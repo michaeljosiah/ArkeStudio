@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "../../lib/media-query.js";
+import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../../lib/arke-half.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
 
@@ -35,6 +36,9 @@ export function useSceneDock() {
 export function SceneDock({ open, onOpen, onClose, stage = false, children }: { open: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
   const compact = useMediaQuery("(max-width: 1099px)");
   const phone = useMediaQuery("(max-width: 599px)");
+  // On a Fold7 the open dock is the hinge half beside the live page, not a drawer over it (202).
+  const half = useMediaQuery(ARKE_HALF_QUERY);
+  useHoldArkeHalf(half && open);
   const trigger = useRef<HTMLButtonElement>(null);
   const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
   const [conversationHost, setConversationHost] = useState<HTMLDivElement | null>(null);
@@ -73,9 +77,9 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   // A phone's rail floats over the page, and nothing floats over Stage's picture (issue 1355). Its way
   // into the conversation is the Conversation press in the page's head instead (design 196q).
   return <>
-    {compact ? phone && stage ? null : rail : open ? null : rail}
+    {compact ? phone && stage || half && open ? null : rail : open ? null : rail}
     <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
-    <PageSheet open={compact && open} keepMounted onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
+    <PageSheet open={compact && open} keepMounted modeless={half} onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}
   </>;
 }

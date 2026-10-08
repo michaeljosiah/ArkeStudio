@@ -1,5 +1,5 @@
 import { ProductionStudio } from "./production-studio.js";
-import { StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
+import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
@@ -63,7 +63,8 @@ import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
+import { Film, Pin, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
+import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
@@ -822,6 +823,7 @@ export function ProductionConversation({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
+  const half = useMediaQuery(ARKE_HALF_QUERY);
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
@@ -1399,10 +1401,14 @@ export function ProductionConversation({
               <span className="fy-mono">{dock.subject}</span>
             </button>
           )}
+          {/* As the hinge half (202) the model is the head's, and the composer keeps one line: its
+              tools measure their row (model-chip.css), so beside the words they had no width. */}
+          {half && modelChip}
           <StudioToggle />
           {dock.onPutAway === undefined ? null : (
-            <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
-              <Pin size={13} />
+            // As the hinge half (202) putting it away is closing the half: a 44 ×, not the pin.
+            <IconButton className="fy-arke__pin" label={half ? "Close Arke" : "Unpin the assistant"} onClick={dock.onPutAway}>
+              {half ? <X size={18} /> : <Pin size={13} />}
             </IconButton>
           )}
         </div>
@@ -1463,7 +1469,7 @@ export function ProductionConversation({
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
@@ -1481,6 +1487,7 @@ export function ProductionConversation({
       {(eyebrow || heading) && <div className="fy-story__chathead">
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
         {heading && <h1 className="fy-story__h1">{heading}</h1>}
+        {responsive && compact && <StudioCanvasPress />}
       </div>}
       {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>

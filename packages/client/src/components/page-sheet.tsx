@@ -5,7 +5,7 @@ import { ChevronLeft, X } from "./icons.js";
 import { focusNewestLayer, useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false, headless = false }: {
+export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false, headless = false, modeless = false }: {
   open: boolean;
   onClose: () => void;
   /** The sheet's heading, or with `headless` only its accessible name. */
@@ -24,6 +24,11 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   className?: string;
   /** Keep ongoing requests and viewport attachments alive while their sheet is put away. */
   keepMounted?: boolean;
+  /**
+   * Shown beside the page rather than over it: no modal, so the page stays live and nothing is
+   * dimmed. Arke's hinge half on a Fold7 (design turn 202) is the one such sheet.
+   */
+  modeless?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -40,15 +45,19 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
     const dialog = ref.current;
     if (!dialog || !showing) return;
     const opener = document.activeElement;
-    dialog.showModal?.();
-    dialog.querySelector("h2")?.focus({ preventScroll: true });
+    if (modeless) dialog.show?.();
+    else dialog.showModal?.();
+    // Beside the page the sheet takes the focus itself, not its first press: its heading is not
+    // drawn there, and a ring on the dock's title read as a press waiting (202).
+    if (modeless) dialog.focus?.({ preventScroll: true });
+    else dialog.querySelector("h2")?.focus({ preventScroll: true });
     return () => {
       dialog.close?.();
       // Put away for a sheet in front, the focus goes to that sheet, not back to the page under both.
       if (coveredNow.current) focusNewestLayer();
       else if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, [showing, mounted]);
+  }, [showing, mounted, modeless]);
   useLayoutEffect(() => {
     if (!open || resetKey === undefined) return;
     const body = ref.current?.querySelector(".fy-page-sheet__body");
@@ -57,7 +66,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   }, [open, mounted, resetKey]);
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
-    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })}
+    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1 } : {})}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;

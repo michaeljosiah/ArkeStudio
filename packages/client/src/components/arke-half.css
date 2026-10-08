@@ -1,0 +1,88 @@
+/*
+ * Design turn 202: on a Fold7 (840 to 1099) an open Arke is the right half of the screen, beside a
+ * live page. It was a 340 drawer over a dimmed page with two head rows, about 240 of chrome before
+ * the first reply, replies in a bubble with about 280 of text, and a placeholder wrapped onto a
+ * second line (installed 0.5.69, 984×1092). The chapter squeezed three columns beside it.
+ *
+ * The sheet is the scene's dock (`fy-scene-dock`) or the chapter's, season's and map's
+ * (`fy-season-arke-sheet`), shown without a modal (PageSheet's `modeless`); `data-arke-half` on the
+ * root says one is open (lib/arke-half.ts), and the page makes room for it. Loaded last, so it
+ * stands over the drawer's rules in the screens' sheets.
+ */
+@media (min-width: 840px) and (max-width: 1099px) {
+  :is(.fy-scene-dock, .fy-season-arke-sheet) { inset: calc(52px + env(safe-area-inset-top, 0px)) 0 0 auto; z-index: 40; width: 50vw; max-width: none; border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: none; animation: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) :is(.fy-page-sheet__grab, .fy-page-sheet__head) { display: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-page-sheet__body { position: static; display: flex; flex-direction: column; padding: 0; gap: 0; overflow: hidden; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke { flex: 1; width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; border: 0; overflow: hidden; background: var(--background); }
+
+  /* One head row: the mark, the title and the subject on one line, Studio, and × (put away). The
+     drawer's own title row goes, and so does Widen dock: the hinge is the divider. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px 6px 6px 16px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb svg { width: 16px; height: 16px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__thumb:empty { display: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-mchip { flex: none; display: flex; gap: 4px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-mchip__btn { max-width: 140px; min-height: 36px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__who { flex-direction: row; align-items: baseline; gap: 8px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__name { flex: none; max-width: 60%; font: 600 var(--text-md)/1.2 var(--font-sans); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__who .fy-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-meta); color: var(--muted-foreground); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-studio-toggle { min-height: 44px; padding: 0 12px; font: var(--type-ui); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-studio-toggle + .fy-studio-toggle { display: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__head .fy-arke__pin { width: 44px; height: 44px; border-radius: 10px; color: var(--muted-foreground); }
+
+  /* The thread scrolls between the head and the foot, which hold their places. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__log { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 20px 8px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__strip { flex: none; padding: 0 16px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__foot { position: static; flex: none; gap: 8px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 0; }
+
+  /* Replies at the width: Arke's are text on the half, the person's a bubble at the right. */
+  /* The dock's own skins (the conversation-first card, the drawer's bubble) are a class deeper. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__transcript { gap: 14px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--studio { width: 100%; max-width: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--studio .fy-chat__bubble { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font: 400 var(--text-md)/1.6 var(--font-sans); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--user { max-width: 80%; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--user .fy-chat__bubble { padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: var(--muted); color: var(--foreground); font: 400 var(--text-md)/1.5 var(--font-sans); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-replyacts { margin: 2px 0 0 -10px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-replyacts__btn { height: 44px; padding: 0 10px; font: var(--type-ui); }
+
+  /* The suggestions are one row that scrolls sideways and fades at the edge, never two; they
+     step aside while the field holds words, which is when the keyboard is up. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__prompts { flex-wrap: nowrap; gap: 8px; margin: 0 -16px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, black 85%, transparent); mask-image: linear-gradient(90deg, black 85%, transparent); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__prompt { flex: none; min-height: 40px; padding: 0 14px; white-space: nowrap; font: var(--type-ui); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__foot:not(:has(.fy-cx__placeholder)) .fy-arke__prompts { display: none; }
+  /* A passage asked about rides over the composer as a chip. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__subject { align-self: flex-start; padding: 6px 10px; border-radius: 8px; background: var(--muted); color: var(--foreground); font: var(--type-meta); }
+
+  /* The page keeps the left half while the half is open; the rail beside a scene goes with it. */
+  :root[data-arke-half] .fy-production-app > .fy-prod { padding-right: 50vw; }
+  /* The column a page keeps for its dock beside it is the half now. */
+  :root[data-arke-half] .fy-sw, :root[data-arke-half] .fy-sw[data-dock] { grid-template-columns: minmax(0, 1fr); }
+  :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]).fy-sw,
+  :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]).fy-sw[data-dock] { grid-template-columns: minmax(0, 1fr); }
+  :root[data-arke-half] :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__centre { padding: 0 24px; }
+  :root[data-arke-half] [data-screen="scene-detail"] .fy-swrows[data-layout="list"] .fy-swrow__band { grid-template-columns: 132px minmax(0, 1fr); gap: 6px 12px; }
+  :root[data-arke-half] [data-screen="scene-detail"] .fy-swrows[data-layout="list"] .fy-swrow__framewrap { width: 132px; }
+  :root[data-arke-half] [data-screen="chapter"] .fy-sw__centre { padding-inline: 24px; }
+
+  /* The production conversation, conversation first (202c): Arke's replies at the column's width
+     as in the half, and what it understood its 340 beside them (171c) rather than spilling out of
+     a 32% track it was 80 wider than. */
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--studio { max-width: none; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--studio .fy-chat__bubble { padding: 0; background: transparent; border-radius: 0; font: 400 var(--text-md)/1.6 var(--font-sans); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-owner[data-dock-owner="false"] .fy-chat__turn--user .fy-chat__bubble { font: 400 var(--text-md)/1.5 var(--font-sans); }
+}
+
+/* From 900 what it understood is a column, not a sheet (develop-responsive.css): its track is its
+   340, not a 32% it was 80 wider than and spilled out of the page. */
+@media (min-width: 900px) and (max-width: 1099px) {
+  .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0, 1fr) 340px; }
+}
+
+/* The composer is one line in the half: with the model chip its tools stay beside the words, as
+   they do without it. The half is wide enough; the phone's sheet (190e) is not. */
+@media (min-width: 840px) and (max-width: 1099px) and (pointer: coarse) {
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-cx:has(.fy-mchip) { grid-template-columns: minmax(0, 1fr) auto; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-cx:has(.fy-mchip) > .fy-cx__bar { padding: 4px 4px 4px 0; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-cx__placeholder { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 400 var(--text-md)/1.5 var(--font-sans); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-cx__editor { font: 400 var(--text-md)/1.5 var(--font-sans); }
+}

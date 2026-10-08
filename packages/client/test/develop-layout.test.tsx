@@ -116,6 +116,13 @@ it('remote composers without byte support retain their supplied attach action',a
  await act(async()=>root!.render(<Composer value="" onChange={()=>{}} onSubmit={()=>{}} placeholder="Write" onAttach={()=>calls++}/>));
  assert.equal(find('input[type="file"]'),null);await click(find('.fy-cx__attach'));assert.equal(calls,1);
 });
+it('on a Fold7 the conversation opens first and Canvas opens the Studio (202)',async()=>{
+ await mount(undefined,984);await draft('Held across the canvas');
+ assert.equal(find('.fy-production-studio'),null,'no canvas until one is asked for');assert.ok(find('.fy-story__side'),'what it understood stands beside the conversation');
+ await click(button('.fy-studio-canvas','Canvas'));assert.ok(find('.fy-production-studio'));assert.equal(find('.fy-studio-canvas'),null);
+ assert.equal(find('.fy-cx__editor').innerText,'Held across the canvas');
+ await click(button('.fy-production-studio__head button','Close Studio'));assert.equal(find('.fy-production-studio'),null);assert.ok(find('.fy-studio-canvas'),'closed, Canvas is the way back');
+});
 it('600–899px keeps understood in a sheet with the draft available',async()=>{
  await mount(undefined,600);await draft('A narrow tablet');assert.ok(find('.fy-thread-peek'));assert.equal(find('.fy-develop-sheet[open]'),null);
  await click(find('.fy-thread-peek'));assert.ok(find('.fy-develop-sheet[open]'));
