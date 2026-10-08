@@ -1,5 +1,5 @@
 import { ProductionStudio } from "./production-studio.js";
-import { StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
+import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
@@ -1484,6 +1484,7 @@ export function ProductionConversation({
       {(eyebrow || heading) && <div className="fy-story__chathead">
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
         {heading && <h1 className="fy-story__h1">{heading}</h1>}
+        {responsive && compact && <StudioCanvasPress />}
       </div>}
       {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>

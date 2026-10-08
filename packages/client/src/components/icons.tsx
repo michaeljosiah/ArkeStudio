@@ -108,6 +108,13 @@ export const PanelLeft = icon(
     <path d="M9 3v18" />
   </>,
 );
+/** A pane with a panel down its right: the production conversation's canvas (202c). */
+export const PanelRight = icon(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M15 3v18" />
+  </>,
+);
 /** Three dots: everything else this row can be told to do. */
 export const More = icon(
   <>
