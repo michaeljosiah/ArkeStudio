@@ -63,7 +63,8 @@ import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
+import { Film, Pin, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
+import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
@@ -822,6 +823,7 @@ export function ProductionConversation({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
+  const half = useMediaQuery(ARKE_HALF_QUERY);
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
@@ -1401,8 +1403,9 @@ export function ProductionConversation({
           )}
           <StudioToggle />
           {dock.onPutAway === undefined ? null : (
-            <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
-              <Pin size={13} />
+            // As the hinge half (202) putting it away is closing the half: a 44 ×, not the pin.
+            <IconButton className="fy-arke__pin" label={half ? "Close Arke" : "Unpin the assistant"} onClick={dock.onPutAway}>
+              {half ? <X size={18} /> : <Pin size={13} />}
             </IconButton>
           )}
         </div>

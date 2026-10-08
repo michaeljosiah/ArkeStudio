@@ -47,6 +47,7 @@ import {
 import { Loading } from "../components/loading.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { useArkeHalfOpen } from "../lib/arke-half.js";
 import { CUT_PHONE_QUERY } from "./editor-responsive.js";
 import { Button } from "../components/ui.js";
 import { cx } from "../components/ui.js";
@@ -377,7 +378,10 @@ export function ProductionLayout() {
   // returns when the Studio closes.
   const studioFold = !phone && compact && studioInline;
   const drawerMode = !phone && !studioFold && wantsFold && (compact || coarse);
-  const folded = studioFold || !phone && wantsFold && !drawerMode;
+  // Arke open as the hinge half on a Fold7 folds the rail to its marks too (design turn 202), so
+  // the page keeps the left half; where the rail is already a drawer it stays one.
+  const arkeHalf = useArkeHalfOpen();
+  const folded = studioFold || !phone && wantsFold && !drawerMode || !phone && compact && arkeHalf && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
   useEffect(() => {
     const node = drawer.current;

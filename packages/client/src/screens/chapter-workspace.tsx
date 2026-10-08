@@ -47,6 +47,7 @@ import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Chat, ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -1162,6 +1163,8 @@ export function ChapterWorkspace({
   // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
   const phone = useMediaQuery("(max-width: 599px)");
   const compact = useMediaQuery("(max-width: 1099px)");
+  // On a Fold7 an open dock is the hinge half beside the chapter, not a drawer over it (turn 202).
+  const half = useMediaQuery(ARKE_HALF_QUERY);
   const coarse = useMediaQuery("(pointer: coarse)");
   const [notesOpen, setNotesOpen] = useState(false);
   const [synopsisOpen, setSynopsisOpen] = useState(false);
@@ -1311,6 +1314,7 @@ export function ChapterWorkspace({
     setDockByView((held) => ({ ...held, [view]: open }));
     rememberDock(view, open);
   }, [compact, view]);
+  useHoldArkeHalf(half && dock);
   const [passageLine, setPassageLine] = useState("");
   /*
    * The plan (turn 127): typed where it reads and saved in place, one write for every field.
@@ -2326,7 +2330,9 @@ export function ChapterWorkspace({
                       : {})}
               />
             )}
-            {selection !== null && !locked && coarse && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {/* With the half open the dock's composer is where a passage is asked about (202): the
+                 selection is its subject, said over the composer, and its prompts are the passage's. */}
+            {selection !== null && !locked && coarse && !(half && dock) && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />
@@ -2833,7 +2839,7 @@ export function ChapterWorkspace({
       )}
 
       {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
-      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
+      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
           key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
@@ -2926,7 +2932,7 @@ export function ChapterWorkspace({
               })}
         />
       </ResponsiveSheet>
-      {((compact && !foldedAudiobook) || (!dock && !toolbarDock)) && (
+      {((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>
