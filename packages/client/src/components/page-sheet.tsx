@@ -47,7 +47,10 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
     const opener = document.activeElement;
     if (modeless) dialog.show?.();
     else dialog.showModal?.();
-    dialog.querySelector("h2")?.focus({ preventScroll: true });
+    // Beside the page the sheet takes the focus itself, not its first press: its heading is not
+    // drawn there, and a ring on the dock's title read as a press waiting (202).
+    if (modeless) dialog.focus?.({ preventScroll: true });
+    else dialog.querySelector("h2")?.focus({ preventScroll: true });
     return () => {
       dialog.close?.();
       // Put away for a sheet in front, the focus goes to that sheet, not back to the page under both.
@@ -63,7 +66,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   }, [open, mounted, resetKey]);
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
-    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })}
+    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1 } : {})}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;

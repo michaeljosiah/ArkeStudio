@@ -36,11 +36,12 @@
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke__foot { position: static; flex: none; gap: 8px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px)); border-top: 0; }
 
   /* Replies at the width: Arke's are text on the half, the person's a bubble at the right. */
-  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-chat__transcript { gap: 14px; }
-  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-chat__turn--studio { width: 100%; max-width: none; }
-  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-chat__turn--studio .fy-chat__bubble { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font: 400 var(--text-md)/1.6 var(--font-sans); }
-  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-chat__turn--user { max-width: 80%; }
-  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-chat__turn--user .fy-chat__bubble { padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: var(--muted); color: var(--foreground); font: 400 var(--text-md)/1.5 var(--font-sans); }
+  /* The dock's own skins (the conversation-first card, the drawer's bubble) are a class deeper. */
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__transcript { gap: 14px; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--studio { width: 100%; max-width: none; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--studio .fy-chat__bubble { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font: 400 var(--text-md)/1.6 var(--font-sans); }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--user { max-width: 80%; }
+  :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-arke[data-dock] .fy-chat__turn--user .fy-chat__bubble { padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: var(--muted); color: var(--foreground); font: 400 var(--text-md)/1.5 var(--font-sans); }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-replyacts { margin: 2px 0 0 -10px; }
   :is(.fy-scene-dock, .fy-season-arke-sheet) .fy-replyacts__btn { height: 44px; padding: 0 10px; font: var(--type-ui); }
 
@@ -62,6 +63,19 @@
   :root[data-arke-half] [data-screen="scene-detail"] .fy-swrows[data-layout="list"] .fy-swrow__band { grid-template-columns: 132px minmax(0, 1fr); gap: 6px 12px; }
   :root[data-arke-half] [data-screen="scene-detail"] .fy-swrows[data-layout="list"] .fy-swrow__framewrap { width: 132px; }
   :root[data-arke-half] [data-screen="chapter"] .fy-sw__centre { padding-inline: 24px; }
+
+  /* The production conversation, conversation first (202c): Arke's replies at the column's width
+     as in the half, and what it understood its 340 beside them (171c) rather than spilling out of
+     a 32% track it was 80 wider than. */
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--studio { max-width: none; }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--studio .fy-chat__bubble { padding: 0; background: transparent; border-radius: 0; font: 400 var(--text-md)/1.6 var(--font-sans); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-production-studio-inline .fy-chat__turn--user .fy-chat__bubble { font: 400 var(--text-md)/1.5 var(--font-sans); }
+}
+
+/* From 900 what it understood is a column, not a sheet (develop-responsive.css): its track is its
+   340, not a 32% it was 80 wider than and spilled out of the page. */
+@media (min-width: 900px) and (max-width: 1099px) {
+  .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0, 1fr) 340px; }
 }
 
 /* The composer is one line in the half: with the model chip its tools stay beside the words, as
