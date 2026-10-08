@@ -1293,6 +1293,13 @@ export class Coordinator {
   private readonly stagedLines = new Map<string, { worldId: string; productionId: string; matched: MatchedFile[] }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /**
+   * Chapters being grouped by beats (design turn 201): a register of their own, replayed as
+   * `audiobook.beats · grouping`. Held in `directingChapters` they were replayed to a window that
+   * joined mid-run as a direction started, and its card said directing… for a direction that never
+   * ran and never finished (0.5.67, 2026-10-08).
+   */
+  private readonly groupingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A chapter being read for its look (turn 191c): one at a time, ended with the world. */
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
@@ -3712,6 +3719,9 @@ export class Coordinator {
         }
         for (const run of this.directingChapters.values()) {
           replayed.push({ at: new Date().toISOString(), type: "direction.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        }
+        for (const run of this.groupingChapters.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.beats", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, outcome: "grouping" });
         }
         for (const held of this.heldDirections.values()) replayed.push({ ...held, at: new Date().toISOString() });
         for (const run of this.illustrating.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
@@ -14751,6 +14761,11 @@ export class Coordinator {
         if (!chapter) return;
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
         if (this.directingChapters.has(key)) return;
+        // A direction made for the blocks before the grouping would name other blocks after it (design turn 201, rule 3).
+        if (this.groupingChapters.has(key)) {
+          this.emit({ at: new Date().toISOString(), type: "direction.finished", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, outcome: "failed", directed: 0, dropped: 0, reason: "grouping by beats · direct when the beats are in" });
+          return;
+        }
         const control = new AbortController();
         this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         const onClose = () => control.abort();
@@ -15003,7 +15018,7 @@ export class Coordinator {
         const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
         const at = () => new Date().toISOString();
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
-        if (this.audiobookBusy(msg.worldId, msg.productionId) || this.directingChapters.has(key)) {
+        if (this.audiobookBusy(msg.worldId, msg.productionId) || this.directingChapters.has(key) || this.groupingChapters.has(key)) {
           this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "refused", reason: "reading or directing · beats wait until it ends" });
           return;
         }
@@ -15016,7 +15031,7 @@ export class Coordinator {
           return;
         }
         const control = new AbortController();
-        this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        this.groupingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         // Every window shows the press as grouping until the answer (design turn 201, rule 3).
@@ -15047,7 +15062,7 @@ export class Coordinator {
           this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
-          this.directingChapters.delete(key);
+          this.groupingChapters.delete(key);
         }
         return;
       }
@@ -21256,6 +21271,7 @@ export class Coordinator {
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
       for (const run of this.directingChapters.values()) run.control.abort();
+      for (const run of this.groupingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
       for (const run of this.illustrating.values()) run.control.abort();
