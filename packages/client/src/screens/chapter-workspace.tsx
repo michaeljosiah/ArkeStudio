@@ -1200,11 +1200,13 @@ export function ChapterWorkspace({
         return;
       }
       const room = line.clientWidth;
-      if (room <= 0) return;
+      if (!(room > 0)) return;
+      const full = line.scrollWidth;
       setNarrowToolbar((narrow) => {
-        if (narrow) return lineWidth.current === null || room < lineWidth.current;
-        if (line.scrollWidth <= room + 1) return false;
-        lineWidth.current = line.scrollWidth;
+        // Folded with no width measured (it was a tablet's a moment ago): unfold once to measure.
+        if (narrow) return lineWidth.current !== null && room < lineWidth.current;
+        if (!(full > room + 1)) return false;
+        lineWidth.current = full;
         return true;
       });
     };
