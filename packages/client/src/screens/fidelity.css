@@ -8615,7 +8615,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-helptip { position: relative; display: inline-flex; }
 .fy-helptip__press { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 99px; background: none; color: var(--neutral-400); cursor: help; }
 .fy-helptip__press:hover, .fy-helptip__press:focus-visible { color: var(--foreground); }
-.fy-helptip__pop { position: absolute; left: -8px; top: calc(100% + 8px); z-index: 30; width: 300px; box-sizing: border-box; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14); display: flex; flex-direction: column; gap: 8px; color: var(--foreground); font: 400 12.5px/1.5 var(--font-sans); text-align: left; white-space: normal; }
+.fy-helptip__pop { position: absolute; left: -8px; top: calc(100% + 8px); z-index: 30; width: 300px; box-sizing: border-box; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 8px; color: var(--foreground); font: 400 12.5px/1.5 var(--font-sans); text-align: left; white-space: normal; }
 .fy-helptip__pop b { font: 600 13px var(--font-sans); }
 .fy-helptip__eg { display: flex; align-items: center; gap: 8px; }
 .fy-helptip__eg .fy-mono, .fy-helptip__extra { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); }
