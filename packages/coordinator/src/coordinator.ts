@@ -16298,7 +16298,8 @@ export class Coordinator {
         try {
           const key = await this.credentials?.get("google");
           if (!key) throw new Error("Connect Google in Settings to list your project's voices.");
-          const client = this.designedVoiceClient();
+          const client = this.opts.dispatchClients?.google as (DispatchClient & Partial<VoiceDesignClient>) | undefined;
+          if (!client?.listDesignedVoices) throw new Error("Listing Google voices is unavailable on this host.");
           const voices: Array<{ remoteId: string; name: string; language: string; model: string; expiresAt: string }> = [];
           let page: string | undefined;
           for (let n = 0; n < 10; n += 1) {
