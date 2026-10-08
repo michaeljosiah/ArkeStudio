@@ -166,6 +166,12 @@ export interface ChapterAudiobookInput {
   /** On a phone (design turn 198, rule 10) the Blocks press and its Reset are in the toolbar's ⋯ menu. */
   seamsInMenu?: boolean;
   /**
+   * The reading is the toolbar ⋯'s first item where the line has no room for its press (design
+   * turn 203): `open` shows the reading menu, and `narrator` names the voice where the hook's own
+   * reader has no label.
+   */
+  readingInMenu?: { open: () => void; narrator: string };
+  /**
    * Casting from the view (design turn 198): the paragraphs edited since the cast (`changed`) or
    * the chapter, through the workspace's press, which waits out the autosave; busy while a cast runs.
    */
@@ -1102,6 +1108,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         // On a phone the lines to cast head the menu (design turn 198j), Reset beside them over Direct and illustrate.
         {...(input.seamsInMenu === true && castItems.length > 0 ? { lead: { head: paragraphsToCast(toCast.length), items: castItems, also: seamReset } } : {})}
         items={[
+          ...(input.readingInMenu !== undefined
+            ? [{ key: "reading", label: `${READINGS.find((r) => r.reading === input.reading)?.label ?? input.reading} · ${narrator.label ?? input.readingInMenu.narrator}`, state: "reading", disabled: false, press: input.readingInMenu.open, testId: "audiobook-reading-item" }]
+            : []),
           ...beatGroup,
           {
             key: "direct",
@@ -1372,7 +1381,9 @@ const READINGS: ReadonlyArray<{ reading: AudiobookReading; label: string; data: 
  * readings — the book's, written as the door's seg writes it — and `Narrator…`. The build had no
  * reading on the chapter and no way into `Performed` from it (issue 1324 §3).
  */
-export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator }: {
+export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator, external }: {
+  /** Drawn without its own press, opened from the toolbar's ⋯ (design turn 203). */
+  external?: { open: boolean; onClose: () => void };
   reading: AudiobookReading;
   /** The narrator the book reads in, by name. */
   narrator: string;
@@ -1381,7 +1392,14 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
   onReading: (reading: AudiobookReading) => void;
   onNarrator: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = external !== undefined ? external.open : ownOpen;
+  const setOpen = (next: boolean | ((was: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(open) : next;
+    if (external !== undefined) {
+      if (!value) external.onClose();
+    } else setOwnOpen(value);
+  };
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const label = READINGS.find((r) => r.reading === reading)?.label ?? reading;
@@ -1414,8 +1432,8 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
     }
   };
   return (
-    <span className="fy-ab__reading">
-      <button
+    <span className={external !== undefined ? "fy-ab__reading fy-ab__reading--external" : "fy-ab__reading"}>
+      {external === undefined && <button
         ref={button}
         type="button"
         className={`fy-ab__reading-press fy-mono${open ? " fy-ab__reading-press--open" : ""}`}
@@ -1427,7 +1445,7 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
       >
         <span className="fy-ab__reading-k">{label} ·</span> <b>{narrator}</b>
         <ChevronDown size={13} stroke={2} aria-hidden="true" />
-      </button>
+      </button>}
       {open && (
         <div ref={menu} className="fy-ab__menu fy-ab__reading-menu" role="menu" aria-label="Reading" onKeyDown={onKey}>
           <p className="fy-ab__menu-eb">Reading · whole book</p>

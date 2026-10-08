@@ -1979,7 +1979,9 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       await answerOpen(m);
       const line = q(m, ".fy-ch__viewline")!;
       assert.ok(line.querySelector('[aria-label="Chapter view"]'), "the view switch");
-      for (const testId of ["audiobook-reading", "reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
+      for (const testId of ["reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
+      // The reading is the ⋯'s first item on a tablet (design turn 203); a phone keeps its press.
+      assert.deepEqual(where(m, "audiobook-reading"), name === "a phone" ? [".fy-ch__viewline"] : []);
       const more = q(m, '[data-testid="direct-illustrate"]')!;
       assert.deepEqual(where(m, "direct-illustrate"), [".fy-ch__viewline"], "the menu is on the line");
       assert.equal(more.getAttribute("aria-label"), "Direct and illustrate", "named for a screen reader");
@@ -1994,11 +1996,39 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(more.getAttribute("aria-expanded"), "true");
       assert.deepEqual(
         all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
-        // On a phone Group by beats is the menu's first item (design turn 201, rule 5); a tablet keeps the Blocks press on the line.
-        [...(name === "a phone" ? ["Group by beats"] : []), "Direct this chapter", "Illustrate this chapter", "Looks"],
+        // On a phone Group by beats is the menu's first item (design turn 201, rule 5); a tablet keeps the Blocks press on the line
+        // and puts the reading first in the menu (design turn 203).
+        [...(name === "a phone" ? ["Group by beats"] : [`Narrator · ${q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')?.textContent?.split(" · ")[1] ?? ""}`]), "Direct this chapter", "Illustrate this chapter", "Looks"],
       );
     });
   }
+
+  it("wide, but the line has no room: it folds as a tablet's, the reading first in its ⋯ (design turn 203, issue 1642)", async () => {
+    windowOf(1600);
+    // The installed app at 1200 with Arke open: the centre 823 wide, the line 1,164.
+    const proto = dom.window.HTMLElement.prototype;
+    const own = { client: Object.getOwnPropertyDescriptor(proto, "clientWidth"), scroll: Object.getOwnPropertyDescriptor(proto, "scrollWidth") };
+    Object.defineProperty(proto, "clientWidth", { configurable: true, get(this: HTMLElement) { return this.classList?.contains("fy-ch__viewline") ? 823 : 1200; } });
+    Object.defineProperty(proto, "scrollWidth", { configurable: true, get(this: HTMLElement) { return this.classList?.contains("fy-ch__viewline") ? 1164 : 0; } });
+    try {
+      const m = await mount(inkbound());
+      await answerOpen(m);
+      assert.equal(q(m, ".fy-ch__viewline")!.getAttribute("data-narrow"), "true", "the line folds on its room, not the window");
+      for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot`);
+      assert.equal(q(m, '[data-testid="audiobook-hold"]')!.getAttribute("data-wide"), "true");
+      assert.deepEqual(where(m, "audiobook-reading"), [], "the reading's press leaves the line");
+      const more = q(m, '[data-testid="direct-illustrate"]')!;
+      assert.equal(more.textContent, "", "Direct and illustrate is a ⋯");
+      await act(async () => more.click());
+      const reading = q(m, '[data-testid="audiobook-reading-item"]')!;
+      assert.match(reading.textContent!, /^Narrator · /, "the reading is the menu's first item, its voice named");
+      await act(async () => reading.click());
+      assert.ok(q(m, '.fy-ab__reading--external [role="menu"][aria-label="Reading"]'), "and opens the reading menu");
+    } finally {
+      if (own.client) Object.defineProperty(proto, "clientWidth", own.client); else delete (proto as unknown as Record<string, unknown>).clientWidth;
+      if (own.scroll) Object.defineProperty(proto, "scrollWidth", own.scroll); else delete (proto as unknown as Record<string, unknown>).scrollWidth;
+    }
+  });
 
   it("a tablet's Arke press ends the line, and no press floats over the list", async () => {
     windowOf(820);
