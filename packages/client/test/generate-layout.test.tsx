@@ -25,6 +25,7 @@ Object.assign(dom.window, {
 Object.assign(dom.HTMLElement.prototype, {
   getBoundingClientRect: () => ({ x: 0, y: 0, left: 0, top: 0, right: 44, bottom: 44, width: 44, height: 44 }),
   showModal(this: HTMLElement) { this.setAttribute("open", ""); },
+  show(this: HTMLElement) { this.setAttribute("open", ""); },
   close(this: HTMLElement) { this.removeAttribute("open"); },
   scrollIntoView() {},
 });

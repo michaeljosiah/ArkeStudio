@@ -1400,14 +1400,15 @@ export function ChapterWorkspace({
   const onSelect = useCallback((text: string | null, paragraph: number | null = null, source?: HTMLTextAreaElement) => {
     const subject = passageSubject(text);
     const at = source === undefined ? askAt(manuscriptRef.current) : askAtSource(manuscriptRef.current, source);
-    // Native selection may collapse when the ask field receives focus. Keep its captured subject.
-    const inAsk = document.activeElement?.closest(".fy-passage-ask");
+    // Native selection may collapse when the ask field receives focus. Keep its captured subject:
+    // the bar's field, or the dock's while it is the hinge half and the bar is not drawn (202).
+    const inAsk = document.activeElement?.closest(half ? ".fy-passage-ask, .fy-season-arke-sheet" : ".fy-passage-ask");
     if (subject !== null || !coarse || !inAsk) setSelection(subject === null ? null : { text: subject, paragraph, ...at });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
     if (subject !== null && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
-  }, [flushSave, coarse]);
+  }, [flushSave, coarse, half]);
   // The words come from the text the editor holds, not the element's value: the two are the same
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
