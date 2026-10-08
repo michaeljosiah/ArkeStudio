@@ -5577,6 +5577,12 @@ export function resetAudiobookSeams(worldId: string, productionId: string, chapt
   return send({ kind: "reset-audiobook-seams", worldId, productionId, chapterFile });
 }
 
+/** Group by beats (SPEC-047 R-172): the director joins each beat's blocks, answered as `audiobook.beats` under the id returned. */
+export function groupChapterBeats(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "group-chapter-beats", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+
 /** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
 export function openAudiobookListening(worldId: string, productionId: string): string | null {
   const requestId = ulid();

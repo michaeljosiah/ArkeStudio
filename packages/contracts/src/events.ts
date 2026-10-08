@@ -1343,6 +1343,34 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * A chapter's blocks grouped by beats (SPEC-047 R-172): how many blocks it had and has, and the
+   * beats the director named — each with its first block, how many blocks it joined and their
+   * expected seconds — or why nothing was grouped. The record itself is answered as `audiobook.record`.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.beats"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      requestId: UlidSchema.optional(),
+      outcome: z.enum(["grouped", "unavailable", "refused", "failed"]),
+      before: z.number().int().min(0).optional(),
+      after: z.number().int().min(0).optional(),
+      beats: z
+        .array(z.object({ start: z.string().min(1), blocks: z.number().int().min(1), seconds: z.number().min(0), name: z.string().min(1).max(80).optional(), whose: z.string().min(1).max(120).optional() }).strict())
+        .max(4000)
+        .optional(),
+      /** Beat starts the director named that the chapter does not hold, dropped and counted. */
+      dropped: z.number().int().min(0).optional(),
+      /** Beats begun where it named none: a scene break, a gap no join crosses, or the length cap. */
+      cut: z.number().int().min(0).optional(),
+      summary: z.string().optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
    * The looks a book's chapters have chosen (design turn 193, SPEC-047 R-114), answered to the
    * window that asked: for each kit look, the chapters (by their number) that chose it, so a
    * picker can say `chapters 3, 5`. Nothing was changed or spent.
