@@ -5,6 +5,7 @@ import {
   FrameRunIdSchema,
   orderedShots,
   canonicalSceneFlow,
+  chapterParagraphs,
   isGraphScene,
   productionFrameRate,
   seedFirstPictureTimeline,
@@ -79,6 +80,8 @@ export interface TargetReadDeps {
   readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
   /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
+  /** The beats a chapter was grouped by for its audiobook (design turn 201), the units an adaptation judges (SPEC-052 R-17). */
+  readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -732,7 +735,7 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending") throw new TargetReadError("section must be plan or ending");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats") throw new TargetReadError("section must be plan, ending or beats");
         if (section === "plan") {
           readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
           rows = chapter ? [{ key: "plan", value: chapter }] : [];
@@ -740,6 +743,23 @@ export class WorldChatTargetReads {
           break;
         }
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
+        if (section === "beats") {
+          // The beats the audiobook's director named (design turn 201), each placed at the paragraph
+          // its first block begins: a key is `p<paragraph>.<n>`. They are the units an adaptation
+          // judges (SPEC-052 R-17); a chapter never grouped by beats has none, and says so.
+          const beats = chapter && this.deps.getChapterBeats ? await this.deps.getChapterBeats(productionId, chapter.file) : null;
+          const paragraphs = chapterParagraphs(body ?? "");
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:beats`);
+          rows = chapter ? [{ key: "beats", value: { chapterId: chapter.id, title: chapter.title, beats: (beats ?? []).map((beat) => {
+            const at = /^p(\d+)\./.exec(beat.start);
+            const paragraph = at ? Number(at[1]) : null;
+            const opens = paragraph !== null ? paragraphs[paragraph]?.slice(0, 160) : undefined;
+            return { ...(beat.name !== undefined ? { name: beat.name } : {}), ...(beat.whose !== undefined ? { whose: beat.whose } : {}),
+              ...(paragraph !== null ? { paragraph: paragraph + 1 } : {}), ...(opens !== undefined ? { opens } : {}) };
+          }) } }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         if (section === "ending") {
           if (chapter && body === null) throw new TargetReadError("The previous chapter could not be read.");
           const paragraphs = (body ?? "").trim().split(/\n\s*\n/).slice(-3).join("\n\n");

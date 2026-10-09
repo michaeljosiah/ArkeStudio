@@ -23,7 +23,7 @@ export function setupSourceDigest(bundle: WorldBundle): string {
 export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDraft, at: string): ProductionCreationPlan {
   const draft = ProductionSetupDraftSchema.parse(raw);
   if (draft.worldId !== bundle.meta.worldId) throw new Error("This setup belongs to another world.");
-  const problems = productionSetupProblems(draft, bundle.sheets);
+  const problems = productionSetupProblems(draft, bundle.sheets, bundle.productions);
   if (problems.length) throw new Error(problems.join("\n"));
   if (!normalizeAspect(draft.aspect)) throw new Error("Choose a valid aspect, such as 16:9 or 9:16.");
   const base = planProductionCreation(bundle, {
