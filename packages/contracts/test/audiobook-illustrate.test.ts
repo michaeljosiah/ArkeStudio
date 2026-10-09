@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { IllustrationProposalSchema, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
+import { IllustrationProposalSchema, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
 import { sheetReferencePicture } from "../src/world-image-references.js";
 
 /**
@@ -99,6 +99,21 @@ describe("the brief a picture is made from (R-99)", () => {
     assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo text in the picture.", "nobody cited: no identity line");
     assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo text in the picture.", "a place alone: no identity line");
     assert.equal(referenceBriefLine([]), "");
+  });
+
+  // A detail carries no reference (rule 12), so the hand was drawn from the prompt alone, and white:
+  // Ade's in Na love or Juju's second chapter. The closing lines now say whose skin it is, from the sheet.
+  it("says whose hand a detail shows and the skin their sheet gives", () => {
+    const ade = { id: "ade", sections: [{ heading: "Essence", body: "Proud." }, { heading: "Appearance", body: "Early forties, tall. Deep brown skin with a warm undertone, and a face that keeps its own counsel." }] };
+    const ife = { id: "ife", sections: [{ heading: "Appearance", body: "Late twenties. Dark brown skin kept to a high gloss, so that light finds her." }] };
+    const plain = { id: "musa", sections: [{ heading: "Appearance", body: "Thin, in a kaftan." }] };
+    assert.equal(sheetSkin(ade), "Deep brown skin with a warm undertone");
+    assert.equal(sheetSkin(plain), null);
+    const people = [{ key: "ade", name: "Ade", sheet: "ade" }, { key: "ife", name: "Ife", sheet: "ife" }, { key: "musa", name: "Musa", sheet: "musa" }, { key: "nkechi", name: "Nkechi" }];
+    const detailed = pictureDetailSkins([{ of: "ife", part: "hand" }, { of: "ade", part: "mouth" }, { of: "ade", part: "hand" }, { of: "musa", part: "hand" }, { of: "nkechi", part: "hand" }], people, [ade, ife, plain]);
+    assert.deepEqual(detailed, [{ name: "Ife", part: "hand", skin: "Dark brown skin kept to a high gloss" }, { name: "Ade", part: "mouth and hand", skin: "Deep brown skin with a warm undertone" }]);
+    assert.equal(pictureBench("Detail, her thumb across his lower lip.", [], undefined, detailed),
+      "Detail, her thumb across his lower lip.\n\nIfe's hand: dark brown skin kept to a high gloss. Ade's mouth and hand: deep brown skin with a warm undertone.\n\nNo text in the picture.");
   });
 });
 

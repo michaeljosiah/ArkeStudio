@@ -160,6 +160,8 @@ import {
   PICTURE_PROMPT_MAX,
   type PictureWho,
   pictureBench,
+  pictureDetailSkins,
+  type PictureDetailSkin,
   priceLabel,
   type BenchSession,
   type BenchTake,
@@ -1722,6 +1724,8 @@ export class Coordinator {
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
+            // Whose hand a detail shows, and the skin their sheet gives: no reference rides a detail.
+            detailed: pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets),
             requestId: ulid(),
             ceilingMicroUsd: Math.max(0, run.confirmedMicroUsd - progress.spentMicroUsd),
             signal: control.signal,
@@ -15544,6 +15548,7 @@ export class Coordinator {
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
+            detailed: pictureDetailSkins(msg.shot?.details ?? [], room.people, store.getBundle().sheets),
             requestId: msg.requestId,
             ceilingMicroUsd: msg.confirmedMicroUsd,
             signal: control.signal,
@@ -19539,7 +19544,7 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
     const worldId = store.worldId;
     const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
@@ -19567,7 +19572,7 @@ export class Coordinator {
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
-    const brief = pictureBench(input.prompt, cited, input.mood);
+    const brief = pictureBench(input.prompt, cited, input.mood, input.detailed ?? []);
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
     await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });

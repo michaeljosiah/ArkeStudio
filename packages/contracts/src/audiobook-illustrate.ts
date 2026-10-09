@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LOOK_LINE_MAX, LookViewSchema, MAIN_PHOTO_LOOK, PictureLookSchema, type PictureLookPick } from "./audiobook-look.js";
 import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
+import type { Sheet } from "./world.js";
 
 /**
  * Pictures proposed by Arke (design turn 191, SPEC-047 R-99..R-102): a suggestion for one block
@@ -122,6 +123,47 @@ export const PictureShotSchema = z
   })
   .strict();
 export type PictureShot = z.infer<typeof PictureShotSchema>;
+
+/**
+ * The skin a sheet's Appearance gives, in its own words: the clause that names it ("Deep brown skin
+ * with a warm undertone"). A detail shot carries no reference (rule 12), so a hand drawn from the
+ * prompt alone was drawn white — Ade's, in Na love or Juju's second chapter. Null where none is said.
+ */
+export function sheetSkin(sheet: Pick<Sheet, "sections">): string | null {
+  const body = sheet.sections.find((section) => section.heading === "Appearance")?.body ?? "";
+  const clause = /[^.;,!?\n]*\bskin\b[^.;,!?\n]*/i.exec(body)?.[0]?.replace(/\*+/g, "").trim();
+  return clause !== undefined && clause.length > 0 ? clause.slice(0, 120) : null;
+}
+
+/** A person whose hand, arm or face a detail shows, with the skin their sheet gives. */
+export interface PictureDetailSkin { name: string; part: string; skin: string }
+
+/**
+ * The people a detail shows whose sheets say their skin (design turn 193k's closing lines): each
+ * once, with the parts of them in frame. Keys that are no sheet, or whose sheet says nothing, are left out.
+ */
+export function pictureDetailSkins(
+  details: ReadonlyArray<Pick<PictureDetail, "of" | "part">>,
+  people: ReadonlyArray<{ key: string; name: string; sheet?: string }>,
+  sheets: ReadonlyArray<Pick<Sheet, "id" | "sections">>,
+): PictureDetailSkin[] {
+  const out: PictureDetailSkin[] = [];
+  for (const detail of details) {
+    const person = people.find((candidate) => candidate.key === detail.of);
+    const sheet = person?.sheet === undefined ? undefined : sheets.find((candidate) => candidate.id === person.sheet);
+    const skin = sheet === undefined ? null : sheetSkin(sheet);
+    if (person === undefined || skin === null) continue;
+    const held = out.find((entry) => entry.name === person.name);
+    if (held !== undefined) { if (!held.part.split(" and ").includes(detail.part)) held.part = `${held.part} and ${detail.part}`; continue; }
+    out.push({ name: person.name, part: detail.part, skin });
+  }
+  return out;
+}
+
+/** The closing line that says whose skin each detailed part is: `Ade's hand: deep brown skin with a warm undertone.` */
+function detailSkinLine(detailed: ReadonlyArray<PictureDetailSkin>): string {
+  return detailed.map((entry) => `${entry.name}'s ${entry.part}: ${entry.skin.charAt(0).toLowerCase()}${entry.skin.slice(1)}.`).join(" ");
+}
 
 /** The identity line the app writes after every prompt with someone in it (rule 8c, 193k). */
 export const PICTURE_IDENTITY_LINE = "Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.";
@@ -369,13 +411,19 @@ export type IllustrationProgress = z.infer<typeof IllustrationProgressSchema>;
  * stand. `mood` is the Mood line (design turn 193, rule 9; R-117), never the art direction's free
  * text, which named clothes and dressed everyone in them.
  */
-export function pictureBench(prompt: string, cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>, mood: string | undefined): string {
+export function pictureBench(
+  prompt: string,
+  cited: ReadonlyArray<{ name: string; kind: "character" | "place"; token: string }>,
+  mood: string | undefined,
+  detailed: ReadonlyArray<PictureDetailSkin> = [],
+): string {
   // The closing lines are the app's, never the model's (193k, check 6): who is shown where, that the
   // references fix identity, hair and clothes and never the expression, the light, and no text.
   const people = cited.some((entry) => entry.kind === "character");
   return [
     prompt.replace(/\s+/g, " ").trim(),
     [referenceBriefLine(cited), people ? PICTURE_IDENTITY_LINE : ""].filter((part) => part !== "").join(" "),
+    detailSkinLine(detailed),
     mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
     "No text in the picture.",
   ]
