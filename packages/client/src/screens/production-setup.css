@@ -23,6 +23,8 @@
 .fy-production-target h3 { margin: 12px 0 4px; font-size: 14px; font-weight: 600; }
 .fy-production-target__row { display: grid; grid-template-columns: 88px minmax(0, 1fr) minmax(64px, auto); gap: 12px; align-items: center; min-height: 44px; border-top: 1px solid var(--line); font-size: 13px; }
 .fy-production-target__row:first-of-type { border-top: 0; }
+/* The audience names its numbers in the option text, so it takes the whole row rather than clip them. */
+.fy-production-target__row > #target-audience { grid-column: 2 / -1; }
 .fy-production-target__row > label:first-child { color: var(--muted-foreground); }
 .fy-production-target__end { text-align: right; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 .fy-production-target__check { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
