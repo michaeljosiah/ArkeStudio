@@ -428,7 +428,7 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
 test("a completed turn without an image is a typed refusal in Codex's words", async t => {
   const f = await fixture("image-gen-refused"); t.after(f.cleanup);
   await assert.rejects(f.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageRefusedError &&
-    error.said === "The image request was rejected by the safety system, so no image was made." && /^Codex made no image: The image request/.test(error.message));
+    error.said === "The image request was rejected by the safety system, so no image was made." && error.message.startsWith("Codex made no image: The image request"));
 });
 
 test("turn-level quota and login failures preserve their remedies", async t => {
