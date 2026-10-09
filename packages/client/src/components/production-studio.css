@@ -7,6 +7,12 @@
 /* Closed, the dock fills its column through the chat's mount, as it did as the grid's own child. */
 .fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat { display: flex; height: 100%; min-height: 0; }
 .fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat > .fy-arke { flex: 1; min-height: 0; }
+/* A flex page (.fy-arkewrap: the season, an episode, the takes, the map) has no dock column; the
+   owner is the row's flex item through ArkeEdge's two contents slots, so 100% took the row and left
+   a new season 88 of a 1200 window (installed 0.5.80, 2026-10-09). There the dock keeps .fy-arke's
+   own width, as it did as the row's child before the owner. */
+.fy-arkewrap > div > div > .fy-production-studio-owner[data-dock-owner="true"] { flex: none; width: auto; }
+.fy-arkewrap > div > div > .fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat > .fy-arke { flex: none; }
 .fy-production-studio-inline { min-height: 0; height: 100%; }
 .fy-production-studio-owner [hidden], .fy-production-studio [hidden], .fy-production-studio[hidden] { display: none !important; }
 .fy-production-studio { display: grid; grid-template-columns: minmax(280px, var(--studio-thread-width,420px)) 8px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); height: 100%; min-height: 480px; min-width: 0; background: var(--background); color: var(--foreground); }
