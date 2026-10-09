@@ -17,13 +17,14 @@ export function draft(): ProductionSetupDraft {
 }
 
 describe("conversational production setup (SPEC-012 §4)", () => {
+  // The seeded numbers are the global app preset's since SPEC-052 R-6 amended R-VSETUP-5.
   it("seeds missing microdrama delivery fields while preserving explicit values and clearing", () => {
     const seeded = applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "microdrama" } });
-    assert.deepEqual(seeded.defaults, { episodeSecondsMin: 45, episodeSecondsMax: 75, hookWindowSec: 3, exportPreset: "social-1080x1920" });
+    assert.deepEqual(seeded.defaults, { episodeSecondsMin: 60, episodeSecondsMax: 120, hookWindowSec: 3, exportPreset: "social-1080x1920", episodeCount: 50 });
     const explicit = applyProductionSetupUpdate({ ...draft(), defaults: { hookWindowSec: 2 } }, {
       expectedRevision: 1, fields: { kind: "microdrama", defaults: { episodeSecondsMin: 30, episodeSecondsMax: 45 } },
     });
-    assert.deepEqual(explicit.defaults, { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 2, exportPreset: "social-1080x1920" });
+    assert.deepEqual(explicit.defaults, { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 2, exportPreset: "social-1080x1920", episodeCount: 50 });
     const edited = applyProductionSetupUpdate(explicit, { expectedRevision: 2, fields: { defaults: { episodeSecondsMax: 40 } } });
     assert.deepEqual(edited.defaults, { ...explicit.defaults, episodeSecondsMax: 40 });
     const cleared = applyProductionSetupUpdate(edited, { expectedRevision: 3, fields: { kind: "microdrama", defaults: null } });

@@ -128,6 +128,7 @@ export * from "./error-copy.js";
 export * from "./production-narrative.js";
 export * from "./production-creation.js";
 export * from "./production-setup.js";
+export * from "./production-target.js";
 export * from "./publication.js";
 export * from "./publication-video.js";
 export * from "./publication-host.js";

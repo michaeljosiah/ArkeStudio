@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
+import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen } from "../src/screens/production-setup.js";
 import { NewProductionScreen } from "../src/screens/world.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -253,5 +253,32 @@ describe("production setup interaction (issue #976)", () => {
     music.draft.kind = "music-video";
     await act(async () => { __setStateForTest(withStory(music), { connection: "open" }); });
     assert.equal(select(), undefined, "a music video adapts nothing");
+  });
+
+  // The Target (design turn 205, SPEC-052 R-6..R-9): where it will be watched first, then the
+  // numbers a preset filled, each with what it comes to; a preset sends its target and its defaults.
+  it("shows a micro drama's Target with what each row comes to, and a preset sends its numbers", async () => {
+    const micro = draft();
+    const global = presetTarget("global-app");
+    micro.draft.kind = "microdrama";
+    micro.draft.target = global.target;
+    micro.draft.defaults = { ...global.defaults, hookWindowSec: 3 };
+    const m = await mount(fixture(micro));
+    await answer(m.commands()[0]!, micro);
+    const card = m.container.querySelector('[aria-label="Target"]');
+    assert.ok(card, "the Target stands in the rail for a micro drama");
+    const text = card!.textContent ?? "";
+    for (const end of ["2 seasons", "120 min", "then paid", "one drop"]) assert.ok(text.includes(end), end);
+    const audience = card!.querySelector("#target-audience") as HTMLSelectElement;
+    assert.ok([...audience.querySelectorAll("option")].some(option => option.textContent === "Nigeria · free vertical · 40–60 × 60–90 s · free"));
+    Object.defineProperty(audience, "value", { value: "nigeria-free-vertical", configurable: true });
+    await act(async () => audience.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    const nigeria = presetTarget("nigeria-free-vertical");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "update", update: { expectedRevision: 3, fields: {
+      target: nigeria.target, defaults: { ...micro.draft.defaults, ...nigeria.defaults },
+    } } });
+    const film = draft();
+    await act(async () => { __setStateForTest(fixture(film), { connection: "open" }); });
+    assert.equal(m.container.querySelector('[aria-label="Target"]'), null, "a film has no Target here");
   });
 });

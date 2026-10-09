@@ -1,3 +1,4 @@
+import { ProductionTargetSchema } from "./production-target.js";
 import { z } from "zod";
 import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { ChapterAudiobookStateSchema } from "./audiobook.js";
@@ -458,6 +459,8 @@ export const SeasonSchema = z
       })
       .strict()
       .optional(),
+    /** Where the season will be watched and what it is held to (design turn 205, SPEC-052 R-6). */
+    target: ProductionTargetSchema.optional(),
   })
   .strict();
 export type Season = z.infer<typeof SeasonSchema>;

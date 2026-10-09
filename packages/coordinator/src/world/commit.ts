@@ -446,6 +446,13 @@ export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
  * so the world is raised before the first draft that names one, from the rail or from Arke.
  */
 export const ADAPT_FROM_SCHEMA_VERSION = 70;
+/**
+ * A micro drama's Target (design turn 205, SPEC-052 R-6): `target` on the strict setup draft and on
+ * the strict season.json, which a build before it reads as an unreadable setup or season. The
+ * world is raised before the first draft that carries one, which becoming a micro drama seeds,
+ * and before a creation that writes one.
+ */
+export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

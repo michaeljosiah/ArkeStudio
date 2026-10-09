@@ -203,7 +203,8 @@ describe("durable production setup lifecycle (issue #976)", () => {
     assert.ok((await readWorldMeta(store.dir)).schemaVersion < ADAPT_FROM_SCHEMA_VERSION, "a refused source raises nothing");
     const named = await service.update(id, { expectedRevision: 2, fields: { kind: "microdrama", source: { productionId: "the-ledger-of-nights" } } });
     assert.deepEqual(named.draft.source, { productionId: "the-ledger-of-nights" });
-    assert.equal((await readWorldMeta(store.dir)).schemaVersion, ADAPT_FROM_SCHEMA_VERSION);
+    // At least Adapt from's version: becoming a micro drama also seeds a Target (SPEC-052 R-6).
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= ADAPT_FROM_SCHEMA_VERSION);
     const cleared = await service.update(id, { expectedRevision: 3, fields: { source: null } });
     assert.equal(cleared.draft.source, undefined);
   });

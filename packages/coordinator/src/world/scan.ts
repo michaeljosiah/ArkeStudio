@@ -160,7 +160,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // them, which a build without the field would drop the sheet over.
 // Sixty-nine is the beats a chapter was grouped by, named on its audiobook record (design turn 201).
 // Seventy is the story a production setup is adapted from, on its strict draft (design turn 205).
-export const SUPPORTED_SCHEMA_VERSION = 70;
+// Seventy-one is a micro drama's Target, on the draft and on season.json (design turn 205).
+export const SUPPORTED_SCHEMA_VERSION = 71;
 
 export class WorldOpenError extends Error {
   constructor(

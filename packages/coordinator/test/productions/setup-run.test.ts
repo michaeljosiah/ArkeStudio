@@ -11,6 +11,8 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { checkpointPath } from "../../src/world-chat/checkpoint.js";
 import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { PRODUCTION_TARGET_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { guardProductionSetupAuthority } from "../../src/productions/setup-authority.js";
 import { handleProductionSetupCommand } from "../../src/productions/setup-command.js";
@@ -173,13 +175,18 @@ describe("setup turns share conversation durability but no world-mutation author
       defaults: { episodeSecondsMin: 30, episodeSecondsMax: 45 },
     }, episodes: [{ key: "one", title: "One", scenes: [] }] }));
     assert.equal((await h.runner.send(h.log, h.id, "Micro drama: episodes forty seconds each, min thirty, max forty-five.")).status, "completed");
-    const defaults = { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 3, exportPreset: "social-1080x1920" };
+    // Becoming a micro drama seeds the global app's Target (SPEC-052 R-6); the stated bounds win.
+    const defaults = { episodeCount: 50, episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 3, exportPreset: "social-1080x1920" };
     assert.deepEqual((await h.view())!.productionSetup!.draft.defaults, defaults);
+    assert.equal((await h.view())!.productionSetup!.draft.target?.audience, "global-app");
     const review = await h.service.review(h.id, 2);
     assert.deepEqual(review.review!.plan.initialSeason!.defaults, defaults);
     const created = await h.service.create(h.id, 2, review.review!.id);
     const season = JSON.parse(await readFile(join(h.world.dir, "productions", created.productionId!, "season.json"), "utf8"));
     assert.deepEqual(season.defaults, defaults);
+    // The Target travels with the season it describes, past the builds that cannot read it.
+    assert.equal(season.target.audience, "global-app");
+    assert.equal((await readWorldMeta(h.world.dir)).schemaVersion, PRODUCTION_TARGET_SCHEMA_VERSION);
   });
 
   it("refuses a retry record that races with completed production creation", async () => {
