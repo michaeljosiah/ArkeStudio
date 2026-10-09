@@ -63,6 +63,15 @@ describe("codex image client", () => {
       error => error instanceof ProviderAuthError && PROVIDER_FAULT.test(error.message));
   });
 
+  // An output-stage safety refusal (Na love or Juju, chapter 4) ends a turn with no picture: a
+  // witnessed rejection, terminal, never a result held for reconciliation.
+  it("maps a turn that made no image to a witnessed rejection carrying Codex's words", async () => {
+    const refused = Object.assign(new Error("Codex made no image: The safety system rejected the image."), { name: "CodexImageRefusedError" });
+    await assert.rejects(new CodexClient(runner({ generate: async () => { throw refused; } })).submit("", { model: "codex-image", capability: "image", params: { prompt: "x" } }),
+      error => error instanceof ProviderRequestRejectedError && error.submissionRejected && /safety system rejected/.test(error.message) &&
+        (error as unknown as { failureClass?: string }).failureClass === "terminal");
+  });
+
   it("disposing the client stops the runner it was given", async () => {
     let stopped = 0;
     await new CodexClient(runner({ dispose: () => { stopped++; } })).dispose();

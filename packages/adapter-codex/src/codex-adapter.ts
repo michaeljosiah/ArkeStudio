@@ -96,9 +96,24 @@ export interface CodexImageResult { bytes: Buffer; mimeType: "image/png" | "imag
 export class CodexImageLimitError extends Error {
   constructor(readonly resetsAt: number | null) { super("The Codex plan's image limit has been reached."); this.name = "CodexImageLimitError"; }
 }
+/**
+ * A turn that finished and made no image: witnessed, not uncertain. OpenAI's safety system
+ * refuses an image at its output stage, Codex's model tries again and then answers in words, and
+ * the turn completes normally. Reported as an unwitnessed result, that held each refused picture
+ * for reconciliation and stalled a chapter's illustration run (Na love or Juju, chapter 4). `said`
+ * is Codex's own last sentence, which names the refusal when there was one.
+ */
+export class CodexImageRefusedError extends Error {
+  constructor(readonly said: string | null) {
+    super(said ? `Codex made no image: ${said}` : "Codex finished without producing an image.");
+    this.name = "CodexImageRefusedError";
+  }
+}
 interface ImageJob {
   turnId: string | null;
   items: JsonObject[];
+  /** Codex's last reply in words, for a turn that ends without an image. */
+  said?: string;
   settle: (error?: Error) => void;
 }
 function imageType(bytes: Buffer): CodexImageResult["mimeType"] | null {
@@ -356,7 +371,8 @@ export class CodexAdapter implements HarnessAdapter {
       if (failed) throw new CodexImageLimitError(typeof failed.resetsAt === "number" ? failed.resetsAt : null);
       const lateError = turnError as Error | null;
       if (lateError) throw lateError;
-      throw new Error(job.items.some(item => typeof item.result === "string" && item.result.length > 0) ? "Codex returned data that is not a supported image." : "Codex finished without producing an image.");
+      if (job.items.some(item => typeof item.result === "string" && item.result.length > 0)) throw new Error("Codex returned data that is not a supported image.");
+      throw new CodexImageRefusedError(job.said ?? null);
     } finally {
       if (threadId) { this.imageJobs.delete(threadId); await this.releaseImageThread(rpc, threadId); }
       await rm(cwd, { recursive: true, force: true }).catch(() => {});
@@ -376,7 +392,11 @@ export class CodexAdapter implements HarnessAdapter {
     const id = typeof params.turnId === "string" ? params.turnId : typeof announced.id === "string" ? announced.id : undefined;
     if (!id || (job.turnId !== null && job.turnId !== id)) return;
     if (job.turnId === null) { if (method !== "turn/started") return; job.turnId = id; }
-    if (method === "item/completed") { const item = object(params.item); if (item.type === "imageGeneration") job.items.push(item); }
+    if (method === "item/completed") {
+      const item = object(params.item);
+      if (item.type === "imageGeneration") job.items.push(item);
+      else if (item.type === "agentMessage" && typeof item.text === "string" && item.text.trim()) job.said = item.text.trim().replace(/\s+/g, " ").slice(0, 300);
+    }
     else if (method === "turn/completed") {
       if (Array.isArray(announced.items)) for (const raw of announced.items) { const item = object(raw); if (item.type === "imageGeneration" && !job.items.some(seen => seen.id === item.id)) job.items.push(item); }
       job.settle(announced.status === "completed" ? undefined : this.imageError(announced.error));

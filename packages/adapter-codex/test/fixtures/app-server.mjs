@@ -64,6 +64,12 @@ createInterface({ input: process.stdin }).on('line', line => {
           } } });
           return;
         }
+        if (scenario === 'image-gen-refused') {
+          // The image tool was refused at the output stage; the model answered in words and the turn completed.
+          notify('item/completed', { ...base, item: { id: 'msg', type: 'agentMessage', text: 'The image request was rejected by the safety system,\n  so no image was made.' } });
+          finish(thread.id, thread.turn);
+          return;
+        }
       const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('fixture-image-bytes')]).toString('base64');
       const item = scenario === 'image-gen-limit' ? { id: 'img', type: 'imageGeneration', status: 'failed', result: '', failure: { type: 'usageLimitExceeded', limitId: 'images', resetsAt: 1900000000 } }
         : scenario === 'image-gen-junk' ? { id: 'img', type: 'imageGeneration', status: 'completed', result: Buffer.from('not an image at all').toString('base64'), savedPath: '/etc/passwd' }
