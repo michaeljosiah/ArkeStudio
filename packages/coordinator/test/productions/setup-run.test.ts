@@ -322,4 +322,32 @@ describe("setup turns share conversation durability but no world-mutation author
       ({ result: {}, receipt: { status: "complete" } }) as never, 400_000);
     assert.match(gone, /no longer in this world \(not-here\)/);
   });
+
+  // A harness that reports no window is budgeted from a floor, and a world of long sheets with a
+  // whole-novel digest did not fit it (Na love or Juju, 2026-10-09). The brief steps down: compact
+  // world records first, then the draft as its outline, and refuses only when even that does not fit.
+  it("steps down to compact records and an outlined draft before refusing", async () => {
+    const h = await setup(() => reply());
+    const bundle = structuredClone(h.world.getBundle());
+    const character = bundle.sheets.find(sheet => sheet.type === "character")!;
+    const long = { ...character, sections: [{ heading: "Essence", body: "A long life. ".repeat(4_000) }] };
+    bundle.sheets = bundle.sheets.map(sheet => sheet.id === character.id ? long : sheet);
+    const read = async (tool: string, args: Record<string, unknown>) => ({
+      result: tool === "get_sheet" ? bundle.sheets.find(sheet => sheet.id === args.id) : { id: args.id, text: "canon" },
+      receipt: { id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT },
+    }) as never;
+    const draft = (await h.service.resume(h.id)).draft;
+    const full = await productionSetupBrief(bundle, draft, read, 1_000_000);
+    assert.ok(full.includes("A long life. A long life."), "with room, the records go whole");
+    const compact = await productionSetupBrief(bundle, draft, read, 30_000);
+    assert.ok(compact.length <= 30_000);
+    assert.match(compact, /shown compactly/);
+    assert.match(compact, /read any in full with get_sheet/);
+    assert.ok(!compact.includes("A long life. ".repeat(40)), "the long sheet is cut to its start");
+    const outlined = { ...draft, scenes: Array.from({ length: 120 }, (_, i) => ({ key: `s-${i}`, title: `Scene ${i}`, synopsis: "What happens here. ".repeat(20) })) };
+    const outline = await productionSetupBrief(bundle, outlined, read, 30_000);
+    assert.match(outline, /shown as its outline/);
+    assert.ok(!outline.includes("What happens here."), "an outlined draft carries keys and titles");
+    assert.ok(outline.includes('"key":"s-119","title":"Scene 119"'));
+  });
 });
