@@ -5,6 +5,7 @@ import {
   formatRunningTime,
   kitLookLibrary,
   pictureBench,
+  pictureDetailSkins,
   pictureLookChanged,
   pictureMood,
   pictureSpans,
@@ -188,7 +189,10 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const editInBench = (picked: PictureSuggestion, prompt: string) => {
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
     const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description))), refs: carried.map((who) => who.reference!) };
+    // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
+    const sheets = world?.sheets ?? [];
+    const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!) };
     sendBenchNewSession(worldId);
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
