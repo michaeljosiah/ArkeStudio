@@ -12,7 +12,7 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { ADAPT_FROM_SCHEMA_VERSION, CommitStaleError, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
 
@@ -34,6 +34,9 @@ export function assertAdaptableSource(world: WorldStore, update: ProductionSetup
  */
 export async function fenceAdaptableSource(world: WorldStore, update: ProductionSetupUpdate): Promise<void> {
   if (update.fields?.source) await world.ensureSchemaVersion(ADAPT_FROM_SCHEMA_VERSION, "production-setup");
+  // A Target is carried by the draft once it is a micro drama: chosen, or seeded by the change of
+  // format (SPEC-052 R-6). Raised for either, since the seeding happens inside the update.
+  if (update.fields?.target || update.fields?.kind === "microdrama") await world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
 }
 
 function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
@@ -213,6 +216,8 @@ export class ProductionSetupService {
       this.uncertain.add(id);
       try {
         const review = state.review!;
+        // A season carrying a Target is past the builds that read season.json without it.
+        if (review.plan.initialSeason?.target) await this.world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
         await createProductionFromPlan(this.world, review.plan, {
           source: "production-setup", requestId: review.id,
           precondition: () => setupSourceDigest(this.world.getBundle()) === review.sourceDigest

@@ -65,6 +65,8 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     const { arcNotes: _arcNotes, ...narrative } = draft.narrative;
     base.initialSeason = SeasonSchema.parse({
       ...base.initialSeason, ...narrative,
+      // The Target travels with the season it describes (SPEC-052 R-6).
+      ...(draft.target ? { target: draft.target } : {}),
       arcs: draft.arcs.map(arc => ({
         ...arc,
         ...(arc.setup ? { setup: episodeId(arc.setup) } : {}),

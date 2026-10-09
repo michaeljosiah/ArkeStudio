@@ -15,6 +15,7 @@ import { ConversationTranscript, languageChoiceReason } from "../components/conv
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
+import { ProductionTargetCard } from "../components/production-target-card.js";
 import { Button } from "../components/ui.js";
 import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
@@ -175,13 +176,9 @@ export function ProductionSetupScreen() {
                 {stories.map(story => <option key={story.id} value={story.id}>{story.title} · {story.kind} · {story.chapters} chapter{story.chapters === 1 ? "" : "s"} · {story.words.toLocaleString("en-GB")} words</option>)}
                 {draft.source && !stories.some(story => story.id === draft.source!.productionId) && <option value={draft.source.productionId}>{draft.source.productionId} · no longer here</option>}
               </select></label>}
-              {draft.kind === "microdrama" && <div className="fy-production-setup__delivery">
-                <label>Episode min · seconds<input type="number" min={1} key={`min-${draft.revision}`} defaultValue={draft.defaults?.episodeSecondsMin ?? ""}
-                  onBlur={event => { if (event.target.value) update({ defaults: { episodeSecondsMin: Number(event.target.value) } }); }} /></label>
-                <label>Episode max · seconds<input type="number" min={1} key={`max-${draft.revision}`} defaultValue={draft.defaults?.episodeSecondsMax ?? ""}
-                  onBlur={event => { if (event.target.value) update({ defaults: { episodeSecondsMax: Number(event.target.value) } }); }} /></label>
-              </div>}
             </fieldset>
+            {/* Where it will be watched, and the numbers that follow (design turn 205, SPEC-052 R-6). */}
+            {draft.kind === "microdrama" && <ProductionTargetCard draft={draft} update={update} disabled={!!pending || running || locked} />}
             {/* The production's own models (design turn 153), written with the production. Each
                 row follows Settings until chosen here — Settings, not the world: the world's
                 choice was for making the world. */}

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
 import { FrameRateSchema, SeasonSchema, pickableSheets, type ChapterSummary, type Production, type Sheet } from "./world.js";
 import { productionShape } from "./production-shape.js";
+import { ProductionTargetSchema, presetTarget } from "./production-target.js";
 import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
@@ -78,6 +79,8 @@ const SetupFieldsSchema = z.object({
   models: ModelChoicesSchema.optional(),
   /** Adapt from (design turn 205): the story this production is made from, when it is. */
   source: SetupSourceSchema.optional(),
+  /** Where a micro drama will be watched (design turn 205, SPEC-052 R-6); its numbers are `defaults`. */
+  target: ProductionTargetSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -107,6 +110,7 @@ export const ProductionSetupUpdateSchema = z.object({
     series: SetupFieldsSchema.shape.series.nullable(),
     defaults: SetupFieldsSchema.shape.defaults.nullable(),
     source: SetupSourceSchema.nullable().optional(),
+    target: ProductionTargetSchema.nullable().optional(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   scenes: z.array(SetupSceneSchema.partial().extend({
@@ -138,8 +142,12 @@ function items<T extends { key: string }>(current: T[], replacements: Array<Part
 export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: ProductionSetupUpdate): ProductionSetupDraft {
   const update = ProductionSetupUpdateSchema.parse(raw);
   if (draft.revision !== update.expectedRevision) throw new Error("Production so far changed. Read the current draft before editing it.");
-  const defaults = draft.kind !== "microdrama" && update.fields?.kind === "microdrama"
-    ? { ...MICRODRAMA_DEFAULTS, ...draft.defaults } : draft.defaults;
+  // Becoming a micro drama seeds its Target from a preset (SPEC-052 R-6, amending R-VSETUP-5):
+  // the global app's numbers until the author or Arke chooses where it will be watched. Explicit
+  // values the author already set are kept.
+  const seeding = draft.kind !== "microdrama" && update.fields?.kind === "microdrama";
+  const seeded = seeding && !draft.target && update.fields?.target === undefined ? presetTarget("global-app") : null;
+  const defaults = seeding ? { ...MICRODRAMA_DEFAULTS, ...seeded?.defaults, ...draft.defaults } : draft.defaults;
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
@@ -148,6 +156,7 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     ...(update.fields?.models !== undefined && Object.keys(update.fields.models).length === 0 ? { models: undefined } : {}),
     narrative: { ...draft.narrative, ...update.fields?.narrative },
     source: update.fields?.source === null ? undefined : update.fields?.source ?? draft.source,
+    target: update.fields?.target === null ? undefined : update.fields?.target ?? seeded?.target ?? draft.target,
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults
