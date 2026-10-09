@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
 import type { HarnessEvent } from "@arke-studio/contracts";
-import { CodexAdapter, CodexImageLimitError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
+import { CodexAdapter, CodexImageLimitError, CodexImageRefusedError, codexCredentialEnv, confinedConfig, type CodexAdapterOptions } from "../src/codex-adapter.js";
 
 async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
@@ -423,6 +423,12 @@ test("a plan limit is a typed error and unrecognised bytes are rejected", async 
   await assert.rejects(limit.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageLimitError && error.resetsAt === 1900000000);
   const junk = await fixture("image-gen-junk"); t.after(junk.cleanup);
   await assert.rejects(junk.adapter.generateImage({ prompt: "x" }), /not a supported image/);
+});
+
+test("a completed turn without an image is a typed refusal in Codex's words", async t => {
+  const f = await fixture("image-gen-refused"); t.after(f.cleanup);
+  await assert.rejects(f.adapter.generateImage({ prompt: "x" }), error => error instanceof CodexImageRefusedError &&
+    error.said === "The image request was rejected by the safety system, so no image was made." && error.message.startsWith("Codex made no image: The image request"));
 });
 
 test("turn-level quota and login failures preserve their remedies", async t => {
