@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
-import { FrameRateSchema, SeasonSchema, pickableSheets, type Sheet } from "./world.js";
+import { FrameRateSchema, SeasonSchema, pickableSheets, type ChapterSummary, type Production, type Sheet } from "./world.js";
+import { productionShape } from "./production-shape.js";
 import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
@@ -32,6 +33,32 @@ const SetupArcSchema = z.object({
   id: Key, title: Title, note: Prose.optional(),
   setup: Key.optional(), turn: Key.optional(), payoff: Key.optional(),
 }).strict();
+/**
+ * The story a micro drama or a film is adapted from (design turn 205, SPEC-052 R-1..R-2): a Story
+ * production in the same world with a chapter. Only its id is kept; what it holds is read each turn.
+ */
+export const SetupSourceSchema = z.object({ productionId: SlugSchema }).strict();
+/** The formats Adapt from is offered for (SPEC-052 R-1). */
+export const ADAPTATION_KINDS: ReadonlyArray<z.infer<typeof SetupKindSchema>> = ["microdrama", "film"];
+
+export interface AdaptableStory { id: string; title: string; kind: string; chapters: number; words: number }
+/**
+ * The stories Adapt from lists (SPEC-052 R-1): the world's Story productions with at least one
+ * chapter that is not retired, with the chapters and words they hold, in title order.
+ */
+export function adaptableStories(productions: ReadonlyArray<{ meta: Production; chapters: readonly ChapterSummary[] }>): AdaptableStory[] {
+  return productions.flatMap((production) => {
+    const shape = productionShape(production.meta);
+    if (shape.medium !== "story") return [];
+    const chapters = production.chapters.filter((chapter) => chapter.retired !== true);
+    if (chapters.length === 0) return [];
+    return [{
+      id: production.meta.id, title: production.meta.title, kind: shape.kindLabel.toLowerCase(), chapters: chapters.length,
+      words: chapters.reduce((sum, chapter) => sum + (chapter.words ?? 0), 0),
+    }];
+  }).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+}
+
 const SetupFieldsSchema = z.object({
   title: z.string().trim().max(PRODUCTION_SETUP_BOUNDS.title),
   logline: Prose.optional(),
@@ -49,6 +76,8 @@ const SetupFieldsSchema = z.object({
    * production. Absent entries follow Settings — not the world's choice.
    */
   models: ModelChoicesSchema.optional(),
+  /** Adapt from (design turn 205): the story this production is made from, when it is. */
+  source: SetupSourceSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -77,6 +106,7 @@ export const ProductionSetupUpdateSchema = z.object({
   fields: SetupFieldsSchema.partial().extend({
     series: SetupFieldsSchema.shape.series.nullable(),
     defaults: SetupFieldsSchema.shape.defaults.nullable(),
+    source: SetupSourceSchema.nullable().optional(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   scenes: z.array(SetupSceneSchema.partial().extend({
@@ -117,6 +147,7 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     // made and then emptied, which is not the same as never having made one.
     ...(update.fields?.models !== undefined && Object.keys(update.fields.models).length === 0 ? { models: undefined } : {}),
     narrative: { ...draft.narrative, ...update.fields?.narrative },
+    source: update.fields?.source === null ? undefined : update.fields?.source ?? draft.source,
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults
@@ -135,10 +166,22 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
   });
 }
 
-/** Structural problems stay visible while discussing an unfinished or retracted outline. */
-export function productionSetupProblems(draft: ProductionSetupDraft, sheets: Sheet[]): string[] {
+/**
+ * Structural problems stay visible while discussing an unfinished or retracted outline. The
+ * world's productions, when given, also check the story Adapt from names is still one to adapt.
+ */
+export function productionSetupProblems(
+  draft: ProductionSetupDraft, sheets: Sheet[],
+  productions?: ReadonlyArray<{ meta: Production; chapters: readonly ChapterSummary[] }>,
+): string[] {
   const problems: string[] = [];
   if (!draft.title.trim()) problems.push("Give the production a working title.");
+  if (draft.source) {
+    if (!ADAPTATION_KINDS.includes(draft.kind)) problems.push("Adapt from is for a micro drama or a film. Clear it, or choose one.");
+    else if (productions && !adaptableStories(productions).some((story) => story.id === draft.source!.productionId)) {
+      problems.push("The story this adapts is no longer in this world. Choose another under Adapt from, or clear it.");
+    }
+  }
   const episodic = draft.kind === "microdrama";
   if (!episodic && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
   if (!episodic && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");

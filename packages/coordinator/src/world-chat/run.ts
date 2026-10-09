@@ -4,6 +4,7 @@ import {
   worldChatInputRouting,
   applyProductionSetupUpdate,
   type ProductionSetupDraft,
+  type ProductionSetupUpdate,
   type ProductionSetupState,
   REFUSED_TOOLS_MAX,
   PRODUCTION_READINESS_SCHEMA_VERSION,
@@ -80,6 +81,11 @@ export interface RunDeps {
   /** Closing the owning world retires this runner and aborts every request it admitted. */
   closingSignal?: AbortSignal;
   setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
+  /**
+   * Checks a setup turn's update against the world before it is applied, and raises the world past
+   * the builds that cannot read it (design turn 205): Adapt from named by Arke, as by the rail.
+   */
+  checkSetupUpdate?: (update: ProductionSetupUpdate) => Promise<void>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -1090,6 +1096,7 @@ export class WorldChatRunner {
         return { ok: false, problems: [{ code: "setup-stale", safeMessage: "Production so far changed while this reply was being written. Read the latest draft and try again." }] };
       }
       try {
+        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate);
         const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
         productionSetup = { draft, status: "draft", review: null };
       } catch (error) {

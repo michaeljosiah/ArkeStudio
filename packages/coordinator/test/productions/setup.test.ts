@@ -11,7 +11,8 @@ import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
 import { WorldStore } from "../../src/world/store.js";
-import { CrashSignal } from "../../src/world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, CrashSignal } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { toExtendedLength } from "../../src/world/paths.js";
 import { FIXTURE_WORLD, makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup, tempDir } from "../tmp.js";
@@ -192,5 +193,18 @@ describe("durable production setup lifecycle (issue #976)", () => {
     const log = new ProductionSetupConversationStore(store, id);
     await store.close();
     await assert.rejects(log.append({ type: "conversation.archived" }, { at: CLOCK }), /closed|writable/);
+  });
+
+  // Adapt from (design turn 205, SPEC-052 R-1..R-2): only a story of this world with chapters, and
+  // the world raised past the builds that would read the draft naming it as unreadable.
+  it("names a story to adapt only when it is one, raising the world first", async () => {
+    const { store, service, id } = await open();
+    await assert.rejects(service.update(id, { expectedRevision: 2, fields: { kind: "microdrama", source: { productionId: "saltlight" } } }), /Adapt from names a story/);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion < ADAPT_FROM_SCHEMA_VERSION, "a refused source raises nothing");
+    const named = await service.update(id, { expectedRevision: 2, fields: { kind: "microdrama", source: { productionId: "the-ledger-of-nights" } } });
+    assert.deepEqual(named.draft.source, { productionId: "the-ledger-of-nights" });
+    assert.equal((await readWorldMeta(store.dir)).schemaVersion, ADAPT_FROM_SCHEMA_VERSION);
+    const cleared = await service.update(id, { expectedRevision: 3, fields: { source: null } });
+    assert.equal(cleared.draft.source, undefined);
   });
 });

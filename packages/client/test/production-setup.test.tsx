@@ -219,4 +219,39 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /The boat returns/);
     assert.ok([...m.container.querySelectorAll("button")].some(button => button.textContent === "Review production" && !button.disabled));
   });
+
+  // Adapt from (design turn 205, SPEC-052 R-1): the world's stories with chapters, under the format,
+  // for a film or a micro drama; choosing one or Nothing is the same draft update Arke could make.
+  it("offers the world's stories under Adapt from and sends the choice as the draft's source", async () => {
+    const withStory = (setup: ProductionSetupState) => {
+      const state = fixture(setup);
+      const video = state.world!.productions[0]!;
+      const chapter = (id: string, order: number, words: number) => ({ id, file: id, order, title: id, status: "draft", version: 1, words });
+      state.world!.productions.push({ ...structuredClone(video), meta: { ...video.meta, id: "na-love", title: "Na love or Juju", format: "story", medium: "story", kind: "book" },
+        chapters: [chapter("gold-on-gold", 1, 4_100), chapter("suya-at-midnight", 2, 3_600)], scenes: [] });
+      return state;
+    };
+    const m = await mount(withStory(draft()));
+    await answer(m.commands()[0]!, draft());
+    await act(async () => { __setStateForTest(withStory(draft()), { connection: "open" }); });
+    const select = () => [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Adapt from"))?.querySelector("select");
+    assert.ok(select(), "Adapt from stands under the format for a film");
+    assert.deepEqual([...select()!.querySelectorAll("option")].map(option => option.textContent),
+      ["Nothing — start from an idea", "Na love or Juju · book · 2 chapters · 7,700 words"]);
+    Object.defineProperty(select()!, "value", { value: "na-love", configurable: true });
+    await act(async () => select()!.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    const chosen = m.commands().at(-1)!;
+    assert.deepEqual(chosen.action, { operation: "update", update: { expectedRevision: 3, fields: { source: { productionId: "na-love" } } } });
+    const sourced = draft();
+    sourced.draft.source = { productionId: "na-love" };
+    await answer(chosen, sourced);
+    await act(async () => { __setStateForTest(withStory(sourced), { connection: "open" }); });
+    Object.defineProperty(select()!, "value", { value: "", configurable: true });
+    await act(async () => select()!.dispatchEvent(new dom.Event("change", { bubbles: true })));
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "update", update: { expectedRevision: 3, fields: { source: null } } });
+    const music = draft();
+    music.draft.kind = "music-video";
+    await act(async () => { __setStateForTest(withStory(music), { connection: "open" }); });
+    assert.equal(select(), undefined, "a music video adapts nothing");
+  });
 });

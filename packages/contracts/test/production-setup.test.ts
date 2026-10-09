@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  ProductionSetupDraftSchema, applyProductionSetupUpdate, productionSetupProblems,
+  ProductionSetupDraftSchema, applyProductionSetupUpdate, productionSetupProblems, adaptableStories,
   PRODUCTION_SETUP_BOUNDS, type ProductionSetupDraft,
 } from "../src/production-setup.js";
 
@@ -93,5 +93,37 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.equal(ProductionSetupDraftSchema.parse({ ...draft(), scenes }).scenes.length, scenes.length);
     assert.throws(() => ProductionSetupDraftSchema.parse({ ...draft(), scenes: [...scenes, { key: "extra", title: "Extra" }] }));
     assert.throws(() => ProductionSetupDraftSchema.parse({ ...draft(), scenes: scenes.map(scene => ({ ...scene, synopsis: "界".repeat(2000) })) }), /1 MiB/);
+  });
+
+  // Adapt from (design turn 205, SPEC-052 R-1..R-2): the world's stories with chapters, and the
+  // one a setup names, kept, cleared and checked.
+  const chapter = (id: string, order: number, words: number, retired?: boolean) =>
+    ({ id, file: id, order, title: id, status: "draft", version: 1, words, ...(retired ? { retired } : {}) });
+  const productions = [
+    { meta: { id: "juju", title: "Na love or Juju", format: "story", medium: "story" }, chapters: [chapter("gold", 1, 4000), chapter("suya", 2, 3500), chapter("old", 3, 900, true)] },
+    { meta: { id: "empty-book", title: "An empty book", format: "story", medium: "story" }, chapters: [] },
+    { meta: { id: "short", title: "A short", format: "video", medium: "video", kind: "film" }, chapters: [chapter("x", 1, 10)] },
+  ] as never;
+
+  it("lists the stories with chapters as Adapt from offers them, retired chapters left out", () => {
+    assert.deepEqual(adaptableStories(productions), [{ id: "juju", title: "Na love or Juju", kind: "book", chapters: 2, words: 7500 }]);
+  });
+
+  it("keeps the source a setup names across other edits, and clears it on null", () => {
+    const named = applyProductionSetupUpdate({ ...draft(), kind: "microdrama" }, { expectedRevision: 1, fields: { source: { productionId: "juju" } } });
+    assert.deepEqual(named.source, { productionId: "juju" });
+    const retitled = applyProductionSetupUpdate(named, { expectedRevision: 2, fields: { title: "Na love or Juju · the drama" } });
+    assert.deepEqual(retitled.source, { productionId: "juju" });
+    assert.equal(applyProductionSetupUpdate(retitled, { expectedRevision: 3, fields: { source: null } }).source, undefined);
+    assert.throws(() => applyProductionSetupUpdate(named, { expectedRevision: 2, fields: { source: { productionId: "Not a slug!" } } }));
+  });
+
+  it("names a source on the wrong format, or one no longer in the world, as a problem", () => {
+    const sourced = { ...draft(), source: { productionId: "juju" } };
+    assert.deepEqual(productionSetupProblems(sourced, [], productions), []);
+    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama or a film/);
+    assert.match(productionSetupProblems({ ...sourced, source: { productionId: "empty-book" } }, [], productions).join(" "), /no longer in this world/);
+    // Without the world's productions only the format is checked: the client may not hold them yet.
+    assert.deepEqual(productionSetupProblems({ ...sourced, source: { productionId: "gone" } }, []), []);
   });
 });

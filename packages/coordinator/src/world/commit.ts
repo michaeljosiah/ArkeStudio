@@ -440,6 +440,12 @@ export const SHEET_NARRATION_SCHEMA_VERSION = 68;
  * unreadable — every take of the chapter read as lost — so the world is raised before the first.
  */
 export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
+/**
+ * The story a production setup is adapted from (design turn 205, SPEC-052 R-2): `source` on the
+ * strict setup draft in its conversation, which a build before it reads as an unreadable setup —
+ * so the world is raised before the first draft that names one, from the rail or from Arke.
+ */
+export const ADAPT_FROM_SCHEMA_VERSION = 70;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

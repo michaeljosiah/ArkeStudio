@@ -284,4 +284,35 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.match(brief, /defaults\?:\{episodeSecondsMin\?,episodeSecondsMax\?,hookWindowSec\?,exportPreset\?\}/);
     await assert.rejects(productionSetupBrief(bundle, draft, async () => ({ result: {}, receipt: { status: "complete" } }) as never, 100), /larger writing-model context/);
   });
+
+  // Adapt from (design turn 205, SPEC-052 R-14): the story's chapters in order, built from the world,
+  // with the beats its audiobook named read through the lease for the chapters that have a record.
+  it("carries the story a setup adapts as a digest of its chapters and their named beats", async () => {
+    const h = await setup(() => reply());
+    const bundle = structuredClone(h.world.getBundle());
+    const story = bundle.productions.find(production => production.meta.id === "the-ledger-of-nights")!;
+    const ordered = [...story.chapters].filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
+    (ordered[0] as { audiobook?: unknown }).audiobook = { stamp: "x" };
+    const draft = { ...(await h.service.resume(h.id)).draft, kind: "microdrama" as const, source: { productionId: "the-ledger-of-nights" } };
+    const beatReads: string[] = [];
+    const brief = await productionSetupBrief(bundle, draft, async (tool, args) => {
+      if (tool === "get_chapter") {
+        beatReads.push(`${String(args.chapterId)}:${String(args.section)}`);
+        return { result: { target: { kind: "chapters", id: "x" }, observedRevisionOrDigest: "d", total: 1, nextCursor: null, complete: true,
+          items: [{ chapterId: args.chapterId, title: "t", beats: [{ name: "The bell under the water", whose: "Maren", paragraph: 1 }] }] },
+          receipt: { id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [], at: AT } } as never;
+      }
+      return { result: { id: args.id }, receipt: { id: newId("check"), runId: newId("run"), tool: "get-entry", status: "complete", consulted: [], at: AT } } as never;
+    }, 400_000);
+    assert.deepEqual(beatReads, [`${ordered[0]!.id}:beats`], "beats are read only where an audiobook record stands");
+    assert.ok(brief.includes(`adapted from “${story.meta.title}” (the-ledger-of-nights)`));
+    const at = ordered.map(chapter => brief.indexOf(`"id":"${chapter.id}"`));
+    assert.ok(at.every((index, i) => index > 0 && (i === 0 || index > at[i - 1]!)), "every chapter, in order");
+    assert.match(brief, /"beats":\["The bell under the water · Maren"\]/);
+    assert.match(brief, /get_chapter \{productionId: "the-ledger-of-nights", chapterId\}/);
+    assert.match(brief, /fields\.source is Adapt from/);
+    const gone = await productionSetupBrief(bundle, { ...draft, source: { productionId: "not-here" } }, async () =>
+      ({ result: {}, receipt: { status: "complete" } }) as never, 400_000);
+    assert.match(gone, /no longer in this world \(not-here\)/);
+  });
 });
