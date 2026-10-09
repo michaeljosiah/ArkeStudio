@@ -289,6 +289,9 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.ok(!reads.includes("foreign-guest"));
     assert.match(brief, /openQuestions/);
     assert.match(brief, /defaults\?:\{episodeSecondsMin\?,episodeSecondsMax\?,hookWindowSec\?,exportPreset\?\}/);
+    // A micro drama with film arc notes cannot be reviewed; the spine of Na love or Juju landed
+    // there and blocked Review until it was moved by hand (2026-10-09).
+    assert.match(brief, /arcNotes is a film's: a micro drama keeps its arcs as named arcs/);
     await assert.rejects(productionSetupBrief(bundle, draft, async () => ({ result: {}, receipt: { status: "complete" } }) as never, 100), /larger writing-model context/);
   });
 
