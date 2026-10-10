@@ -10,6 +10,7 @@ import {
   subscribeAudiobookListening,
   subscribeAudiobookVideoExported,
   subscribeWebPackages,
+  useAudiobookRecords,
   useExports,
   useStore,
   type AudiobookExported,
@@ -66,6 +67,12 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const [options, setOptions] = useState<AudiobookVideoOptions>(() => ({ ...DEFAULT_VIDEO_OPTIONS, scope: chapterId === undefined ? { kind: "book" } : { kind: "chapter", chapterId } }));
   const scope: AudiobookScope = options.scope ?? { kind: "book" };
   const scopeKey = audiobookScopeKey(scope);
+  const records = useAudiobookRecords();
+  const prefix = `${worldId}/${production.meta.id}/`;
+  const planStamp = JSON.stringify([
+    production.chapters.filter((chapter) => scope.kind === "book" || chapter.id === scope.chapterId).map((chapter) => [chapter.id, chapter.version, chapter.audiobook]),
+    Object.entries(records).filter(([key]) => scope.kind === "chapter" ? key === prefix + scope.chapterId : key.startsWith(prefix)).map(([key, record]) => [key, record.seq]),
+  ]);
   const [subtitlesChosen, setSubtitlesChosen] = useState(false);
   const [rendering, setRendering] = useState<string | null>(null);
   const [video, setVideo] = useState<AudiobookVideoResult | null>(null);
@@ -105,6 +112,16 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       offPackages();
     };
   }, [worldId, production.meta.id, scopeKey]);
+  // A scoped read's quote can cover this sheet while it keeps its options. Saved takes update
+  // readiness here without replacing the sheet or navigating away from the originating chapter.
+  useEffect(() => {
+    if (connection !== "open") return;
+    const timer = setTimeout(() => {
+      asked.current = openAudiobookListening(worldId, production.meta.id, scope);
+      setAgain((value) => value + 1);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [worldId, production.meta.id, scopeKey, connection, planStamp]);
   useEffect(
     () =>
       subscribeAudiobookVideoExported((answer) => {
@@ -234,7 +251,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
         </>
       ) : (
         <>
-          {!phone && (
+          {(
             <button type="button" className="fy-abv-btn" onClick={onClose}>
               Cancel
             </button>
@@ -335,9 +352,12 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
                 <>
                   {estimate(false)}
                   {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
+                  <div className="fy-abv-foot">
+                  <button type="button" className="fy-abv-btn" onClick={onClose}>Cancel</button>
                   <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">
                     {quote?.press ?? "Render"}
                   </button>
+                  </div>
                 </>
               ) : (
                 <>

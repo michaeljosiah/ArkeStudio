@@ -1230,6 +1230,18 @@ export function ChapterWorkspace({
   const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
   const [chapterExportOpen, setChapterExportOpen] = useState(false);
+  const chapterExportOpener = useRef<HTMLElement | null>(null);
+  const openChapterExport = () => {
+    const active = document.activeElement;
+    chapterExportOpener.current = active instanceof HTMLElement && active.matches('[data-testid="audiobook-chapter-export"]:not([role="menuitem"])')
+      ? active : document.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+    setChapterExportOpen(true);
+  };
+  const closeChapterExport = () => {
+    setChapterExportOpen(false);
+    // A menu item is gone by the time a modal opens; return to its stable chapter action press.
+    requestAnimationFrame(() => chapterExportOpener.current?.isConnected && chapterExportOpener.current.focus({ preventScroll: true }));
+  };
   useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
   const [lookToMake, setLookToMake] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
@@ -1269,7 +1281,7 @@ export function ChapterWorkspace({
           : {}),
     },
     looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
-    export: () => setChapterExportOpen(true),
+    export: openChapterExport,
     // Cast the edited paragraphs or the chapter from the view (design turn 198), as the rail does.
     casting: { press: castLinesPress, busy: castingNow },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -2087,7 +2099,7 @@ export function ChapterWorkspace({
                 {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
                     tablet's Arke press; the read and Listen are held at the foot, under the list. */}
                 {stagedDraft === undefined && (narrowToolbar ? audiobook.headMenu : audiobook.head)}
-                {stagedDraft === undefined && !phone && <button type="button" className="fy-ab__pill" disabled={connection !== "open"} onClick={() => setChapterExportOpen(true)} data-testid="audiobook-chapter-export">Export…</button>}
+                {stagedDraft === undefined && !phone && <button type="button" className="fy-ab__pill" disabled={connection !== "open"} onClick={openChapterExport} data-testid="audiobook-chapter-export">Export…</button>}
                 {/* Listen (design turn 186): the book from this chapter, after the chapter's own read. */}
                 {stagedDraft === undefined && !narrowToolbar && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
                 {!phone && arkePress}
@@ -2383,10 +2395,7 @@ export function ChapterWorkspace({
               the manuscript's rail is hidden there by chapter-responsive.css, not unmounted, so
               Voices keeps its speakers' notes and the narrator's dialog. */}
           <div className="fy-ch__panels">
-          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={() => setChapterExportOpen(false)} onReadRemaining={(numbers) => {
-            setChapterExportOpen(false);
-            audiobook.readRemaining(numbers);
-          }} />}
+          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReadRemaining={audiobook.readRemaining} />}
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
             <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} onClose={audiobook.readSheet.cancel} className="fy-chapter-review-sheet">
