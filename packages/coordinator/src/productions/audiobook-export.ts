@@ -3,9 +3,12 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 
 import { join } from "node:path";
 import {
   AUDIOBOOK_PLAYER_SOURCE,
+  audiobookScopeKey,
+  AudiobookScopeSchema,
   ulid,
   type AudiobookListening,
   type AudiobookPlayerChapter,
+  type AudiobookScope,
   type ListeningChapter,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -29,7 +32,7 @@ import { containedWorldFile } from "./interactive.js";
  */
 
 export type AudiobookExportResult =
-  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean }
+  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean; scope: AudiobookScope; chapterIds: string[] }
   | { ok: false; blockers: string[] };
 
 const EXPORT_ID = /^ab_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -74,11 +77,13 @@ mountAudiobookPlayer(document.getElementById("app"), { title: manifest.title, co
 export async function exportAudiobookPlayer(
   store: WorldStore,
   productionId: string,
-  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal } ,
+  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal; scope?: AudiobookScope } ,
 ): Promise<AudiobookExportResult> {
-  const listening: AudiobookListening = await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {});
+  const scope = options.scope ?? { kind: "book" };
+  const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), scope };
+  const listening: AudiobookListening = await audiobookListening(store, productionId, listeningOptions);
   const whole = listening.chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
-  if (whole.length === 0) return { ok: false, blockers: ["no chapter is read whole yet"] };
+  if (whole.length === 0) return { ok: false, blockers: [scope.kind === "chapter" ? "this chapter is not read whole yet" : "no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
   if (!EXPORT_ID.test(exportId)) throw new Error("invalid audiobook export id");
   const signal = options.signal ?? new AbortController().signal;
@@ -209,6 +214,8 @@ export async function exportAudiobookPlayer(
       kind: "audiobook" as const,
       version: 1,
       productionId,
+      scope,
+      chapterIds: chapters.map((chapter) => chapter.id),
       title: listening.title,
       world: store.getBundle().meta.name,
       cover: picture(listening.cover),
@@ -217,7 +224,7 @@ export async function exportAudiobookPlayer(
       provenance: { exportId, exportedAt: options.clock() },
     };
     await atomicWriteFile(join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}`);
+    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}${scope.kind === "chapter" ? `-${audiobookScopeKey(scope)}` : ""}`);
     await atomicWriteFile(join(staging, "player.html"), page);
     bytes += Buffer.byteLength(page);
 
@@ -227,11 +234,11 @@ export async function exportAudiobookPlayer(
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {})).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
       await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));
-      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined };
+      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined, scope, chapterIds: manifest.chapterIds };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
@@ -240,7 +247,7 @@ export async function exportAudiobookPlayer(
 
 /** The package re-read as a listener's browser would: the page, the manifest, and every file at its hash. */
 export async function packageProblems(dir: string, exportId: string): Promise<string[]> {
-  let manifest: { kind?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
+  let manifest: { kind?: unknown; scope?: unknown; chapterIds?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
   try {
     manifest = JSON.parse(await readFile(toExtendedLength(join(dir, "manifest.json")), "utf8"));
   } catch {
@@ -248,6 +255,11 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   }
   if (manifest === null || manifest.kind !== "audiobook" || !Array.isArray(manifest.files) || !Array.isArray(manifest.chapters)) return ["manifest.json is missing or invalid"];
   const problems: string[] = [];
+  if (manifest.scope !== undefined) {
+    const scope = AudiobookScopeSchema.safeParse(manifest.scope);
+    const ids = manifest.chapters.map((chapter) => chapter.id);
+    if (!scope.success || (scope.data.kind === "chapter" && (ids.length !== 1 || ids[0] !== scope.data.chapterId)) || JSON.stringify(manifest.chapterIds) !== JSON.stringify(ids)) problems.push("manifest.json does not match its export scope");
+  }
   if (manifest.provenance?.exportId !== exportId) problems.push("manifest.json names another export");
   const listed = new Set(manifest.files.map((entry) => entry.file));
   for (const entry of manifest.files) {

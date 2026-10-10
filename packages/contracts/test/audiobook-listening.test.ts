@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { audiobookTextHash, ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookListeningSchema,
+  AudiobookScopeSchema,
+  audiobookScopeKey,
   ListeningChapterSchema,
   blockSentences,
   bookPlace,
@@ -21,6 +23,13 @@ import type { AudiobookPicture } from "../src/audiobook-pictures.js";
  */
 
 const AT = "2026-10-03T09:00:00.000Z";
+it("requires an explicit chapter identity and keeps scope keys distinct", () => {
+  assert.equal(AudiobookScopeSchema.safeParse({ kind: "chapter" }).success, false);
+  assert.equal(AudiobookScopeSchema.safeParse({ kind: "chapter", chapterId: "" }).success, false);
+  assert.equal(AudiobookScopeSchema.safeParse({ kind: "book", chapterId: "neap" }).success, false);
+  assert.equal(audiobookScopeKey(undefined), "book");
+  assert.notEqual(audiobookScopeKey({ kind: "chapter", chapterId: "neap" }), audiobookScopeKey({ kind: "book" }));
+});
 const take = (seconds: number, grouped = false) => ({ file: `artifacts/take-${seconds}.wav`, seconds, grouped });
 const picture = (text: string, file: string): AudiobookPicture => ({ file, source: "world", textHash: audiobookTextHash(text), at: AT });
 

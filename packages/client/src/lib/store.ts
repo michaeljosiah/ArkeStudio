@@ -5636,9 +5636,9 @@ export function groupChapterBeats(worldId: string, productionId: string, chapter
 }
 
 /** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
-export function openAudiobookListening(worldId: string, productionId: string): string | null {
+export function openAudiobookListening(worldId: string, productionId: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
-  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId }) ? requestId : null;
+  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId, ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** A picture set on a block, or taken off with null (design turn 186c): answered as `audiobook.record` under the id returned. */
@@ -6024,9 +6024,9 @@ export function setAudiobookPictureFocus(worldId: string, productionId: string, 
 }
 
 /** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
-export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string): string | null {
+export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
-  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}) }) ? requestId : null;
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */

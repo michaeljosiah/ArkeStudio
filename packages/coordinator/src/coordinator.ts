@@ -4344,7 +4344,7 @@ export class Coordinator {
           return { ok: false, blockers: [control.signal.aborted ? "the render was cancelled" : describeCoordinatorError(err)] };
         });
         if (result.ok) {
-          sourceFingerprint = `video:${exportId}:${result.made}:${result.files.length}`;
+          sourceFingerprint = `video:${exportId}:${JSON.stringify(result.scope ?? { kind: "book" })}:${(result.chapterIds ?? []).join(",")}:${result.made}:${result.files.length}`;
           if (last !== undefined) last = { ...last, doneSec: last.totalSec, leftSec: 0 };
           await progress("done", 100, `${result.dir}/${result.files[0]!.name}`, null);
         } else if (control.signal.aborted) await progress("cancelled", 0, null, null);
@@ -14310,7 +14310,7 @@ export class Coordinator {
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: control.signal, exportId }).catch(
+        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), signal: control.signal, exportId }).catch(
           (err: unknown): { ok: false; blockers: string[] } => {
             void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
             return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
@@ -15425,7 +15425,7 @@ export class Coordinator {
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
         try {
           // No voice is asked for: what plays is judged by the words alone (codex on PR 1491).
-          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
+          const listening = await audiobookListening(store, msg.productionId, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });

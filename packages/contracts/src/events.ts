@@ -10,7 +10,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
-import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
@@ -1505,7 +1505,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       result: z.union([
-        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean() }).strict(),
+        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean(), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
     })
