@@ -1,3 +1,4 @@
+import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
@@ -398,6 +399,7 @@ export const ClientStateSchema = valueSchema(z
         version: z.string(),
         health: AppHealthSchema,
         jobs: z.array(JobSchema),
+        audiobookActivity: z.array(AudiobookActivitySchema).optional(),
         ledger: z.array(LedgerEntrySchema),
         /**
          * True when the ledger file exists and the read that produced `ledger` failed

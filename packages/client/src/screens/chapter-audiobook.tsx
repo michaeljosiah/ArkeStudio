@@ -5,6 +5,8 @@ import {
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   audiobookBeatAt,
+  audiobookActivityLive,
+  audiobookActivityStage,
   audiobookBeatCount,
   CADENCE_PHRASE_MAX,
   NOTE_TAG_HOLD,
@@ -391,6 +393,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const catalogue = useStore().voiceCatalogue;
   const runs = useAudiobookRuns();
   const run = runs[`${worldId}/${prodId}/${chapter.id}`];
+  const activity = state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run));
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
   // The marker menu (R-42): the view's, so the page's `[` and the side's button open the same one.
@@ -1021,12 +1024,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (reading_) {
       return whole(
-        <span className="fy-ab__control">
+        <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {activity ? `${audiobookActivityStage(activity)} · ${activity.made} of ${activity.toMake} blocks saved` : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
-          <Button variant="ghost" onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
-            Stop
+          <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
+            {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
           </Button>
         </span>
       );

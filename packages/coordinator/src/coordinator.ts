@@ -1,3 +1,4 @@
+import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
@@ -1329,6 +1330,7 @@ export class Coordinator {
   private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number; requests?: number; groups?: string[][]; request?: number }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
   private readonly audiobookRequests = new Map<string, string>();
+  private readonly audiobookActivity: AudiobookActivityJournal;
   /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
   private readonly readingBooks = new Map<string, { control: AbortController; worldId: string; productionId: string; requestId: string; chapters?: number; blocks?: number; done?: number }>();
   /**
@@ -1915,7 +1917,18 @@ export class Coordinator {
       this.emit({ at: at(), type: "audiobook.finished", ...ids, ...ending });
       return ending;
     }
+    const runId = ulid();
+    const bundle = store.getBundle();
+    const production = bundle.productions.find(p => p.meta.id === ids.productionId);
+    const chapter = production?.chapters.find(c => c.id === ids.chapterId);
+    let activityRequest = 0;
+    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, startedAt: at() };
+    try {
     await runAudiobookChapter({
+      activity: async patch => {
+        if (patch.request !== undefined) activityRequest = patch.request;
+        await this.audiobookActivity.update(runId, patch, initial);
+      },
       store,
       worldId: ids.worldId,
       productionId: ids.productionId,
@@ -1962,11 +1975,16 @@ export class Coordinator {
         const queued = await this.enqueueBatch(
           requestId,
           command,
-          inputs.map((input) => ({
-            ...bindDesignedNarrator(input, room.designedBinding),
-            ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
-          })),
+          inputs.map((input) => {
+            const bound = bindDesignedNarrator(input, room.designedBinding);
+            return {
+              ...bound,
+              params: { ...bound.params, audiobookRunId: runId, audiobookChapterTitle: initial.chapterTitle, audiobookScope: initial.scope, audiobookRequest: activityRequest },
+              ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+            };
+          }),
         );
+        for (const id of queued.jobIds) await this.audiobookActivity.update(runId, { job: { id, index: Math.max(1, activityRequest), reused: false } });
         return { jobIds: queued.jobIds, ...(queued.reason !== undefined ? { reason: queued.reason } : {}) };
       },
       waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
@@ -2013,6 +2031,10 @@ export class Coordinator {
         }
       },
     });
+    } catch (error) {
+      await this.audiobookActivity.update(runId, { phase: signal.aborted ? "stopped" : "interrupted", reason: describeCoordinatorError(error) });
+      throw error;
+    }
     return ending;
   }
 
@@ -3305,6 +3327,7 @@ export class Coordinator {
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
+    this.audiobookActivity = new AudiobookActivityJournal(opts.appRoot ? join(opts.appRoot, "queue", "audiobook-reads.jsonl") : undefined, run => this.emit({ type: "audiobook.activity", at: run.updatedAt, run }));
     this.changeLog = storage.changeLog;
     this.appLog = storage.appLog;
     storage.onLogChanged(() => this.refreshDiagnosticsLogTail());
@@ -4522,6 +4545,7 @@ export class Coordinator {
     await this.seed();
     await this.adapterLibrary?.refresh();
     await this.seedAppConfig();
+    for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
     // which, run too early, is indistinguishable from "not resolved yet" and fails every
@@ -21354,6 +21378,7 @@ export class Coordinator {
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
+      await this.audiobookActivity.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();

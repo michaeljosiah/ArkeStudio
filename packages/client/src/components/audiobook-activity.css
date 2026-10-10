@@ -1,0 +1,25 @@
+/* Turn 206: cost scope and the full chapter name stay readable at phone width. */
+.fy-abactivity:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.fy-abactivity .fy-ap__rowtitle { display: block; font: var(--type-ui); font-weight: var(--weight-semibold); white-space: normal; overflow-wrap: anywhere; }
+.fy-abactivity .fy-ap__rowsub { font: var(--type-meta); font-size: var(--text-xs); white-space: normal; overflow-wrap: anywhere; color: var(--muted-foreground); }
+.fy-abactivity .fy-ap__reason { font: var(--type-ui); }
+.fy-abactivity__stage { font: var(--type-ui); margin-top: 12px; }
+.fy-abactivity__progress { height: 4px; background: var(--secondary); border-radius: 2px; margin: 9px 0 6px; overflow: hidden; }
+.fy-abactivity__progress i { display: block; height: 100%; background: var(--foreground); }
+.fy-abactivity__requests { margin-top: 12px; }
+.fy-abactivity__requests summary { font: var(--type-label); padding: 8px 0; cursor: pointer; }
+.fy-abactivity__requests summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.fy-abactivity__request { border-top: 1px solid var(--border); padding: 10px 0; font: var(--type-ui); }
+.fy-abreceipt { width: 100%; }
+.fy-abreceipt .fy-note__title { font: var(--type-ui); font-weight: var(--weight-semibold); white-space: normal; overflow-wrap: anywhere; }
+.fy-abreceipt .fy-note__meta { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); white-space: normal; }
+.fy-abreceipt .fy-note__close { min-width: 28px; min-height: 28px; font: var(--type-body); }
+.fy-abreceipt > .fy-ap__dot { margin-top: 6px; }
+@media (max-width: 600px) {
+  .fy-abactivity .ui-btn, .fy-abactivity__requests summary { min-height: 44px; }
+  .fy-abactivity .fy-ap__actions .ui-btn { flex: 1; }
+  .fy-abreceipt { flex-wrap: wrap; }
+  .fy-abreceipt .fy-note__body { flex: 1; min-width: 200px; }
+  .fy-abreceipt .fy-note__end { width: 100%; margin-left: 19px; justify-content: space-between; }
+  .fy-abreceipt .fy-note__end .ui-btn, .fy-abreceipt .fy-note__close { min-height: 44px; min-width: 44px; }
+}
