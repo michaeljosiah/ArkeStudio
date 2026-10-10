@@ -154,6 +154,12 @@ export function AudiobookMotionControl({
   };
   const showingChosen = viewChosen && chosen !== undefined && !review && state !== "making";
   const shownClip = review ? candidate : showingChosen ? chosen : undefined;
+  const problem = reason === null ? null : (
+    <p role="alert" className="fy-abv-warn">
+      {reason}
+      {/library/i.test(reason) && <> <a href={`#/w/${encodeURIComponent(worldId)}/artifacts`}>View clip</a></>}
+    </p>
+  );
   const generation = store.state?.world?.artifacts.find(
     (artifact) => artifact.id === shownClip?.artifactId,
   )?.generation;
@@ -276,6 +282,7 @@ export function AudiobookMotionControl({
           />
         ) : (
           <div className="fy-abmotion-body">
+            {shownClip !== undefined && problem}
             {shownClip !== undefined ? (
               <>
                 <ClipPreview
@@ -420,17 +427,7 @@ export function AudiobookMotionControl({
                 </div>
               </>
             )}
-            {reason !== null && (
-              <p role="alert" className="fy-abv-warn">
-                {reason}
-                {/library/i.test(reason) && (
-                  <>
-                    {" "}
-                    <a href={`#/w/${encodeURIComponent(worldId)}/artifacts`}>View clip</a>
-                  </>
-                )}
-              </p>
-            )}
+            {shownClip === undefined && problem}
           </div>
         )}
         <div className="fy-abmotion-foot">
