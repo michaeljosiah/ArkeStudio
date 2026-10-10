@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter } from "@arke-studio/contracts";
@@ -105,7 +105,7 @@ export function makeAdapterExtractor(
       // is parked, so it never fires and the extraction waits forever.
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => reject(new Error("extraction took too long")), WALL_CLOCK_MS);
+        deadline = setTimeout(() => reject(new Error("extraction took too long")), sessionTurnTimeoutMs(session.model, WALL_CLOCK_MS));
       });
       try {
         await Promise.race([collected, timeout]);

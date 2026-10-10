@@ -7,7 +7,7 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { toExtendedLength } from "../world/paths.js";
 import { boundSummary, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
@@ -218,7 +218,7 @@ export function makeConversationSummariser(
       .join("\n\n");
       const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
       const timeout = new Promise<never>((_, reject) => {
-      deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), SUMMARY_TIMEOUT_MS);
+      deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), sessionTurnTimeoutMs(session.model, SUMMARY_TIMEOUT_MS));
       });
       await cancellable(Promise.race([
         Promise.all([

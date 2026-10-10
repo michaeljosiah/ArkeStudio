@@ -1,5 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -186,7 +186,7 @@ export class AskService {
         const timeout = new Promise<never>((_, reject) => {
           deadline = setTimeout(
             () => reject(new Error("the answer took too long")),
-            this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS,
+            this.opts.wallClockMs ?? sessionTurnTimeoutMs(session.model, DEFAULT_WALL_CLOCK_MS),
           );
         });
         try {

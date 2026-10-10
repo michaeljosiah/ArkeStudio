@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ChapterContinuitySchema, type ChapterContinuity, type HarnessAdapter } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -147,7 +147,7 @@ export function makeAdapterJsonDeriver<T>(
           // wait, and a generation left running behind it would go on spending.
           void adapter.interrupt?.(session.sessionId).catch(() => {});
           reject(new Error("deriving took too long"));
-        }, WALL_CLOCK_MS);
+        }, sessionTurnTimeoutMs(session.model, WALL_CLOCK_MS));
       });
       try {
         // Dispatch under the same cleanup as collection (codex on PR 907, round five) and under
