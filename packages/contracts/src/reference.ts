@@ -212,7 +212,7 @@ export function kitLookLibrary(kits: ReadonlyArray<Pick<ReferenceKit, "sheetId" 
 /** Hair-first prompts are not outfit names. Legacy looks use their saved date, never guessed clothing. */
 export function lookName(look: Pick<CharacterLook, "prompt" | "framing"> & Partial<Pick<CharacterLook, "name" | "acceptedAt" | "id">>, siblings: readonly CharacterLook[] = []): string {
   if (look.name?.trim()) return look.name.trim();
-  const formatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const formatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   const date = (at: string | undefined) => at === undefined || !Number.isFinite(Date.parse(at)) ? null : formatter.format(new Date(at));
   const when = date(look.acceptedAt);
   const label = when === null ? "Look" : `Look · ${when}`;

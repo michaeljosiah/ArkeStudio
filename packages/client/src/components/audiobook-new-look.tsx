@@ -125,13 +125,13 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
 
   const footer = (
         <div className="fy-newlook__foot">
-          <Checkbox label={`Choose for Chapter ${chapterOrder}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
+          <Checkbox label={`Use for Chapter ${chapterOrder}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
           <span className="fy-ch__panelpush" />
-          <Button variant="ghost" onClick={onClose} data-testid="new-look-cancel">
+          <Button variant="ghost" className="fy-newlook__cancel" onClick={onClose} data-testid="new-look-cancel">
             Cancel
           </Button>
           {batch !== null && (
-            <Button variant="secondary" disabled={!canMake} onClick={make} data-testid="new-look-again">
+            <Button variant="outline" disabled={!canMake} onClick={make} data-testid="new-look-again">
               {plan ? "Make again" : `Make again · ${againCost}`}
             </Button>
           )}
@@ -142,7 +142,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
   );
   return (
     <>
-    <PageSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} className="fy-newlook" footer={footer}>
+    <PageSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For Chapter ${chapterOrder}`} className="fy-newlook" footer={footer}>
       <div className="fy-newlook__body" data-testid="new-look-sheet">
         <div className="fy-newlook__top">
           <div className="fy-newlook__photo" data-testid="new-look-photo" hidden>
@@ -153,15 +153,12 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
             <b>Clothing</b>
             <Textarea aria-label="Clothing" rows={3} value={clothing} disabled={off} onChange={(event) => setClothing(event.target.value)} data-testid="new-look-clothing" />
           </div>
-          <label className="fy-newlook__clothing">Look name <span className="fy-mono">Optional</span><Input aria-label="Look name" value={lookName} maxLength={60} disabled={off} onChange={(event) => setLookName(event.target.value)} data-testid="new-look-name" /></label>
+          <label className="fy-newlook__clothing"><span>Look name <span className="fy-mono">Optional</span></span><Input aria-label="Look name" value={lookName} maxLength={60} disabled={off} onChange={(event) => setLookName(event.target.value)} data-testid="new-look-name" /></label>
         </div>
         <div className="fy-newlook__fixed" data-testid="new-look-fixed"><span>Full body · plain background · art direction v{world?.artDirection.version ?? 1}</span><Checkbox label={plan ? "Close view" : `Close view · ${closeCost}`} checked={closeOn} disabled={off} onChange={(event) => { setCloseOn(event.target.checked); if (event.target.checked && chosenTake !== null) askClose(chosenTake.id); }} data-testid="new-look-close-box" /></div>
         <div className="fy-newlook__candheader">
           <b>Candidates</b>
-          <span className="fy-mono" data-testid="new-look-price">
-            {batch !== null ? `${candidates.length} of ${LOOK_CANDIDATES} ready · ` : `${LOOK_CANDIDATES} pictures · `}{plan ? "Included in your plan" : manyCost}
-            {closeOn && !plan ? ` · close view ${closeCost}` : ""}
-          </span>
+          <span className="fy-mono">{batch !== null ? `${candidates.length} of ${LOOK_CANDIDATES} ready` : `${LOOK_CANDIDATES} candidates`}</span>
           {batch === null && (
             <Button variant="primary" disabled={!canMake} onClick={make} data-testid="new-look-make">
               {plan ? "Make" : `Make · ${manyCost}`}
@@ -192,14 +189,14 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
                 return (
                   <button key={take.id} type="button" className={cx("fy-newlook__cand", chosen === take.id && "fy-newlook__cand--on")} aria-pressed={chosen === take.id} aria-label={`Candidate ${String.fromCharCode(65 + index)}`} data-testid="new-look-candidate" data-state={chosen === take.id ? "chosen" : "made"} onClick={() => choose(take)}>
                     <img src={tileOf(slug, who.sheet, take)} alt="" />
-                    <span className="fy-mono">{String.fromCharCode(65 + index)}{chosen === take.id ? " · chosen" : ""}</span>
+                    <span className="fy-mono">{String.fromCharCode(65 + index)}{chosen === take.id ? " · selected" : ""}</span>
                   </button>
                 );
               })}
           {closeOn && chosenTake !== null && (
             <div className="fy-newlook__close" data-testid="new-look-close" data-state={closeTake !== null ? "made" : closeFailed !== null ? "failed" : closeWaiting ? "making" : "none"}>
               {closeTake !== null ? <img src={tileOf(slug, who.sheet, closeTake)} alt="" /> : <i aria-hidden="true" />}
-              <span className="fy-mono">Close view</span>
+              <span className="fy-mono">{closeTake !== null ? "Close view ready" : closeWaiting ? "Making close view…" : "Close view"}</span>
               {closeFailed !== null && (
                 <>
                   <span className="fy-mono fy-ch__who-where--warn" data-testid="new-look-close-reason">{closeFailed}</span>
@@ -214,7 +211,7 @@ export function NewLookSheet({ open, onClose, worldId, productionId, chapterFile
           )}
         </div>
         <details className="fy-newlook__looks" data-testid="new-look-looks"><summary>Saved looks · {looks.length}</summary><Button variant="ghost" onClick={() => setBrowsing(true)} data-testid="new-look-browse">Browse saved looks</Button></details>
-
+        <p className="fy-newlook__price fy-mono" data-testid="new-look-price">{LOOK_CANDIDATES} candidates{closeOn && plan ? " + close view" : ""} · {plan ? "Included in your plan" : manyCost}{closeOn && !plan ? ` · close view ${closeCost}` : ""}</p>
       </div>
     </PageSheet>
     {open && browsing && <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={who.sheet} name={who.name} chapterOrder={chapterOrder} currentId={null} fromNewLook onClose={() => setBrowsing(false)} onChoose={(id) => { if (id !== null && chooseAudiobookLook(worldId, productionId, chapterFile, who, id) !== null) { setBrowsing(false); onClose(); } }} />}

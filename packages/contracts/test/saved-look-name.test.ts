@@ -14,9 +14,10 @@ it("keeps optional names separate from prompts and accepts old kits without one"
 });
 it("distinguishes legacy looks accepted in the same displayed minute without inventing an outfit", () => {
   const other = { ...look, id: "look-000002", acceptedAt: "2026-10-10T10:10:20.000Z" };
-  assert.match(lookName(look), /^Look · 10 Oct 2026/);
+  assert.match(lookName(look), /^Look · 10 Oct, /);
   assert.doesNotMatch(lookName(look), /Hair|charcoal|000001/);
   assert.match(lookName(look, [look, other]), / · 000001$/);
   assert.match(lookName(other, [look, other]), / · 000002$/);
+  assert.match(lookName(look, [look, { ...other, acceptedAt: "2025-10-10T10:10:10.000Z" }]), / · 000001$/, "the short date remains distinguishable across years");
   assert.doesNotMatch(lookName(look, [look, { ...other, name: "Other coat" }]), /000001/);
 });

@@ -120,7 +120,7 @@ describe("the sheet before anything is made", () => {
       if (box.getAttribute("data-testid") !== "new-look-close-box") assert.equal((box as HTMLInputElement).disabled, true, "the fixed boxes can be seen and not removed");
     }
     assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), "Oilskin coat, hood up; two braids.", "the chapter's line to start from");
-    assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 pictures · ~\$0\.12 · close view ~\$0\.04/);
+    assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 candidates · ~\$0\.12 · close view ~\$0\.04/);
     assert.equal(text(bodyAll('[data-testid="new-look-make"]')[0]), "Make · ~$0.12");
     assert.equal(m.sent.length, 0, "nothing is made until Make");
     assert.equal((bodyAll('[data-testid="new-look-accept"]')[0] as HTMLButtonElement).disabled, true, "nothing to accept yet");
@@ -132,7 +132,7 @@ describe("the sheet before anything is made", () => {
     assert.equal(bodyAll('[data-testid="saved-look-option"]').length, 0, "folded until browsing");
     await press(bodyAll('[data-testid="new-look-browse"]')[0]);
     assert.equal(bodyAll('[data-testid="saved-look-option"]').length, 2);
-    assert.match(text(bodyAll('[data-testid="saved-look-option"]')[0]), /Look · 4 Oct 2026/);
+    assert.match(text(bodyAll('[data-testid="saved-look-option"]')[0]), /Look · 4 Oct, /);
   });
 
   it("cannot make without a clothing line, or while the coordinator is away", async () => {
@@ -295,7 +295,7 @@ describe("the close view's price (2026-10-04)", () => {
     const box = bodyAll('[data-testid="new-look-close-box"]')[0] as HTMLInputElement;
     assert.equal(box.checked, true, "on by default");
     assert.match(text(bodyAll('[data-testid="new-look-fixed"]')[0]), /Close view · ~\$0\.26/, "53,000 for the picture and 100,000 for each of its two references");
-    assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 pictures · ~\$0\.46 · close view ~\$0\.26/);
+    assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 candidates · ~\$0\.46 · close view ~\$0\.26/);
   });
 });
 

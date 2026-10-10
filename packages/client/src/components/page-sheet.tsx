@@ -5,11 +5,13 @@ import { ChevronLeft, X } from "./icons.js";
 import { focusNewestLayer, useCoveredAfter, useOverlay } from "../lib/overlays.js";
 
 /** Turn 163 uses the character sheet's shape with native focus containment and an inert page. */
-export function PageSheet({ open, onClose, title, children, footer, className, onBack, resetKey, keepMounted = false, headless = false, modeless = false, preserveReturnFocus = false }: {
+export function PageSheet({ open, onClose, title, subtitle, children, footer, className, onBack, resetKey, keepMounted = false, headless = false, modeless = false, preserveReturnFocus = false }: {
   open: boolean;
   onClose: () => void;
   /** The sheet's heading, or with `headless` only its accessible name. */
   title: string;
+  /** Supporting chapter/origin context beneath the sheet title. */
+  subtitle?: string;
   /**
    * No head of the sheet's own: what it holds draws its title and its close. The block's panel
    * raised as a sheet has its own head, and a second over it named the block twice with two
@@ -93,7 +95,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
         if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
       }}>
       <div className="fy-page-sheet__grab" />
-      {!headless && <header className="fy-page-sheet__head">{onBack && <IconButton label="Back" onClick={onBack}><ChevronLeft size={20} /></IconButton>}<h2 id={heading} tabIndex={-1}>{title}</h2><IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>}
+      {!headless && <header className="fy-page-sheet__head">{onBack && <IconButton label="Back" onClick={onBack}><ChevronLeft size={20} /></IconButton>}{subtitle === undefined ? <h2 id={heading} tabIndex={-1}>{title}</h2> : <div className="fy-page-sheet__titles"><h2 id={heading} tabIndex={-1}>{title}</h2><p>{subtitle}</p></div>}<IconButton label="Close" onClick={onClose}><X size={20} /></IconButton></header>}
       <div className="fy-page-sheet__body">{children}</div>
       {footer && <footer className="fy-page-sheet__foot">{footer}</footer>}
     </dialog>, document.body,

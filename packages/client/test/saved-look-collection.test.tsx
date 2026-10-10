@@ -73,7 +73,7 @@ it("renames by metadata with an expected-name fence, preserving the selection th
   await act(async () => props(all('form')[0]!).onSubmit!({ preventDefault() {} } as never));
   const message = m.sent.find(message => message.kind === "rename-character-look"); assert.ok(message && message.kind === "rename-character-look");
   assert.deepEqual([message.lookId, message.name, message.expectedName], [looks[0]!.id, "Charcoal evening coat", "Coat 1"]);
-  assert.equal(use().disabled, true);
+  assert.equal(all('[data-testid="saved-look-use"]').length, 0, "rename view cannot choose a chapter look");
   await m.refresh(looks.map((look, i) => i === 0 ? { ...look, name: message.name } : look));
   await act(async () => __applyEventForTest({ at: AT, type: "reference.look-renamed", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: message.lookId, requestId: message.requestId }));
   assert.equal(all('form').length, 0); assert.equal(use().disabled, false); assert.equal(options()[1]!.getAttribute("aria-selected"), "true"); assert.match(options()[1]!.textContent ?? "", /Charcoal evening coat/);
@@ -87,5 +87,5 @@ it("retains a refused rename draft, clears a lost pending reply on disconnect, a
   await act(async () => __applyEventForTest({ at: AT, type: "reference.look-renamed", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: message.lookId, requestId: message.requestId, error: "This look was renamed elsewhere." }));
   assert.equal((all('.fy-savedlook__rename input')[0] as HTMLInputElement).value, "My coat"); assert.match(all('[role="alert"]')[0]!.textContent ?? "", /renamed elsewhere/);
   await act(async () => props(all('form')[0]!).onSubmit!({ preventDefault() {} } as never)); await m.refresh(looks, "closed");
-  assert.match(all('[role="alert"]')[0]!.textContent ?? "", /Connection lost/); assert.equal((all('.fy-savedlook__rename input')[0] as HTMLInputElement).disabled, false); assert.equal(use().disabled, true);
+  assert.match(all('[role="alert"]')[0]!.textContent ?? "", /Connection lost/); assert.equal((all('.fy-savedlook__rename input')[0] as HTMLInputElement).disabled, false); assert.equal(all('[data-testid="saved-look-use"]').length, 0);
 });

@@ -260,7 +260,7 @@ describe("a look's clothing line", () => {
 
   it("uses an authored name separately from the exact prompt, and a date for legacy looks", () => {
     assert.equal(lookName({ prompt: "A long generation prompt.", name: "Storm coat" }), "Storm coat");
-    assert.match(lookName({ prompt: "A long generation prompt.", acceptedAt: AT }), /^Look · 3 Oct 2026/);
+    assert.match(lookName({ prompt: "A long generation prompt.", acceptedAt: AT }), /^Look · 3 Oct, /);
     assert.equal(lookName({ prompt: "A long generation prompt." }), "Look");
   });
 });
