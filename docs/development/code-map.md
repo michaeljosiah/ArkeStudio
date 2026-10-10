@@ -23,7 +23,7 @@ the operation journal's durable saved count rather than inferring saved takes fr
 coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
 `activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.
 
-The client and coordinator share contracts. Providers, voice and the four writing adapters also consume contracts. Desktop composes coordinator and platform integrations. Coordinator's supported dev entry composes providers/voice too, so those package dependencies are intentional. Shared harness assembly imports concrete adapters in `packages/coordinator/src/harness/v2-launch.ts`; Coordinator itself consumes contracts. Check package.json and actual imports when changing dependencies.
+The client and coordinator share contracts. Providers, voice and the three writing adapters also consume contracts. Desktop composes coordinator and platform integrations. Coordinator's supported dev entry composes providers/voice too, so those package dependencies are intentional. Shared harness assembly imports concrete adapters in `packages/coordinator/src/harness/v2-launch.ts`; Coordinator itself consumes contracts. Check package.json and actual imports when changing dependencies.
 
 ```text
 Desktop main ──constructs──> Coordinator ──operates──> world folders / jobs / ledger

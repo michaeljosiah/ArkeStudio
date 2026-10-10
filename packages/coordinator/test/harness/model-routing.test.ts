@@ -98,6 +98,7 @@ async function fixture(options: {
   cipher?: Cipher;
   /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
   manifest?: boolean;
+  ollamaHealth?: () => Promise<boolean>;
   /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
   supervisor?: ChildSupervisor;
 } = {}) {
@@ -112,10 +113,8 @@ async function fixture(options: {
     provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
     ...(options.cipher ? { cipher: options.cipher } : {}),
-    ...(options.manifest ? {
-      manifest: SHIPPED_MANIFEST,
-      validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: true }] } },
-    } : {}),
+    ...(options.manifest ? { manifest: SHIPPED_MANIFEST } : {}),
+    validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: await (options.ollamaHealth?.() ?? true) }] } },
   });
   if (options.supervisor) coordinator.superviseAs("harness", options.supervisor);
   await coordinator.start(0);
@@ -470,6 +469,30 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       test.adapter.list = async () => CLOUD_ONLY;
       await test.probeLocalRuntimes();
       assert.deepEqual(test.coordinator.getState().app.harnessModels, CLOUD_ONLY);
+    } finally { await test.close(); }
+  });
+
+  it("refuses a retained native Ollama inventory after sustained runtime failure and recovers on health", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "unmanifested:8b", tools: true }, ...CLOUD_ONLY];
+    let running = true;
+    const test = await fixture({ adapter, ollamaHealth: async () => {
+      if (!running) throw new Error("Ollama stopped");
+      return true;
+    } });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/unmanifested:8b");
+      running = false;
+      await test.probeLocalRuntimes();
+      assert.equal(test.coordinator.getState().app.providers.find(provider => provider.id === "ollama")?.validation, "valid", "one transient miss retains health");
+      await test.probeLocalRuntimes();
+      assert.ok(test.coordinator.getState().app.harnessModels.some(model => model.id === "unmanifested:8b"), "OpenCode still returns its retained inventory");
+      adapter.sessions.length = 0;
+      assert.equal(await test.chat(), undefined, "a retained row cannot open a keyless session on a stopped runtime");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is not available/, "the refusal names runtime health");
+      running = true;
+      await test.probeLocalRuntimes();
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/unmanifested:8b");
     } finally { await test.close(); }
   });
 

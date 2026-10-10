@@ -73,12 +73,12 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible", settings: { baseURL: "http://127.0.0.1:1/v1", apiKey: "ollama" },
       models: { "deleted-inventory-model": { name: "deleted-inventory-model", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } },
     } } }));
-    const inherited = Object.fromEntries(["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].map(key => [key, process.env[key]]));
+    const inherited = Object.fromEntries(["opencode_password", "OpenCode_Server_Password", "opencode_server_username"].map(key => [key, process.env[key]]));
     let wiring: Awaited<ReturnType<typeof assembleHarness>>;
     try {
-      process.env["OPENCODE_PASSWORD"] = "synthetic-personal-password";
-      process.env["OPENCODE_SERVER_PASSWORD"] = "synthetic-legacy-password";
-      process.env["OPENCODE_SERVER_USERNAME"] = "personal-user";
+      process.env["opencode_password"] = "synthetic-personal-password";
+      process.env["OpenCode_Server_Password"] = "synthetic-legacy-password";
+      process.env["opencode_server_username"] = "personal-user";
       wiring = await assembleHarness({
         appRoot,
         v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },

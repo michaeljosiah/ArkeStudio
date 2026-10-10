@@ -285,7 +285,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         inheritEnv: false,
         env: {
           ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
-            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0]))),
+            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0].toUpperCase()))),
           ...v2ProfileEnv(profileDir),
         },
       } : {}),
