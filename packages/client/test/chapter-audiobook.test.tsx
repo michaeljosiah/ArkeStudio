@@ -21,6 +21,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
+import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import { cueLabel } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { HEAR_ANSWER_MS, HEAR_NO_ANSWER, __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -162,6 +163,7 @@ afterEach(async () => {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
   }
+  __clearChapterViewsForTest();
 });
 
 // PageSheet portals are siblings of the mounted screen; another mounted fixture is not.
