@@ -936,7 +936,7 @@ export function lookGallery(
   const promoted: LookGalleryEntry[] = (kit?.looks ?? []).map((look) => ({
     key: `look:${look.id}`,
     path: `references/${sheetId}/${look.file}`,
-    label: lookTileLabel(look.prompt, look.kind),
+    label: (look.name ?? lookTileLabel(look.prompt, look.kind)),
     at: look.acceptedAt,
     look,
   }));

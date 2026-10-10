@@ -6,7 +6,7 @@ import { ChapterAudiobookSchema, estimateCharacterImageMicroUsd, priceLabel, typ
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import { AUDIOBOOK_LOOKS_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_LOOKS_SCHEMA_VERSION, LOOK_NAMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { characterLookRequests } from "../../src/references/generate.js";
 import { acceptCharacterLook, attachCloseView, readKit } from "../../src/references/kit.js";
@@ -226,7 +226,7 @@ describe("accepting a look for the chapter that asked for it", () => {
   });
 
   it("files the look with its close view, chooses it for the character and attaches it to nothing", () =>
-    withHarness(async ({ store, worldDir, send, events, schemaVersion }) => {
+    withHarness(async ({ store, worldDir, send, events, order, schemaVersion }) => {
       const full = await lookTake(store(), worldDir, "01J8E0000000000000000000B1", params("full-body"), "g1-2");
       const close = await lookTake(store(), worldDir, "01J8E0000000000000000000B2", params("close", { lookOfTake: "tk_B" }), "g2-1");
       await send({ kind: "accept-character-look", worldId: WORLD_ID, sheetId: "maren-kest", takeId: full.id, closeTakeId: close.id, choose: { productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", name: "Maren Kest", sheet: "maren-kest" } });
@@ -245,6 +245,17 @@ describe("accepting a look for the chapter that asked for it", () => {
       assert.equal(record.look!.characters["maren-kest"]!.text, "Oilskin coat, hood up; two braids.", "the chapter's line is the look's own words");
       assert.equal(schemaVersion(), AUDIOBOOK_LOOKS_SCHEMA_VERSION);
       assert.ok(ChapterAudiobookSchema.safeParse(JSON.parse(JSON.stringify(record))).success);
+      const rename = { kind: "rename-character-look" as const, worldId: WORLD_ID, sheetId: "maren-kest", lookId: full.id, name: "Storm coat", expectedName: null, requestId: "01J00000000000000000000007" };
+      order.length = 0;
+      await send(rename);
+      assert.deepEqual((await readKit(store(), "maren-kest"))!.kit.looks!.find(candidate => candidate.id === full.id), { ...look, name: "Storm coat" });
+      assert.equal(schemaVersion(), LOOK_NAMES_SCHEMA_VERSION);
+      assert.ok(order.indexOf("snapshot") < order.indexOf("reference.look-renamed"), "the saved name arrives before its acknowledgement");
+      assert.deepEqual(answer(events).record, record, "rename never changes a chapter choice or picture stamp");
+      await send({ ...rename, name: "Stale window name", requestId: "01J00000000000000000000008" });
+      const refusal = events.filter(event => event.type === "reference.look-renamed").at(-1)!;
+      assert.ok(refusal.type === "reference.look-renamed" && refusal.error?.includes("renamed elsewhere"));
+      assert.equal((await readKit(store(), "maren-kest"))!.kit.looks!.find(candidate => candidate.id === full.id)!.name, "Storm coat");
     }));
 
   it("files a close view made afterwards on the look that already stands, not as a look of its own", () =>

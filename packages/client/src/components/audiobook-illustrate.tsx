@@ -237,7 +237,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
   return (
-    <PageSheet open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
+    <PageSheet preserveReturnFocus open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
       <div className="fy-ills" data-testid="illustration-sheet">
         <section className="fy-ills__sheet" data-state="proposed">
           <header className="fy-ills__head">
@@ -274,7 +274,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
           </div>
           {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
           <footer className="fy-ills__foot">
-            <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Read: chapter, cast, looks, art direction</Button>
+            <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Review chapter looks</Button>
             <span className="fy-ills__push" />
             <Button variant="ghost" onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
             <Button variant="primary" disabled={offline || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
