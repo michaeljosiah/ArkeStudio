@@ -1283,6 +1283,7 @@ export class Coordinator {
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
   private readonly benchDispatchActions = new Map<string, Promise<void>>();
+  private readonly benchRefreshes = new Map<string, symbol>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
   /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
@@ -19817,10 +19818,27 @@ export class Coordinator {
   private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return;
-    const bench = await this.benchFor(worldId, sessionId);
-    if (bench) this.readModel.setBench({ worldId, session: bench.session });
-    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-    this.transport.broadcastSnapshot();
+    const key = `${worldId}/${sessionId}`;
+    const refresh = Symbol();
+    this.benchRefreshes.set(key, refresh);
+    try {
+      const [bench, sessions] = await Promise.all([
+        this.benchFor(worldId, sessionId),
+        discoverBenchSessions(store.dir),
+      ]);
+      if (!this.stillOpen(store) || this.benchRefreshes.get(key) !== refresh) return;
+      // Completion and filing also refresh sessions opened by background chapter work. Those
+      // results belong in the session list, not in the workspace the author is reviewing.
+      // A slower refresh must not restore an older selection after a newer command answered.
+      const active = this.readModel.getState().bench;
+      if (bench && active?.worldId === worldId && active.session.id === sessionId) {
+        this.readModel.setBench({ worldId, session: bench.session });
+      }
+      this.readModel.setBenchSessions(sessions);
+      this.transport.broadcastSnapshot();
+    } finally {
+      if (this.benchRefreshes.get(key) === refresh) this.benchRefreshes.delete(key);
+    }
     // Dispatch itself refreshes Bench while holding the action execution lock. Reconcile in the
     // background so fast completions wait for that dispatch's durable queued outcome.
     this.trackBackground(this.reconcileBenchConversationActions(store, sessionId));

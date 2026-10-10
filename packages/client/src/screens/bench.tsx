@@ -2772,7 +2772,7 @@ function BenchWorkspace({
                     data-testid="bench-keep"
                     onClick={() => sendBenchKeep(worldId, session.id, selected.id)}
                   >
-                    Keep · file as artifact
+                    Keep take {selected.n} · file as artifact
                   </Button>
                 ) : (
                   <Button
