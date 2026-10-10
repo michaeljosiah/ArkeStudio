@@ -1173,7 +1173,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
         token: run.price.confirmationToken,
-        title: `${only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)}` : "Read the chapter"} · Chapter ${chapter.order}`,
+        title: only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
         blocks: run.toMake,
         characters: run.price.characters,
         free: run.price.estimatedMicroUsd === 0,

@@ -72,6 +72,7 @@ try {
     await until(()=>evaluate("Boolean(document.querySelector('.fy-ills-modal[open]'))")).catch(async error=>{ console.log(await evaluate("document.body.innerText.slice(-6000)")); throw error; });
     const measure = () => evaluate(`(()=>{const dialog=document.querySelector('dialog[open]'), box=dialog.getBoundingClientRect();const btn=dialog.querySelector('[data-testid=illustration-accept], [data-testid=audiobook-confirm]'), r=btn.getBoundingClientRect();return {width:innerWidth,open:document.querySelectorAll('dialog[open]').length,overflow:dialog.scrollWidth>dialog.clientWidth+1,contained:r.left>=box.left&&r.right<=box.right&&r.top>=box.top&&r.bottom<=box.bottom,focusInside:dialog.contains(document.activeElement),modal:dialog.matches(':modal')};})()`);
     const first=await measure(); assert.equal(first.open,1);assert.equal(first.modal,true);assert.equal(first.focusInside,true);assert.equal(first.overflow,false);assert.equal(first.contained,true);
+    const initial=await cdp("Page.captureScreenshot",{format:"png"});await writeFile(join(dir,`illustrate-initial-${width}.png`),Buffer.from(initial.data,"base64"));
     for(let i=0;i<25;i++)await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
     assert.equal((await measure()).focusInside,true,'Tab stays inside proposal');
     // An asynchronous read quote must stand in front of an already open block and proposal.
@@ -87,7 +88,7 @@ try {
     await cdp('Input.dispatchMouseEvent',{type:'mousePressed',...button,button:'left',clickCount:1});await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...button,button:'left',clickCount:1});
     await until(()=>evaluate("!document.querySelector('.fy-ills-modal[open]')"));
     assert.equal(await evaluate("window.sent.filter(m=>m.kind==='accept-illustration').length"),1,'one acceptance');
-    assert.equal(await evaluate("window.sent.filter(m=>m.kind==='read-audiobook' || m.kind==='voice-preview').length"),0,'no background purchase');
+    assert.equal(await evaluate("window.sent.filter(m=>m.kind==='read-audiobook-chapter' || m.kind==='voice-preview').length"),0,'no background purchase');
     records.push({proposal:first,quote});
   }
   await writeFile(join(dir,'measurements.json'),JSON.stringify(records,null,2));

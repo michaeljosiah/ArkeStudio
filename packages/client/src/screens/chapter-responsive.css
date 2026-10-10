@@ -674,6 +674,7 @@
 .fy-chapter-review-sheet::backdrop { background: color-mix(in srgb, var(--neutral-950) 28%, transparent); }
 .fy-chapter-review-sheet > .fy-page-sheet__grab { display: none; }
 .fy-chapter-review-sheet .fy-ch__side { width: 100%; overflow: visible; }
+.fy-chapter-review-sheet .fy-ab__directsheet { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
 .fy-chapter-review-sheet .fy-ab__directsheet > div > h3 { display: none; }
 .fy-chapter-review-sheet .fy-ab__directsheet-foot { flex-wrap: wrap; }
 .fy-chapter-review-sheet .ui-btn { max-width: 100%; height: auto; padding-block: 8px; white-space: normal; }

@@ -38,7 +38,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal() { this.setAttribute("open", ""); }, close() { this.removeAttribute("open"); } });
+Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
   pause() {},
   play: () => Promise.resolve(),
@@ -1850,11 +1850,13 @@ describe("Illustrate this chapter (turn 191)", () => {
 
 describe("audiobook action targets (#1675)", () => {
   it("names a title read and keeps its quote separate from background controls", async () => {
-    const m = await mount(voiced(inkbound()));
-    await answerOpen(m);
+    const state = voiced(inkbound());
+    state.world!.artifacts = state.world!.artifacts.map((artifact) => artifact.id === KEPT ? takeArtifact(KEPT, "neap", "title") : artifact);
+    const m = await mount(state);
+    await answerOpen(m, { audiobook: record(["title"], { title: "Chapter 2 · The counting of bells" }) });
     await act(async () => q(m, '[data-block="title"]')!.click());
-    assert.match(q(m, '[data-testid="audiobook-make"]')!.textContent ?? "", /^Read title/);
-    await act(async () => q(m, '[data-testid="audiobook-make"]')!.click());
+    assert.match(q(m, '[data-testid="audiobook-make-again"]')!.textContent ?? "", /^Reread title/);
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 4 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 24, estimatedMicroUsd: 2400, confirmationToken: "target-token", voices: [] }));
