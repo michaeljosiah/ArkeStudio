@@ -2014,20 +2014,19 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
   });
 
   for (const [name, width] of [["a tablet", 820], ["a phone", 390]] as const) {
-    it(`${name}: Direct and illustrate is a ⋯ on the line, the reading, Notes and the filter beside it, Read and Listen held at the foot`, async () => {
+    it(`${name}: the named chapter menu holds actions and Reading settings, with Read and Listen held at the foot`, async () => {
       windowOf(width);
       const m = await mount(inkbound());
       await answerOpen(m);
       const line = q(m, ".fy-ch__viewline")!;
       assert.ok(line.querySelector('[aria-label="Chapter view"]'), "the view switch");
       for (const testId of ["reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
-      // The reading is the ⋯'s first item on a tablet (design turn 203); a phone keeps its press.
-      assert.deepEqual(where(m, "audiobook-reading"), name === "a phone" ? [".fy-ch__viewline"] : []);
+      // Turn 209 gives the compact toolbar one named menu for its settings and actions.
+      assert.deepEqual(where(m, "audiobook-reading"), [], "the named menu holds Reading settings");
       const more = q(m, '[data-testid="direct-illustrate"]')!;
       assert.deepEqual(where(m, "direct-illustrate"), [".fy-ch__viewline"], "the menu is on the line");
-      assert.equal(more.getAttribute("aria-label"), "Direct and illustrate", "named for a screen reader");
-      assert.equal(more.textContent, "", "a ⋯, no label");
-      assert.ok(more.className.includes("fy-ab__ico") && !more.className.includes("fy-ab__pill"));
+      assert.equal(more.textContent, name === "a phone" ? "Chapter actions" : "Direct and illustrate", "the action is visibly named");
+      assert.ok(more.className.includes("fy-ab__pill"));
       for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot, not on the line`);
       const hold = q(m, '[data-testid="audiobook-hold"]')!;
       assert.deepEqual([...hold.querySelectorAll("button")].map((button) => button.getAttribute("data-testid")), ["read-audiobook", "audiobook-listen"], "Read, then Listen");
@@ -2037,10 +2036,20 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(more.getAttribute("aria-expanded"), "true");
       assert.deepEqual(
         all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
-        // On a phone Group by beats is the menu's first item (design turn 201, rule 5); a tablet keeps the Blocks press on the line
-        // and puts the reading first in the menu (design turn 203).
-        [...(name === "a phone" ? ["Group by beats"] : [`Narrator · ${q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')?.textContent?.split(" · ")[1] ?? ""}`]), "Direct this chapter", "Illustrate this chapter", "Looks"],
+        // Turn 209 groups chapter work, export, then reading/block settings on a phone.
+        // The tablet retains its first reading item and separate Blocks toolbar press.
+        name === "a phone"
+          ? ["Direct this chapter", "Illustrate this chapter", "Looks", "Export…", q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Blocks"]
+          : [q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Direct this chapter", "Illustrate this chapter", "Looks"],
       );
+      if (name === "a phone") {
+        assert.equal(q(m, ".fy-ab__toolmenu .fy-ab__menu-hd")!.textContent, "Direct and illustrate");
+        assert.equal(all(m, '.fy-ab__toolmenu [role="separator"]').length, 2);
+        const before = m.sent.length;
+        await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
+        assert.deepEqual(all(m, '.fy-ab__toolmenu [role="menuitem"]').map(item => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"]);
+        assert.equal(m.sent.length, before, "opening Blocks starts no director work");
+      }
     });
   }
 
@@ -2059,7 +2068,7 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(q(m, '[data-testid="audiobook-hold"]')!.getAttribute("data-wide"), "true");
       assert.deepEqual(where(m, "audiobook-reading"), [], "the reading's press leaves the line");
       const more = q(m, '[data-testid="direct-illustrate"]')!;
-      assert.equal(more.textContent, "", "Direct and illustrate is a ⋯");
+      assert.equal(more.textContent, "Direct and illustrate", "the folded toolbar keeps its named action");
       await act(async () => more.click());
       const reading = q(m, '[data-testid="audiobook-reading-item"]')!;
       assert.match(reading.textContent!, /^Narrator · /, "the reading is the menu's first item, its voice named");
@@ -2361,9 +2370,10 @@ describe("block seams (design turn 198)", () => {
     await answerOpen(m, { voices: CAST, audiobook: joined() });
     assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "no Blocks press on a phone's line");
     await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+    await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
     const item = q(m, '[data-testid="audiobook-blocks-reset"]')!;
     assert.equal(item.querySelector(".fy-ab__menu-label")!.textContent, "Reset");
-    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "Blocks · 1 changed");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "1 changed");
     await act(async () => item.click());
     assert.equal(seamSent(m).at(-1)?.kind, "reset-audiobook-seams");
 

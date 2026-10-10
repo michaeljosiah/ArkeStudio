@@ -1183,6 +1183,10 @@ export function ChapterWorkspace({
   const viewLine = useRef<HTMLDivElement>(null);
   const lineWidth = useRef<number | null>(null);
   const [readingOpen, setReadingOpen] = useState(false);
+  const closeReadingMenu = () => {
+    setReadingOpen(false);
+    requestAnimationFrame(() => viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]')?.focus({ preventScroll: true }));
+  };
   const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
   // The Timing view's playhead (turn 187a), on the view's clock; a new chapter starts at its head.
   const [playhead, setPlayhead] = useState(0);
@@ -1270,7 +1274,7 @@ export function ChapterWorkspace({
     // On a phone the Blocks press and its Reset are in the toolbar's ⋯ (design turn 198, rule 10).
     seamsInMenu: phone,
     // Folded where the window is not a tablet's, the reading is the ⋯'s first item (design turn 203).
-    ...(narrowToolbar && !phone ? { readingInMenu: { open: () => setReadingOpen(true), narrator: narratorName } } : {}),
+    ...(narrowToolbar ? { readingInMenu: { open: () => setReadingOpen(true), narrator: narratorName } } : {}),
     // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
     // that takes the menu's place while pictures are read or made.
     illustrate: {
@@ -2083,7 +2087,7 @@ export function ChapterWorkspace({
                   disabled={audiobook.run?.state === "reading" || connection !== "open"}
                   onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
                   onNarrator={() => setNarratorOpen(true)}
-                  {...(narrowToolbar && !phone ? { external: { open: readingOpen, onClose: () => setReadingOpen(false) } } : {})}
+                  {...(narrowToolbar ? { external: { open: readingOpen, onClose: closeReadingMenu } } : {})}
                 />
                 {/* The book note and the chapter note behind one press (194, rule 5; turn 184, R-53). */}
                 <NotesPress
