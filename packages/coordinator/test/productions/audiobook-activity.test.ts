@@ -7,7 +7,7 @@ import type { AudiobookActivity } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "../../src/productions/audiobook-activity.js";
 
 const at = "2026-10-10T12:00:00.000Z";
-const initial = { id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing", chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter" as const, startedAt: at };
+const initial = { id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing", chapterTitle: "The crossing", chapterOrder: 4, productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter" as const, startedAt: at };
 
 it("records only accepted reads, publishes persisted progress, and interrupts unfinished work on restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "arke-read-activity-"));
@@ -21,7 +21,7 @@ it("records only accepted reads, publishes persisted progress, and interrupts un
     await Promise.all([
       journal.update(initial.id, { phase: "reading", request: 1, job: { id: "request-a", index: 1, reused: false } }),
       journal.update(initial.id, { phase: "aligning" }),
-      journal.update(initial.id, { made: 6 }),
+      journal.update(initial.id, { made: 6, job: { id: "request-a", index: 1, reused: false, saved: 6 } }),
     ]);
     await journal.drain();
     const rows = (await readFile(path, "utf8")).trim().split("\n").map(row => JSON.parse(row));
@@ -33,11 +33,19 @@ it("records only accepted reads, publishes persisted progress, and interrupts un
     assert.equal(read?.phase, "interrupted");
     assert.equal(read?.interruptedDuring, "aligning", "recovery keeps the failed stage rather than claiming TTS failed");
     assert.equal(read?.made, 6);
-    assert.deepEqual(read?.jobs, [{ id: "request-a", index: 1, reused: false }]);
+    assert.deepEqual(read?.jobs, [{ id: "request-a", index: 1, reused: false, saved: 6 }]);
+    assert.equal(read?.chapterOrder, 4);
     assert.match(read?.reason ?? "", /restarted/);
     assert.ok((await readFile(path, "utf8")).endsWith("\n"), "repaired and durably recorded interruption");
     await restored.update(initial.id, { phase: "stopping" });
     assert.equal(restored.all()[0]?.phase, "interrupted", "late abort cannot revive a finished row");
+    const blockId = "01J8F3K2QW9VZX4N7M0RTYB6HE";
+    await restored.update(blockId, { phase: "ready", toMake: 1, made: 1, requests: 1, job: { id: "block-request", index: 1, reused: false, saved: 1 } }, { ...initial, id: blockId, scope: "block", block: "p1.0" });
+    const blockReload = new AudiobookActivityJournal(path, () => {}, () => at);
+    const savedBlock = (await blockReload.load()).find(run => run.id === blockId);
+    assert.equal(savedBlock?.block, "p1.0", "the exact return passage survives restart");
+    assert.equal(savedBlock?.chapterOrder, 4);
+    assert.equal(savedBlock?.jobs[0]?.saved, 1);
     const stopped = new AudiobookActivityJournal(undefined, () => {}, () => at);
     await stopped.update(initial.id, { phase: "queued", toMake: 20 }, initial);
     await stopped.update(initial.id, { phase: "stopping" });

@@ -521,6 +521,9 @@ describe("a chapter read grouped (design turn 185)", () => {
       const record = await recordOf(worldDir);
       const flagged = Object.entries(record.flags);
       assert.equal(flagged.length, 1);
+      const saved = Object.keys(record.takes).length;
+      assert.equal(h.activity.findLast(update => update.job?.saved !== undefined)?.job?.saved, saved, "flagged cuts never count as saved request takes");
+      assert.deepEqual(h.activity.at(-1), { phase: "finished", made: saved, flagged: 1 }, "completion distinguishes saved takes from the flagged cut");
       const [key, flag] = flagged[0]!;
       assert.ok(flag.reason.startsWith(SPLIT_DID_NOT_MATCH));
       assert.ok(flag.split?.heard.startsWith("Maren reads that. Then"));
