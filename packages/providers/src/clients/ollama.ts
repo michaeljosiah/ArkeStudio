@@ -1,12 +1,7 @@
-import type { CapabilityProbe, ClientDeclarations, LocalHarnessModel, ModelResidency } from "@arke-studio/contracts";
+import type { CapabilityProbe, ClientDeclarations, ModelResidency } from "@arke-studio/contracts";
 import { setTimeout as pause } from "node:timers/promises";
 import { jsonRequest, tryProbe } from "./http.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
-
-/** The whole listing pass, tags and shows together, against a runtime that may have stopped answering. */
-const LISTING_DEADLINE_MS = 8_000;
-/** Shows in flight at once. Ollama serves these from metadata, so a few at a time is plenty. */
-const SHOW_CONCURRENCY = 4;
 
 /**
  * Ollama — local llm runtime, no key, unmetered (R-18): every run is a ledger local-zero.
@@ -31,7 +26,6 @@ export class OllamaClient implements ProviderClient {
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl = "http://127.0.0.1:11434",
     private readonly residencyPause: (signal?: AbortSignal) => Promise<void> = async (signal) => { await pause(1_000, undefined, { signal }); },
-    private readonly listingDeadlineMs = LISTING_DEADLINE_MS,
   ) {}
 
   async validateKey(): Promise<CapabilityProbe[]> {
@@ -108,82 +102,6 @@ export class OllamaClient implements ProviderClient {
     if (first.length > 0 && first.every((model) => model.state === "gpu" || model.state === "mixed")) return first;
     await this.residencyPause(signal);
     return read();
-  }
-
-  /**
-   * What is pulled, with what each model can do, for the writing harness's catalogue (issue 1247).
-   *
-   * `/api/tags` names the models; `/api/show` says per model whether it completes, calls tools
-   * and reads images, and how long its context is. A model that does not complete (an embedding
-   * model) is left out — the harness would list it and every turn on it would fail. A show that
-   * fails still lists the model, with tools assumed: a wrong assumption is a refused call the
-   * person can read, where an omitted model is one they cannot find. Ollama not answering is
-   * an error, never an empty list: a runtime that has nothing pulled and one that has not
-   * started answering yet look the same as `[]`, and the caller decides differently on them —
-   * the first is a machine with no local model, the second is a moment to wait out.
-   *
-   * One deadline covers the whole pass, and the shows run a few at a time under it: the caller
-   * holds the local-runtime probe open while this answers, so twenty pulled models against a
-   * runtime that has stopped answering must cost seconds, not minutes. A model the deadline
-   * cuts off is listed without metadata, the same as one whose show failed.
-   */
-  async listModels(signal?: AbortSignal): Promise<LocalHarnessModel[]> {
-    // A held timer rather than AbortSignal.timeout, whose timer does not keep the process
-    // alive: a pass waiting only on that could see the loop drain under it.
-    const cutoff = new AbortController();
-    const timer = setTimeout(() => cutoff.abort(new Error("Ollama listing deadline")), this.listingDeadlineMs);
-    try {
-      return await this.listUnder(AbortSignal.any([...(signal ? [signal] : []), cutoff.signal]));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private async listUnder(deadline: AbortSignal): Promise<LocalHarnessModel[]> {
-    const tags = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: deadline });
-    if (tags.status >= 400) throw new Error(`ollama: listing failed (HTTP ${tags.status})`);
-    // A body that is not a model list is not an empty one: publishing it as nothing pulled
-    // would read as an answer the runtime never gave.
-    const listed = (tags.body as { models?: unknown } | null)?.models;
-    if (!Array.isArray(listed)) throw new Error("ollama: listing did not return a model list");
-    const names = (listed as Array<{ name?: unknown } | null>)
-      .map((model) => model?.name).filter((name): name is string => typeof name === "string" && name.length > 0);
-    const shown = Array.from({ length: names.length }, (): { capabilities?: unknown; model_info?: Record<string, unknown> } | null => null);
-    let next = 0;
-    const worker = async () => {
-      while (next < names.length && !deadline.aborted) {
-        const index = next++;
-        try {
-          const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/show`, {
-            method: "POST", headers: { "Content-Type": "application/json" }, signal: deadline,
-            body: JSON.stringify({ model: names[index] }),
-          });
-          if (response.status < 400 && response.body && typeof response.body === "object") {
-            shown[index] = response.body as { capabilities?: unknown; model_info?: Record<string, unknown> };
-          }
-        } catch { /* listed without metadata, as the comment above says */ }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(SHOW_CONCURRENCY, names.length) }, worker));
-    const models: LocalHarnessModel[] = [];
-    for (const [index, id] of names.entries()) {
-      const details = shown[index];
-      const capabilities = Array.isArray(details?.capabilities) ? details.capabilities.filter((c): c is string => typeof c === "string") : null;
-      if (capabilities && !capabilities.includes("completion")) continue;
-      // The key is architecture-prefixed — `gemma4.context_length` — and the architecture
-      // itself is stated beside it, so one lookup names the other.
-      const info = details?.model_info ?? {};
-      const architecture = typeof info["general.architecture"] === "string" ? info["general.architecture"] : null;
-      const context = architecture !== null ? info[`${architecture}.context_length`] : undefined;
-      models.push({
-        id,
-        ...(typeof context === "number" && Number.isSafeInteger(context) && context > 0 ? { contextLength: context } : {}),
-        tools: capabilities ? capabilities.includes("tools") : true,
-        vision: capabilities ? capabilities.includes("vision") : false,
-        ...(capabilities ? {} : { assumed: true as const }),
-      });
-    }
-    return models;
   }
 
   /** Query the runtime, including models loaded by the writing harness, before a GPU handover. */

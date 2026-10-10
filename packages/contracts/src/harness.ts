@@ -73,25 +73,6 @@ export function effectiveHarnessEngine(stored: HarnessEngine, override?: string)
   return parsed.success ? parsed.data : stored;
 }
 
-/** Installed Ollama metadata used by runtime setup and downloads. Writing discovery belongs to the harness. */
-export interface LocalHarnessModel {
-  /** Ollama's own name, tag included — `gemma4:12b`. The id the harness will be asked for. */
-  readonly id: string;
-  /** Context length from the model's metadata, when Ollama states one. */
-  readonly contextLength?: number;
-  /** Whether the runtime says the model calls tools. Unknown reads as true: a refusal beats a hidden model. */
-  readonly tools: boolean;
-  /** Whether the runtime says the model reads images. */
-  readonly vision: boolean;
-  /**
-   * The capabilities above were assumed, not read: the model's show failed or was cut off by
-   * the listing deadline, or it listed no capabilities. Offered for choosing when its window is
-   * stated, never chosen unattended — nothing says it completes,
-   * let alone calls tools.
-   */
-  readonly assumed?: true;
-}
-
 /**
  * The bundled harness, stated once. It cannot be missing, so nothing detects it — a detector
  * that reported OpenCode absent would be describing a broken installation, not a choice.

@@ -322,7 +322,7 @@ npm run smoke:main --workspace @arke-studio/desktop
 ```
 
 The tests use disposable profiles, a scripted localhost provider and synthetic credentials.
-They verify authenticated launch, the exact server version, published Ollama metadata, pinned
+They verify authenticated launch, the exact server version, native Ollama discovery with an endpoint-only configuration, pinned
 agent/model configuration, a file-tool loop, outside-directory denial, final text/usage, approval
 confirmation, and durable key add/restart/removal. They make no paid requests and do not qualify
 live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol

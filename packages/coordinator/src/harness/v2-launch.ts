@@ -254,8 +254,8 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
         // server, so personal server credentials must not determine its authentication.
         inheritEnv: false,
         env: {
-          ...Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined &&
-            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(key))),
+          ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
+            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0]))),
           ...v2ProfileEnv(profileDir),
         },
       } : {}),
