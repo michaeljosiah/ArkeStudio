@@ -4,7 +4,7 @@ import { modelEnabled, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, type V2Envelope } from "./http.js";
 
 /**
- * next-17444 forks Copilot's first model sync per location. Until it settles, the catalogue
+ * OpenCode forks Copilot's first model sync per location. Until it settles, the catalogue
  * can return a bare @ai-sdk/github-copilot package that its own runner cannot resolve (#1696).
  * Global discovery is not evidence for a new scratch directory. Wait only before publishing
  * the session; no prompt, model substitution or credential operation belongs in this retry.

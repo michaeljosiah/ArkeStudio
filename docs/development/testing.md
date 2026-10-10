@@ -328,9 +328,10 @@ confirmation, and durable key add/restart/removal. They make no paid requests an
 live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
 fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
 native steering.
+
 For the bundled OpenCode Copilot startup race (#1696), run adapter-opencode's package suite
 and coordinator `test/harness/session-files.test.ts`. Adapter `test/v2-model-readiness.test.ts`
-scripts the measured next-17444 scoped catalogue protocol: global-ready/location-pending,
+scripts the scoped catalogue protocol: global-ready/location-pending,
 separate Beats/Continuity/Cast locations, default/fallback choices, 503 warm-up, unsupported or
 missing routes, cancellation, deadlines and incorrect scope. It verifies no prompt is sent
 before readiness and failed creation retires the unpublished session. These fixtures make no
