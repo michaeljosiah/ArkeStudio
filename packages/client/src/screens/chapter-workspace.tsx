@@ -64,7 +64,7 @@ import { BlockPicturePanel, pictureStart, useChapterPictures } from "../componen
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -2406,9 +2406,9 @@ export function ChapterWorkspace({
           {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReadRemaining={audiobook.readRemaining} />}
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
-            <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} onClose={audiobook.readSheet.cancel} className="fy-chapter-review-sheet">
+            <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} subtitle={audiobook.readSheet.recovery?.chapter} preserveReturnFocus onClose={audiobook.readSheet.cancel} className={`fy-chapter-review-sheet${audiobook.readSheet.recovery !== null ? " fy-chapter-read-recovery" : ""}`} footer={audiobook.readSheet.recovery !== null ? <ReadSheetActions sheet={audiobook.readSheet} /> : undefined}>
               <aside className="fy-ch__side fy-ch__block-side">
-                <ReadSheet sheet={audiobook.readSheet} headless />
+                <ReadSheet sheet={audiobook.readSheet} headless footer={audiobook.readSheet.recovery === null} />
               </aside>
             </PageSheet>
           )}

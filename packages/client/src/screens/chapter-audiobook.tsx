@@ -1893,7 +1893,9 @@ function packTurnsFor(rows: readonly BlockRow[]) {
  * The sheet a grouped read is confirmed in (design turn 185a): the blocks and the requests, as
  * many as a block a request would make, Google's free day where it is known, and the estimate.
  */
-export function ReadSheet({ sheet, headless = false }: { sheet: NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]>; headless?: boolean }) {
+type ReadSheetState = NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]>;
+
+export function ReadSheet({ sheet, headless = false, footer = true }: { sheet: ReadSheetState; headless?: boolean; footer?: boolean }) {
   const row = (label: string, value: string) => (
     <div className="fy-ab__read" key={label}>
       <b>{label}</b>
@@ -1902,11 +1904,11 @@ export function ReadSheet({ sheet, headless = false }: { sheet: NonNullable<Retu
   );
   return (
     <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label={sheet.title}>
-      <div>
+      {(!headless || sheet.recovery === null) && <div>
         {!headless && <h3 className="fy-ab__card-title">{sheet.title}</h3>}
         {sheet.recovery !== null && <p className="fy-mono fy-ab__card-line">{sheet.recovery.chapter}</p>}
         {sheet.recovery === null && <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>}
-      </div>
+      </div>}
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
         {sheet.recovery !== null ? <>
           {row("Ready", `${sheet.recovery.ready} of ${sheet.recovery.total} blocks`)}
@@ -1924,14 +1926,20 @@ export function ReadSheet({ sheet, headless = false }: { sheet: NonNullable<Retu
       {sheet.freeDay !== undefined && <p className="fy-mono" data-testid="audiobook-free-plan">{freePlanAskCopy(sheet.freeDay).line}</p>}
       {sheet.notices.map((notice) => <p key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</p>)}
       {sheet.castFirst !== undefined && <CastFirstCheck count={sheet.castFirst.count} on={sheet.castFirst.on} onChange={sheet.castFirst.set} />}
-      <div className="fy-ab__control fy-ab__directsheet-foot">
+      {footer && <ReadSheetActions sheet={sheet} />}
+    </section>
+  );
+}
+
+export function ReadSheetActions({ sheet }: { sheet: ReadSheetState }) {
+  return (
+    <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
         <Button variant="ghost" onClick={sheet.cancel}>{sheet.recovery !== null ? "Back to export" : "Cancel"}</Button>
         <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
           {sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
-    </section>
   );
 }
 
