@@ -86,6 +86,8 @@ export const AudiobookWordTimingStateSchema = z
     reason: z.string().optional(),
     running: z.boolean(),
     runningRequestId: z.string().optional(),
+    /** The running operation's scope, independent of the requesting window's current selection. */
+    chapters: z.array(z.string()).optional(),
     done: z.number().int().min(0),
     total: z.number().int().min(0),
     blocks: z.array(

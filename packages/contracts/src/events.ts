@@ -2456,3 +2456,4 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 ]));
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
+export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;

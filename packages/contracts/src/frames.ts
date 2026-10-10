@@ -3389,7 +3389,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("make-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), quote: AudiobookMotionQuoteSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("stop-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("choose-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), choice: z.enum(["candidate", "still", "behavior"]), behavior: z.enum(["repeat", "hold"]), artifactId: z.string().optional(), requestId: UlidSchema }).strict(),
-  z.object({ kind: z.literal("audiobook-word-timing"), worldId: UlidSchema, productionId: SlugSchema, action: z.enum(["read", "prepare", "stop"]), chapters: z.array(SlugSchema).optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("audiobook-word-timing"), worldId: UlidSchema, productionId: SlugSchema, action: z.enum(["read", "prepare", "stop"]), chapters: z.array(SlugSchema).optional(), blocks: z.array(z.object({ chapterId: SlugSchema, key: z.string().min(1) }).strict()).min(1).optional(), requestId: UlidSchema }).strict(),
   /**
    * A picture set on a block, or taken off it with null (design turn 186c, R-69): a picture the
    * world holds, by its world-relative path, and the tab it was chosen on. Answered as

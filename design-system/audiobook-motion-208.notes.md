@@ -13,6 +13,8 @@ Review decisions are therefore bounded: the Animate entry and choice flow; Repea
 
 ## Findings that change the issue's assumptions
 
+This table records the pre-implementation investigation at the source revision named below. The implementation now adds the explicit motion and measured timing representations described in the approved requirements.
+
 | Issue assumption | Current source | Consequence |
 |---|---|---|
 | `AudiobookPicture.file` can simply point at MP4 | `packages/contracts/src/audiobook-pictures.ts` is a strict still-oriented record; consumers validate images. `packages/contracts/src/audiobook-listening.ts` carries only a file, hold and focus. | Preserve `file` as the source still and add explicit optional motion with its own media identity. This is a proposed representation, not a schema amendment shipped in this PR. Old readers reject unknown strict fields, so first-write world-version handling is necessary. |
@@ -39,4 +41,12 @@ Motion can ship independently of captions. Arbitrary imported video assignment, 
 - `node design-system/check-master.mjs --record` and the static master check: pass; the pre-existing t195 warning remains unrelated.
 - Focused HTML rendered in a dedicated headless Chromium instance, never the installed app or its CDP connection. All nine frames loaded their images and Geist font; no horizontal element overflow. The 390 px sheets use 44 px actions and an independently scrolling body above a persistent footer.
 - Review screenshots are local artifacts; clip frames are deliberately static poster drawings, not a claim that generated video or accurate alignment was tested.
-- No application tests or builds are appropriate to a design-only change. Actual focus trapping, keyboard behavior, playback synchronization, format compatibility and rendering correctness must be tested during an approved implementation.
+- Actual implementation checks now exercise focus containment, explicit adoption, retained stills, clock synchronization and native FFmpeg rendering. The original source frames remain unchanged; the paired review compares their literal screenshots against real React components with fictional data.
+
+## Implementation and validation
+
+- `AudiobookPicture.file` remains the still; schema 73 guards optional motion/candidate and exact-audio word-timing records. Both the player package and MP4 renderer use muted clips on the existing picture clock.
+- The pinned Voxa runtime is `4c2e5b58117016778312735b71052153c8ebf4a2`. Only `whisper.cpp/dtw-word-boundaries-v1` and its validated base.en profile qualify. Inference uses acoustic DTW and measured silence, never token Start/End interpolation. Missing confidence, changed words/audio or no safe silent split within28seconds leave highlighting unready; ordinary captions remain available.
+- Turn209 adds an explicit local preparation decision, exact stale-block retry and separate timing Activity progress. These operations neither synthesize narration nor incur a provider charge.
+- Focused client motion/export/picture/player checks passed77tests. Contracts, voice and coordinator typechecks passed. Native FFmpeg motion/highlight rendering passed, including repeat/hold, narration-only audio, plain sidecars and cache invalidation. Final integration and paired visual checks remain in progress in PR1687.
+- [Issue1693](https://github.com/michaeljosiah/ArkeStudio/issues/1693) tracks the larger caption text drawn in208e versus the true scaled export preview. Approved rule8 retains the existing export typography; this implementation does not silently enlarge the output font to match that illustrative discrepancy.

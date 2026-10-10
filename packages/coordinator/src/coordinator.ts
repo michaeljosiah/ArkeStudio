@@ -1345,6 +1345,7 @@ export class Coordinator {
   private readonly makingMotion = new Map<string, AbortController>();
   private readonly preparingWordTiming = new Map<string, AbortController>();
   private readonly wordTimingRequests = new Map<string, string>();
+  private readonly wordTimingProgress = new Map<string, { done: number; total: number; chapters: string[] }>();
   private waitForAudiobookJob(jobId: string): Promise<Job> {
     return this.audiobookJobs.wait(jobId);
   }
@@ -15591,6 +15592,7 @@ export class Coordinator {
         const failures = new Map<string, string>();
         let done = 0;
         let cached: AudiobookWordTimingState["blocks"] = [];
+        const included = (block: { chapterId: string; key: string }) => (msg.chapters === undefined || msg.chapters.includes(block.chapterId)) && (msg.blocks === undefined || msg.blocks.some((pick) => pick.chapterId === block.chapterId && pick.key === block.key));
         let availability: { ready: boolean; reason?: string } | null | undefined;
         const report = async (refresh = true) => {
           if (refresh) {
@@ -15599,7 +15601,9 @@ export class Coordinator {
           cached = listening.chapters.flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
           }
           const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
-          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), done, total: blocks.filter((block) => msg.chapters === undefined || msg.chapters.includes(block.chapterId)).length, blocks } });
+          const selected = blocks.filter(included);
+          const progress = this.wordTimingProgress.get(key) ?? { done, total: selected.length, chapters: [...new Set(selected.map((block) => block.chapterId))] };
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), ...progress, blocks } });
           return blocks;
         };
         try {
@@ -15608,7 +15612,8 @@ export class Coordinator {
           if (availability?.ready !== true) { await report(); return; }
           this.preparingWordTiming.set(key, control);
           this.wordTimingRequests.set(key, msg.requestId);
-          const blocks = (await report()).filter((block) => msg.chapters === undefined || msg.chapters.includes(block.chapterId));
+          const blocks = (await report()).filter(included);
+          this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((block) => block.chapterId))] });
           for (const block of blocks) {
             if (control.signal.aborted) break;
             if (!block.ready) {
@@ -15617,11 +15622,13 @@ export class Coordinator {
                 await prepareAudiobookWordTiming(store, msg.productionId, plan, block.key, (audio, signal) => this.voiceService!.transcribeWords(audio, signal), control.signal, this.opts.ffmpeg);
               } catch (error) { failures.set(`${block.chapterId}/${block.key}`, control.signal.aborted ? "stopped" : describeCoordinatorError(error)); }
             }
-            done += 1; await report(false);
+            done += 1;
+            this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((entry) => entry.chapterId))] });
+            await report(false);
           }
         } catch (error) { void this.appLog?.append({ kind: "audiobook.word-timing-failed", message: describeCoordinatorError(error) }); }
         finally {
-          if (this.preparingWordTiming.get(key) === control) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); }
+          if (this.preparingWordTiming.get(key) === control) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); this.wordTimingProgress.delete(key); }
           store.closingSignal.removeEventListener("abort", onClose);
           if (!store.closingSignal.aborted) await report().catch(() => {});
         }
