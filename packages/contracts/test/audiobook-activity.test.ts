@@ -24,11 +24,17 @@ it("names the chapter operation and keeps alignment live, with the accepted read
 it("excludes reused requests from this read's bill and distinguishes missing provider evidence", () => {
   const done = { ...run, phase: "interrupted" as const, jobs: [{ id: "old", index: 1, reused: true }, { id: "paid", index: 2, reused: false }, { id: "uncertain", index: 3, reused: false }] };
   const jobs = [job("old", { providerCostMicroUsd: 900000 }), job("paid", { providerCostMicroUsd: 123000 }), job("uncertain", { status: "needs-reconciliation" })];
-  assert.equal(audiobookActivityCost(done, jobs), "$0.12 measured · 1 request charge unknown for this read");
+  assert.equal(audiobookActivityCost(done, jobs), "$0.12 reported · 1 request charge unknown for this read");
   assert.equal(audiobookRequestCost(jobs[2]!).label, "charge unknown");
   assert.equal(audiobookRequestCost(job("rejected", { status: "failed", providerJobId: null, submissionRejected: true })).label, "not charged");
   assert.match(audiobookActivityCost({ ...done, jobs: [{ id: "missing", index: 1, reused: false }] }, []), /^1 request charge unknown/);
   assert.equal(audiobookActivityCost({ ...done, jobs: [{ id: "old", index: 1, reused: true }] }, jobs), "$0.00 this read");
+});
+
+it("preserves block destinations and stops quoting an accepted total after Stop", () => {
+  assert.match(audiobookActivityPath({ ...run, scope: "block", block: "p1.0" }), /view=audiobook&block=p1.0$/);
+  const stopping = { ...run, phase: "stopping" as const, jobs: [{ id: "paid", index: 1, reused: false }, { id: "pending", index: 2, reused: false }] };
+  assert.equal(audiobookActivityCost(stopping, [job("paid", { providerCostMicroUsd: 50000 }), job("pending", { status: "running" })]), "$0.05 reported · 1 request charge unknown for this read");
 });
 
 it("does not invent grouping for legacy jobs or borrow another world's run", () => {

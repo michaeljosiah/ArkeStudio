@@ -1057,6 +1057,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const characters = group.kept.map((block) => block.text.length);
     const costs = shareByCharacters(actual, characters);
     const estimates = shareByCharacters(job.estimatedMicroUsd, characters) as number[];
+    let requestSaved = 0;
     for (const [index, block] of group.kept.entries()) {
       const cut = cuts.find((candidate) => candidate.key === block.block.key)!;
       const piece = applyGain(sliceSpeech(pcm, cut.start, cut.end), level.loudness.gainDb);
@@ -1070,6 +1071,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       settled.add(block.block.key);
       if (cut.matched) {
         await keep(block, artifact, provenance);
+        requestSaved += 1;
         // A request that ran long is said on its takes' progress; the record keeps no note, which
         // would be another strict field and another world schema for what the cut already dropped.
         await progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
@@ -1081,6 +1083,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         await progress(block, "flagged", reason);
       }
     }
+    await deps.activity?.({ job: { id: job.id, index: requestAt, reused: Boolean(prior), saved: requestSaved } });
     await unlink(toExtendedLength(landed)).catch(() => {});
     return null;
   };

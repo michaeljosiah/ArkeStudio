@@ -476,6 +476,7 @@ describe("a chapter read grouped (design turn 185)", () => {
       assert.equal(takes.length, blocks);
       assert.equal(Object.keys(record.flags).length, 0);
       assert.equal(h.activity[0]?.phase, "queued");
+      assert.equal(h.activity.findLast(update => update.job?.saved !== undefined)?.job?.saved, blocks, "request detail names saved blocks only after the durable keeps");
       assert.deepEqual(h.activity.at(-1), { phase: "ready", made: blocks, flagged: 0 }, "completion follows the durable block writes");
       assert.ok(takes.every((take) => take.grouped?.request === "jb_01J8G000000000000000000001" && take.grouped.blocks.length === blocks && take.loudness !== undefined));
       assert.equal(takes.reduce((sum, take) => sum + (take.costMicroUsd ?? 0), 0), 1_001, "the request's actual, shared by characters");

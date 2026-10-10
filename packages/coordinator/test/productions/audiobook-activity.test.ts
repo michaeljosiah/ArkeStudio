@@ -31,6 +31,7 @@ it("records only accepted reads, publishes persisted progress, and interrupts un
     const restored = new AudiobookActivityJournal(path, () => {}, () => at);
     const [read] = await restored.load();
     assert.equal(read?.phase, "interrupted");
+    assert.equal(read?.interruptedDuring, "aligning", "recovery keeps the failed stage rather than claiming TTS failed");
     assert.equal(read?.made, 6);
     assert.deepEqual(read?.jobs, [{ id: "request-a", index: 1, reused: false }]);
     assert.match(read?.reason ?? "", /restarted/);
