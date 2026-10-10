@@ -156,8 +156,6 @@ async function refreshConversationSummaryOnce(
 
 const SummaryResponseSchema = z.object({ summary: z.string().min(1).max(8_000) }).strict();
 const SUMMARY_TIMEOUT_MS = 120_000;
-/** On Arke's local harness: a model on the person's own card is slower and costs nothing to wait for. */
-const LOCAL_SUMMARY_TIMEOUT_MS = 10 * 60_000;
 
 /** A separate, tool-free harness turn whose answer can only become non-authoritative context. */
 export function makeConversationSummariser(
@@ -220,7 +218,7 @@ export function makeConversationSummariser(
       .join("\n\n");
       const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
       const timeout = new Promise<never>((_, reject) => {
-      deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), adapter.id === "arke" ? LOCAL_SUMMARY_TIMEOUT_MS : SUMMARY_TIMEOUT_MS);
+      deadline = setTimeout(() => reject(new Error("conversation summarisation timed out")), SUMMARY_TIMEOUT_MS);
       });
       await cancellable(Promise.race([
         Promise.all([

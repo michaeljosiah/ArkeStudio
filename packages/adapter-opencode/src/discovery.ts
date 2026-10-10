@@ -138,7 +138,8 @@ async function discoverGated(
   let rejected: DiscoveredOpenCode | null = null;
   const consider = (candidate: DiscoveredOpenCode): DiscoveredOpenCode | null => {
     if (accept(candidate.version)) return candidate;
-    rejected ??= candidate;
+    // The shared `opencode` command may be v1; that is absence of v2, not a rejected v2 install.
+    if (!candidate.version?.startsWith("1.")) rejected ??= candidate;
     return null;
   };
   if (opts.configuredPath && existsSync(opts.configuredPath)) {

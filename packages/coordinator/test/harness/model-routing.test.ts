@@ -11,9 +11,7 @@ import {
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import type { Cipher } from "../../src/credentials/store.js";
-import type { DispatchClient } from "../../src/queue/dispatcher.js";
 import type { ChildSupervisor } from "../../src/supervisor.js";
-import { FakeProvider } from "../queue/fake-provider.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { setProductionModel } from "../../src/productions/ops.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -24,9 +22,9 @@ const MODELS: ModelInfo[] = [
   { provider: "anthropic", id: "opus[1m]", displayName: "Opus", inputModalities: ["text", "image"] },
   { provider: "openai", id: "spark", displayName: "Spark", inputModalities: ["text"] },
   { provider: "custom-provider", id: "region/model:fast", displayName: "Custom model" },
-  { provider: "ollama", id: "gemma4:12b", displayName: "Gemma 4 12B", inputTokenLimit: 131_072 },
-  { provider: "ollama", id: "gemma4:e2b-it-qat", displayName: "Gemma 4 E2B" },
-  { provider: "ollama", id: "qwen3-vl:8b", displayName: "Qwen3 VL", inputModalities: ["text", "image"] },
+  { provider: "ollama", tools: true, id: "gemma4:12b", displayName: "Gemma 4 12B", inputTokenLimit: 131_072 },
+  { provider: "ollama", tools: true, id: "gemma4:e2b-it-qat", displayName: "Gemma 4 E2B" },
+  { provider: "ollama", tools: true, id: "qwen3-vl:8b", displayName: "Qwen3 VL", inputModalities: ["text", "image"] },
 ];
 const LOCAL_VISION = "ollama/qwen3-vl:8b";
 /**
@@ -46,8 +44,6 @@ const STOP_MS = 10_000;
 const CLOUD_ONLY = MODELS.filter((model) => model.provider !== "ollama");
 const LOCAL = "ollama/gemma4:12b";
 const LOCAL_SMALL = "ollama/gemma4:e2b-it-qat";
-/** What Ollama has pulled when the catalogue is MODELS: the harness lists exactly what it was handed (issue 1247). */
-const PULLED = MODELS.filter((model) => model.provider === "ollama").map((model) => ({ id: model.id, contextLength: 262144, tools: true, vision: model.inputModalities?.includes("image") ?? false }));
 
 /** A reversible fake cipher that is very visibly not the plaintext. */
 const fakeCipher: Cipher = {
@@ -102,11 +98,6 @@ async function fixture(options: {
   cipher?: Cipher;
   /** The shipped manifest, with Ollama answering as a running local runtime so its rows pass the gate. */
   manifest?: boolean;
-  /** What Ollama has pulled, with a publication hook: the first-run path the local default waits on (issue 1247). */
-  localModels?: Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean; assumed?: true }>;
-  /** Ollama's answer to each listing, when it is not simply the list above: it may be a refusal. */
-  listLocalModels?: () => Promise<Array<{ id: string; contextLength?: number; tools: boolean; vision: boolean; assumed?: true }>>;
-  onPublish?: () => void | Promise<void>;
   /** A harness process under supervision, so a test can fail it and bring it back (issue 1247). */
   supervisor?: ChildSupervisor;
 } = {}) {
@@ -121,10 +112,6 @@ async function fixture(options: {
     provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
     changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
     ...(options.cipher ? { cipher: options.cipher } : {}),
-    ...(options.localModels || options.listLocalModels ? {
-      dispatchClients: { ollama: Object.assign(new FakeProvider(), { listModels: options.listLocalModels ?? (async () => options.localModels!) }) as DispatchClient },
-      publishLocalHarnessModels: async () => { await options.onPublish?.(); },
-    } : {}),
     ...(options.manifest ? {
       manifest: SHIPPED_MANIFEST,
       validators: { ollama: { validateKey: async () => [{ capability: "llm" as const, available: true }] } },
@@ -409,13 +396,13 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     // agent's writer, with Content & safety off.
     const UNCENSORED = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
     const beside = new CaptureAdapter();
-    beside.list = async () => [{ provider: "ollama", id: UNCENSORED, displayName: UNCENSORED }, ...MODELS];
+    beside.list = async () => [{ provider: "ollama", tools: true, id: UNCENSORED, displayName: UNCENSORED }, ...MODELS];
     const test = await fixture({ adapter: beside });
     try {
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "installing it is not choosing it");
     } finally { await test.close(); }
     const alone = new CaptureAdapter();
-    alone.list = async () => [...CLOUD_ONLY, { provider: "ollama", id: UNCENSORED, displayName: UNCENSORED }];
+    alone.list = async () => [...CLOUD_ONLY, { provider: "ollama", tools: true, id: UNCENSORED, displayName: UNCENSORED }];
     const only = await fixture({ adapter: alone });
     try {
       await untilAsync(async () => {
@@ -453,41 +440,46 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("keeps the validated local default on Arke's own lane even when a cloud key is stored (issue 1247)", async () => {
-    // The local harness cannot spend a cloud key, so a stored one must not hand the choice back
-    // to the adapter: it would pick for itself, past the disabled-model and Stage image checks.
+
+
+
+  it("waits for native discovery before preparing the first keyless session", async () => {
     const adapter = new CaptureAdapter();
-    Object.defineProperty(adapter, "id", { value: "arke" });
-    const test = await fixture({ adapter, cipher: fakeCipher });
+    let release: (() => void) | undefined;
+    const discovery = new Promise<void>(resolve => { release = resolve; });
+    adapter.list = async () => { await discovery; return MODELS; };
+    const test = await fixture({ adapter });
+    const pending = test.chat();
     try {
-      await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the application's local default, key or no key");
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "native discovery is pending");
+      assert.equal(adapter.sessions.length, 0, "the first session cannot bypass discovery");
+      release!();
+      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, LOCAL);
+    } finally { release!(); await pending; await test.close(); }
+  });
+
+  it("publishes native inventory changes to an open picker without a local publishing client", async () => {
+    const test = await fixture();
+    try {
+      await test.send({ kind: "list-harness-models" });
+      const pulled = { provider: "ollama", id: "newly-pulled:8b", tools: true };
+      test.adapter.list = async () => [...CLOUD_ONLY, pulled];
+      await test.probeLocalRuntimes();
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, [...CLOUD_ONLY, pulled]);
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/newly-pulled:8b");
+      test.adapter.list = async () => CLOUD_ONLY;
+      await test.probeLocalRuntimes();
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, CLOUD_ONLY);
     } finally { await test.close(); }
   });
 
-  it("never tells a person on the Local lane to add a key it cannot use", async () => {
+  it("keeps unknown local tool support selectable but never chooses it unattended", async () => {
     const adapter = new CaptureAdapter();
-    Object.defineProperty(adapter, "id", { value: "arke" });
-    adapter.list = async () => { throw new Error("Ollama is not answering"); };
-    const test = await fixture({ adapter, cipher: fakeCipher });
+    adapter.list = async () => [{ provider: "ollama", id: "unknown:8b" }, ...MODELS];
+    const test = await fixture({ adapter });
     try {
-      await test.send({ kind: "set-credential", provider: "anthropic", key: "sk-ant-test-key" });
-      await untilAsync(async () => {
-        assert.equal(await test.chat(), undefined);
-        return /Local's models could not be read/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
-      }, "the Local refusal", CHAT_POLL_MS);
-      assert.doesNotMatch(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /cloud key|add a key/);
-    } finally { await test.close(); }
-  });
-
-  it("waits for the first local-model publication and its reload before deciding, on a fresh start", async () => {
-    // Before publication the harness lists only cloud rows; the publication is what makes the
-    // local rows appear on the next fetch — as the profile write does for the real harness.
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: PULLED, onPublish: () => { adapter.list = async () => MODELS; } });
-    try {
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL, "the first session saw the rows the publication brought");
+      assert.equal((await test.chat())?.config.model, LOCAL);
+      assert.equal((await test.chat("ollama/unknown:8b"))?.config.model, "ollama/unknown:8b");
     } finally { await test.close(); }
   });
 
@@ -578,27 +570,6 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("refuses a keyless session while Ollama is not answering, and decides once it has listed", async () => {
-    // Not answering and nothing pulled both publish no rows. Only the second is a machine with
-    // no local model; the first is the bundled runtime still starting, and a session decided
-    // on it would run on the cloud default with a pulled model a few seconds away.
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    let answering = false;
-    const test = await fixture({ adapter, listLocalModels: async () => {
-      if (!answering) throw new Error("ECONNREFUSED 127.0.0.1:11434");
-      return PULLED;
-    }, onPublish: () => { if (answering) adapter.list = async () => MODELS; } });
-    try {
-      assert.equal(await test.chat(), undefined, "no session is built while the runtime has not answered");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      answering = true;
-      await test.probeLocalRuntimes();
-      // Listed, published, and not yet in the catalogue: still not decided on the old catalogue.
-      assert.equal(await test.chat(), undefined, "the reload window after a changed listing is refused, not run unmodelled");
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the runtime has listed", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
   it("refuses rather than going unmodelled when every local model is passed over", async () => {
     const adapter = new CaptureAdapter();
@@ -688,71 +659,9 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("ends a keyless chat at its Stop while its configuration is still waiting on discovery", async () => {
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false }] });
-    try {
-      await test.send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Stopped early",
-        entryContext: { kind: "production", productionId: "saltlight" } });
-      const conversationId = test.coordinator.getState().worldChat!.conversationId;
-      const pending = test.send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
-        text: "Explain the current production.", attachmentIds: [] });
-      await until(() => test.coordinator.getState().worldChat?.runStatus !== null, "the turn admitted and waiting on discovery");
-      await test.send({ kind: "world-chat-cancel", worldId: WORLD_ID, conversationId });
-      // Well inside the reload delay the configuration is waiting on: the Stop ended the wait.
-      // (The send itself also awaits the conversation's naming pass, which is not the turn.)
-      await until(() => test.coordinator.getState().worldChat?.runStatus === null, "the turn ended at the Stop", STOP_MS);
-      await pending;
-      assert.equal(test.adapter.sessions.filter((session) => session.agent === "world-builder").length, 0, "no session was built for a stopped turn");
-    } finally { await test.close(); }
-  });
 
-  it("keeps asking for the catalogue until it lists the rows that were published, when the reload outlasts the delay", async () => {
-    // The harness reloads its profile in about three seconds (measured); a fetch that lands
-    // before it has is a successful read of the old rows, and must not count as carried.
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: PULLED });
-    try {
-      assert.equal(await test.chat(), undefined, "the read that beat the reload does not open local routing");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      adapter.list = async () => MODELS;
-      // The listing is unchanged, so nothing is published; the catalogue is asked again.
-      await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists the published rows", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
-  it("treats a catalogue still listing a deleted model as not yet carrying the listing", async () => {
-    // The harness lists three local rows; Ollama now holds one. A read that beat the reload is
-    // a successful read of the old rows, and a default from it could name a model that is gone.
-    const adapter = new CaptureAdapter();
-    const test = await fixture({ adapter, localModels: [PULLED[0]!] });
-    try {
-      assert.equal(await test.chat(), undefined, "extra rows are as stale as missing ones");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      adapter.list = async () => [...CLOUD_ONLY, MODELS.find((model) => model.id === "gemma4:12b")!];
-      await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue lists exactly what was handed", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
-  it("treats a catalogue row that still states the old capabilities as not yet carrying a re-pulled model", async () => {
-    // Same id, re-pulled without tool calling: the row that beat the reload still says tools.
-    const adapter = new CaptureAdapter();
-    const stated = (tools: boolean) => [...CLOUD_ONLY, { ...MODELS.find((model) => model.id === "gemma4:12b")!, tools }];
-    adapter.list = async () => stated(true);
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: false, vision: false }] });
-    try {
-      assert.equal(await test.chat(), undefined, "a row stating what was not written is not carried");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      adapter.list = async () => stated(false);
-      await test.probeLocalRuntimes();
-      // Carried now — and passed over, since it cannot call tools: refused for that reason instead.
-      await untilAsync(async () => { await test.chat(); return /None of the local models/.test(test.coordinator.getState().worldChat?.lastFailure?.detail ?? ""); }, "the row read back as written, then judged on it", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
   it("does not count a sign-in row kept after a faulted read as a credential", async () => {
     const adapter = new CaptureAdapter();
@@ -802,29 +711,6 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("checks a returned harness's first catalogue against the rows it was handed before opening local routing", async () => {
-    const adapter = new CaptureAdapter();
-    const supervisor = Object.assign(new EventEmitter(), {
-      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
-    }) as unknown as ChildSupervisor;
-    const test = await fixture({ adapter, supervisor, localModels: PULLED });
-    try {
-      supervisor.emit("status", { id: "harness", status: "healthy" });
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the first lifecycle carried the rows", CHAT_POLL_MS);
-      // The child restarts, and the replacement's first answer is its cloud-only start-up catalogue.
-      adapter.list = async () => CLOUD_ONLY;
-      supervisor.emit("status", { id: "harness", status: "unhealthy", reason: "the child exited" });
-      supervisor.emit("status", { id: "harness", status: "healthy" });
-      await until(() => adapter.initCalls === 2, "the returning harness initialised");
-      const before = test.adapter.sessions.length;
-      await test.chat();
-      assert.equal(test.adapter.sessions.length, before, "not run unmodelled on the returned harness's cloud-only read");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      adapter.list = async () => MODELS;
-      await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the returned harness lists the rows", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
   it("does not count a connection the harness says needs signing in again", async () => {
     const test = await fixture();
@@ -880,70 +766,9 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { release(); await test.close(); }
   });
 
-  it("does not choose unattended a local model whose capabilities were assumed rather than read", async () => {
-    // A show that listed no capabilities still states the window, so the model is offered, but
-    // the default takes the first row the runtime actually described.
-    const test = await fixture({ localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
-    try {
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the first described row, not the first row");
-      assert.equal((await test.chat(LOCAL))?.config.model, LOCAL, "chosen on purpose, the assumed row is still admitted");
-    } finally { await test.close(); }
-  });
 
-  it("does not offer a local model that states no window", async () => {
-    // A show that failed outright reads nothing, not even the window, and the minimum holds it back.
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", tools: true, vision: false, assumed: true }, ...PULLED.slice(1)] });
-    try {
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL);
-    } finally { await test.close(); }
-  });
 
-  it("does not offer a local model stating less than a 256k context, and says so when that leaves none", async () => {
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => MODELS.filter((model) => model.id !== "gemma4:12b");
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }, ...PULLED.slice(1)] });
-    try {
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL_SMALL, "the 128k model is passed over for one that states 256k");
-    } finally { await test.close(); }
-    const cloudOnly = new CaptureAdapter();
-    cloudOnly.list = async () => CLOUD_ONLY;
-    const none = await fixture({ adapter: cloudOnly, localModels: PULLED.map((model) => ({ ...model, contextLength: 131072 })) });
-    try {
-      await untilAsync(async () => {
-        assert.equal(await none.chat(), undefined, "no session goes to a cloud default nobody can pay for");
-        return /None of the pulled local models has a 256k context window/.test(none.coordinator.getState().worldChat?.lastFailure?.detail ?? "");
-      }, "refused, naming the minimum", CHAT_POLL_MS);
-      const staged = await none.stage();
-      assert.match(staged?.type === "stage.construction" ? staged.detail : "", /256k context window/, "Stage is told the same, not sent to choose a model that reads images");
-    } finally { await none.close(); }
-  });
 
-  it("does not hold a session with a chosen model behind discovery", async () => {
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    // The gate waits on the publication and its reload; a session whose agent has a model of
-    // its own runs on it whatever discovery says, so it does not wait.
-    let release!: () => void;
-    const publication = new Promise<void>((resolve) => { release = resolve; });
-    const test = await fixture({ adapter, localModels: PULLED, agents: { "world-builder": { model: CHAT } }, onPublish: () => publication });
-    let pending: ReturnType<typeof test.chat> | undefined;
-    try {
-      // The send also awaits the conversation's naming pass, which is not a chosen session and
-      // does wait; the turn's own session is what must not.
-      pending = test.chat();
-      void pending.catch(() => {});
-      await until(() => test.adapter.sessions.some((session) => session.agent === "world-builder"), "the chosen session while publication is held", CHAT_POLL_MS);
-      release();
-      assert.equal((await pending)?.config.agents?.["world-builder"]?.model, CHAT);
-    } finally {
-      release();
-      // A failed assertion must still drain the chat before closing its writable world.
-      await pending?.catch(() => {});
-      await test.close();
-    }
-  });
 
   it("does not trust a previous lifecycle's sign-in read on a returned harness", async () => {
     const adapter = new CaptureAdapter();
@@ -974,33 +799,6 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { release(); await test.close(); }
   });
 
-  it("settles a re-armed gate when the first publication failed before the harness came up", async () => {
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    let publishFails = true;
-    const supervisor = Object.assign(new EventEmitter(), {
-      id: "harness", status: "stopped", start: async () => {}, stop: async () => {}, restart: async () => {},
-    }) as unknown as ChildSupervisor;
-    const test = await fixture({ adapter, supervisor, localModels: PULLED, onPublish: async () => {
-      if (publishFails) throw new Error("the profile could not be written");
-      adapter.list = async () => MODELS;
-    } });
-    try {
-      await until(() => (test.coordinator as unknown as { catalogueGateOpen: boolean }).catalogueGateOpen === false, "the failed publication settled the gate");
-      supervisor.emit("status", { id: "harness", status: "healthy" });
-      await until(() => adapter.initCalls === 1, "the harness came up");
-      const started = Date.now();
-      const before = test.adapter.sessions.length;
-      await test.chat();
-      // Promptly means well inside the 30 s creation timeout, not a figure a busy runner can miss (issue 1290).
-      assert.ok(Date.now() - started < 20_000, "refused promptly rather than held to the creation timeout");
-      assert.equal(test.adapter.sessions.length, before, "and not run unmodelled: the rows are unpublished");
-      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /not available to the harness yet/);
-      publishFails = false;
-      await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the publication succeeds", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
   it("gives a prompt-only agent a local model that calls no tools, where a tool-using agent is refused", async () => {
     const adapter = new CaptureAdapter();
@@ -1082,32 +880,7 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
     } finally { await test.close(); }
   });
 
-  it("lets shutdown through while a keyless session is waiting on the reload after a publication", async () => {
-    const adapter = new CaptureAdapter();
-    adapter.list = async () => CLOUD_ONLY;
-    const test = await fixture({ adapter, localModels: [{ id: "gemma4:12b", contextLength: 262144, tools: true, vision: false }] });
-    const pending = test.chat().catch(() => undefined);
-    const stopped = Promise.race([test.close().then(() => "stopped"), new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 4_000).unref?.())]);
-    assert.equal(await stopped, "stopped", "the cleared reload timer settled the gate rather than leaving the command waiting on it");
-    await pending;
-  });
 
-  it("asks for the catalogue again when the read after a publication failed, on the probe's cadence", async () => {
-    const test = await fixture({ localModels: PULLED });
-    try {
-      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, LOCAL);
-      test.adapter.list = async () => { throw new Error("discovery is down"); };
-      await test.send({ kind: "list-harness-models" });
-      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "error", "the failed read");
-      const before = test.adapter.sessions.length;
-      await test.chat();
-      assert.equal(test.adapter.sessions.length, before, "refused while the catalogue is unread: no session was built");
-      test.adapter.list = async () => MODELS;
-      // The listing is unchanged, so nothing is published; the failed read is what is retried.
-      await test.probeLocalRuntimes();
-      await untilAsync(async () => (await test.chat())?.config.agents?.["world-builder"]?.model === LOCAL, "the local default once the catalogue reads again", CHAT_POLL_MS);
-    } finally { await test.close(); }
-  });
 
   it("refuses while the harness's sign-in state could not be read, rather than pinning a connected account local", async () => {
     const adapter = new CaptureAdapter();

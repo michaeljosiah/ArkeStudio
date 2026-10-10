@@ -69,7 +69,6 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       voice: { sidecar: null, localPresets: [], cloudSources: cloudVoiceSources(clients) },
       setup: nodeSetupDeps(), authoring: { agentForPurpose, roster: ROSTER, skillFor },
       harnessLaunchEngine: chosen, relaunchHarness: wiring?.relaunchHarness,
-      ...(wiring?.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
       ...(wiring?.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
       harnessUnavailableReason: wiring?.unavailableReason ?? (options.adapter === null ? "AI is disabled for this server." : undefined),
     });

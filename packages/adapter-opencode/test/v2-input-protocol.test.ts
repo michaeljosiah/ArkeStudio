@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import type { HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
-import { buildProfileConfigV2, buildSessionConfigV2 } from "../src/v2/config.js";
+import { buildSessionConfigV2 } from "../src/v2/config.js";
 import { until } from "./wait.js";
 
 /**
@@ -35,7 +35,8 @@ it("qualifies the pinned runtime's inbox, config, confined tool turn and permiss
       }
       if (req.url === "/api/show") {
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": 262144 } })); return;
+        const contextLength = JSON.parse(body).model === "arke-discovered" ? 131072 : 262144;
+        res.end(JSON.stringify({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma", "gemma.context_length": contextLength } })); return;
       }
       if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
       const request = JSON.parse(body);
@@ -58,9 +59,7 @@ it("qualifies the pinned runtime's inbox, config, confined tool turn and permiss
   provider.listen(0, "127.0.0.1"); await once(provider, "listening");
   const providerAddress = provider.address(); assert.ok(providerAddress && typeof providerAddress !== "string");
   await mkdir(join(profile, ".config", "opencode"), { recursive: true });
-  await writeFile(join(profile, ".config", "opencode", "opencode.json"), JSON.stringify(buildProfileConfigV2(
-    [{ id: "arke-smoke", contextLength: 262144, tools: true, vision: false }], `http://127.0.0.1:${providerAddress.port}/v1`,
-  )));
+  await writeFile(join(profile, ".config", "opencode", "opencode.json"), JSON.stringify({ providers: { ollama: { settings: { baseURL: `http://127.0.0.1:${providerAddress.port}/v1` } } } }));
   const preparation = { preparationId: "smoke-preparation", model: "ollama/arke-smoke" };
   const config = buildSessionConfigV2({ ...preparation, defaultAgent: "sheet-editor" });
   (config.permissions as unknown[]).push({ action: "smoke-approval", resource: "*", effect: "ask" });
@@ -127,6 +126,9 @@ it("qualifies the pinned runtime's inbox, config, confined tool turn and permiss
     assert.ok(catalog?.some(model => model.provider === "ollama" && model.id === "arke-smoke" && model.tools === true), JSON.stringify(catalog));
     assert.ok(catalog?.some(model => model.provider === "ollama" && model.id === "arke-discovered" && model.tools === true),
       "native Ollama discovery includes installed completion models absent from the configured models map");
+    const smaller = catalog?.find(model => model.provider === "ollama" && model.id === "arke-discovered");
+    assert.ok(smaller?.inputTokenLimit && smaller.inputTokenLimit <= 131072,
+      "a native model below the retired 256k catalogue floor remains discoverable with its own limit");
     const created = await request("POST", "/api/session", { location: { directory: cwd.replaceAll("\\", "/") } });
     assert.equal(created.status, 200);
     const sessionId = created.body.data.id as string;
