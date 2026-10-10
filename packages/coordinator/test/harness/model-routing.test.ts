@@ -490,9 +490,30 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       adapter.sessions.length = 0;
       assert.equal(await test.chat(), undefined, "a retained row cannot open a keyless session on a stopped runtime");
       assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is not available/, "the refusal names runtime health");
+      assert.equal(await test.chat("ollama/unmanifested:8b"), undefined, "an explicit native choice also checks runtime health");
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is unavailable/);
       running = true;
       await test.probeLocalRuntimes();
       assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/unmanifested:8b");
+    } finally { await test.close(); }
+  });
+
+  it("revalidates a saved unmanifested Ollama choice after its runtime stops", async () => {
+    let running = true;
+    const adapter = new CaptureAdapter();
+    adapter.list = async () => [{ provider: "ollama", id: "saved:8b", tools: true }, ...CLOUD_ONLY];
+    const test = await fixture({ adapter, agents: { "world-builder": { model: "ollama/saved:8b" } }, ollamaHealth: async () => running });
+    try {
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/saved:8b");
+      running = false;
+      await test.probeLocalRuntimes();
+      adapter.sessions.length = 0;
+      assert.equal(await test.chat(), undefined);
+      assert.match(test.coordinator.getState().worldChat?.lastFailure?.detail ?? "", /Ollama is unavailable/);
+      assert.equal((await test.settings()).agents?.["world-builder"]?.model, "ollama/saved:8b", "an outage keeps the saved choice");
+      running = true;
+      await test.probeLocalRuntimes();
+      assert.equal((await test.chat())?.config.agents?.["world-builder"]?.model, "ollama/saved:8b");
     } finally { await test.close(); }
   });
 

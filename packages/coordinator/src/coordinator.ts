@@ -25,7 +25,7 @@ import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
 import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
-import { referenceInputProblem } from "@arke-studio/contracts";
+import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
@@ -5399,7 +5399,7 @@ export class Coordinator {
       return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
     }
     const offered = this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama");
-    if (offered && !this.ollamaRuntimeAvailable()) {
+    if (offered && !ollamaLlmAvailable(this.readModel.getState().app.providers)) {
       return "Ollama is not available, and no cloud key is stored. Start Ollama and retry, or add a key.";
     }
     // Local rows the default passed over — switched off, or unable to call tools — are not
@@ -5430,11 +5430,6 @@ export class Coordinator {
     return this.opts.appRoot !== undefined && worldId ? join(this.opts.appRoot, "agent-memory", worldId) : undefined;
   }
 
-  private ollamaRuntimeAvailable(): boolean {
-    const status = this.readModel.getState().app.providers.find(provider => provider.id === "ollama");
-    return status?.validation === "valid" && status.probes.some(probe => probe.capability === "llm" && probe.available);
-  }
-
   private localHarnessDefault(needsImages = false, needsTools = true): string | undefined {
     if (this.cloudCredentialAvailable()) return undefined;
     const app = this.readModel.getState().app;
@@ -5444,7 +5439,7 @@ export class Coordinator {
     if (this.vendorAuthUnread()) return undefined;
     // Native discovery retains its last inventory through outages. The existing runtime
     // health probe, including its transient-failure grace, owns whether that inventory can run.
-    if (!this.ollamaRuntimeAvailable()) return undefined;
+    if (!ollamaLlmAvailable(app.providers)) return undefined;
     // Every roster agent works through tools — reads, edits, world queries — so a model the
     // runtime says cannot call them would take the session and fail its first turn. Nor is a
     // model whose tool support was not confirmed chosen
