@@ -618,7 +618,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
     if (sheet?.type === "location") return "plate";
     const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
     const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
-    return look === undefined ? null : `look · ${lookTileLabel(look.prompt, look.kind)}`;
+    return look === undefined ? null : `look · ${(look.name ?? lookTileLabel(look.prompt, look.kind))}`;
   };
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];

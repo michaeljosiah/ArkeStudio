@@ -89,7 +89,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "resume-character-voice-sample": "studio", "prepare-character-voice-sample": "studio", "accept-character-voice-sample": "studio",
   "clear-character-voice-sample": "studio", "withdraw-character-voice-sample": "studio", "generate-character-voice-sample": "studio",
   "generate-character-sheet": "studio", "accept-character-sheet": "studio", "generate-character-looks": "studio",
-  "accept-character-look": "studio", "reject-reference-take": "studio", "promote-character-look": "studio",
+  "accept-character-look": "studio", "rename-character-look": "studio", "reject-reference-take": "studio", "promote-character-look": "studio",
   "attach-character-look": "studio", "lock-tile": "studio", "generate-missing-tiles": "studio",
   "regenerate-tile": "studio", "compile-grid": "studio", "designate-compilation": "studio",
   "set-style-override": "studio", "voice-candidates": "studio", "voice-catalogue": "studio",

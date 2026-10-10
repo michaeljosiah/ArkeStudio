@@ -100,9 +100,9 @@ function state(): ClientState {
     },
   };
 }
-const STORM_LOOK = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2S1", file: "takes/tk_storm/storm.png", kind: "costume", prompt: "Storm coat, hood up; two braids.", acceptedAt: "2026-10-03T09:00:00.000Z", framing: "full-body", closeFile: "takes/tk_close/close.png" };
+const STORM_LOOK = { name: "Storm coat", id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2S1", file: "takes/tk_storm/storm.png", kind: "costume", prompt: "Storm coat, hood up; two braids.", acceptedAt: "2026-10-03T09:00:00.000Z", framing: "full-body", closeFile: "takes/tk_close/close.png" };
 /** Her harbour coat (193d), made before the storm coat and with no close view. */
-const HARBOUR_LOOK = { id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2H1", file: "takes/tk_harbour/harbour.png", kind: "costume", prompt: "Harbour coat, brass buttons.", acceptedAt: "2026-10-02T09:00:00.000Z", framing: "full-body" };
+const HARBOUR_LOOK = { name: "Harbour coat", id: "tk_01J8Z3X4Y5Z6A7B8C9D0E1F2H1", file: "takes/tk_harbour/harbour.png", kind: "costume", prompt: "Harbour coat, brass buttons.", acceptedAt: "2026-10-02T09:00:00.000Z", framing: "full-body" };
 
 type Mounted = { container: HTMLElement; root: Root; sent: ClientMessage[]; where: () => string };
 const open: Mounted[] = [];
@@ -756,7 +756,7 @@ describe("a made picture on its block (turn 194g)", () => {
     await press(q(m, '[data-key="maren-kest"] [data-testid="picture-card-look"]'));
     await press(q(m, '[data-testid="picture-card-look-new"]'));
     assert.equal(q(m, '[data-testid="picture-card-look-menu"]'), null);
-    const sheet = dom.document.querySelector('[role="dialog"]');
+    const sheet = dom.document.querySelector("dialog.fy-newlook");
     assert.ok(sheet, "193b's sheet, drawn on the body");
     assert.match(text(sheet), /New look · Maren Kest/);
     assert.match(text(sheet), /for Chapter 7/);

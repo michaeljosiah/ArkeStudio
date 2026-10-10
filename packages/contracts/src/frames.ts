@@ -1801,12 +1801,24 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       takeId: TakeIdSchema,
+      name: z.string().trim().max(60).optional(),
       /** A close view made for a chapter's look (R-118): filed on the same look as its `closeFile`. */
       closeTakeId: TakeIdSchema.optional(),
       /** `takeId` is a close view (made by Make close view) for the accepted look with this id, not a look of its own. */
       closeFor: z.string().min(1).optional(),
       /** The chapter that asked for the look chooses it for the character in the same press (R-112). */
       choose: z.object({ productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), name: z.string().min(1).max(120).optional(), sheet: SlugSchema.optional() }).strict().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("rename-character-look"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      sheetId: SlugSchema,
+      lookId: z.string().min(1),
+      name: z.string().trim().max(60),
+      expectedName: z.string().min(1).max(60).nullable(),
     })
     .strict(),
   z

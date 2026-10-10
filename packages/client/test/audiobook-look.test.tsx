@@ -109,7 +109,7 @@ describe("the look sheet", () => {
     assert.match(text(sheet), /Maren Kest/);
     assert.match(text(bodyAll('[data-key="sereth"] [data-testid="look-unlinked"]')[0]), /Identity not linked/);
     assert.equal(bodyAll('[data-key="maren-kest"] [data-testid="look-unlinked"]').length, 0);
-    assert.match(text(sheet), /2 characters · 0 looks chosen · edited · saved\s*used by every picture in this chapter/);
+    assert.match(text(sheet), /Saved · 2 characters · 0 chosen looks/);
     assert.equal(text(bodyAll('[data-testid="look-derive"]')[0]), "Derive again");
   });
 

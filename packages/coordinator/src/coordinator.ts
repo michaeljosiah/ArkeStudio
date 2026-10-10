@@ -499,6 +499,7 @@ import {
 import { foldBlueprint } from "./harness/blueprint.js";
 import {
   acceptCharacterLook,
+  renameCharacterLook,
   acceptCharacterSheet,
   acceptLocationView,
   attachCharacterLook,
@@ -18917,6 +18918,7 @@ export class Coordinator {
           file: `takes/${take.id}/${take.media}`,
           kind: lookKind,
           prompt: lookPrompt.trim(),
+          ...(msg.name?.trim() ? { name: msg.name.trim() } : {}),
           ...(take.jobId ? { jobId: take.jobId } : {}),
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
@@ -18946,6 +18948,21 @@ export class Coordinator {
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("look", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "rename-character-look": {
+        const store = this.opts.provider.openStore?.();
+        let error: string | undefined;
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("This world is no longer open.");
+          await renameCharacterLook(store, msg.sheetId, msg.lookId, msg.name, msg.expectedName, { requestId: msg.requestId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          error = describeCoordinatorError(err);
+          // A stale rename must show the current saved name before the author retries it.
+          if (store?.worldId === msg.worldId) await this.refreshWorldSnapshot(msg.worldId).catch(() => {});
+        }
+        this.emit({ at: new Date().toISOString(), type: "reference.look-renamed", worldId: msg.worldId, sheetId: msg.sheetId, lookId: msg.lookId, requestId: msg.requestId, ...(error !== undefined ? { error } : {}) });
         return;
       }
       case "reject-reference-take": {
