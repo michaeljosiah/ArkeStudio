@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { lookViewFor, type PictureWho } from "@arke-studio/contracts";
-import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
+import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, namedInText, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
 import { buildPicturePrompt } from "../../src/productions/audiobook-picture-suggest.js";
 import type { ChapterPerson } from "../../src/productions/audiobook-look.js";
 
@@ -137,6 +137,14 @@ describe("expression named (check 7)", () => {
 });
 
 describe("the other checks", () => {
+  it("does not turn a shared surname into an off-camera relative, and still recognises familiar names", () => {
+    const mother = { name: "Lena Kest", aliases: ["Len"] };
+    assert.equal(namedInText("Close-up on Maren Kest's eyes.", mother), false);
+    assert.equal(namedInText("Close-up on Lena's eyes.", mother), true);
+    assert.equal(namedInText("Close-up on Len's eyes.", mother), true);
+    assert.equal(namedInText("Close-up on Lena Kest's eyes.", mother), true);
+  });
+
   it("shows a garment no look line and no word of the block gives as invented", () => {
     const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} A lace-trimmed agbada hangs behind her.` }, EYES_BLOCK);
     assert.equal(checks["garments"]!.ok, false);

@@ -11,7 +11,7 @@ import {
   type PictureWho,
 } from "@arke-studio/contracts";
 import { clip } from "./audiobook-direction.js";
-import { nameAt, personIdentity, resolveChapterPerson, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
+import { personIdentity, resolveChapterPerson, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
 
 /**
  * The picture brief (design turn 193k, SPEC-047 R-120, R-121): the instruction the writing service
@@ -211,9 +211,11 @@ export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place" 
 // The seven checks (rule 14, R-121)
 // ---------------------------------------------------------------------------
 
-/** Whether a person is named in words: their whole name, or their first name where it is a name of its own. */
-export function namedInText(text: string, person: Pick<ChapterPerson, "name">): boolean {
-  if (nameAt(text, person.name) >= 0) return true;
+/** Whether a person is named: a full name, familiar name or given name, never a shared surname alone. */
+export function namedInText(text: string, person: Pick<ChapterPerson, "name" | "aliases">): boolean {
+  const contains = (name: string): boolean => name !== "" && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
+  // Relatives are identity context too; mentioning one person's surname cannot place the family.
+  if ([person.name, ...(person.aliases ?? [])].some(contains)) return true;
   // "Maren" for Maren Kest, as written with its capital: never a title or an article ("The Chorister").
   const first = person.name.trim().split(/\s+/)[0] ?? "";
   if (first.length < 3 || first === person.name.trim() || TITLES.has(first.toLowerCase()) || !/^\p{Lu}/u.test(first)) return false;
