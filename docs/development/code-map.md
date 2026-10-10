@@ -167,6 +167,11 @@ See [running the standalone server](standalone-server.md) and coordinator
 
 Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
 
+Chapter-list entry remembers each chapter's last Manuscript/Audiobook/Timing view for the app
+session through client `lib/chapter-view.ts`, keyed by world, production and chapter. An explicit
+`view` query takes precedence. This is client navigation state, never a world write or a read
+request (approved turn 209, SPEC-047 R-179); the route regression is in `test/chapter-workspace.test.tsx`.
+
 For an unfamiliar feature, search its visible label in client source, follow the store helper's message kind into contracts and the coordinator switch, then follow the domain operation. Search the emitted event back into the client store. Use nearby tests to discover fixtures and failure cases.
 
 The remote gateway also advertises client `public/manifest.webmanifest` for home-screen
