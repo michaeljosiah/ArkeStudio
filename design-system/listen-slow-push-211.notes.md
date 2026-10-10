@@ -1,7 +1,7 @@
-# Listen Slow push — proposed turn 211
+# Listen Slow push — approved turn 211
 
-**Design only, awaiting owner approval.** Open the [focused HTML review](listen-slow-push-211.review.html)
-or [master turn 211](Arke%20Studio.dc.html#t211). No product implementation is included.
+**Owner approved on 2026-10-10; implemented by PR #1700.** Open the [focused HTML review](listen-slow-push-211.review.html)
+or [master turn 211](Arke%20Studio.dc.html#t211). The drawings remain the approved reference.
 
 The current shared player is the baseline, including its contained picture, phone 62% image
 area, transport, Text, Chapters, sleep timer and Close. A labelled **Slow push · On / Off**
@@ -14,7 +14,7 @@ avoids adding another item to the phone's already variable-width Speed / Sleep /
 - The existing 6% video-export movement follows the saved focus, over the picture's whole hold.
   Pause, seek, playback speed and buffering use the narration's clock.
 - The fitted picture rectangle and its letterbox area stay fixed. The optional push crops up
-  to 6% inside that rectangle; Off shows the whole image. This is an explicit proposed exception
+  to 6% inside that rectangle; Off shows the whole image. This is an explicit approved exception
   to SPEC-047 R-69's never-cropped stills, not a change to cover-fill framing.
 - Clips and their fallback stills receive no extra transform. Cover/poster images stay static.
 - The same shared module serves Listen and newly exported HTML players. Preferences are local
@@ -35,16 +35,12 @@ The standalone review's **Try it** section runs a real muted audio element conta
 seconds of silence. Its time drives the prototype image transform; Play, Pause, scrub, speed,
 start/end comparison, OS-preference simulation and saved-choice reset are inspectable. It has
 no application connection, private manuscript, model request, media write or charge. The image
-is the repository's public Undersong harbour illustration. The proposal's production behavior
+is the repository's public Undersong harbour illustration. The approved behavior
 is recorded in the master rules; a design prototype is not an implementation acceptance test.
 
 ## Source and validation
 
-Read live SPEC-047 R-66–R-74, R-134–R-136 and R-183; the reserved R-75 follow-up already names
-slow push. Current `audiobook-player.js` preserves only source/motion identity in its typed input,
-so implementation must carry picture hold and focus through that seam. Current
-`DEFAULT_VIDEO_OPTIONS.slowPush` is true and `VIDEO_PUSH` is 0.06. The shared player currently
-shows a static still; MP4 behavior alone does not implement Listen.
+SPEC-047 R-75 records the approved behavior. The shared player now receives each picture’s exact hold and optional focus from the app and HTML package mapper; old package inputs derive a hold from the next picture or chapter end. Still movement follows the audio clock. MP4 behavior remains independent.
 
 Regenerate with `node design-system/listen-slow-push-211.mjs`, then
 `node design-system/check-master.mjs --record` and `node design-system/build-review.mjs`.
@@ -56,6 +52,8 @@ Reduced-motion precedence, no surprise restart, deliberate On and a 320px phone 
 End of chapter sleep label. Screenshots and `render-report.json` are local review artifacts;
 the installed app was never used. These are design checks, not product acceptance tests.
 
-After approval, amend the live requirement, implement once in the shared player, and validate
-clock/preference/accessibility behavior plus literal master/actual paired renders. No new world
-schema field, paid generation or player UI beyond this turn is proposed.
+Implementation validation includes native shared-player and exporter-template renders, the six literal master/actual pairs, keyboard switch operation, saved Off, actual MediaQueryList change events in both directions and a scrollable Text region at 320px/200% text. The enlarged-text repair keeps Text between the switch and transport. Existing enlarged timer-row overflow is tracked in [issue #1701](https://github.com/michaeljosiah/ArkeStudio/issues/1701); no broad transport redesign is included.
+
+The comparison records retained differences rather than claiming full-screen pixel identity: existing active Text styling, small baseline transport/line-height and icon differences, and the offline package’s existing system-font fallback. The approved static drawing uses an illustrative 1.03× crop; the implemented example at 6:06 follows its exact 24%→66% picture hold, about 1.0257×. Frame 211e draws a poster; the implementation uses a real sanitized fixture clip. All new switch positions and minimum hit areas match.
+
+No new world schema, provider call, model download or installed-app change is part of this implementation.

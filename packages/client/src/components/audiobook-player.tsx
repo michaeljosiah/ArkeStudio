@@ -41,7 +41,7 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
     ...(chapter.mix !== undefined ? { audio: [{ src: src(chapter.mix.file), at: 0, seconds: chapter.mix.seconds }] } : {}),
     blocks: chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, src: src(block.file), sentences: block.sentences })),
     gaps: chapter.gaps,
-    pictures: chapter.pictures.map((picture) => ({ at: picture.at, src: src(picture.file), ...(picture.motion !== undefined ? { motion: { src: src(picture.motion.file), seconds: picture.motion.seconds, behavior: picture.motion.behavior } } : {}), ...(picture.motionProblem !== undefined ? { motionProblem: picture.motionProblem } : {}) })),
+    pictures: chapter.pictures.map((picture) => ({ at: picture.at, seconds: picture.seconds, src: src(picture.file), ...(picture.focus !== undefined ? { focus: picture.focus } : {}), ...(picture.motion !== undefined ? { motion: { src: src(picture.motion.file), seconds: picture.motion.seconds, behavior: picture.motion.behavior } } : {}), ...(picture.motionProblem !== undefined ? { motionProblem: picture.motionProblem } : {}) })),
     opening: chapter.opening === null ? null : src(chapter.opening),
   }));
 }

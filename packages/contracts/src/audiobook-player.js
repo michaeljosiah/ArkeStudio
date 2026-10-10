@@ -15,7 +15,8 @@
  * The listener's place is kept on this device only, by the block it is in and how far into it —
  * never by the chapter's clock alone, which moves whenever a block before it is made — so a place
  * kept while a chapter was half read opens where it was once the rest is read. The speed, the
- * sleep choice and Text are kept beside it.
+ * sleep choice, Text and Slow push choice are kept beside it. Slow push (turn 211, SPEC-047 R-75)
+ * follows that same audio clock, within the contained still, and respects system Reduced motion.
  */
 
 /**
@@ -59,6 +60,7 @@ export function mountAudiobookPlayer(root, options) {
   function normalise(list) {
     return (list || []).map((c) => {
       const audio = (c.audio && c.audio.length > 0 ? c.audio : (c.blocks || []).map((b) => ({ src: b.src, at: b.at, seconds: b.seconds }))).filter((a) => a.src && a.seconds > 0);
+      const pictures = (c.pictures || []).slice().sort((a, b) => a.at - b.at);
       return {
         id: c.id,
         order: c.order,
@@ -68,7 +70,11 @@ export function mountAudiobookPlayer(root, options) {
         audio,
         blocks: c.blocks || [],
         gaps: c.gaps || [],
-        pictures: (c.pictures || []).slice().sort((a, b) => a.at - b.at),
+        pictures: pictures.map((picture, index) => ({
+          ...picture,
+          seconds: Number.isFinite(picture.seconds) && picture.seconds > 0
+            ? picture.seconds : Math.max(0, (pictures[index + 1] ? pictures[index + 1].at : c.seconds || 0) - picture.at),
+        })),
         opening: c.opening || null,
       };
     });
@@ -93,12 +99,15 @@ export function mountAudiobookPlayer(root, options) {
   let speed = SPEEDS.includes(kept.speed) ? kept.speed : 1;
   let sleep = SLEEPS.includes(kept.sleep) ? kept.sleep : "off";
   let textOn = kept.text === true;
+  // Only an explicit choice is persisted. An OS override never replaces the listener's choice.
+  let slowPushChoice = typeof kept.slowPush === "boolean" ? kept.slowPush : null;
+  let pushHeld = false;
   /** Where the listener is: a chapter, a block in it and how far in; `at` is the clock when the block is gone. */
   let saved = kept.place && typeof kept.place.chapterId === "string" ? kept.place : null;
   function save() {
     if (!KEY) return;
     try {
-      win.localStorage.setItem(KEY, JSON.stringify({ place: saved, speed, sleep, text: textOn }));
+      win.localStorage.setItem(KEY, JSON.stringify({ place: saved, speed, sleep, text: textOn, ...(slowPushChoice !== null ? { slowPush: slowPushChoice } : {}) }));
     } catch {
       // A full or refused storage keeps nothing; the player plays on regardless.
     }
@@ -179,6 +188,9 @@ export function mountAudiobookPlayer(root, options) {
 .abp [hidden]{display:none!important}
 .abp-pic{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;opacity:0;transition:opacity 1s ease}
 .abp-pic.on{opacity:1}
+.abp-still{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.abp-still-window{position:relative;overflow:hidden;width:100%;height:100%}
+.abp-still .abp-pic{position:relative;inset:auto;width:100%;height:100%;object-fit:contain;transform-origin:50% 50%}
 .abp-clipnote{position:absolute;left:24px;top:76px;color:white;font-size:12px;z-index:2}
 .abp-scrim-top{position:absolute;left:0;right:0;top:0;height:160px;background:linear-gradient(to bottom,color-mix(in srgb,var(--abp-bg) 72%,transparent),transparent);pointer-events:none}
 .abp-scrim-bot{position:absolute;left:0;right:0;bottom:0;height:330px;background:linear-gradient(to top,color-mix(in srgb,var(--abp-bg) 90%,transparent) 12%,transparent);pointer-events:none}
@@ -190,6 +202,16 @@ export function mountAudiobookPlayer(root, options) {
 .abp-ib:hover,.abp-ib:focus-visible,.abp-ib[aria-pressed="true"],.abp-lab:hover,.abp-lab:focus-visible{background:color-mix(in srgb,var(--abp-fg) 14%,transparent)!important}
 .abp-ib:disabled{opacity:.35;cursor:default}
 .abp-lab{height:40px;flex:none;border-radius:999px;display:inline-flex!important;align-items:center;gap:7px;padding:0 14px 0 12px!important;font-weight:500;white-space:nowrap}
+.abp-push{min-height:44px;flex:none;border-radius:999px;display:inline-flex!important;align-items:center;gap:9px;padding:0 13px!important;border:1px solid color-mix(in srgb,var(--abp-fg) 33%,transparent)!important;background:color-mix(in srgb,var(--abp-bg) 50%,transparent)!important;font-size:var(--text-sm,13px)!important;font-weight:500!important;margin-right:12px}
+.abp-push:hover{background:color-mix(in srgb,var(--abp-fg) 14%,var(--abp-bg))!important}
+.abp-push b{font-size:var(--text-xs,12px);font-weight:500;min-width:18px}
+.abp-push i{width:28px;height:17px;position:relative;display:block;background:var(--abp-fg);border-radius:12px}
+.abp-push i:after{content:"";position:absolute;top:3px;left:14px;width:11px;height:11px;border-radius:50%;background:var(--abp-bg)}
+.abp-push[aria-checked="false"] i{background:color-mix(in srgb,var(--abp-fg) 32%,transparent)}
+.abp-push[aria-checked="false"] i:after{left:3px;background:var(--abp-fg)}
+.abp-push:disabled{cursor:default;opacity:.78}
+.abp-push:focus-visible{outline:2px solid var(--abp-fg);outline-offset:3px}
+.abp-pushnote{position:absolute;right:158px;top:76px;margin:0;font-size:var(--text-xs,12px);color:color-mix(in srgb,var(--abp-fg) 80%,transparent)}
 .abp-follow{position:absolute;left:50%;transform:translateX(-50%);bottom:170px;width:860px;max-width:calc(100% - 64px);text-align:center;font-size:var(--text-xl,22px);line-height:1.5;text-wrap:pretty}
 .abp-follow .now{color:var(--abp-fg)}
 .abp-follow .rest{color:color-mix(in srgb,var(--abp-fg) 55%,transparent)}
@@ -215,7 +237,8 @@ export function mountAudiobookPlayer(root, options) {
 @keyframes abp-rest{to{opacity:0}}
 .abp.abp-wake[data-mode="playing"]:not([data-paused]):not([data-sheet]) .abp-chrome{animation:abp-rest .35s ease 2.5s forwards}
 .abp[data-mode="playing"]:not([data-paused]):not([data-sheet]):not(.abp-wake) .abp-chrome{opacity:0}
-.abp[data-mode="poster"] .abp-bar,.abp[data-mode="poster"] .abp-top,.abp[data-mode="poster"] .abp-follow{display:none}
+.abp:has(:focus-visible) .abp-chrome{opacity:1!important;animation:none!important}
+.abp[data-mode="poster"] .abp-bar,.abp[data-mode="poster"] .abp-top,.abp[data-mode="poster"] .abp-follow,.abp[data-mode="poster"] .abp-pushnote{display:none}
 .abp-sheet{position:absolute;right:24px;top:84px;max-height:calc(100% - 264px);width:420px;max-width:calc(100% - 48px);border-radius:18px;padding:18px 0;display:flex;flex-direction:column;background:color-mix(in srgb,var(--abp-bg) 58%,transparent);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);border:1px solid color-mix(in srgb,var(--abp-fg) 20%,transparent)}
 .abp-sheet h4{margin:0 20px 10px;font-size:var(--text-2xs,11px);font-weight:500;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--abp-fg) 68%,transparent)}
 .abp-list{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
@@ -236,12 +259,15 @@ export function mountAudiobookPlayer(root, options) {
 .abp-btn>i>b{display:block;height:100%;background:var(--abp-bg)}
 @media (max-width:599px){
 .abp-pic{height:62%;bottom:auto}
+.abp-still{height:62%;bottom:auto}
 .abp-scrim-top{display:none}
 .abp-scrim-bot{height:520px}
 .abp-top{left:20px;right:12px;top:18px}
+.abp-push{position:absolute;left:0;top:70px;margin:0}
+.abp-pushnote{top:139px;left:20px;right:20px}
 .abp-text-top,.abp-long{display:none!important}
 .abp-text-lab{display:inline-flex!important}
-.abp-follow{width:auto;left:20px;right:20px;transform:none;bottom:290px;font-size:var(--text-md,16px)}
+.abp-follow{width:auto;left:20px;right:20px;transform:none;bottom:290px;max-height:max(0px,calc(100% - 470px));overflow:auto;overscroll-behavior:contain;font-size:var(--text-md,16px)}
 .abp-bar{left:20px;right:20px;bottom:40px}
 .abp-transport{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"now . len" "ctl ctl ctl" "labs labs labs";row-gap:18px}
 .abp-transport>.abp-grow{display:none}
@@ -257,15 +283,18 @@ export function mountAudiobookPlayer(root, options) {
 
   root.classList.add("abp");
   root.tabIndex = 0;
+  const pushNoteId = "abp-push-note-" + Math.random().toString(36).slice(2);
   root.innerHTML =
     "<style>" + css + "</style>" +
-    '<img class="abp-pic" data-ref="picA" alt=""><video class="abp-pic" data-ref="clipA" muted playsinline preload="auto"></video><img class="abp-pic" data-ref="picB" alt=""><video class="abp-pic" data-ref="clipB" muted playsinline preload="auto"></video><span class="abp-clipnote" data-ref="clipNote" role="status"></span>' +
+    '<div class="abp-still"><div class="abp-still-window"><img class="abp-pic" data-ref="picA" alt=""></div></div><video class="abp-pic" data-ref="clipA" muted playsinline preload="auto"></video><div class="abp-still"><div class="abp-still-window"><img class="abp-pic" data-ref="picB" alt=""></div></div><video class="abp-pic" data-ref="clipB" muted playsinline preload="auto"></video><span class="abp-clipnote" data-ref="clipNote" role="status"></span>' +
     '<div class="abp-scrim-top abp-chrome"></div><div class="abp-scrim-bot abp-chrome"></div>' +
     '<div class="abp-top abp-chrome"><div class="abp-title"><div class="abp-eyebrow" data-ref="eyebrow"></div><div class="abp-chap" data-ref="chap"></div></div>' +
+    '<button type="button" class="abp-push" data-act="slow-push" data-ref="pushBtn" role="switch" aria-label="Slow push" aria-checked="true" title="A gentle move closer on still pictures. Kept on this device."><span>Slow push</span><i aria-hidden="true"></i><b>On</b></button>' +
     '<button type="button" class="abp-ib abp-text-top" data-act="text" data-ref="textTop" aria-label="Text" title="Text">' + icon(I.text) + "</button>" +
     '<button type="button" class="abp-ib" data-act="chapters" data-ref="chaptersBtn" aria-label="Chapters" title="Chapters">' + icon(I.list) + "</button>" +
     (options.onClose ? '<button type="button" class="abp-ib" data-act="close" aria-label="Close" title="Close">' + icon(I.x) + "</button>" : "") +
     "</div>" +
+    '<p class="abp-pushnote abp-chrome" data-ref="pushNote" id="' + pushNoteId + '" role="status" hidden></p>' +
     '<div class="abp-follow" data-ref="follow" aria-live="polite" hidden></div>' +
     '<div class="abp-sheet" data-ref="sheet" role="dialog" aria-label="Chapters" hidden></div>' +
     '<div class="abp-poster" data-ref="poster" hidden></div>' +
@@ -298,7 +327,11 @@ export function mountAudiobookPlayer(root, options) {
     chaptersBtn: ref("chaptersBtn"), follow: ref("follow"), sheet: ref("sheet"), poster: ref("poster"), track: ref("track"),
     line: ref("line"), now: ref("now"), len: ref("len"), toggle: ref("toggle"), prevBtn: ref("prevBtn"), nextBtn: ref("nextBtn"),
     speedBtn: ref("speedBtn"), sleepBtn: ref("sleepBtn"), book: ref("book"), of: ref("of"), left: ref("left"),
+    pushBtn: ref("pushBtn"), pushNote: ref("pushNote"),
   };
+  const bar = root.querySelector(".abp-bar");
+  const title = root.querySelector(".abp-title");
+  const top = root.querySelector(".abp-top");
   const players = [ref("a0"), ref("a1")];
   let cur = 0;
   /** Which of the chapter's audio each element holds: an index, or -1. */
@@ -312,6 +345,60 @@ export function mountAudiobookPlayer(root, options) {
   const clipFadeUntil = [0, 0];
   const clipFailures = new Set();
   const reducedMotion = win.matchMedia ? win.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  let wasReduced = Boolean(reducedMotion && reducedMotion.matches);
+  let pictureTick = null;
+  let destroyed = false;
+  const stillFailures = new Set();
+  const pushOn = () => (slowPushChoice === null || slowPushChoice) && !pushHeld && !(reducedMotion && reducedMotion.matches);
+  function readReducedMotion() {
+    const reduced = Boolean(reducedMotion && reducedMotion.matches);
+    if (wasReduced && !reduced) pushHeld = true;
+    wasReduced = reduced;
+    return reduced;
+  }
+  const onReducedMotion = () => render();
+  reducedMotion?.addEventListener?.("change", onReducedMotion);
+
+  // Crop only within the original contain rectangle: the surrounding letterbox never moves.
+  function fitStill(image) {
+    const window = image.parentElement;
+    const area = window.parentElement;
+    if (!(image.naturalWidth > 0 && image.naturalHeight > 0 && area.clientWidth > 0 && area.clientHeight > 0)) return;
+    const scale = Math.min(area.clientWidth / image.naturalWidth, area.clientHeight / image.naturalHeight);
+    window.style.width = image.naturalWidth * scale + "px";
+    window.style.height = image.naturalHeight * scale + "px";
+  }
+  function fitText() {
+    if (!(root.clientWidth > 0 && root.clientHeight > 0)) return;
+    if (root.clientWidth < 600) {
+      const bounds = root.getBoundingClientRect();
+      el.pushBtn.style.top = Math.max(70, title.getBoundingClientRect().bottom - top.getBoundingClientRect().top + 16) + "px";
+      const pushBottom = el.pushBtn.getBoundingClientRect().bottom - bounds.top;
+      el.pushNote.style.top = pushBottom + 7 + "px";
+      const textTop = Math.max(180, (el.pushNote.hidden ? pushBottom : el.pushNote.getBoundingClientRect().bottom - bounds.top) + 24);
+      // Enlarged Text stays between the new switch and the existing transport; its words scroll.
+      const bottom = Math.max(290, bounds.bottom - bar.getBoundingClientRect().top + 24);
+      el.follow.style.bottom = bottom + "px";
+      el.follow.style.maxHeight = Math.max(0, root.clientHeight - bottom - textTop) + "px";
+      el.follow.tabIndex = el.follow.scrollHeight > el.follow.clientHeight ? 0 : -1;
+    } else {
+      el.follow.style.bottom = ""; el.follow.style.maxHeight = ""; el.follow.removeAttribute("tabindex");
+      el.pushBtn.style.top = ""; el.pushNote.style.top = "";
+    }
+  }
+  const fitStills = () => { for (const image of el.pics) fitStill(image); fitText(); };
+  const onStillLoad = (event) => {
+    stillFailures.delete(event.target.getAttribute("src"));
+    fitStill(event.target); updateStillPush(pictureClock()); schedulePictureTick();
+  };
+  const onStillError = (event) => { stillFailures.add(event.target.getAttribute("src")); updateStillPush(t); };
+  for (const image of el.pics) { image.addEventListener("load", onStillLoad); image.addEventListener("error", onStillError); }
+  const resizeObserver = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(fitStills) : null;
+  resizeObserver?.observe(root);
+  resizeObserver?.observe(bar);
+  resizeObserver?.observe(title);
+  resizeObserver?.observe(el.pushNote);
+  win.addEventListener?.("resize", fitStills);
   const onClipError = (event) => {
     const index = clips.indexOf(event.target);
     if (index < 0) return;
@@ -459,6 +546,7 @@ export function mountAudiobookPlayer(root, options) {
     render();
   }
   function pause() {
+    t = pictureClock();
     playing = false;
     lastTick = null;
     quietPause(players[cur]);
@@ -543,6 +631,7 @@ export function mountAudiobookPlayer(root, options) {
     // A headset, the lock screen or the system paused or played the element itself.
     const now = !players[cur].paused;
     if (now !== playing) {
+      if (!now) t = pictureClock();
       playing = now;
       lastTick = now ? clockNow() : null;
       render();
@@ -564,6 +653,45 @@ export function mountAudiobookPlayer(root, options) {
     for (const picture of c.pictures) if (picture.at <= at + 1e-6) found = picture;
     return found || { at: 0, src: c.opening || options.cover || null };
   }
+  /** Read the media clock, never elapsed wall time: buffering and a paused element cannot drift. */
+  function pictureClock() {
+    const c = chapter();
+    const piece = c && c.audio[segIndex];
+    const audio = players[cur];
+    return playing && piece && !pending.has(audio) && Number.isFinite(audio.currentTime)
+      ? Math.min(c.seconds, piece.at + Math.max(0, audio.currentTime)) : t;
+  }
+  function canPush(picture) {
+    return pushOn() && mode === "playing" && picture && picture.src && picture.seconds > 0 &&
+      !picture.motion && !picture.motionProblem && !stillFailures.has(picture.src);
+  }
+  function updateStillPush(at) {
+    for (let index = 0; index < el.pics.length; index++) {
+      const image = el.pics[index];
+      const picture = clipPictures[index];
+      const eligible = canPush(picture);
+      const focus = picture && picture.focus;
+      const share = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
+      image.style.transformOrigin = share(focus && focus.x) * 100 + "% " + share(focus && focus.y) * 100 + "%";
+      // Each fading layer retains its own interval, including when two entries reuse one image.
+      const progress = eligible ? Math.max(0, Math.min(1, (at - picture.at) / picture.seconds)) : 0;
+      image.style.transform = eligible ? "scale(" + (1 + 0.06 * progress) + ")" : "none";
+    }
+  }
+  function schedulePictureTick() {
+    if (!playing || destroyed || !clipPictures.some((picture, index) => canPush(picture) && (index === shown || Date.now() < clipFadeUntil[index]))) {
+      if (pictureTick !== null) win.cancelAnimationFrame?.(pictureTick);
+      pictureTick = null;
+      return;
+    }
+    if (pictureTick !== null || typeof win.requestAnimationFrame !== "function") return;
+    pictureTick = win.requestAnimationFrame(() => {
+      pictureTick = null;
+      if (destroyed) return;
+      updateStillPush(pictureClock());
+      schedulePictureTick();
+    });
+  }
   function showPicture(picture) {
     const key = (chapter() ? chapter().id : "") + "|" + JSON.stringify(picture);
     if (key !== shownKey) {
@@ -581,6 +709,7 @@ export function mountAudiobookPlayer(root, options) {
       if (picture.motion) clips[next].setAttribute("src", picture.motion.src);
       else clips[next].removeAttribute("src");
       shown = next;
+      fitStill(incoming);
       syncSession();
     }
     // The audio is the clock even after seeking, changing speed, or a repeat boundary.
@@ -601,6 +730,8 @@ export function mountAudiobookPlayer(root, options) {
       else clip.pause?.();
     }
     ref("clipNote").textContent = picture.motionProblem || (picture.motion && clipFailures.has(picture.motion.src) ? "clip unavailable · showing the still" : "");
+    updateStillPush(t);
+    schedulePictureTick();
   }
   function sentenceAt(c, at) {
     const block = blockAt(c, at);
@@ -701,6 +832,15 @@ export function mountAudiobookPlayer(root, options) {
     el.sleepBtn.setAttribute("aria-label", sleep === "off" ? "Sleep timer" : sleep === "chapter" ? "End of chapter" : sleep + " min");
     el.textTop.setAttribute("aria-pressed", String(textOn));
     el.textLab.setAttribute("aria-pressed", String(textOn));
+    // A media render can observe the preference before the browser dispatches its change event.
+    const reduced = readReducedMotion();
+    el.pushBtn.disabled = reduced;
+    el.pushBtn.setAttribute("aria-checked", String(pushOn()));
+    el.pushBtn.querySelector("b").textContent = pushOn() ? "On" : "Off";
+    el.pushNote.hidden = !reduced && !pushHeld;
+    el.pushNote.textContent = reduced ? "Off for Reduced motion" : pushHeld ? "Motion is allowed · turn On when ready" : "";
+    if (el.pushNote.hidden) el.pushBtn.removeAttribute("aria-describedby");
+    else el.pushBtn.setAttribute("aria-describedby", pushNoteId);
     el.now.textContent = time(t);
     el.len.textContent = time(c ? c.seconds : 0);
     const book = bookLine();
@@ -712,6 +852,7 @@ export function mountAudiobookPlayer(root, options) {
     renderSheet();
     renderPoster();
     showPicture(c ? pictureAt(c, t) : { at: 0, src: options.cover || null });
+    fitText();
     syncSession();
     syncPosition();
   }
@@ -815,6 +956,12 @@ export function mountAudiobookPlayer(root, options) {
       textOn = !textOn;
       save();
       render();
+    } else if (name === "slow-push") {
+      if (reducedMotion && reducedMotion.matches) return;
+      slowPushChoice = !pushOn();
+      pushHeld = false;
+      save();
+      render();
     } else if (name === "chapters") {
       sheetOpen = !sheetOpen;
       render();
@@ -856,6 +1003,7 @@ export function mountAudiobookPlayer(root, options) {
       return;
     }
     if (mode === "poster") return;
+    if (event.target === el.follow && event.key !== "k" && event.key !== "K") return;
     const onButton = event.target && event.target.tagName === "BUTTON";
     if ((event.key === " " && !onButton) || event.key === "k" || event.key === "K") {
       if (event.preventDefault) event.preventDefault();
@@ -971,6 +1119,13 @@ export function mountAudiobookPlayer(root, options) {
       if (playing) pause();
     },
     destroy() {
+      destroyed = true;
+      if (pictureTick !== null) win.cancelAnimationFrame?.(pictureTick);
+      pictureTick = null;
+      reducedMotion?.removeEventListener?.("change", onReducedMotion);
+      resizeObserver?.disconnect();
+      win.removeEventListener?.("resize", fitStills);
+      for (const image of el.pics) { image.removeEventListener("load", onStillLoad); image.removeEventListener("error", onStillError); }
       for (const clip of clips) { clip.removeEventListener("error", onClipError); clip.pause?.(); clip.removeAttribute("src"); }
       for (const audio of players) {
         audio.removeEventListener("ended", onEnded);

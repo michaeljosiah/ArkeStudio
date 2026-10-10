@@ -269,6 +269,7 @@ describe("the audiobook as the player (turn 186e)", () => {
       await read(send, "01-neap");
       await read(send, "02-the-same-ink", ["title", "p0.0"]);
       await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "artifacts/board-v2.png", source: "scenes" }, requestId: REQUEST });
+      await send({ kind: "set-audiobook-picture-focus", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", focus: { x: 0.72, y: 0.31 }, requestId: REQUEST });
       const result = await exportPlayer(send, events);
       assert.ok(result.ok, JSON.stringify(result));
       assert.equal(result.chapters, 1, "the chapter read in part stays out");
@@ -277,13 +278,16 @@ describe("the audiobook as the player (turn 186e)", () => {
       const dir = join(worldDir, result.dir);
       const page = await readFile(join(dir, "player.html"), "utf8");
       assert.match(page, /function mountAudiobookPlayer\(root, options\)/, "the app's own player, inlined");
-      const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as { kind: string; chapters: Array<{ id: string; audio: Array<{ src: string }>; blocks: unknown[]; pictures: Array<{ src: string }>; opening: string | null }>; files: Array<{ file: string }> };
+      const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as { kind: string; chapters: Array<{ id: string; audio: Array<{ src: string }>; blocks: unknown[]; pictures: Array<{ src: string; at: number; seconds: number; focus?: { x: number; y: number } }>; opening: string | null }>; files: Array<{ file: string }> };
       assert.equal(manifest.kind, "audiobook");
       assert.deepEqual(manifest.chapters.map((chapter) => chapter.id), ["neap"]);
       const neap = manifest.chapters[0]!;
       assert.equal(neap.audio.length, neap.blocks.length, "a piece a take");
       assert.ok(neap.audio.every((piece) => existsSync(join(dir, piece.src))));
       assert.equal(neap.pictures.length, 1);
+      assert.deepEqual(neap.pictures[0]!.focus, { x: 0.72, y: 0.31 }, "the shared package retains the focus used in Listen");
+      const currentPlan = AudiobookListeningSchema.parse((await listen(send, events)).listening);
+      assert.equal(neap.pictures[0]!.seconds, currentPlan.chapters[0]!.pictures[0]!.seconds, "the package retains the exact picture hold");
       assert.ok(neap.opening !== null && existsSync(join(dir, neap.opening)), "the cover at the start");
       assert.equal(existsSync(join(worldDir, ".staging", "audiobook-export")) ? (await readdir(join(worldDir, ".staging", "audiobook-export"))).length : 0, 0, "nothing left staged");
 
@@ -291,6 +295,32 @@ describe("the audiobook as the player (turn 186e)", () => {
       const listed = events.filter((e): e is Packages => e.type === "web-packages.listed").at(-1);
       assert.deepEqual(listed?.packages.map((entry) => [entry.kind, entry.productionId, entry.dir]), [["audiobook", LEDGER, result.dir]]);
     }));
+
+  it("refuses a package if picture focus changes while its media is being staged", () => {
+    let blockExport = false;
+    let entered!: () => void;
+    let release!: () => void;
+    const staging = new Promise<void>((resolve) => (entered = resolve));
+    const proceed = new Promise<void>((resolve) => (release = resolve));
+    const ffmpeg: FfmpegRunner = { slateFont: "", run: async (args) => {
+      if (blockExport) { entered(); await proceed; }
+      await writeFile(args[args.length - 1]!, "audio");
+    } };
+    return withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      await send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", picture: { file: "artifacts/board-v2.png", source: "scenes" }, requestId: REQUEST });
+      blockExport = true;
+      const exporting = exportPlayer(send, events);
+      await staging;
+      try {
+        await send({ kind: "set-audiobook-picture-focus", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p1.0", focus: { x: 0.1, y: 0.9 }, requestId: REQUEST });
+      } finally { release(); }
+      const result = await exporting;
+      assert.equal(result.ok, false, "stale focus cannot be delivered as the current plan");
+      if (!result.ok) assert.match(result.blockers.join(" "), /changed/);
+      assert.equal(existsSync(join(worldDir, ".staging", "audiobook-export")) ? (await readdir(join(worldDir, ".staging", "audiobook-export"))).length : 0, 0);
+    }, { ffmpeg });
+  });
 
   it("joins each chapter's takes into one file where this machine has ffmpeg", () => {
     const calls: string[][] = [];

@@ -13,12 +13,31 @@ const dom = parseHTML("<!doctype html><html><body></body></html>");
 /** Every source an element was told to play, in order. */
 const started: string[] = [];
 const store = new Map<string, string>();
+const motionListeners = new Set<() => void>();
+const frames = new Map<number, FrameRequestCallback>();
+let frameId = 0;
+let reduced = false;
+let disconnectedObservers = 0;
+const motionQuery = {
+  get matches() { return reduced; },
+  addEventListener: (_: string, listener: () => void) => void motionListeners.add(listener),
+  removeEventListener: (_: string, listener: () => void) => void motionListeners.delete(listener),
+};
+function reduceMotion(value: boolean) { reduced = value; for (const listener of motionListeners) listener(); }
+function paint() { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(wall); }
 const session: { metadata: { title: string; album: string; artwork: Array<{ src: string }> } | null; handlers: Map<string, ((details?: unknown) => void) | null>; positions: unknown[]; playbackState?: string } = {
   metadata: null,
   handlers: new Map(),
   positions: [],
 };
 Object.assign(dom.window, {
+  matchMedia: () => motionQuery,
+  requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++frameId, callback); return frameId; },
+  cancelAnimationFrame: (id: number) => void frames.delete(id),
+  ResizeObserver: class {
+    observe() {}
+    disconnect() { disconnectedObservers++; }
+  },
   localStorage: {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => void store.set(key, value),
@@ -131,6 +150,163 @@ afterEach(() => {
   session.metadata = null;
   session.handlers.clear();
   session.positions = [];
+  reduced = false;
+  motionListeners.clear();
+  frames.clear();
+});
+
+describe("Slow push in the shared player (turn 211, R-75)", () => {
+  const pictureBook = (pictures: AudiobookPlayerChapter["pictures"] = [{ at: 0, seconds: 40, src: "still.png", focus: { x: 0.7, y: 0.4 } }]): AudiobookPlayerChapter => ({
+    id: "push", order: 1, title: "The harbour", state: "read", seconds: 40,
+    blocks: [take("whole", 0, 40)], gaps: [], pictures, opening: "cover.png",
+  });
+  const scale = (p: ReturnType<typeof mount>) => p.q("img.on")?.style.transform;
+
+  it("starts on and follows the media clock through pause, buffering, speed and seeks", () => {
+    const p = mount({ chapters: [pictureBook()] });
+    assert.equal(p.q('[role="switch"]')?.getAttribute("aria-checked"), "true");
+    assert.equal(scale(p), "scale(1)");
+    p.at(20);
+    assert.equal(scale(p), "scale(1.03)");
+    assert.equal(p.q("img.on")?.style.transformOrigin, "70% 40%");
+    wall += 30_000; paint();
+    assert.equal(scale(p), "scale(1.03)", "wall time alone cannot move a buffered picture");
+    p.press("Speed"); paint();
+    assert.equal(scale(p), "scale(1.03)", "speed changes do not restart or jump the crop");
+    const audio = p.playingAudio()!;
+    audio.currentTime = 25; paint();
+    assert.equal(scale(p), "scale(1.0375)", "animation frames sample actual audio between timeupdate events");
+    p.press("Pause");
+    const frozen = scale(p); wall += 60_000; paint();
+    assert.equal(scale(p), frozen);
+    assert.equal(frames.size, 0, "a paused player owns no animation loop");
+    p.key("ArrowRight");
+    assert.equal(scale(p), "scale(1.045)", "paused seek immediately chooses the crop at 30 seconds");
+    p.press("Play");
+    assert.equal(scale(p), "scale(1.045)", "resuming keeps the seek position");
+  });
+
+  it("remembers an explicit Off and does not persist an OS override", () => {
+    const p = mount({ chapters: [pictureBook()] });
+    p.at(20); p.press("Slow push");
+    assert.equal(scale(p), "none");
+    assert.equal(JSON.parse(store.get("ab-test")!).slowPush, false);
+    p.handle.destroy();
+    const again = mount({ chapters: [pictureBook()] });
+    assert.equal(again.q('[role="switch"]')?.getAttribute("aria-checked"), "false");
+    again.press("Slow push");
+    reduceMotion(true);
+    assert.equal(again.q(".abp-push")?.hasAttribute("disabled"), true);
+    assert.equal(scale(again), "none");
+    assert.match(again.text(".abp-pushnote"), /Off for Reduced motion/);
+    assert.equal(JSON.parse(store.get("ab-test")!).slowPush, true, "OS override preserves explicit On");
+    reduceMotion(false);
+    assert.equal(again.q(".abp-push")?.hasAttribute("disabled"), false);
+    assert.equal(again.q('[role="switch"]')?.getAttribute("aria-checked"), "false", "OS change cannot surprise the listener with motion");
+    again.press("Slow push");
+    assert.equal(again.q('[role="switch"]')?.getAttribute("aria-checked"), "true");
+    assert.equal(again.q(".abp-pushnote")?.hidden, true);
+  });
+
+  it("latches an OS preference observed by playback before its change event arrives", () => {
+    const p = mount({ chapters: [pictureBook()] });p.at(20);
+    reduced = true;p.at(21);
+    assert.equal(scale(p), "none");
+    reduced = false;p.at(22);
+    assert.equal(scale(p), "none", "observed Reduce remains off even if the event is late");
+    assert.equal(p.q('[role="switch"]')?.getAttribute("aria-checked"), "false");
+    p.press("Slow push");assert.notEqual(scale(p), "none");
+  });
+
+  it("starts off for Reduced motion, re-resolves on a later open, and survives denied storage", () => {
+    reduced = true;
+    const p = mount({ chapters: [pictureBook()] });
+    assert.equal(p.q('[role="switch"]')?.getAttribute("aria-checked"), "false");
+    assert.equal(JSON.parse(store.get("ab-test") ?? "{}").slowPush, undefined, "default and OS are not user choices");
+    p.handle.destroy(); reduced = false;
+    const storage = dom.window.localStorage;
+    Object.assign(dom.window, { localStorage: { getItem() { throw Error("denied"); }, setItem() { throw Error("denied"); } } });
+    try {
+      const again = mount({ chapters: [pictureBook()] });
+      assert.equal(again.q('[role="switch"]')?.getAttribute("aria-checked"), "true");
+      again.press("Slow push"); again.at(20);
+      assert.equal(scale(again), "none", "in-memory Off survives subsequent position saves");
+      assert.ok(again.playingAudio(), "storage refusal cannot stop narration");
+    } finally { Object.assign(dom.window, { localStorage: storage }); }
+  });
+
+  it("keeps each reused image's hold and clamps the outgoing crossfade layer", () => {
+    const p = mount({ chapters: [pictureBook([{ at: 0, seconds: 10, src: "same.png" }, { at: 10, seconds: 30, src: "same.png", focus: { x: 1, y: 0 } }])] });
+    p.at(9);
+    const outgoing = p.q("img.on")!;
+    p.at(25);
+    assert.equal(outgoing.style.transform, "scale(1.06)", "the fading first hold never overshoots");
+    assert.equal(scale(p), "scale(1.03)", "the second occurrence starts its own push");
+    assert.equal(p.q("img.on")?.style.transformOrigin, "100% 0%");
+    assert.notEqual(p.q("img.on"), outgoing);
+  });
+
+  it("adopts live focus/hold changes without restarting the same audio", () => {
+    const c = pictureBook();
+    const p = mount({ chapters: [c] });p.at(10);
+    const audio = p.playingAudio();
+    p.handle.update([{ ...c, pictures: [{ at: 0, seconds: 20, src: "still.png", focus: { x: 0.2, y: 0.8 } }] }]);
+    assert.equal(p.playingAudio(), audio);
+    assert.equal(scale(p), "scale(1.03)");
+    assert.equal(p.q("img.on")?.style.transformOrigin, "20% 80%");
+  });
+
+  it("derives holds and centred focus for older package inputs", () => {
+    const p = mount({ chapters: [pictureBook([{ at: 0, src: "one.png" }, { at: 20, src: "two.png" }])] });
+    p.at(10);assert.equal(scale(p), "scale(1.03)");
+    assert.equal(p.q("img.on")?.style.transformOrigin, "50% 50%");
+    p.at(30);assert.equal(scale(p), "scale(1.03)");
+  });
+
+  it("never moves an opening cover, poster, clip or unavailable clip fallback", () => {
+    const c = pictureBook([{ at: 10, seconds: 10, src: "one.png" }, { at: 20, seconds: 20, src: "two.png", motion: { src: "clip.mp4", seconds: 5, behavior: "repeat" } }]);
+    const p = mount({ chapters: [c] });p.at(5);assert.equal(scale(p), "none", "opening cover");
+    p.at(15);assert.notEqual(scale(p), "none", "normal still");
+    p.at(25);assert.equal(scale(p), "none", "clip's retained still");
+    const clip = p.all("video").find(v=>v.getAttribute("src")==="clip.mp4")!;
+    clip.dispatchEvent(new dom.Event("error") as unknown as Event);p.at(26);
+    assert.equal(scale(p), "none", "unavailable clip fallback");
+    assert.equal(clip.style.transform, undefined, "the clip itself receives no transform");
+    p.handle.destroy();
+    const poster = mount({ chapters: [pictureBook()], autoplay: false, storageKey: null });
+    assert.equal(scale(poster), "none", "poster before the listener starts");
+  });
+
+  it("moves a recovered still again only after the same URL loads successfully", () => {
+    const p = mount({ chapters: [pictureBook()] });p.at(20);
+    const image = p.q("img.on")!;
+    image.dispatchEvent(new dom.Event("error") as unknown as Event);
+    assert.equal(scale(p), "none");
+    p.at(25);assert.equal(scale(p), "none", "a clock update does not assume recovery");
+    image.dispatchEvent(new dom.Event("load") as unknown as Event);
+    assert.equal(scale(p), "scale(1.0375)", "a successful load resumes at the current audio position");
+  });
+
+  it("removes its clock, image, resize and media preference listeners on close", () => {
+    const p = mount({ chapters: [pictureBook()] });
+    assert.ok(frames.size > 0);assert.ok(motionListeners.size > 0);
+    const before = disconnectedObservers;p.handle.destroy();
+    assert.equal(frames.size, 0);assert.equal(motionListeners.size, 0);
+    assert.equal(disconnectedObservers, before + 1);
+    reduceMotion(true);paint();assert.equal(p.root.innerHTML, "");
+  });
+
+  it("leaves native scrolling keys to an enlarged Text region while retaining the playback shortcut", () => {
+    const p = mount({ chapters: [pictureBook()] });p.press("Text");
+    const follow = p.q(".abp-follow")!;
+    const press = (key: string) => {
+      const event = new dom.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+      Object.assign(event, { key });follow.dispatchEvent(event);return event;
+    };
+    assert.equal(press(" ").defaultPrevented, false);
+    assert.ok(p.playingAudio(), "Space is available to scroll the focused passage");
+    press("k");assert.equal(p.playingAudio(), null, "the explicit playback shortcut still works");
+  });
 });
 
 describe("the book, not a chapter (186a, R-67)", () => {
