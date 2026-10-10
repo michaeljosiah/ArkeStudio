@@ -112,3 +112,23 @@
 @media (max-width: 599px) {
   .fy-abmotion-model-note { order: 1; }
 }
+
+/* Turn 209 adds chapter inclusion; its control is distinct from the detailed media choices. */
+.fy-abv-modal .fy-abv-scope { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-height: 0; margin: 0; padding: 0; border: 0; font: var(--type-ui); }
+.fy-abv-modal .fy-abv-scope > b { width: auto; font-weight: 400; color: var(--foreground); }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg { display: flex; width: 100%; gap: 4px; padding: 4px; border-radius: 9px; box-sizing: border-box; }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg button { flex: 1; justify-content: center; min-height: 44px; height: auto; padding: 8px 14px; border-radius: 7px; font: var(--type-ui); color: var(--foreground); }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg button.on { background: var(--secondary); color: var(--foreground); box-shadow: inset 0 0 0 1px var(--border); font-weight: 400; }
+.fy-abv-modal .fy-abv-scope-title { margin-top: 10px; font: var(--type-ui); font-weight: 600; }
+.fy-abv-modal .fy-abv-scope-notice { padding: 14px 16px; background: var(--secondary); border: 0; border-radius: 8px; gap: 8px; }
+.fy-abv-modal .fy-abv-scope-notice > b { font: var(--type-h3); }
+.fy-abv-modal .fy-abv-scope-notice > span { color: var(--foreground); }
+.fy-abv-rendering { display: flex; flex-direction: column; gap: 18px; }
+.fy-abv-rendering h3, .fy-abv-rendering p { margin: 0; }
+.fy-abv-rendering progress { width: 100%; height: 6px; accent-color: var(--foreground); }
+.fy-abv-rendering p { color: var(--muted-foreground); }
+@media (max-width: 599px) {
+  .fy-page-sheet.fy-abv-modal--phone { inset: 44px 0 0; width: 100%; height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); border: 0; border-radius: 0; }
+  .fy-abv-modal--phone > .fy-page-sheet__head h2 { font: var(--type-h3); }
+  .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { padding-inline: 8px; }
+}
