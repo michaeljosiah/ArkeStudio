@@ -1050,8 +1050,9 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
   },
   {
     id: QWEN21_IMAGE.id, provider: "comfyui", capability: "image", displayName: QWEN21_IMAGE.displayName,
-    accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false },
-    limits: { maxPromptChars: 2000, resolutions: ["1024"], tiers: { "1K": "1024" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
+    accepts: { referenceImages: QWEN21_IMAGE.referenceImages!.length, referenceRoles: false, startFrame: false, endFrame: false },
+    // One tier: Qwen's native canvases sit near 1.5 megapixels, 1664 on the long edge.
+    limits: { maxPromptChars: 2000, resolutions: ["1664"], tiers: { "1K": "1664" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
     pricing: { kind: "unmetered" },
     requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
   },

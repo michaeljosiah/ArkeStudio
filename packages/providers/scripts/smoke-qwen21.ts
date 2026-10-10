@@ -7,11 +7,11 @@ import { setTimeout } from "node:timers/promises";
 import { ComfyUiClient } from "../src/clients/comfyui.js";
 import { comfyUiRecipeById, comfyUiRecipeIdentity, recipeNodeClasses } from "../src/comfyui/recipes.js";
 
-const [engineDir, modelsDir, base, destination, ...references] = process.argv.slice(2);
-if (!engineDir || !modelsDir || !base || !destination || references.length > 1) {
-  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <engine> <models> <URL> <output directory> [reference PNG]");
-}
+const [modelsDir, base, destination, ...references] = process.argv.slice(2);
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
+if (!modelsDir || !base || !destination || references.length > recipe.referenceImages!.length) {
+  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <models> <URL> <output directory> [up to four reference PNGs]");
+}
 const target = resolve(destination);
 await mkdir(target, { recursive: false });
 const get = async (path: string) => {
@@ -33,9 +33,6 @@ for (const checkpoint of recipe.requires.checkpoints) {
   for await (const chunk of createReadStream(join(modelsDir, checkpoint.file))) hash.update(chunk);
   if (hash.digest("hex") !== checkpoint.sha256) throw new Error(`Weight verification failed: ${checkpoint.file}`);
 }
-const dependency = recipe.requires.customNodes[0]!;
-const code = await readFile(join(engineDir, "custom_nodes", dependency.id, "__init__.py"));
-if (createHash("sha256").update(code).digest("hex") !== dependency.pinnedRef) throw new Error("Runtime source verification failed");
 const stats = await get("/system_stats");
 const client = new ComfyUiClient(async (url, init) => {
   if (url.endsWith("/prompt")) await writeFile(join(target, "request.json"), init!.body as string);
@@ -50,9 +47,9 @@ try {
       prompt: process.env.ARKE_SMOKE_PROMPT ?? (references.length
         ? "Keep the same ceramic teapot from image 1. Photograph it on a pale oak table beside a rain-streaked window at dusk. Warm amber lamplight reflects in the cobalt blue glaze. Preserve its round body, curved spout, handle and brass lid details."
         : "An editorial still-life photograph of a round cobalt blue ceramic teapot with a curved spout and small brass lid, resting on a pale oak table beside loosely folded linen. Soft morning window light from the left, glossy handmade glaze, fine wood grain, a cream kitchen and softly blurred leafy plant. Natural color, precise material detail, no text."),
-      seed: Number(process.env.ARKE_SMOKE_SEED ?? 28471), output: { aspect: "1:1", tier: "1K" }, references,
+      seed: Number(process.env.ARKE_SMOKE_SEED ?? 28471), output: { aspect: process.env.ARKE_SMOKE_ASPECT ?? "16:9", tier: "1K" }, references,
     },
-    imageReferences: await Promise.all(references.map(async (path) => ({ name: "reference.png", contentType: "image/png" as const, data: await readFile(path) }))),
+    imageReferences: await Promise.all(references.map(async (path, n) => ({ name: `reference-${n + 1}.png`, contentType: "image/png" as const, data: await readFile(path) }))),
   });
   await writeFile(join(target, "submission.json"), JSON.stringify(submitted, null, 2));
   console.log(`Submitted ${submitted.remoteId}`);
