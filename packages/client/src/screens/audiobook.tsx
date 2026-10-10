@@ -648,7 +648,7 @@ export function AudiobookScreen() {
         />
       )}
       {listening !== null && <AudiobookPlayerView worldId={worldId} production={production} {...(listening.chapterId !== undefined ? { chapterId: listening.chapterId } : {})} onClose={() => setListening(null)} />}
-      {exporting && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setExporting(false)} />}
+      {exporting && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setExporting(false)} onReviewChapters={() => { setExporting(false); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} />}
       {book?.state === "priced" && book.price !== undefined && (
         <BookPriceSheet
           price={book.price}

@@ -49,7 +49,7 @@ const stamp = (iso: string) => {
   return Number.isNaN(at.getTime()) ? iso.slice(0, 16).replace("T", " ") : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
 
-export function AudiobookExportSheet({ worldId, production, chapterId, onReadRemaining, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; onReadRemaining?: (blockNumbers: number[]) => void; onClose: () => void }) {
+export function AudiobookExportSheet({ worldId, production, chapterId, onReadRemaining, onReviewChapters, onClose }: { worldId: string; production: ProductionBundle; chapterId?: string; onReadRemaining?: (blockNumbers: number[]) => void; onReviewChapters?: () => void; onClose: () => void }) {
   const connection = useStore().connection;
   const exportsState = useExports();
   const phone = useMediaQuery("(max-width: 599px)");
@@ -215,7 +215,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       </div>}
       {omitted.length > 0 && <div className="fy-abv-scope-notice" data-testid="audiobook-export-omitted">
         <b>{omitted.length} incomplete chapter{omitted.length === 1 ? "" : "s"} will be left out</b>
-        <span>{omitted.map((chapter) => chapter.title).join(" · ")}</span>
+        <span>{omitted.map((chapter) => `Chapter ${chapter.order} · ${chapter.title}`).join("; ")}</span>
+        {onReviewChapters !== undefined && <button type="button" className="fy-abv-btn" onClick={onReviewChapters}>Review chapters</button>}
       </div>}
     </>
   );

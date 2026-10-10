@@ -2403,7 +2403,7 @@ export function ChapterWorkspace({
               the manuscript's rail is hidden there by chapter-responsive.css, not unmounted, so
               Voices keeps its speakers' notes and the narrator's dialog. */}
           <div className="fy-ch__panels">
-          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReadRemaining={audiobook.readRemaining} />}
+          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
             <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} subtitle={audiobook.readSheet.recovery?.chapter} preserveReturnFocus onClose={audiobook.readSheet.cancel} className={`fy-chapter-review-sheet${audiobook.readSheet.recovery !== null ? " fy-chapter-read-recovery" : ""}`} footer={audiobook.readSheet.recovery !== null ? <ReadSheetActions sheet={audiobook.readSheet} /> : undefined}>
