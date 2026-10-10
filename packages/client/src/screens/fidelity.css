@@ -5165,7 +5165,7 @@ span.fy-bench__who { border-bottom: 0; }
 .fy-bench__chip--on { color: var(--foreground); border-color: var(--foreground); }
 .fy-bench__chip--refs { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-weight: 500; }
 
-.fy-bench__dispatch { display: flex; align-items: center; gap: 8px; margin-top: 11px; flex: none; min-width: 0; }
+.fy-bench__dispatch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 11px; flex: none; min-width: 0; }
 .fy-bench__modelwrap { position: relative; display: inline-flex; flex: 1 1 120px; min-width: 0; }
 .fy-bench__modelwrap > svg {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
