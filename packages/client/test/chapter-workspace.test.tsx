@@ -3,9 +3,11 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { ChapterTreeScreen } from "../src/screens/production-story.js";
+import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -165,6 +167,7 @@ interface Mounted {
   container: HTMLElement;
   root: Root;
   sent: ClientMessage[];
+  navigate: (to: string) => void;
 }
 
 const open: Mounted[] = [];
@@ -185,17 +188,21 @@ async function mount(state: ClientState, route = ROUTE): Promise<Mounted> {
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
+  let navigate: (to: string) => void = () => { throw new Error("Router has not mounted"); };
+  function Navigation() { navigate = useNavigate(); return null; }
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
     root.render(
       <MemoryRouter initialEntries={[route]}>
+        <Navigation />
         <Routes>
+          <Route path="/w/:worldId/p/:prodId/story/chapters" element={<ChapterTreeScreen />} />
           <Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} />
         </Routes>
       </MemoryRouter>,
     );
   });
-  const mounted = { container, root, sent };
+  const mounted = { container, root, sent, navigate: (to: string) => navigate(to) };
   open.push(mounted);
   return mounted;
 }
@@ -206,11 +213,41 @@ afterEach(async () => {
     mounted.container.remove();
   }
   __clearHeldAsksForTest();
+  __clearChapterViewsForTest();
   __clearWorldChatHoldsForTest();
 });
 
 const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
+
+it("reopens a chapter from its actual list row in the last view, with explicit addresses taking precedence", async () => {
+  const m = await mount(inkbound());
+  const shown = () => q(m, '[data-testid="chapter-workspace"]')?.getAttribute("data-view");
+  const choose = async (label: string) => {
+    const button = [...m.container.querySelectorAll(".fy-ch__viewline button")].find(button => button.textContent === label) as HTMLElement;
+    assert.ok(button, `visible ${label} tab`);
+    await act(async () => button.click());
+  };
+  assert.equal(shown(), "manuscript");
+  await choose("Audiobook");
+  await act(async () => m.navigate(ROUTE.slice(0, ROUTE.lastIndexOf("/"))));
+  const chapterRow = [...m.container.querySelectorAll(".fy-chapter-card > button")].find(button => button.textContent?.includes("The counting of bells")) as HTMLElement;
+  assert.ok(chapterRow, "actual Chapters row is available");
+  await act(async () => chapterRow.click());
+  assert.equal(shown(), "audiobook");
+  await act(async () => m.navigate(ROUTE + "?view=manuscript"));
+  assert.equal(shown(), "manuscript");
+  await choose("Timing");
+  await act(async () => m.navigate(ROUTE.replace("neap", "slack-water")));
+  assert.equal(shown(), "manuscript", "another chapter has its own first-entry view");
+  await act(async () => m.navigate(ROUTE));
+  assert.equal(shown(), "timing");
+  await choose("Manuscript");
+  await act(async () => m.navigate(ROUTE.replace("neap", "slack-water")));
+  await act(async () => m.navigate(ROUTE));
+  assert.equal(shown(), "manuscript", "removing the query keeps an explicit Manuscript choice");
+  assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter" || message.kind === "direct-chapter"), false, "navigation never starts authoring or narration");
+});
 
 async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
