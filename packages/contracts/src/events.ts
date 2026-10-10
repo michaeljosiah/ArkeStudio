@@ -10,7 +10,9 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
-import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
+import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
+import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
@@ -1473,6 +1475,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("audiobook.motion"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, block: z.string(), state: z.enum(["quoted", "making", "review", "chosen", "failed"]), quote: AudiobookMotionQuoteSchema.optional(), reason: z.string().optional() }).strict(),
+  z.object({ ...base, type: z.literal("audiobook.word-timing"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordTimingStateSchema }).strict(),
   /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
   z
     .object({
@@ -1507,7 +1511,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       result: z.union([
-        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean() }).strict(),
+        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean(), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
     })
@@ -1534,7 +1538,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       type: z.literal("web-packages.listed"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
+      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict()),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
@@ -2454,3 +2458,4 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 ]));
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
+export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;

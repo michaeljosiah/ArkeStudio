@@ -408,10 +408,13 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
-(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 390, 820, 1440 and 2560
-wide, opens Listen and Export, and checks each layer covers the window from the body with no
-transformed or contained ancestor, Listen leads the head, and the chapter's Voices rail names a
-designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
+(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
+wide, plus 200% text at 1440. Listen covers the window; Export is a native modal on the body,
+within the viewport, with no transformed ancestor or horizontal overflow. The chapter export
+starts at This chapter, blocks an incomplete reading, keeps its options under the missing-block
+read quote, refreshes readiness when saved takes arrive, and returns focus to its stable opener.
+Phone export actions are at least 44px. Listen leads the head, and the chapter's Voices rail names
+a designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
 renders the changed screens as they were at that revision and asserts nothing.
 
 ## Dialogs and sheets
@@ -807,3 +810,19 @@ turn206 frames directly from the master alongside real components at matching vi
 `paired.html` preserves full frames and separately crops the affected receipt/footer/panel;
 the master chapter background is schematic, while the actual side uses the retained chapter
 screen. The harness uses its own headless Chrome profile and public synthetic content.
+
+
+Chapter export inclusion (turn 209, #1688) has scoped listening/player and video regressions in
+coordinator `test/productions/audiobook-listening.test.ts` and `audiobook-video.test.ts`. They
+cover incomplete/missing chapter refusal, manifests, delivery identity, unchanged encode reuse
+and interrupted-job recovery; client `audiobook-export.test.tsx` covers scope/format changes and
+stale readiness, and `chapter-audiobook.test.tsx` covers the missing-block quote and return.
+Run `node scripts/smoke-chapter-scope-parity.mjs --out <review-directory>` for fourteen literal
+master/full-App pairs: chapter action menus, normal Read, ready Direction, Activity, both export
+formats/scopes, blocked recovery, render progress and desktop/phone return. The bridge validates
+its synthetic events and asserts no export fallback, no implicit read confirmation, no cancellation
+on close, selected-block/focus return and reserved native footers. Use `--frame 209o --width 320`
+or `--frame 209o --text-scale 2` in a separate output directory for supplementary narrow/text-zoom
+captures. Retained detailed destinations and known schematic differences are labelled explicitly
+in `paired.html`; screenshots alone do not establish universal visual parity. Chrome runs headless
+with a dedicated profile; this test never attaches to the installed app or a private world.

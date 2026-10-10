@@ -14,6 +14,7 @@ import {
   type AudiobookPicture,
   type AudiobookPictureSource,
   type AudiobookReader,
+  type AudiobookScope,
   type ChapterAudiobook,
   type ListeningChapter,
   type ListeningInputBlock,
@@ -25,6 +26,8 @@ import type { WorldStore } from "../world/store.js";
 import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { renderChapterMix } from "./audiobook-mix.js";
 import { chapterTiming } from "./audiobook-timing.js";
+import { applyAudiobookWordTiming } from "./audiobook-word-timing.js";
+import { checkAudiobookMotion } from "./audiobook-motion.js";
 import type { FfmpegRunner } from "../takes/export.js";
 
 /**
@@ -137,13 +140,16 @@ async function timedListening(store: WorldStore, productionId: string, plan: Aud
  * takes its sound from the renderer the chapter's Play uses and nothing else, so a chapter with
  * no timing is rendered as one too: its takes back to back, at the book's one loudness.
  */
-export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean } = {}): Promise<AudiobookListening> {
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean; scope?: AudiobookScope } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
+  const scope = options.scope ?? { kind: "book" };
+  const selected = production.chapters.filter((chapter) => !chapter.retired && (scope.kind === "book" || chapter.id === scope.chapterId));
+  if (scope.kind === "chapter" && selected.length === 0) throw new Error("That chapter is no longer in this production.");
   const cover = await bookCover(store);
   const narrator = await anyNarrator(store, productionId);
   const chapters: ListeningChapter[] = [];
-  for (const summary of [...production.chapters].filter((c) => !c.retired).sort((a, b) => a.order - b.order)) {
+  for (const summary of selected.sort((a, b) => a.order - b.order)) {
     let plan: AudiobookPlan;
     try {
       plan = await planAudiobook(store, productionId, summary.id, { narrator });
@@ -156,9 +162,12 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
     const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
-    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) }));
+    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
+    await applyAudiobookWordTiming(store, plan, chapter);
+    await checkAudiobookMotion(store, chapter);
+    chapters.push(chapter);
   }
-  return { productionId, title: production.meta.title, cover, chapters };
+  return { productionId, title: production.meta.title, cover, chapters, scope };
 }
 
 /**

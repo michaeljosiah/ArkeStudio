@@ -440,6 +440,8 @@ export const SHEET_NARRATION_SCHEMA_VERSION = 68;
  * unreadable — every take of the chapter read as lost — so the world is raised before the first.
  */
 export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
+/** Turn 208: strict old readers must not drop a record containing motion or acoustic word timing. */
+export const AUDIOBOOK_MOTION_SCHEMA_VERSION = 73;
 /**
  * The story a production setup is adapted from (design turn 205, SPEC-052 R-2): `source` on the
  * strict setup draft in its conversation, which a build before it reads as an unreadable setup —

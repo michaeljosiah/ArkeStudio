@@ -10,6 +10,7 @@ import {
   type ClientMessage,
   type DomainEvent,
   type ManifestModel,
+  type AudiobookScope,
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
@@ -222,14 +223,47 @@ describe("the book as a listener hears it (turn 186)", () => {
 
 type Exported = Extract<DomainEvent, { type: "audiobook.exported" }>;
 type Packages = Extract<DomainEvent, { type: "web-packages.listed" }>;
-async function exportPlayer(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[]): Promise<Exported["result"]> {
-  await send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+async function exportPlayer(send: (message: ClientMessage) => Promise<void>, events: DomainEvent[], scope?: AudiobookScope): Promise<Exported["result"]> {
+  await send({ kind: "export-audiobook-player", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, ...(scope !== undefined ? { scope } : {}) });
   const answer = events.filter((e): e is Exported => e.type === "audiobook.exported").at(-1);
   assert.ok(answer, "the export is answered");
   return answer.result;
 }
 
 describe("the audiobook as the player (turn 186e)", () => {
+  it("keeps chapter export scope through listening, package and receipt, and never falls back from an incomplete or missing chapter", () =>
+    withHarness(async ({ worldDir, events, send }) => {
+      await read(send, "01-neap");
+      await read(send, "02-the-same-ink", ["title"]);
+      await read(send, "04-her-own-hand");
+      const scope: AudiobookScope = { kind: "chapter", chapterId: "neap" };
+      await send({ kind: "open-audiobook-listening", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, scope });
+      const plan = events.filter((event): event is Listening => event.type === "audiobook.listening").at(-1)!.listening!;
+      assert.deepEqual(plan.chapters.map((chapter) => chapter.chapterId), ["neap"]);
+      assert.deepEqual(plan.scope, scope);
+      const result = await exportPlayer(send, events, scope);
+      assert.ok(result.ok, JSON.stringify(result));
+      assert.deepEqual(result.scope, scope);
+      assert.deepEqual(result.chapterIds, ["neap"]);
+      const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8"));
+      assert.deepEqual(manifest.scope, scope);
+      assert.deepEqual(manifest.chapters.map((chapter: { id: string }) => chapter.id), ["neap"]);
+      await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = events.filter((event): event is Packages => event.type === "web-packages.listed").at(-1)!.packages.find((entry) => entry.dir === result.dir)!;
+      assert.deepEqual(listed.scope, scope, "reconnect keeps the saved delivery's selection");
+      assert.deepEqual(listed.chapterIds, ["neap"]);
+      const page = await readFile(join(worldDir, result.dir, "player.html"), "utf8");
+      assert.ok(page.includes(`arke-ab-${WORLD_ID}-${LEDGER}-chapter-neap`), "chapter place does not overwrite the whole-book place");
+      const incomplete = await exportPlayer(send, events, { kind: "chapter", chapterId: "the-same-ink" });
+      assert.deepEqual(incomplete, { ok: false, blockers: ["this chapter is not read whole yet"] });
+      const missing = await exportPlayer(send, events, { kind: "chapter", chapterId: "gone" });
+      assert.equal(missing.ok, false);
+      if (!missing.ok) assert.match(missing.blockers.join(" "), /no longer in this production/);
+      const book = await exportPlayer(send, events, { kind: "book" });
+      assert.ok(book.ok, JSON.stringify(book));
+      assert.deepEqual(book.chapterIds, ["neap", "her-own-hand"]);
+    }));
+
   it("packages only the chapters read whole, the same player, the takes and the pictures, and lists it beside the other packages", () =>
     withHarness(async ({ worldDir, events, send }) => {
       await read(send, "01-neap");

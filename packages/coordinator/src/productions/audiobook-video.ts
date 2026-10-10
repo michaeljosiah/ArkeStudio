@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   assertSlateLabelSupported,
   AudiobookVideoOptionsSchema,
+  AudiobookScopeSchema,
+  SlugSchema,
   BOOK_OPENING_SEC,
   bookParts,
   burnedCues,
+  highlightedCaptionAss,
   CAPTION_BOTTOM_SHARE,
   CARD_TITLE_SHARE,
   captionFontPx,
@@ -29,6 +32,7 @@ import {
   videoSegments,
   wrapWords,
   type AudiobookVideoFile,
+  type AudiobookScope,
   type AudiobookVideoOptions,
   type AudiobookVideoProgress,
   type AudiobookVideoResult,
@@ -37,6 +41,7 @@ import {
   type VideoCue,
   type VideoRates,
   type VideoSegment,
+  type WebPackagesListed,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -65,8 +70,9 @@ import { containedWorldFile } from "./interactive.js";
 /**
  * Moves when what a render makes from the same inputs changes, so an older render is never reused.
  * 2: pictures fill the frame, and the words are cut into short cues (2026-10-04).
+ * 3: chosen motion and validated highlighted words share the preview clock (2026-10-10).
  */
-export const VIDEO_RENDER_VERSION = 2;
+export const VIDEO_RENDER_VERSION = 3;
 
 const EXPORT_ID = /^vb_[0-9A-HJKMNP-TV-Z]{26}$/;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -91,6 +97,7 @@ interface PlannedChapter {
 }
 
 interface Book {
+  scope: AudiobookScope;
   title: string;
   cover: string | null;
   readBy: string;
@@ -117,38 +124,47 @@ async function fileStamp(store: WorldStore, file: string | null): Promise<string
  * sheet can say what a render would make without making anything.
  */
 async function planBook(store: WorldStore, productionId: string, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner | undefined): Promise<Book> {
-  const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true });
+  const scope = options.scope ?? { kind: "book" };
+  const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true, scope });
   const narrator = await anyNarrator(store, productionId);
   const readBy = `Read by ${narrator.label ?? narrator.voiceId}’s voice`;
   const blockers: string[] = [];
   const chapters: PlannedChapter[] = [];
   for (const chapter of listening.chapters) {
-    if (chapter.state !== "read" || chapter.blocks.length === 0) continue;
+    if (chapter.state !== "read" || chapter.blocks.length === 0) {
+      if (scope.kind === "chapter") blockers.push(`${chapter.title}: this chapter is not read whole yet`);
+      continue;
+    }
     if (chapter.mix === undefined) {
       blockers.push(`${chapter.title}: its mix could not be made on this machine`);
       continue;
     }
     const segments = videoSegments(chapter, listening.cover, options.titleCards);
+    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined);
+    if (broken !== undefined) { blockers.push(`${chapter.title}: ${broken.motionProblem} · choose Use still before exporting`); continue; }
+    if (wantsBurnIn(options) && options.captionStyle === "word" && chapter.blocks.some((b) => b.words === undefined)) {
+      blockers.push(`${chapter.title}: prepare and check word timing before exporting highlighted captions`); continue;
+    }
     // No words over a card: the title is what is being read, and a caption over the title (or
     // over it fading) reads as two lines fighting. A sentence begun under the card shows from
     // the moment the card has given way, to its own end.
     const after = options.titleCards ? titleCardSeconds(chapter) + (segmentFades(segments)[1] ?? 0) : 0;
     const burned = wantsBurnIn(options) ? burnedCues(chapter, options.shape, options.captionSize, after) : [];
     const cues = wantsSidecar(options) ? chapterCues(chapter) : [];
-    const stamps = await Promise.all(segments.map((segment) => fileStamp(store, segment.file)));
+    const stamps = await Promise.all(segments.map((segment) => fileStamp(store, segment.motion?.file ?? segment.file)));
     const digest = sha(
       JSON.stringify({
         version: VIDEO_RENDER_VERSION,
         mix: [chapter.mix.file, chapter.seconds],
-        segments: segments.map((segment, index) => [segment.kind, stamps[index], segment.from, segment.to, segment.focus ?? null, segment.title ?? null]),
+        segments: segments.map((segment, index) => [segment.kind, stamps[index], segment.from, segment.to, segment.focus ?? null, segment.title ?? null, segment.motion ?? null]),
         burned,
         cues,
-        options: { shape: options.shape, slowPush: options.slowPush, subtitles: options.subtitles, position: options.captionPosition, size: options.captionSize, titleCards: options.titleCards },
+        options: { shape: options.shape, slowPush: options.slowPush, subtitles: options.subtitles, position: options.captionPosition, size: options.captionSize, style: options.captionStyle ?? "phrases", titleCards: options.titleCards },
       }),
     ).slice(0, 24);
     chapters.push({ chapter, segments, burned, cues, mix: chapter.mix.file, digest });
   }
-  return { title: listening.title, cover: listening.cover, readBy, chapters, blockers };
+  return { title: listening.title, cover: listening.cover, readBy, chapters, blockers, scope };
 }
 
 const cachedPiece = (store: WorldStore, productionId: string, planned: PlannedChapter) => join(store.dir, videoCacheFolder(productionId), planned.chapter.chapterId, `${planned.digest}.mp4`);
@@ -262,7 +278,7 @@ async function recordRate(appRoot: string | undefined, key: string, rate: { byte
 export async function audiobookVideoState(store: WorldStore, productionId: string, options: AudiobookVideoOptions, context: { ffmpeg?: FfmpegRunner; appRoot?: string; running: string | null }): Promise<AudiobookVideoState> {
   const book = await planBook(store, productionId, options, context.ffmpeg);
   const chapters = await Promise.all(book.chapters.map(async (planned) => ({ chapterId: planned.chapter.chapterId, seconds: planned.chapter.seconds, rendered: await exists(cachedPiece(store, productionId, planned)) })));
-  return { chapters, rates: await readVideoRates(context.appRoot), readBy: book.readBy, running: context.running };
+  return { chapters, rates: await readVideoRates(context.appRoot), readBy: book.readBy, running: context.running, scope: book.scope, blockers: book.blockers };
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————
@@ -284,7 +300,7 @@ function chapterGraph(
   planned: PlannedChapter,
   options: AudiobookVideoOptions,
   font: string,
-  inputs: { file: (index: number) => number | null; size: (index: number) => PictureSize | null },
+  inputs: { file: (index: number) => number | null; size: (index: number) => PictureSize | null; captions?: string },
 ): string {
   const { width: W, height: H } = shapeSize(options.shape);
   const fades = segmentFades(planned.segments);
@@ -321,11 +337,17 @@ function chapterGraph(
     const focus = segment.focus ?? { x: 0.5, y: 0.5 };
     const size = inputs.size(index);
     const crop = size === null ? null : coverCrop(size.width, size.height, W, H, focus);
-    const scale = options.slowPush ? 2 : 1;
+    const scale = options.slowPush && segment.motion === undefined ? 2 : 1;
     const fit =
       crop !== null
         ? `crop=w='min(iw,${crop.width})':h='min(ih,${crop.height})':x='min(iw-ow,${crop.x})':y='min(ih-oh,${crop.y})',scale=${W * scale}:${H * scale}`
         : `crop=w='min(iw,ih*${W}/${H})':h='min(ih,iw*${H}/${W})':x='max(0,min(iw-ow,iw*${focus.x}-ow/2))':y='max(0,min(ih-oh,ih*${focus.y}-oh/2))',scale=${W * scale}:${H * scale}`;
+    if (segment.motion !== undefined) {
+      const offset = Math.max(0, segment.from - (segment.motionAt ?? segment.from));
+      const tail = segment.motion.behavior === "hold" ? `tpad=stop_mode=clone:stop_duration=${length + offset},` : "";
+      filters.push(`[${input}:v]setpts=PTS-STARTPTS,${tail}trim=start=${offset}:duration=${length + 1 / VIDEO_FPS},setpts=PTS-STARTPTS,${fit},setsar=1,format=yuv420p,fps=${VIDEO_FPS},settb=1/${VIDEO_FPS}${out}`);
+      return;
+    }
     if (!options.slowPush) {
       filters.push(`[${input}:v]${fit},setsar=1,format=yuv420p,${hold}${out}`);
       return;
@@ -354,7 +376,10 @@ function chapterGraph(
     last = "scrimmed";
     const size = captionFontPx(options.shape, options.captionSize);
     const y = options.captionPosition === "middle" ? "(h-th)/2" : `h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)}`;
-    planned.burned.forEach((cue, index) => {
+    if (inputs.captions !== undefined) {
+      filters.push(`[${last}]ass=filename=${ffmpegFilterPath(inputs.captions)}:fontsdir=${ffmpegFilterPath(dirname(font))}[highlighted]`);
+      last = "highlighted";
+    } else planned.burned.forEach((cue, index) => {
       const next = `c${index}`;
       // Half-open, as the cues are: `between` holds both ends, so a frame landing on the instant
       // one cue gives way to the next drew both over each other.
@@ -405,16 +430,18 @@ async function renderChapter(
   await mkdir(toExtendedLength(join(target, "..")), { recursive: true });
   await mkdir(toExtendedLength(work), { recursive: true });
   const args: string[] = ["-y", ...QUIET];
-  const indexOf = new Map<string, number>();
-  const sizes = new Map<string, PictureSize | null>();
+  const indexOf = new Map<number, number>();
+  const sizes = new Map<number, PictureSize | null>();
   let count = 0;
-  for (const segment of planned.segments) {
-    if (segment.file === null || indexOf.has(segment.file)) continue;
-    const real = await containedWorldFile(store.dir, segment.file);
-    if (real === null) throw new Error(`${segment.file.split("/").pop()} is not a file inside this world`);
+  for (const [index, segment] of planned.segments.entries()) {
+    const file = segment.motion?.file ?? segment.file;
+    if (file === null) continue;
+    const real = await containedWorldFile(store.dir, file);
+    if (real === null) throw new Error(`${file.split("/").pop()} is not a file inside this world`);
+    if (segment.motion?.behavior === "repeat") args.push("-stream_loop", "-1");
     args.push("-i", real);
-    indexOf.set(segment.file, count++);
-    sizes.set(segment.file, await readPictureSize(real));
+    indexOf.set(index, count++);
+    sizes.set(index, segment.motion ?? await readPictureSize(real));
   }
   const mix = await containedWorldFile(store.dir, planned.mix);
   if (mix === null) throw new Error(`${planned.chapter.title}: its mix is not on this machine`);
@@ -432,12 +459,14 @@ async function renderChapter(
   args.push("-i", meta);
   const metaIndex = count++;
   const graph = join(work, `${planned.chapter.chapterId}.graph`);
-  const fileAt = (index: number) => planned.segments[index]!.file;
+  const captions = options.captionStyle === "word" && wantsBurnIn(options) ? join(work, `${planned.chapter.chapterId}.ass`) : undefined;
+  if (captions !== undefined) await writeFile(toExtendedLength(captions), highlightedCaptionAss(planned.burned, options), "utf8");
   await writeFile(
     toExtendedLength(graph),
     chapterGraph(planned, options, ffmpeg.slateFont, {
-      file: (index) => { const file = fileAt(index); return file === null ? null : (indexOf.get(file) ?? null); },
-      size: (index) => { const file = fileAt(index); return file === null ? null : (sizes.get(file) ?? null); },
+      file: (index) => indexOf.get(index) ?? null,
+      size: (index) => sizes.get(index) ?? null,
+      ...(captions !== undefined ? { captions } : {}),
     }),
     "utf8",
   );
@@ -552,6 +581,8 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   const ffmpeg = context.ffmpeg;
   if (ffmpeg === undefined) return { ok: false, blockers: ["making a video needs ffmpeg, which this machine does not have"] };
   const now = context.now ?? (() => Date.now() / 1000);
+  // A chapter is one chapter file, even if a caller kept the book's partition setting (R-179).
+  if (options.scope?.kind === "chapter") options = { ...options, files: "chapter" };
   const book = await planBook(store, productionId, options, ffmpeg);
   if (book.chapters.length === 0) return { ok: false, blockers: book.blockers.length > 0 ? book.blockers : ["no chapter is read whole yet"] };
   const cannot = undrawable([...book.chapters.flatMap((planned) => [...planned.burned.map((cue) => cue.text), ...(options.titleCards ? [planned.chapter.title] : [])]), ...(options.files === "book" ? [book.readBy] : [])]);
@@ -561,7 +592,9 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   await mkdir(toExtendedLength(join(store.dir, videoCacheFolder(productionId))), { recursive: true });
   await atomicWriteFile(jobFile(store, productionId), `${JSON.stringify(job)}\n`);
   const work = join(store.dir, videoCacheFolder(productionId), `work-${context.exportId}`);
-  const folder = videoFolderName(book.title, job.startedAt);
+  // Scope partitions delivery folders, not chapter encodes: identical pixels and audio remain
+  // reusable, while a chapter render cannot replace a whole-book manifest from the same day.
+  const folder = videoFolderName(book.title, job.startedAt, book.scope);
   const dir = join(store.dir, "exports", folder);
   const totalSec = book.chapters.reduce((sum, planned) => sum + planned.chapter.seconds, 0);
   const started = now();
@@ -583,7 +616,7 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   const shape = options.shape;
   const sidecarNames = wantsSidecar(options) ? [".srt", ".vtt"] : [];
   const writeManifest = async () =>
-    atomicWriteFile(join(dir, "video.json"), `${JSON.stringify({ kind: "audiobook-video", version: 1, productionId, title: book.title, files, provenance: { exportId: context.exportId, exportedAt: context.clock() } }, null, 2)}\n`);
+    atomicWriteFile(join(dir, "video.json"), `${JSON.stringify({ kind: "audiobook-video", version: 1, productionId, title: book.title, scope: book.scope, chapterIds: [...new Set(files.flatMap((file) => file.chapterIds ?? []))], files, provenance: { exportId: context.exportId, exportedAt: context.clock() } }, null, 2)}\n`);
   // A second render the same day lands in the same folder; only a folder this render made is
   // taken away when it ends with nothing in it.
   const fresh = !(await stat(toExtendedLength(dir)).then((info) => info.isDirectory(), () => false));
@@ -615,7 +648,7 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
           await atomicWriteFile(join(dir, `${base}.srt`), serializeTimedText(planned.cues, "srt"));
           await atomicWriteFile(join(dir, `${base}.vtt`), serializeTimedText(planned.cues, "vtt"));
         }
-        files.push({ name, seconds: planned.chapter.seconds, bytes: (await stat(toExtendedLength(join(dir, name)))).size, shape, sidecars: planned.cues.length > 0 ? sidecarNames : [], picture: planned.segments.find((segment) => segment.kind === "picture")?.file ?? book.cover });
+        files.push({ name, chapterIds: [planned.chapter.chapterId], seconds: planned.chapter.seconds, bytes: (await stat(toExtendedLength(join(dir, name)))).size, shape, sidecars: planned.cues.length > 0 ? sidecarNames : [], picture: planned.segments.find((segment) => segment.kind === "picture")?.file ?? book.cover });
         await writeManifest();
       }
     }
@@ -657,12 +690,12 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
           await atomicWriteFile(join(dir, `${base}.srt`), serializeTimedText(cues, "srt"));
           await atomicWriteFile(join(dir, `${base}.vtt`), serializeTimedText(cues, "vtt"));
         }
-        files.push({ name, seconds: Math.round(clock * 1000) / 1000, bytes: (await stat(toExtendedLength(join(dir, name)))).size, shape, sidecars: cues.length > 0 ? sidecarNames : [], picture: book.cover ?? book.chapters[0]?.segments.find((segment) => segment.kind === "picture")?.file ?? null });
+        files.push({ name, chapterIds: part.chapters.map((entry) => entry.planned.chapter.chapterId), seconds: Math.round(clock * 1000) / 1000, bytes: (await stat(toExtendedLength(join(dir, name)))).size, shape, sidecars: cues.length > 0 ? sidecarNames : [], picture: book.cover ?? book.chapters[0]?.segments.find((segment) => segment.kind === "picture")?.file ?? null });
         await writeManifest();
       }
     }
     await forgetVideoJob(store, productionId);
-    return { ok: true, dir: `exports/${folder}`, files, made, renderedAt: context.clock() };
+    return { ok: true, dir: `exports/${folder}`, files, made, renderedAt: context.clock(), scope: book.scope, chapterIds: book.chapters.map((planned) => planned.chapter.chapterId) };
   } catch (err) {
     // A cancel ends the chapter in hand and keeps those finished; the job note stays only when
     // the app is closing under the render, so the next start resumes it (the caller decides).
@@ -676,15 +709,18 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
 }
 
 /** A finished video folder, for Publications: read by its own manifest. */
-export async function listVideoExports(store: WorldStore): Promise<Array<{ kind: "audiobook-video"; productionId: string; title: string; dir: string; exportedAt: string }>> {
+export async function listVideoExports(store: WorldStore): Promise<WebPackagesListed["packages"]> {
   const exportsDir = join(store.dir, "exports");
-  const out: Array<{ kind: "audiobook-video"; productionId: string; title: string; dir: string; exportedAt: string }> = [];
+  const out: WebPackagesListed["packages"] = [];
   for (const entry of await readdir(toExtendedLength(exportsDir), { withFileTypes: true }).catch(() => [])) {
     if (!entry.isDirectory() || !/-video-\d{8}$/.test(entry.name)) continue;
     try {
-      const raw = JSON.parse(await readFile(toExtendedLength(join(exportsDir, entry.name, "video.json")), "utf8")) as { kind?: unknown; productionId?: unknown; title?: unknown; files?: unknown; provenance?: { exportedAt?: unknown } };
+      const raw = JSON.parse(await readFile(toExtendedLength(join(exportsDir, entry.name, "video.json")), "utf8")) as { kind?: unknown; productionId?: unknown; title?: unknown; files?: unknown; scope?: unknown; chapterIds?: unknown; provenance?: { exportedAt?: unknown } };
       if (raw.kind !== "audiobook-video" || typeof raw.productionId !== "string" || typeof raw.provenance?.exportedAt !== "string" || !Array.isArray(raw.files) || raw.files.length === 0) continue;
-      out.push({ kind: "audiobook-video", productionId: raw.productionId, title: typeof raw.title === "string" ? raw.title : raw.productionId, dir: `exports/${entry.name}`, exportedAt: raw.provenance.exportedAt });
+      const scope = AudiobookScopeSchema.safeParse(raw.scope);
+      const chapterIds = SlugSchema.array().min(1).safeParse(raw.chapterIds);
+      if (raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
+      out.push({ kind: "audiobook-video", productionId: raw.productionId, title: typeof raw.title === "string" ? raw.title : raw.productionId, dir: `exports/${entry.name}`, exportedAt: raw.provenance.exportedAt, ...(scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}) });
     } catch {
       // A folder with no readable manifest is no video.
     }

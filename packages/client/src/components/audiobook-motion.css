@@ -1,0 +1,151 @@
+.fy-editordialog__panel.fy-abmotion { max-height: calc(100dvh - 64px); display: flex; flex-direction: column; border-radius: 16px; font: var(--type-body); color: var(--foreground); background: var(--background); }
+.fy-abmotion h3, .fy-abmotion p { margin: 0; }
+.fy-abmotion-head { flex: none; padding: 22px 24px 16px; display: flex; align-items: flex-start; gap: 12px; }
+.fy-abmotion-head > div { flex: 1; }
+.fy-abmotion-head h3 { font: var(--type-h3); }
+.fy-abmotion-head p, .fy-abmotion-meta, .fy-abmotion-source p, .fy-abmotion-quote p { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-abmotion-head p, .fy-abmotion-source p, .fy-abmotion-quote p { margin-top: 8px; }
+.fy-abmotion-head > button { background: none; border: 0; color: inherit; width: 32px; min-height: 32px; cursor: pointer; }
+.fy-abmotion-body { min-height: 0; padding: 0 24px 24px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.fy-abmotion-body > * { flex-shrink: 0; }
+.fy-abmotion-source { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font: var(--type-ui); }
+.fy-abmotion-source img { width: 112px; height: 63px; object-fit: cover; border-radius: 6px; flex: none; }
+.fy-abmotion-source > div { flex: 1; min-width: 0; }
+.fy-abmotion-field { display: flex; flex-direction: column; gap: 8px; font: var(--type-ui); }
+.fy-abmotion textarea { resize: vertical; width: 100%; min-height: 104px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font: var(--type-body); color: var(--foreground); background: var(--background); }
+.fy-abmotion select { max-width: 100%; min-height: 40px; width: fit-content; padding: 8px 30px 8px 12px; border: 1px solid var(--border); border-radius: 8px; font: var(--type-ui); color: var(--foreground); background: var(--background); }
+.fy-abmotion-option { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; align-items: center; font: var(--type-ui); }
+.fy-abmotion-option > .fy-abv-seg { justify-self: start; }
+.fy-abmotion-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.fy-abmotion-pair select { width: 100%; }
+.fy-abmotion-row, .fy-abmotion-actions { display: flex; align-items: center; gap: 10px; font: var(--type-ui); }
+.fy-abmotion-actions { flex-wrap: wrap; padding-top: 12px; }
+.fy-abmotion .grow, .fy-abmotion-actions .grow { flex: 1; min-width: 0; }
+.fy-abmotion-quote { padding: 14px 16px; background: var(--secondary); border-radius: 8px; }
+.fy-abmotion-notice { border-left: 2px solid var(--foreground); padding: 10px 14px; background: var(--secondary); font: var(--type-ui); }
+.fy-abmotion-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--border); }
+.fy-abmotion .ui-btn { min-height: 40px; font: var(--type-ui); border-radius: 999px; }
+.fy-wordtiming-prepare .ui-btn { min-height: 44px; border-radius: 9px; }
+.fy-abmotion-media { max-width: 520px; width: 100%; margin-inline: auto; position: relative; }
+.fy-abmotion-media video { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--secondary); border-radius: 10px; }
+.fy-abmotion-badge { position: absolute; left: 12px; top: 12px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); border-radius: 6px; padding: 5px 8px; font: var(--type-meta); pointer-events: none; }
+.fy-abmotion progress { width: 100%; height: 4px; accent-color: var(--foreground); }
+.fy-wordtiming { padding: 16px 0; }
+.fy-wordtiming-list { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding: 0 24px 24px; }
+.fy-wordtiming-block { padding: 14px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.fy-wordtiming-block > div { flex: 1; }
+.fy-wordtiming-list p { margin-top: 4px; color: var(--muted-foreground); font: var(--type-meta); }
+.fy-wordtiming-list .fy-wordtiming-warning { border-left-color: var(--warning); }
+.fy-wordtiming-list .fy-wordtiming-warning p { color: var(--foreground); font: var(--type-ui); }
+.fy-wordtiming-list audio { display: block; width: 100%; margin-top: 12px; }
+.fy-wordtiming-line { padding: 16px; border: 1px solid var(--border); border-radius: 8px; line-height: 2; }
+@media (max-width: 599px) {
+  .fy-editordialog__panel.fy-abmotion { width: 100%!important; max-width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 20px; }
+  .fy-abmotion-head { padding: 20px 18px 12px; }
+  .fy-abmotion-body { flex: 1; padding: 0 18px 18px; gap: 16px; }
+  .fy-abmotion-head > button { width: 44px; }
+  .fy-abmotion-foot { padding: 14px 18px; }
+  .fy-abmotion-foot > button:last-child { flex: 1; }
+  .fy-abmotion-option { grid-template-columns: 1fr; gap: 8px; }
+  .fy-abmotion textarea { min-height: 132px; }
+  .fy-abmotion-source img { width: 100px; height: 56px; }
+  .fy-abmotion-quote .fy-abmotion-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .fy-abmotion-pair { gap: 12px; }
+  .fy-abmotion button, .fy-abmotion button:not(.fy-abmotion-head > button), .fy-abmotion select, .fy-abmotion-actions button { min-height: 44px; }
+  .fy-wordtiming-list { flex: 1; padding-inline: 18px; }
+}
+
+.fy-wordtiming-link { border: 0; padding: 0; background: none; color: inherit; text-decoration: underline; font: inherit; cursor: pointer; }
+.fy-wordtiming .fy-abmotion-notice { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.fy-wordtiming .fy-abmotion-notice p { margin: 0; }
+.fy-wordtiming progress, .fy-wordtiming-list input[type=range] { width: 100%; accent-color: var(--foreground); }
+.fy-wordtiming-line mark { padding: 3px 5px; background: var(--foreground); color: var(--background); border-radius: 4px; }
+.fy-wordtiming-list .fy-abmotion-row { margin-top: 12px; }
+
+.fy-abv-exportcols { display: grid; grid-template-columns: minmax(0, 1fr) 355px; gap: 28px; }
+.fy-abv-exportcols > aside { border-left: 1px solid var(--border); padding-left: 24px; min-width: 0; }
+.fy-abv-exportframe { position: relative; overflow: hidden; border-radius: 10px; }
+.fy-abv-exportpreview { display: flex; flex-direction: column; gap: 16px; }
+.fy-abv-exportpreview p { margin: 0; }
+.fy-abv-exportpreview .fy-abmotion-notice p { margin-top: 8px; }
+.fy-abv-exportcols .fy-abv-opts { border: 0; border-radius: 0; overflow: visible; }
+.fy-abv-exportcols .fy-abv-opt { padding: 0; min-height: 40px; margin-bottom: 16px; border: 0; gap: 16px; }
+.fy-abv-exportcols .fy-abv-opt > b { width: 120px; color: var(--foreground); }
+.fy-abv-opt select { max-width: 100%; min-height: 40px; padding: 8px 30px 8px 12px; border: 1px solid var(--border); border-radius: 8px; font: var(--type-ui); color: var(--foreground); background: var(--background); }
+.fy-abv-toggles { border-top: 1px solid var(--border); padding-top: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.fy-abv-exportcols .fy-wordtiming { padding: 16px 0; }
+@media (max-width: 599px) {
+  .fy-abv-exportcols { display: flex; flex-direction: column; }
+  .fy-abv-exportpreview { gap: 12px; }
+  .fy-abv-exportframe { max-height: 100px; }
+  .fy-abv-exportframe .fy-abv-vid { margin-top: -45px; }
+}
+
+.fy-page-sheet.fy-abv-modal.fy-abv-modal--video { width: min(1020px, calc(100% - 48px)); }
+.fy-abv-modal--video .fy-abv-sheet, .fy-abv-modal--video .fy-abv-sheet *, .fy-abv-modal--phone .fy-abv-psheet, .fy-abv-modal--phone .fy-abv-psheet * { box-sizing: border-box; }
+.fy-abmotion .fy-abv-seg, .fy-abv-modal--video .fy-abv-seg { border-radius: 999px; padding: 3px; gap: 2px; }
+.fy-abmotion .fy-abv-seg button, .fy-abv-modal--video .fy-abv-seg button { height: 32px; min-height: 32px; padding: 5px 12px; border-radius: 999px; font: var(--type-ui); color: var(--foreground); }
+.fy-abmotion .fy-abv-seg button.on, .fy-abv-modal--video .fy-abv-seg button.on, .fy-abv-modal--phone .fy-abv-seg button.on { background: var(--foreground); color: var(--background); }
+.fy-abv-modal--video .fy-abv-btn { min-height: 40px; padding: 8px 16px; border-radius: 999px; font: var(--type-ui); }
+.fy-abv-exportcols .fy-abv-est { flex-direction: column; align-items: flex-start; padding: 14px 16px; background: var(--secondary); border-radius: 8px; margin-top: 16px; }
+.fy-abv-modal--phone .fy-abv-opt { flex-wrap: wrap; gap: 8px; padding: 0; border: 0; margin-block: 16px; }
+.fy-abv-modal--phone .fy-abv-opt > b { width: 100%; color: var(--foreground); }
+.fy-abv-modal--phone .fy-abv-seg { display: flex; width: 100%; border-radius: 12px; padding: 3px; }
+.fy-abv-modal--phone .fy-abv-seg button { flex: 1; min-height: 44px; white-space: normal; line-height: 1.25; border-radius: 9px; padding-inline: 8px; }
+.fy-abv-modal--phone .fy-abv-opts { border: 0; overflow: visible; }
+.fy-abv-modal--phone .fy-abv-exportframe { height: 50px; }
+.fy-abv-modal--phone .fy-abv-exportframe .fy-abv-vid { margin-top: -75px; }
+.fy-abv-modal--phone .fy-abv-exportframe .cap { top: 50%; bottom: auto!important; transform: translateY(-50%); }
+.fy-abv-exportframe .fy-abv-frame-preview { position: absolute; inset: 0; width: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+.fy-abv-frame-preview:focus-visible { outline: 2px solid var(--foreground); outline-offset: -3px; }
+.fy-abv-modal--phone .fy-abv-exportpreview > .fy-abmotion-row, .fy-abv-modal--phone .fy-abv-exportpreview > .fy-abmotion-notice, .fy-abv-modal--phone .fy-abv-exportpreview > .fy-abv-counts { display: none; }
+.fy-abv-modal--phone .fy-wordtiming { padding: 0; }
+.fy-abv-modal--phone .fy-wordtiming .fy-abmotion-notice > button { min-height: 44px; width: 100%; }
+.fy-abv-modal--phone .fy-wordtiming-link { display: inline-flex; align-items: center; min-height: 44px; }
+
+.fy-abmotion .fy-abmotion-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border: none; width: 48px; height: 48px; border-radius: 50%; background: var(--background); color: var(--foreground); cursor: pointer; }
+.fy-abmotion-duration { position: absolute; right: 12px; bottom: 12px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); border-radius: 5px; padding: 3px 7px; font: var(--type-meta); }
+.fy-abmotion--chosen .fy-abmotion-media { max-width: none; }
+.fy-pcard__top.fy-pcard__top--motion { display: flex; flex-direction: column; gap: 12px; }
+.fy-pcard__top--motion > .fy-pcard__pick { width: 100%; }
+.fy-pcard__top--motion .fy-pcard__img { width: 100%; max-height: none; aspect-ratio: 16 / 9; object-fit: cover; }
+.fy-pcard__top--motion .fy-abmotion-actions { padding-top: 0; width: 100%; }
+.fy-pcard__top--motion .fy-pcard__facts { width: 100%; }
+@media (max-width: 599px) {
+  .fy-abmotion-model-note { order: 1; }
+}
+
+/* Turn 209 adds chapter inclusion; its control is distinct from the detailed media choices. */
+.fy-abv-modal .fy-abv-scope { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-height: 0; margin: 0; padding: 0; border: 0; font: var(--type-ui); }
+.fy-abv-modal .fy-abv-scope > b { width: auto; font-weight: 400; color: var(--foreground); }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg { display: flex; width: 100%; gap: 4px; padding: 4px; border-radius: 9px; box-sizing: border-box; }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg button { flex: 1; justify-content: center; min-height: 44px; height: auto; padding: 8px 14px; border-radius: 7px; font: var(--type-ui); color: var(--foreground); }
+.fy-abv-modal .fy-abv-scope .fy-abv-seg button.on { background: var(--secondary); color: var(--foreground); box-shadow: inset 0 0 0 1px var(--border); font-weight: 400; }
+.fy-abv-modal .fy-abv-scope-title { margin-top: 10px; font: var(--type-ui); font-weight: 600; }
+.fy-abv-modal .fy-abv-scope-notice { padding: 14px 16px; background: var(--secondary); border: 0; border-radius: 8px; gap: 8px; }
+.fy-abv-modal .fy-abv-scope-notice > b { font: var(--type-h3); }
+.fy-abv-modal .fy-abv-scope-notice > span { color: var(--foreground); }
+.fy-abv-rendering { display: flex; flex-direction: column; gap: 18px; }
+.fy-abv-rendering h3, .fy-abv-rendering p { margin: 0; }
+.fy-abv-rendering progress { width: 100%; height: 6px; accent-color: var(--foreground); }
+.fy-abv-rendering p { color: var(--muted-foreground); }
+@media (max-width: 599px) {
+  .fy-page-sheet.fy-abv-modal.fy-abv-modal--phone { inset: 44px 0 0; width: 100%; height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); border: 0; border-radius: 0; }
+  .fy-abv-modal--phone .fy-abv-opt select { min-height: 44px; }
+  .fy-abv-modal--phone > .fy-page-sheet__head h2 { font: var(--type-h3); }
+  .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { padding-inline: 8px; }
+}
+
+/* Turn 209 gives the scoped recovery and rendering decisions their own compact sheet. */
+.fy-page-sheet.fy-abv-modal.fy-abv-modal--decision { width: min(780px, calc(100% - 48px)); border-radius: 12px; }
+.fy-abv-modal--decision > .fy-page-sheet__head { padding: 20px 24px; }
+.fy-abv-modal--decision .fy-abv-sheet { padding: 24px; gap: 20px; font: var(--type-ui); }
+.fy-abv-modal--decision .fy-abv-sheet > [data-testid="audiobook-export"] { gap: 20px!important; }
+.fy-abv-modal--decision > .fy-page-sheet__foot { padding: 14px 24px; }
+.fy-page-sheet.fy-abv-modal--decision .fy-abv-btn { min-height: 44px; border-radius: 8px; font: var(--type-ui); padding: 10px 14px; }
+.fy-abv-modal--decision .fy-abv-rendering h3 { font: var(--type-h3); }
+.fy-abv-modal--decision .fy-abv-rendering p { font: var(--type-ui); }
+.fy-abv-modal .fy-abv-scope-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.fy-abv-modal .fy-abv-scope-title small { font: var(--type-meta); font-weight: 400; color: var(--muted-foreground); }
+
+.fy-page-sheet.fy-abv-modal--decision, .fy-page-sheet.fy-abv-modal--decision * { box-sizing: border-box; }

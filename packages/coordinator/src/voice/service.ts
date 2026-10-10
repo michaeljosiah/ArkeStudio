@@ -1,4 +1,4 @@
-import { quoteSpeech, speechInputFits, designedVoiceCandidates } from "@arke-studio/contracts";
+import { quoteSpeech, speechInputFits, designedVoiceCandidates, type AcousticWords } from "@arke-studio/contracts";
 import { compileLine } from "./direction.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -55,10 +55,11 @@ export interface SidecarLike {
    * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
    * depending on @arke-studio/voice.
    */
-  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
+  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
+  transcribeWords?(audio: Uint8Array, options?: { signal?: AbortSignal }): Promise<AcousticWords>;
 }
 
 /** The one cloud-catalogue call the picker needs; ElevenLabsClient gains listVoicesCatalog. */
@@ -898,6 +899,17 @@ export class VoiceService {
   async transcribe(audio: Uint8Array, contentType: string): Promise<string> {
     if (!this.deps.sidecar) throw new Error("Voxa is not running — speech-to-text is off");
     return this.deps.sidecar.transcribe(audio, contentType);
+  }
+
+  async wordTimingAvailability(): Promise<{ ready: boolean; reason?: string }> {
+    if (this.deps.sidecar?.transcribeWords === undefined) return { ready: false, reason: "this local voice runtime does not provide measured word timing" };
+    return (await this.deps.sidecar.health())?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
+  }
+
+  async transcribeWords(audio: Uint8Array, signal: AbortSignal): Promise<AcousticWords> {
+    const ready = await this.wordTimingAvailability();
+    if (!ready.ready || this.deps.sidecar?.transcribeWords === undefined) throw new Error(ready.reason ?? "measured word timing is unavailable");
+    return this.deps.sidecar.transcribeWords(audio, { signal });
   }
 
   /** Local dictation (R-17, R-18): loopback transcription; the text lands as editable input. */

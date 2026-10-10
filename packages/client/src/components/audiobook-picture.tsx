@@ -28,6 +28,7 @@ import { Button, Textarea, cx } from "./ui.js";
 import { usePictureSuggestion, type PictureSuggestionState } from "./audiobook-suggest.js";
 import { PictureCard, PicturePress } from "./audiobook-picture-card.js";
 import { chosenFrom, madePicture } from "./audiobook-made-picture.js";
+import { AudiobookMotionControl } from "./audiobook-motion.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -214,6 +215,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // The card in hand: a suggestion being drafted or made stands over the picture's own.
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
   const choosePicture = connection === "open" ? () => setOpen(true) : undefined;
+  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
   // Make again at the foot. When it shows and how long it holds are the chip's and the tab's, not
@@ -232,13 +234,14 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           onEdit={editInBench}
           offline={connection !== "open"}
           picture={here === null ? null : mediaUrl(world.meta.slug, here.file)}
+          mediaActions={motionControl}
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
           chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[row.block.key] !== undefined ? { own: record.ownLooks[row.block.key] } : {}) }}
         />
       ) : !open ? (
         <>
-          <div className="fy-pcard__top">
+          <div className={motionControl === undefined ? "fy-pcard__top" : "fy-pcard__top fy-pcard__top--motion"}>
             {here !== null && world !== null ? (
               <PicturePress onChoose={choosePicture}>
                 <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
@@ -248,6 +251,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
                 <span className="fy-mono">Choose</span>
               </button>
             )}
+            {motionControl}
             <div className="fy-pcard__facts">
               {here !== null && world !== null ? (
                 <>

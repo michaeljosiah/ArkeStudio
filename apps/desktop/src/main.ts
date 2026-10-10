@@ -1044,6 +1044,7 @@ async function initialize(): Promise<{ port: number }> {
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
       voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
+    transcribeWords: (audio: Uint8Array, options?: { signal?: AbortSignal }) => voxaClient.transcribeWords(audio, options),
   };
 
   const setupEngine = (id: string, healthReady: boolean) => {

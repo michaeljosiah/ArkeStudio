@@ -1637,7 +1637,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
     await act(async () => looks!.click());
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "the Looks sheet opens on the body");
-    assert.equal(sentOf(m, "read-audiobook-looks").length, 1, "which chapters chose which look is asked when it opens");
+    assert.equal(sentOf(m, "read-audiobook-looks").length, 0, "the chapter overview opens without loading a character's saved-look usage (turn 210)");
     await act(async () => (document.body.querySelector('[data-testid="look-done"]') as HTMLButtonElement).click());
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null);
     // The rail's Voices reaches them too (rule 18), which is how Manuscript does.
@@ -2014,20 +2014,19 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
   });
 
   for (const [name, width] of [["a tablet", 820], ["a phone", 390]] as const) {
-    it(`${name}: Direct and illustrate is a ⋯ on the line, the reading, Notes and the filter beside it, Read and Listen held at the foot`, async () => {
+    it(`${name}: the named chapter menu holds actions and Reading settings, with Read and Listen held at the foot`, async () => {
       windowOf(width);
       const m = await mount(inkbound());
       await answerOpen(m);
       const line = q(m, ".fy-ch__viewline")!;
       assert.ok(line.querySelector('[aria-label="Chapter view"]'), "the view switch");
       for (const testId of ["reading-notes-press", "audiobook-filter"]) assert.deepEqual(where(m, testId), [".fy-ch__viewline"], `${testId} stays on the line`);
-      // The reading is the ⋯'s first item on a tablet (design turn 203); a phone keeps its press.
-      assert.deepEqual(where(m, "audiobook-reading"), name === "a phone" ? [".fy-ch__viewline"] : []);
+      // Turn 209 gives the compact toolbar one named menu for its settings and actions.
+      assert.deepEqual(where(m, "audiobook-reading"), [], "the named menu holds Reading settings");
       const more = q(m, '[data-testid="direct-illustrate"]')!;
       assert.deepEqual(where(m, "direct-illustrate"), [".fy-ch__viewline"], "the menu is on the line");
-      assert.equal(more.getAttribute("aria-label"), "Direct and illustrate", "named for a screen reader");
-      assert.equal(more.textContent, "", "a ⋯, no label");
-      assert.ok(more.className.includes("fy-ab__ico") && !more.className.includes("fy-ab__pill"));
+      assert.equal(more.textContent, name === "a phone" ? "Chapter actions" : "Direct and illustrate", "the action is visibly named");
+      assert.ok(more.className.includes("fy-ab__pill"));
       for (const testId of ["read-audiobook", "audiobook-listen"]) assert.deepEqual(where(m, testId), ['[data-testid="audiobook-hold"]'], `${testId} is held at the foot, not on the line`);
       const hold = q(m, '[data-testid="audiobook-hold"]')!;
       assert.deepEqual([...hold.querySelectorAll("button")].map((button) => button.getAttribute("data-testid")), ["read-audiobook", "audiobook-listen"], "Read, then Listen");
@@ -2037,10 +2036,20 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(more.getAttribute("aria-expanded"), "true");
       assert.deepEqual(
         all(m, '.fy-ab__toolmenu [role="menuitem"]').map((item) => item.querySelector(".fy-ab__menu-label")!.textContent),
-        // On a phone Group by beats is the menu's first item (design turn 201, rule 5); a tablet keeps the Blocks press on the line
-        // and puts the reading first in the menu (design turn 203).
-        [...(name === "a phone" ? ["Group by beats"] : [`Narrator · ${q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')?.textContent?.split(" · ")[1] ?? ""}`]), "Direct this chapter", "Illustrate this chapter", "Looks"],
+        // Turn 209 groups chapter work, export, then reading/block settings on a phone.
+        // The tablet retains its first reading item and separate Blocks toolbar press.
+        name === "a phone"
+          ? ["Direct this chapter", "Illustrate this chapter", "Looks", "Export…", q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Blocks"]
+          : [q(m, '[data-testid="audiobook-reading-item"] .fy-ab__menu-label')!.textContent, "Direct this chapter", "Illustrate this chapter", "Looks"],
       );
+      if (name === "a phone") {
+        assert.equal(q(m, ".fy-ab__toolmenu .fy-ab__menu-hd")!.textContent, "Direct and illustrate");
+        assert.equal(all(m, '.fy-ab__toolmenu [role="separator"]').length, 2);
+        const before = m.sent.length;
+        await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
+        assert.deepEqual(all(m, '.fy-ab__toolmenu [role="menuitem"]').map(item => item.querySelector(".fy-ab__menu-label")!.textContent), ["Group by beats", "Reset"]);
+        assert.equal(m.sent.length, before, "opening Blocks starts no director work");
+      }
     });
   }
 
@@ -2059,7 +2068,7 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       assert.equal(q(m, '[data-testid="audiobook-hold"]')!.getAttribute("data-wide"), "true");
       assert.deepEqual(where(m, "audiobook-reading"), [], "the reading's press leaves the line");
       const more = q(m, '[data-testid="direct-illustrate"]')!;
-      assert.equal(more.textContent, "", "Direct and illustrate is a ⋯");
+      assert.equal(more.textContent, "Direct and illustrate", "the folded toolbar keeps its named action");
       await act(async () => more.click());
       const reading = q(m, '[data-testid="audiobook-reading-item"]')!;
       assert.match(reading.textContent!, /^Narrator · /, "the reading is the menu's first item, its voice named");
@@ -2361,9 +2370,10 @@ describe("block seams (design turn 198)", () => {
     await answerOpen(m, { voices: CAST, audiobook: joined() });
     assert.equal(q(m, '[data-testid="audiobook-blocks-press"]') === null, true, "no Blocks press on a phone's line");
     await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
+    await act(async () => q(m, '[data-testid="audiobook-blocks-menu"]')!.click());
     const item = q(m, '[data-testid="audiobook-blocks-reset"]')!;
     assert.equal(item.querySelector(".fy-ab__menu-label")!.textContent, "Reset");
-    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "Blocks · 1 changed");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")!.textContent, "1 changed");
     await act(async () => item.click());
     assert.equal(seamSent(m).at(-1)?.kind, "reset-audiobook-seams");
 
@@ -2533,7 +2543,7 @@ describe("edited lines keep their speaker (design turn 198)", () => {
       assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-cast"]'), null, "no press of its own on the line");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
       assert.equal(q(m, ".fy-ab__toolmenu--lead .fy-ab__menu-hd")?.textContent, "2 paragraphs to cast");
-      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Direct and illustrate"]);
+      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Chapter actions"]);
       await act(async () => q(m, '[data-testid="direct-illustrate-items"]')!.click());
       assert.ok(q(m, '[data-testid="direct-audiobook"]'), "Direct and illustrate opens its own items");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
@@ -2544,4 +2554,33 @@ describe("edited lines keep their speaker (design turn 198)", () => {
       delete (dom.window as unknown as { matchMedia?: unknown }).matchMedia;
     }
   });
+});
+
+
+it("chapter export recovery quotes only its missing blocks and names the return to export", async () => {
+  const m = await mount(inkbound());
+  await answerOpen(m, { audiobook: record(["title", "p0.0"], { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." }) });
+  await act(async () => q(m, '[data-testid="audiobook-chapter-export"]')!.click());
+  const ask = m.sent.findLast(message => message.kind === "open-audiobook-listening");
+  assert.ok(ask?.kind === "open-audiobook-listening");
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { productionId: "inkbound", title: "Inkbound", cover: null, scope: { kind: "chapter", chapterId: "neap" }, chapters: [{ chapterId: "neap", order: 2, title: "The counting of bells", state: "part", seconds: 4, blocks: [], pictures: [], opening: null, gaps: [{ at: 4, from: 3, to: 4 }] }] } }));
+  await act(async () => q(m, '[data-testid="audiobook-export-incomplete"] button')!.click());
+  const read = m.sent.findLast(message => message.kind === "read-audiobook-chapter");
+  assert.ok(read?.kind === "read-audiobook-chapter");
+  assert.deepEqual(read.blocks, ["p1.0", "p3.0"]);
+  await act(async () => {
+    __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 2, blocks: 4 });
+    __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 60000, confirmationToken: "recovery", voices: [] });
+  });
+  const quote = q(m, '[data-testid="read-sheet"]')!;
+  assert.equal(quote.getAttribute("aria-label"), "Read remaining blocks");
+  assert.match(quote.textContent!, /Ready2 of 4 blocksTo read2 blocksEstimated total/);
+  assert.match(quote.textContent!, /The 2 current takes stay as they are/);
+  assert.equal(quote.querySelector("h3"), null, "the native sheet supplies the one heading");
+  assert.match(q(m, '[data-testid="audiobook-confirm"]')!.textContent!, /^Read 2 blocks/);
+  await act(async () => [...quote.closest("dialog")!.querySelectorAll<HTMLButtonElement>(".fy-page-sheet__foot button")].find(button => button.textContent === "Back to export")!.click());
+  assert.equal(q(m, '[data-testid="read-sheet"]'), null);
+  assert.ok(q(m, '[data-testid="audiobook-export"]'));
+  assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");
 });

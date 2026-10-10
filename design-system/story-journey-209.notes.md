@@ -28,8 +28,8 @@ states. Companion proposals remain in draft PRs #1685, #1686 and #1687.
 
 ## Important implementation boundary
 
-The current `AudiobookExportSheet` has no chapter-selection input. Its `Files` control chooses
-file partitioning, **not chapter inclusion**. This proposal requires explicit selection in
+Before this turn, `AudiobookExportSheet` had no chapter-selection input. Its `Files` control chooses
+file partitioning, **not chapter inclusion**. The approved change requires explicit selection in
 the shared listening/export plan and coordinator path for both video and player packages,
 including caches and receipts. A client-only filter is insufficient.
 
@@ -40,9 +40,10 @@ subtitles remain available. Turn 208 owns the actual alignment prerequisites and
 
 The live private SPEC-047 was read, including R-66/R-71/R-72, R-112/R-114/R-118/R-146,
 R-123/R-126/R-129 and R-132–R-145. Turn 209 deliberately proposes an extension to toolbar and
-export scope rules, not an assertion that they already permit this behavior. Amend SPEC-047
-in the implementation session. No private spec was changed for this design-only
-artifact. No app code, world data, generation service or harness was changed.
+export scope rules. PR 1690 implements the chapter navigation and explicit scope through both
+coordinator export paths, saved manifests, delivery listings, cache reuse and recovery. Its
+private companion amends SPEC-047 R-179. The original design-only PR changed no world data or
+generation service; the HTML review remains a separate fixture from the application.
 
 ## Review coverage and limitations
 

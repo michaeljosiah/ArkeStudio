@@ -3,10 +3,15 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 
 import { join } from "node:path";
 import {
   AUDIOBOOK_PLAYER_SOURCE,
+  audiobookScopeKey,
+  AudiobookScopeSchema,
+  SlugSchema,
   ulid,
   type AudiobookListening,
   type AudiobookPlayerChapter,
+  type AudiobookScope,
   type ListeningChapter,
+  type WebPackagesListed,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -29,7 +34,7 @@ import { containedWorldFile } from "./interactive.js";
  */
 
 export type AudiobookExportResult =
-  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean }
+  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean; scope: AudiobookScope; chapterIds: string[] }
   | { ok: false; blockers: string[] };
 
 const EXPORT_ID = /^ab_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -40,7 +45,7 @@ function fullHash(bytes: Uint8Array): string {
 
 /** What a package's chapter depends on, to read the book again under the gate and compare. */
 function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at]), chapter.opening]));
+  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.motion ?? null, picture.motionProblem ?? null]), chapter.opening]));
 }
 
 const extensionOf = (file: string) => {
@@ -74,11 +79,13 @@ mountAudiobookPlayer(document.getElementById("app"), { title: manifest.title, co
 export async function exportAudiobookPlayer(
   store: WorldStore,
   productionId: string,
-  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal } ,
+  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal; scope?: AudiobookScope } ,
 ): Promise<AudiobookExportResult> {
-  const listening: AudiobookListening = await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {});
+  const scope = options.scope ?? { kind: "book" };
+  const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), scope };
+  const listening: AudiobookListening = await audiobookListening(store, productionId, listeningOptions);
   const whole = listening.chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
-  if (whole.length === 0) return { ok: false, blockers: ["no chapter is read whole yet"] };
+  if (whole.length === 0) return { ok: false, blockers: [scope.kind === "chapter" ? "this chapter is not read whole yet" : "no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
   if (!EXPORT_ID.test(exportId)) throw new Error("invalid audiobook export id");
   const signal = options.signal ?? new AbortController().signal;
@@ -98,7 +105,9 @@ export async function exportAudiobookPlayer(
     };
     for (const chapter of whole) for (const block of chapter.blocks) await resolve(block.file);
     for (const chapter of whole) if (chapter.mix !== undefined) await resolve(chapter.mix.file);
-    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
+    const motionProblems = whole.flatMap((chapter) => chapter.pictures.filter((p) => p.motionProblem !== undefined).map((p) => `${chapter.title}: ${p.motionProblem} · choose Use still before exporting`));
+    if (motionProblems.length > 0) return { ok: false, blockers: motionProblems };
+    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.flatMap((picture) => [picture.file, ...(picture.motion !== undefined ? [picture.motion.file] : [])]), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
     for (const file of pictureFiles) await resolve(file);
     if (outside.length > 0) return { ok: false, blockers: outside.map((file) => `${file} is not a file inside this world — the package would carry something else`) };
 
@@ -123,7 +132,7 @@ export async function exportAudiobookPlayer(
         state: "read" as const,
         seconds: chapter.seconds,
         gaps: [],
-        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)! }] : [])),
+        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)!, ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
         opening: picture(chapter.opening),
       };
       const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
@@ -209,6 +218,8 @@ export async function exportAudiobookPlayer(
       kind: "audiobook" as const,
       version: 1,
       productionId,
+      scope,
+      chapterIds: chapters.map((chapter) => chapter.id),
       title: listening.title,
       world: store.getBundle().meta.name,
       cover: picture(listening.cover),
@@ -217,7 +228,7 @@ export async function exportAudiobookPlayer(
       provenance: { exportId, exportedAt: options.clock() },
     };
     await atomicWriteFile(join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}`);
+    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}${scope.kind === "chapter" ? `-${audiobookScopeKey(scope)}` : ""}`);
     await atomicWriteFile(join(staging, "player.html"), page);
     bytes += Buffer.byteLength(page);
 
@@ -227,11 +238,11 @@ export async function exportAudiobookPlayer(
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {})).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
       await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));
-      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined };
+      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined, scope, chapterIds: manifest.chapterIds };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
@@ -240,7 +251,7 @@ export async function exportAudiobookPlayer(
 
 /** The package re-read as a listener's browser would: the page, the manifest, and every file at its hash. */
 export async function packageProblems(dir: string, exportId: string): Promise<string[]> {
-  let manifest: { kind?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
+  let manifest: { kind?: unknown; scope?: unknown; chapterIds?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
   try {
     manifest = JSON.parse(await readFile(toExtendedLength(join(dir, "manifest.json")), "utf8"));
   } catch {
@@ -248,6 +259,11 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   }
   if (manifest === null || manifest.kind !== "audiobook" || !Array.isArray(manifest.files) || !Array.isArray(manifest.chapters)) return ["manifest.json is missing or invalid"];
   const problems: string[] = [];
+  if (manifest.scope !== undefined) {
+    const scope = AudiobookScopeSchema.safeParse(manifest.scope);
+    const ids = manifest.chapters.map((chapter) => chapter.id);
+    if (!scope.success || (scope.data.kind === "chapter" && (ids.length !== 1 || ids[0] !== scope.data.chapterId)) || JSON.stringify(manifest.chapterIds) !== JSON.stringify(ids)) problems.push("manifest.json does not match its export scope");
+  }
   if (manifest.provenance?.exportId !== exportId) problems.push("manifest.json names another export");
   const listed = new Set(manifest.files.map((entry) => entry.file));
   for (const entry of manifest.files) {
@@ -259,17 +275,20 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   }
   for (const chapter of manifest.chapters) {
     for (const piece of chapter.audio ?? []) if (!listed.has(piece.src)) problems.push(`${piece.src} is not in the package`);
-    for (const shown of chapter.pictures) if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+    for (const shown of chapter.pictures) {
+      if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+      if (shown.motion !== undefined && !listed.has(shown.motion.src)) problems.push(`${shown.motion.src} is not in the package`);
+    }
   }
   if (!(await stat(toExtendedLength(join(dir, "player.html"))).then((s) => s.isFile(), () => false))) problems.push("player.html is missing from the package");
   return problems;
 }
 
 /** The world's web packages, newest first (turn 186e): the interactive, the visual novel and the audiobook, each by its manifest. */
-export async function listWebPackages(store: WorldStore): Promise<Array<{ kind: "interactive" | "visual-novel" | "audiobook"; productionId: string; title: string; dir: string; exportedAt: string }>> {
+export async function listWebPackages(store: WorldStore): Promise<WebPackagesListed["packages"]> {
   const exportsDir = join(store.dir, "exports");
   const entries = await readdir(toExtendedLength(exportsDir), { withFileTypes: true }).catch(() => []);
-  const out: Array<{ kind: "interactive" | "visual-novel" | "audiobook"; productionId: string; title: string; dir: string; exportedAt: string }> = [];
+  const out: WebPackagesListed["packages"] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^(interactive|audiobook)-/.test(entry.name)) continue;
     try {
@@ -279,8 +298,11 @@ export async function listWebPackages(store: WorldStore): Promise<Array<{ kind: 
       if (productionId === null || typeof provenance["exportedAt"] !== "string") continue;
       if (!(await stat(toExtendedLength(join(exportsDir, entry.name, "player.html"))).then((s) => s.isFile(), () => false))) continue;
       const kind = raw["kind"] === "audiobook" ? "audiobook" : Array.isArray(raw["beats"]) ? "visual-novel" : "interactive";
+      const scope = AudiobookScopeSchema.safeParse(raw.scope);
+      const chapterIds = SlugSchema.array().min(1).safeParse(raw.chapterIds);
+      if (kind === "audiobook" && raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
-      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"] });
+      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"], ...(kind === "audiobook" && scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}) });
     } catch {
       // A folder with no readable manifest is no package.
     }

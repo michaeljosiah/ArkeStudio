@@ -289,7 +289,7 @@ export function PicturePress({ onChoose, children }: { onChoose: (() => void) | 
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose, chapter }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose, chapter, mediaActions }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -297,6 +297,8 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   offline: boolean;
   /** The picture set on the block, drawn in the slot. */
   picture?: string | null;
+  /** Turn 208 places the saved picture's motion choice immediately below its media. */
+  mediaActions?: ReactNode;
   onRemove?: () => void;
   /** Pick another picture from the world: the picture is the press. */
   onChoose?: () => void;
@@ -496,7 +498,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         };
   return (
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
-      <div className="fy-pcard__top">
+      <div className={cx("fy-pcard__top", mediaActions !== undefined && "fy-pcard__top--motion")}>
         {picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
             <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
@@ -506,6 +508,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <span className="fy-mono">{suggestion.aspect ?? ""}</span>
           </div>
         )}
+        {mediaActions}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">

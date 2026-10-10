@@ -691,3 +691,32 @@
   .fy-ab__read-progress [data-testid="audiobook-progress"] { flex-direction: column; align-items: flex-start; gap: 4px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { padding-inline: 18px; }
 }
+
+/* Turn 209: Reading settings opens from the named chapter menu at every narrow width. */
+@media (max-width: 1099px) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external { position: static; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external .fy-ab__reading-menu { left: auto; right: var(--ab-gutter, 16px); top: calc(100% - 6px); max-width: calc(100vw - 2 * var(--ab-gutter, 16px)); }
+}
+
+/* Turn 209ad: a scoped export recovery is a decision about the missing blocks. */
+.fy-page-sheet.fy-chapter-read-recovery { inset: 24px; margin: auto; width: min(780px, calc(100% - 48px)); height: fit-content; max-height: calc(100dvh - 48px); border-radius: 12px; }
+.fy-chapter-read-recovery > .fy-page-sheet__head { padding: 20px 24px; }
+.fy-chapter-read-recovery > .fy-page-sheet__body { padding: 24px; }
+.fy-chapter-read-recovery .fy-ab__readsheet { display: flex; flex-direction: column; gap: 20px; font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__reads { border: 0; border-radius: 0; }
+.fy-chapter-read-recovery .fy-ab__read { height: auto; min-height: 68px; padding: 20px 0; border-top: 0; border-bottom: 1px solid var(--border); gap: 20px; font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__read b { width: auto; color: var(--foreground); font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__read span { margin-left: auto; text-align: right; white-space: normal; overflow: visible; }
+.fy-chapter-read-recovery .fy-ab__read:not(:first-child) span { font-weight: 600; }
+.fy-chapter-read-recovery .fy-ab__readsheet p { margin: 0; }
+.fy-chapter-read-recovery > .fy-page-sheet__foot { padding: 14px 24px; }
+.fy-chapter-read-recovery .fy-ab__directsheet-foot { width: 100%; display: flex; justify-content: space-between; }
+.fy-chapter-read-recovery .fy-ch__panelpush { display: none; }
+.fy-chapter-read-recovery .ui-btn { min-height: 44px; border-radius: 8px; padding: 10px 14px; font: var(--type-ui); }
+.fy-chapter-read-recovery .ui-btn--ghost { border: 1px solid var(--border); }
+@media (max-width: 599px) {
+  .fy-page-sheet.fy-chapter-read-recovery { inset: 44px 0 0; margin: 0; width: 100%; max-height: calc(100dvh - 44px); border-radius: 0; }
+  .fy-chapter-read-recovery .fy-ab__directsheet-foot .ui-btn { flex: 1; justify-content: center; }
+}
+
+.fy-chapter-read-recovery, .fy-chapter-read-recovery * { box-sizing: border-box; }

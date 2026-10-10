@@ -98,6 +98,9 @@
   --media-overlay-fg: var(--neutral-50);
   --media-control-bg: var(--neutral-50);
   --media-control-fg: var(--neutral-950);
+  /* Turn 208: the discrete current word over video; matches the export's ASS colour. */
+  --caption-current-word: #ffdf63;
+  --caption-current-word-ink: #171717;
 
   /* Legacy brand names → monochrome, so nothing renders teal/orange */
   --teal:        var(--primary);
