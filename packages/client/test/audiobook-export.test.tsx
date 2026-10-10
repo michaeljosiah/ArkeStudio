@@ -94,6 +94,43 @@ const press = async (el: Element | null) => {
 const lastAsk = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind).at(-1);
 
 describe("Export audiobook (turn 186e)", () => {
+  it("starts from this chapter, preserves scope across formats, and holds export until its missing blocks are read", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    let missing: number[] = [];
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="neap" onClose={() => {}} onReadRemaining={(numbers) => { missing = numbers; }} />);
+    const ask = lastAsk(m, "open-audiobook-listening")!;
+    const scope = { kind: "chapter" as const, chapterId: "neap" };
+    assert.deepEqual(ask.scope, scope);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
+    assert.equal(q(m, '[data-testid="audiobook-export-start"]')?.hasAttribute("disabled"), true);
+    assert.match(text(q(m, '[data-testid="audiobook-export-incomplete"]')), /2 blocks still to read/);
+    await press([...dom.document.querySelectorAll("button")].find((button) => text(button) === "Read remaining blocks…")!);
+    assert.deepEqual(missing, [2, 3]);
+    await press(q(m, '[data-testid="audiobook-export-video"]'));
+    assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, scope);
+    assert.equal(q(m, '[aria-label="Files"]'), null, "partitioning is not chapter inclusion");
+    assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true);
+    await press([...dom.document.querySelectorAll('[aria-label="Scope"] button')].find((button) => text(button) === "Whole book")!);
+    const bookAsk = lastAsk(m, "open-audiobook-listening")!;
+    assert.deepEqual(bookAsk.scope, { kind: "book" });
+    assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, { kind: "book" });
+    assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true, "the old chapter quote is not a book quote");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: bookAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" } } }));
+    assert.match(text(q(m, '[data-testid="audiobook-export-omitted"]')), /1 incomplete chapter will be left outNeap/);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
+    assert.ok(q(m, '[data-testid="audiobook-export-omitted"]'), "a late chapter reply cannot replace the chosen book plan");
+  });
+
+  it("sends the chosen chapter with a player export", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="slack-water" onClose={() => {}} />);
+    const ask = lastAsk(m, "open-audiobook-listening")!;
+    const scope = { kind: "chapter" as const, chapterId: "slack-water" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[0]!] } }));
+    await press(q(m, '[data-testid="audiobook-export-start"]'));
+    assert.deepEqual(lastAsk(m, "export-audiobook-player")!.scope, scope);
+  });
+
   it("counts only the chapters read whole, and each picture once with the cover", () => {
     assert.deepEqual(packageCounts(PLAN), { chapters: 1, of: 2, pictures: 2 });
   });
@@ -111,7 +148,7 @@ describe("Export audiobook (turn 186e)", () => {
     await press(q(m, '[data-testid="audiobook-export-open"]'));
     // Drawn on the body (owner, 2026-10-03): inside the title row's fy-fade-up the fixed sheet
     // was clipped to the top of the page over the head.
-    const sheet = q(m, '[data-testid="audiobook-export"]')!.closest(".fy-editordialog")!;
+    const sheet = q(m, '[data-testid="audiobook-export"]')!.closest("dialog.fy-abv-modal")!;
     assert.equal(sheet.parentElement, dom.document.body as unknown as HTMLElement);
     assert.equal(sheet.closest(".fy-h1row, .fy-prodmain"), null);
     const planAsk = lastAsk(m, "open-audiobook-listening")!;
@@ -182,7 +219,7 @@ describe("Export audiobook · Video (turn 197)", () => {
   it("offers Video beside the player as 197a draws it, priced in size and time before Render", async () => {
     const m = await videoSheet();
     const ask = await answerState(m, [{ chapterId: "slack-water", seconds: 1900, rendered: false }]);
-    assert.deepEqual(ask.options, { files: "chapter", shape: "1920x1080", slowPush: true, subtitles: "sidecar", captionPosition: "bottom", captionSize: "m", titleCards: true }, "the owner's defaults");
+    assert.deepEqual(ask.options, { files: "chapter", shape: "1920x1080", slowPush: true, subtitles: "sidecar", captionPosition: "bottom", captionSize: "m", titleCards: true, scope: { kind: "book" } }, "the owner's defaults");
     const sheet = text(q(m, '[data-testid="audiobook-export"]'));
     for (const row of [/Files\s*One a chapterOne for the book\s*1 file/, /Shape\s*1920 × 10801280 × 7201080 × 1920 · vertical/, /Pictures\s*Slow push\s*1 picture · cover before the first/, /Subtitles\s*SidecarBurned inBothNone\s*BottomMiddle\s*SML/, /Openings\s*Chapter title cards\s*chapter markers in the file/, /Chapters\s*1 of 2 · read whole\s*Slack water/, /Audio\s*The chapter mix, as Timing sets it\s*−18 LUFS · AAC 128 kbps · 48 kHz/]) assert.match(sheet, row);
     assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /^~\d+ MB · ~\d+ min on this machine31:40 of video · 1 to render$/);
@@ -219,7 +256,7 @@ describe("Export audiobook · Video (turn 197)", () => {
       const files = [{ name: "inkbound-01-slack-water.mp4", seconds: 1900, bytes: 338 * 1024 * 1024, shape: "1920x1080" as const, sidecars: [".srt" as const, ".vtt" as const], picture: "artifacts/stair.png" }];
       await act(async () => __applyEventForTest({ at: AT, type: "audiobook.video-exported", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: ask.exportId, result: { ok: true, dir: "exports/inkbound-video-20261003", files, made: 1, renderedAt: AT } }));
       const sheet = text(q(m, '[data-testid="audiobook-export"]'));
-      assert.match(sheet, /^1 video · 338 MBexports\/inkbound-video-20261003\/Show in folderRender again/);
+      assert.match(sheet, /1 video · 338 MBexports\/inkbound-video-20261003\/Show in folderRender again/);
       assert.equal(text(q(m, '[data-testid="audiobook-video-file"]')), "inkbound-01-slack-water.mp431:40 · 1920×1080 · 338 MB · .srt .vttOpenShow in folder");
       await press(button("Open"));
       assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "inkbound-video-20261003", file: "inkbound-01-slack-water.mp4" });

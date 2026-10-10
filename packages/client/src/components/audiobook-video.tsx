@@ -98,19 +98,21 @@ export const wholeChapters = (plan: AudiobookListening) => plan.chapters.filter(
 /** What the sheet is told before Render, asked again whenever the options change. */
 export function useVideoState(worldId: string, productionId: string, options: AudiobookVideoOptions, connected: boolean, again: number): AudiobookVideoState | null {
   const asked = useRef<string | null>(null);
-  const [state, setState] = useState<AudiobookVideoState | null>(null);
+  const [held, setHeld] = useState<{ state: AudiobookVideoState | null; key: string } | null>(null);
+  const requestKey = useRef("");
   useEffect(
     () =>
       subscribeAudiobookVideoState((answer) => {
-        if (answer.requestId === asked.current && answer.state !== null) setState(answer.state);
+        if (answer.requestId === asked.current) setHeld({ state: answer.state, key: requestKey.current });
       }),
     [],
   );
   const key = JSON.stringify(options);
   useEffect(() => {
-    if (connected) asked.current = readAudiobookVideo(worldId, productionId, options);
+    requestKey.current = `${worldId}/${productionId}/${key}`;
+    asked.current = connected ? readAudiobookVideo(worldId, productionId, options) : null;
   }, [worldId, productionId, key, connected, again]);
-  return state;
+  return held?.key === `${worldId}/${productionId}/${key}` ? held.state : null;
 }
 
 /** Size and time before Render (rule 9), the files it makes and what the press says. */
@@ -140,12 +142,12 @@ export function VideoOptionRows({ options, setOptions, plan, split, onShape }: {
   const burned = burnsIn(options);
   return (
     <>
-      <div className="fy-abv-opt">
+      {options.scope?.kind !== "chapter" && <div className="fy-abv-opt">
         <b>Files</b>
         <Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "One for the book"]] as const} onChange={(files) => setOptions({ ...options, files })} />
         <span className="grow" />
         <i>{split}</i>
-      </div>
+      </div>}
       <div className="fy-abv-opt">
         <b>Shape</b>
         <Seg label="Shape" value={options.shape} options={SHAPES.map(([key, text]) => [key, text] as const)} onChange={onShape} />
