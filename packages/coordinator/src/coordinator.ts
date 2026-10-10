@@ -15636,9 +15636,11 @@ export class Coordinator {
           }
         } catch (error) { void this.appLog?.append({ kind: "audiobook.word-timing-failed", message: describeCoordinatorError(error) }); }
         finally {
-          if (this.preparingWordTiming.get(key) === control) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); this.wordTimingProgress.delete(key); }
+          const owned = this.preparingWordTiming.get(key) === control;
+          if (owned) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); this.wordTimingProgress.delete(key); }
           store.closingSignal.removeEventListener("abort", onClose);
-          if (!store.closingSignal.aborted) await report().catch(() => {});
+          // Only preparation needs a terminal refresh; read already sent its current plan.
+          if (owned && !store.closingSignal.aborted) await report().catch(() => {});
         }
         return;
       }
