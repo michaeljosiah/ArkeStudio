@@ -670,6 +670,8 @@ export function mountAudiobookPlayer(root, options) {
       const image = el.pics[index];
       const picture = clipPictures[index];
       const eligible = canPush(picture);
+      // A chapter jump has a different clock. Its outgoing still keeps its last crop while fading.
+      if (eligible && index !== shown && clipFadeUntil[index] === 0) continue;
       const focus = picture && picture.focus;
       const share = (value) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
       image.style.transformOrigin = share(focus && focus.x) * 100 + "% " + share(focus && focus.y) * 100 + "%";

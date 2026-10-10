@@ -256,6 +256,17 @@ describe("Slow push in the shared player (turn 211, R-75)", () => {
     assert.equal(p.q("img.on")?.style.transformOrigin, "20% 80%");
   });
 
+  it("freezes an outgoing chapter's crop instead of applying the next chapter's zero clock", () => {
+    const c = pictureBook();
+    const p = mount({ chapters: [c, { ...c, id: "next", order: 2 }] });p.at(20);
+    const outgoing = p.q("img.on")!;
+    p.press("Next chapter");
+    assert.equal(scale(p), "scale(1)");
+    assert.equal(outgoing.style.transform, "scale(1.03)");
+    p.at(5);assert.equal(outgoing.style.transform, "scale(1.03)");
+    p.press("Slow push");assert.equal(outgoing.style.transform, "none", "Off still removes every layer's movement");
+  });
+
   it("derives holds and centred focus for older package inputs", () => {
     const p = mount({ chapters: [pictureBook([{ at: 0, src: "one.png" }, { at: 20, src: "two.png" }])] });
     p.at(10);assert.equal(scale(p), "scale(1.03)");
