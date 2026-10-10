@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HarnessEvent } from "@arke-studio/contracts";
@@ -9,7 +9,7 @@ import { createNormalizeV2State, normalizeOpenCodeV2 } from "../src/v2/normalize
 import { buildProfileConfigV2, buildSessionConfigV2 } from "../src/v2/config.js";
 import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
-import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
+import { meetsV2Gate, OPENCODE2_PINNED_VERSION, discoverOpenCode, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 import { until } from "./wait.js";
 
@@ -192,10 +192,26 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       assert.equal(adapter.readiness().ready, true);
-      assert.equal(adapter.serverVersion, "0.0.0-next-17444");
+      assert.equal(adapter.serverVersion, "2.0.26");
     } finally {
       await adapter.dispose();
       await cold.stop();
+    }
+  });
+
+  it("rejects a running server from any other v2 release without probing the old API", async () => {
+    const unsupported = new StubOpenCodeV2();
+    unsupported.version = "2.0.25";
+    await unsupported.start();
+    const adapter = new OpenCodeV2Adapter({ baseUrl: () => unsupported.baseUrl(), password: () => STUB_V2_PASSWORD });
+    try {
+      await adapter.init();
+      assert.equal(adapter.readiness().ready, false);
+      assert.match(adapter.readiness().reason ?? "", /2\.0\.25.*use 2\.0\.26/);
+      assert.equal(adapter.capabilities().size, 0);
+      assert.deepEqual(unsupported.requests.map(request => request.path), ["/api/info"]);
+    } finally {
+      await adapter.dispose(); await unsupported.stop();
     }
   });
 
@@ -334,7 +350,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const prompts = stub.requests.filter(isPrompt).slice(-2);
       const ids = prompts.map((p) => (p.body as { id?: string }).id);
       assert.ok(ids.every((id) => id?.startsWith("msg_arke_")), `wire ids in the msg_ namespace: ${ids.join(", ")}`);
-      assert.notEqual(ids[0], ids[1], "wire ids never repeat — a reuse answers 409");
+      assert.notEqual(ids[0], ids[1], "wire ids never repeat — a reuse returns the original input");
     } finally {
       await adapter.dispose();
     }
@@ -401,7 +417,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const ack = await adapter.respondToPermission({ permissionId: "per_stub_1", decision: "once" });
       assert.equal(ack.status, "confirmed", "confirmation comes from the replied event, not HTTP status");
       const reply = stub.lastRequest(/\/permission\/per_stub_1\/reply$/);
-      assert.deepEqual(reply?.body, { reply: "once" });
+      assert.deepEqual(reply?.body, { decision: "once" });
       assert.match(reply?.path ?? "", new RegExp(`^/api/session/${ref.sessionId}/`), "the reply is session-scoped");
     } finally {
       await adapter.dispose();
@@ -654,7 +670,7 @@ describe("v2 session config (issue 327 §7)", () => {
       { id: "gemma4:12b", contextLength: 131072, tools: true, vision: false },
       { id: "qwen3-vl:8b", tools: true, vision: true },
     ]);
-    // Measured against 0.0.0-next-17444: `providers` + `package` + `settings.baseURL` produce
+    // Measured against 2.0.26: `providers` + `package` + `settings.baseURL` produce
     // rows; the v1 spelling (`provider`, `npm`, `options`) parses and produces nothing.
     assert.equal(config["provider"], undefined);
     const providers = config["providers"] as Record<string, Record<string, unknown>>;
@@ -691,38 +707,30 @@ describe("v2 session config (issue 327 §7)", () => {
   });
 });
 
-describe("v2 discovery and the build gate (issue 327 §3)", () => {
-  it("gates on the prerelease build number, and lets stable 2.x through", () => {
-    assert.equal(meetsV2Gate("0.0.0-next-17444"), true);
-    assert.equal(meetsV2Gate("0.0.0-next-17443"), false);
-    assert.equal(meetsV2Gate("2.0.0"), true);
-    // A 2.x prerelease restarts the build counter; the major check must win over the
-    // channel branch or a current binary reads as older than the beta pin.
-    assert.equal(meetsV2Gate("2.0.0-next-3"), true);
-    assert.equal(meetsV2Gate("1.18.10"), false);
-    assert.equal(meetsV2Gate(null), false);
+describe("v2 discovery and the release pin (issue 327 §3)", () => {
+  it("keeps the adapter's release gate in lockstep with the packaged runtime", () => {
+    const metadata = JSON.parse(readFileSync(new URL("../../../apps/desktop/runtime-sources.json", import.meta.url), "utf8"));
+    assert.equal(OPENCODE2_PINNED_VERSION, metadata.opencode2.version);
+    assert.ok(metadata.opencode2.x64.url.endsWith(`/cli-windows-x64-${OPENCODE2_PINNED_VERSION}.tgz`));
   });
 
-  it("reads the build number across the renamed channels, off one counter", () => {
-    // Upstream moved the prerelease channel from `next-` to `beta-` after the pin was measured
-    // (2026-08-26: dist-tags beta=0.0.0-beta-18314, latest=0.0.0-beta-17823, dev=0.0.0-dev-18326,
-    // all `bin: opencode2`). The counter continues, so a rename must not read as "too old" —
-    // that rejected every currently installed v2 as absent.
-    assert.equal(meetsV2Gate("0.0.0-beta-18314"), true);
-    assert.equal(meetsV2Gate("0.0.0-beta-17823"), true);
-    assert.equal(meetsV2Gate("0.0.0-dev-18326"), true);
-    // The floor still applies within a renamed channel.
-    assert.equal(meetsV2Gate("0.0.0-beta-17443"), false);
-    // Channels that number differently are not trusted against the floor: this one is a
-    // date, and a wildcarded channel match would clear any build number ever pinned.
-    assert.equal(meetsV2Gate("0.0.0-tui-v2-202606261840"), false);
-    // A compound channel that merely CONTAINS a trusted name is still untrusted — an
-    // unanchored match would read "beta-202606261840" out of it and clear the floor on a date.
-    assert.equal(meetsV2Gate("0.0.0-tui-beta-202606261840"), false);
-    // The counter belongs to the 0.0.0 series. A prerelease of another line numbers by its own
-    // rules, so its suffix is not a build this floor can compare against.
-    assert.equal(meetsV2Gate("1.18.0-beta-202606261840"), false);
-    assert.equal(meetsV2Gate("0.1.0-dev-20000"), false);
+  it("discovers stable v2 under its upstream opencode name and never routes it to the v1 adapter", async () => {
+    for (const version of ["2.0.26", "2.0.25", "0.0.0-beta-19271"]) {
+      const runCommand = async (command: string, args: string[]) => {
+        if (command === "where" || command === "which") return args[0] === "opencode"
+          ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
+        return { status: 0, stdout: `opencode v${version}` };
+      };
+      const result = await discoverPreferredHarness({ v1: { runCommand }, v2: { runCommand }, preferV1: true });
+      assert.equal(result?.generation ?? null, version === "2.0.26" ? "v2" : null);
+      assert.equal(await discoverOpenCode({ runCommand }), null);
+    }
+  });
+  it("accepts only the qualified release, including its exact patch version", () => {
+    assert.equal(meetsV2Gate("2.0.26"), true);
+    for (const version of [null, "2.0.25", "2.0.27", "2.0.0", "2.0.26-beta.1", "3.0.0", "0.0.0-next-17444", "0.0.0-beta-19271", "1.18.35", "2.0.26garbage"]) {
+      assert.equal(meetsV2Gate(version), false, String(version));
+    }
   });
 
   it("prefers v2, falls back to v1, and honours the Settings escape hatch", async () => {
@@ -737,7 +745,7 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
       return present[name] !== undefined ? { status: 0, stdout: present[name]! } : { status: 1, stdout: "" };
     };
 
-    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v0.0.0-next-17444" };
+    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
     const preferred = await discoverPreferredHarness({ v1: { runCommand: machine(both) }, v2: { runCommand: machine(both) } });
     assert.equal(preferred?.generation, "v2");
 
@@ -769,11 +777,11 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
             : { status: 1, stdout: "" };
         }
         if (command === configured) return { status: 0, stdout: "opencode2 v0.0.0-next-9000" };
-        return { status: 0, stdout: "opencode2 v0.0.0-next-17444" };
+        return { status: 0, stdout: "opencode2 v2.0.26" };
       };
       const found = await discoverOpenCode2({ configuredPath: configured, runCommand: run });
       assert.equal(found?.source, "path", "the stale configured entry does not hide the current install");
-      assert.equal(found?.version, "0.0.0-next-17444");
+      assert.equal(found?.version, "2.0.26");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

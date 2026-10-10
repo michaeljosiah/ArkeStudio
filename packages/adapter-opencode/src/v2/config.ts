@@ -28,7 +28,7 @@ interface PermissionRule {
  * The confinement block, in the only order that works. Rules are an ordered array and the
  * LAST match wins, with agent rules appended after the base policy — so the blanket
  * external-directory deny lands after OpenCode's own managed-directory allows and overrides
- * them (measured against 0.0.0-next-17444). The re-allows therefore come AFTER the deny.
+ * them (measured against 2.0.26). The re-allows therefore come AFTER the deny.
  * This ordering looks wrong until you know why it isn't; that is exactly why it is a named
  * constant with this comment attached.
  */
@@ -160,11 +160,10 @@ export const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
 /**
  * The profile-level config that puts the local models in front of OpenCode (issue 1247).
  *
- * Measured against the pinned v2 build, and every clause below is a thing it refused
- * differently. OpenCode never probes Ollama, so the models are listed by name — a provider
- * with no `models` map lists nothing, and the server never asks `/v1/models`. The grammar is
- * v2's own: `providers`, `package` with the `aisdk:` prefix, `settings.baseURL`; the v1 shape
- * (`provider`, `npm`, `options`) parses without a warning and produces no rows. The key is
+ * Studio publishes its installed model rows and metadata explicitly. Stable v2 also probes
+ * Ollama's native /api/tags and /api/show endpoints at the configured base URL; that does not
+ * replace Studio's catalogue or local-runtime eligibility checks. The grammar is v2's own:
+ * `providers`, `package` with the `aisdk:` prefix, `settings.baseURL`. The key is
  * whatever non-empty string keeps the SDK happy; Ollama does not read it. Written into the
  * redirected profile rather than beside each session so the catalogue the pickers validate
  * against carries the rows before any session exists — and the server reloads that file on

@@ -307,6 +307,28 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
 
+For an OpenCode v2 pin change, stage the exact runtime and qualify the actual binary:
+
+```powershell
+npm run prepare:opencode2 --workspace @arke-studio/desktop
+$env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+$env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
+$env:ARKE_LIVE_HARNESS = '1'
+node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
+Remove-Item Env:ARKE_LIVE_HARNESS, Env:ARKE_OPENCODE2_CMD, Env:ARKE_TEST_OPENCODE2
+npm run verify:licenses --workspace @arke-studio/desktop
+npm run smoke:main --workspace @arke-studio/desktop
+```
+
+The tests use disposable profiles, a scripted localhost provider and synthetic credentials.
+They verify authenticated launch, the exact server version, published Ollama metadata, pinned
+agent/model configuration, a file-tool loop, outside-directory denial, final text/usage, approval
+confirmation, and durable key add/restart/removal. They make no paid requests and do not qualify
+live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
+fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
+native steering.
+
 Host lifecycle checks include coordinator `test/harness/owned-child-linux.test.ts` and
 `test/harness/owned-child-windows.test.ts`. They use real native processes on their respective
 platforms: the Linux cases sweep a long-named executable and its helpers after an uncatchable owner exit;

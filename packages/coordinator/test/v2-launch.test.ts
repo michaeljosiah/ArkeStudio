@@ -38,6 +38,30 @@ function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000)
 }
 
 describe("the v2 launch protocol (issue 327 §4)", () => {
+  it("boots the pinned native runtime through the shared launcher and authenticated readiness route", {
+    skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 75_000,
+  }, async () => {
+    const wiring = await assembleHarness({
+      appRoot: await tempDir("v2-native-launch-"),
+      v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },
+      v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+    });
+    assert.equal(wiring.isV2, true);
+    assert.equal(wiring.harnessInfo?.version, "2.0.26");
+    assert.equal(wiring.harnessInfo?.beta, false);
+    assert.ok(wiring.supervisor && wiring.adapter);
+    try {
+      await wiring.relaunchHarness({});
+      await wiring.supervisor.start();
+      await waitForStatus(wiring.supervisor, "healthy");
+      await wiring.adapter.init?.();
+      assert.equal(wiring.adapter.readiness().ready, true);
+      assert.ok(!wiring.logLines.some(line => line.includes("[beta]")));
+    } finally {
+      await wiring.adapter.dispose?.(); await wiring.supervisor.stop();
+    }
+  });
+
   it("parses the password line and only the password line", () => {
     assert.equal(passwordFromLine("server password s3cret_value"), "s3cret_value");
     assert.equal(passwordFromLine("  server password s3cret_value \r"), "s3cret_value");
@@ -84,7 +108,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     const v2 = await assembleHarness({
       appRoot,
       v1: { runCommand: machine({}) },
-      v2: { runCommand: machine({ opencode2: "opencode2 v0.0.0-next-17444" }) },
+      v2: { runCommand: machine({ opencode2: "opencode2 v2.0.26" }) },
     });
     assert.equal(v2.isV2, true);
     assert.ok(v2.publishLocalModels, "a v2 launch owns its profile and can write into it");
@@ -224,7 +248,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
     };
     // A configured v1 path exists, but v2 on PATH wins: the pass-over is stated (R-4).
-    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v0.0.0-next-17444" };
+    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
     const wiring = await assembleHarness({
       appRoot: await tempDir("v2-launch-"),
       v1: { configuredPath: process.execPath, runCommand: machine(both) },

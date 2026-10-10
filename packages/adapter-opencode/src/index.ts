@@ -10,7 +10,7 @@ export {
   discoverOpenCode2,
   discoverPreferredHarness,
   meetsV2Gate,
-  OPENCODE2_MIN_BUILD,
+  OPENCODE2_PINNED_VERSION,
   type DiscoveredHarness,
   type DiscoveredOpenCode,
   type DiscoveryOptions,

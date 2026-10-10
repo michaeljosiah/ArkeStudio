@@ -2,7 +2,7 @@ import { OpenCodeError, errorDetailFrom } from "../http.js";
 
 /**
  * The OpenCode v2 HTTP surface (issue 327 §4–§5). Three things distinguish it from the v1
- * layer and all three were measured against 0.0.0-next-17444:
+ * layer and all three were measured against 2.0.26:
  *
  * - Every request carries HTTP Basic auth, username `opencode`, password from the server's
  *   own stdout. Requests without it answer 401 — including the event stream.

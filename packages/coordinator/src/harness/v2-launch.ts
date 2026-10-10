@@ -5,7 +5,6 @@ import {
   buildProfileConfigV2,
   credentialEnvPatch,
   discoverPreferredHarness,
-  meetsV2Gate,
   OpenCodeAdapter,
   OpenCodeV2Adapter,
   v2BasicAuth,
@@ -139,7 +138,7 @@ export function harnessInfoFrom(harness: DiscoveredHarness): AssembledHarnessInf
     generation: harness.generation,
     source: harness.discovery.source,
     version: harness.discovery.version,
-    beta: harness.generation === "v2",
+    beta: false,
     ...(harness.rejectedV2 ? { rejectedV2Version: harness.rejectedV2.version } : {}),
   };
 }
@@ -152,7 +151,7 @@ export interface AssembleHarnessOptions {
   deps?: SupervisorDeps;
   preferV1?: boolean;
   v1?: DiscoveryOptions;
-  v2?: DiscoveryOptions & { minBuild?: number };
+  v2?: DiscoveryOptions;
   /**
    * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
    * default and ships in the installer; Claude Code is a convenience for people already running
@@ -297,7 +296,7 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       // Real keys arrive via relaunchHarness before the first spawn (SPEC-005 D5); v2 also
       // gets the redirected profile so no personal OpenCode login can shadow them (§2).
       ...(isV2 ? { env: v2ProfileEnv(profileDir) } : {}),
-      healthPath: "/api/health",
+      healthPath: isV2 ? "/api/info" : "/api/health",
       readyTimeoutMs: 30_000,
       ...(isV2 ? { healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine } : {}),
     },
@@ -318,11 +317,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   const logLines: string[] = [];
   if (harness) {
     logLines.push(
-      `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`,
+      `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})`,
     );
     if (harness.rejectedV2) {
       logLines.push(
-        `OpenCode v2 found but too old: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
+        `OpenCode v2 does not match the supported release: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
       );
     }
     // The legacy knob deserves honest treatment now that a generation preference outranks it
@@ -330,15 +329,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     if (isV2 && opts.v1?.configuredPath) {
       logLines.push(
         "configured OpenCode path passed over — v2 preferred; set ARKE_OPENCODE_GENERATION=v1 to use it",
-      );
-    }
-    if (
-      harness.generation === "v1" &&
-      harness.discovery.source === "configured" &&
-      meetsV2Gate(harness.discovery.version)
-    ) {
-      logLines.push(
-        "the configured path looks like an OpenCode v2 binary — point ARKE_OPENCODE2_CMD at it instead",
       );
     }
   } else {

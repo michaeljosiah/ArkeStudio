@@ -645,9 +645,9 @@ function stubOpenCode(t: TestContext, name: string, version: string): string {
 
 describe("discovery (R-1)", () => {
   it("prefers a configured path over PATH, and names the version", async (t) => {
-    const found = await discoverOpenCode({ configuredPath: stubOpenCode(t, "fake-opencode", "7.7.7") });
+    const found = await discoverOpenCode({ configuredPath: stubOpenCode(t, "fake-opencode", "1.7.7") });
     assert.equal(found?.source, "configured");
-    assert.equal(found?.version, "7.7.7");
+    assert.equal(found?.version, "1.7.7");
   });
 
   /*
@@ -665,10 +665,10 @@ describe("discovery (R-1)", () => {
     const command = process.platform === "win32" ? "C:\\tools\\opencode.cmd" : "/usr/local/bin/opencode";
     const found = await discoverOpenCode({
       runCommand: async (_command, args) =>
-        args[0] === "opencode" ? { status: 0, stdout: `${command}\n` } : { status: 0, stdout: "6.6.6\n" },
+        args[0] === "opencode" ? { status: 0, stdout: `${command}\n` } : { status: 0, stdout: "1.6.6\n" },
     });
     assert.equal(found?.source, "path");
-    assert.equal(found?.version, "6.6.6");
+    assert.equal(found?.version, "1.6.6");
     assert.equal(found?.command, command);
   });
 
@@ -683,7 +683,7 @@ describe("discovery (R-1)", () => {
       runCommand: async (_command, args) =>
         args[0] === "opencode"
           ? { status: 0, stdout: "C:\\tools\\opencode\r\nC:\\tools\\opencode.cmd\r\n" }
-          : { status: 0, stdout: "6.6.6\n" },
+          : { status: 0, stdout: "1.6.6\n" },
     });
     assert.equal(found?.command, "C:\\tools\\opencode.cmd", "the extensionless match cannot be started");
   });
@@ -701,7 +701,7 @@ describe("discovery (R-1)", () => {
             setTimeout(() => resolve({ status: 0, stdout: "/usr/local/bin/opencode\n" }), 5_200);
             return;
           }
-          resolve({ status: 0, stdout: "6.6.6\n" });
+          resolve({ status: 0, stdout: "1.6.6\n" });
         }),
     });
     assert.equal(found?.source, "path", "a slow probe is not the same as a missing installation");
@@ -716,11 +716,11 @@ describe("discovery (R-1)", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return args[0] === "opencode"
           ? { status: 0, stdout: `${command}\n` }
-          : { status: 0, stdout: "9.8.7\n" };
+          : { status: 0, stdout: "1.8.7\n" };
       },
     });
     assert.equal(timerRan, true);
-    assert.deepEqual(found, { command, source: "path", version: "9.8.7" });
+    assert.deepEqual(found, { command, source: "path", version: "1.8.7" });
   });
 });
 
