@@ -8,7 +8,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { AUDIOBOOK_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { audiobookPath, readAudiobook } from "../../src/productions/audiobook.js";
-import { buildLookPrompt, verifyLook, type LookDeriver, type LookDeriverInput } from "../../src/productions/audiobook-look.js";
+import { buildLookPrompt, chapterPeople, nameAt, resolveChapterPerson, verifyLook, type LookDeriver, type LookDeriverInput } from "../../src/productions/audiobook-look.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -211,4 +211,38 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.equal(verified.look.characters.length, 0);
     assert.equal(verified.dropped, 1);
   });
+
+  it("retains an evidenced unresolved identity for the author instead of silently dropping it", () => {
+    const verified = verifyLook({ characters: [{ who: "her mother", text: "Seated at the table.", blocks: ["p0.0"] }, { who: "a stranger", text: "A red coat.", blocks: ["p0.0"] }] }, { people: [], blocks: [{ key: "p0.0", text: "She sat beside her mother." }] });
+    assert.deepEqual(verified.look.characters, [{ key: "her mother", name: "her mother", text: "Seated at the table.", blocks: ["p0.0"] }]);
+    assert.equal(verified.dropped, 1, "an invented name still has no evidence");
+  });
+
+  it("recognises quoted familiar names and resolves only unambiguous authored aliases", () => {
+    assert.equal(nameAt("Sol was asleep.", 'Solomon "Sol" Vale'), 0);
+    const people = [{ key: "maren", name: "Maren Kest", aliases: ["Rena"] }, { key: "other", name: "Marena Vale", aliases: ["Rena"] }];
+    assert.equal(resolveChapterPerson(people, "Rena"), undefined);
+    assert.equal(resolveChapterPerson(people, "maren")?.name, "Maren Kest");
+    assert.equal(resolveChapterPerson(people.slice(0, 1), "rena")?.key, "maren");
+  });
+
+  it("gives the deriver POV, relatives, short names and authored look identities without claiming they are in frame", () => withHarness(async ({ store }) => {
+    const bundle = store().getBundle();
+    const production = bundle.productions.find((entry) => entry.meta.id === LEDGER)!;
+    const chapter = production.chapters[0]!;
+    const base = bundle.sheets.find((sheet) => sheet.type === "character")!;
+    const sheets = [
+      { ...base, id: "maren", name: "Maren Kest", shortName: "Rena", sections: [{ heading: "Relationships", body: "Rena is the name her mother Lena uses. Lena is her mother." }] },
+      { ...base, id: "lena", name: "Lena Kest", sections: [{ heading: "Essence", body: "Maren's mother." }] },
+      { ...base, id: "sol", name: 'Solomon "Sol" Vale', sections: [] },
+    ];
+    const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets, productions: [{ ...production, chapters: [{ ...chapter, pov: "maren" }] }] }) }, { body: "She watched Sol sleep, then sat beside her mother.", cast: null, chapter: { id: chapter.id, file: chapter.file, title: chapter.title, order: chapter.order, version: 1, hash: "h" } });
+    assert.deepEqual(people.map((person) => person.key), ["maren", "sol", "lena"]);
+    const prompt = buildLookPrompt({ title: "Dawn", people, places: [], blocks: [{ key: "p0.0", text: "She watched him sleep." }] });
+    assert.match(prompt, /chapter viewpoint/);
+    assert.match(prompt, /also called: Rena/);
+    assert.match(prompt, /Lena is her mother/);
+    assert.match(prompt, /A relative mentioned or remembered is not necessarily present/);
+    assert.match(prompt, /silent or asleep/);
+  }));
 });

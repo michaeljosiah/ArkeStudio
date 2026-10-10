@@ -126,8 +126,8 @@ export type PictureShot = z.infer<typeof PictureShotSchema>;
 
 /**
  * The skin a sheet's Appearance gives, in its own words: the clause that names it ("Deep brown skin
- * with a warm undertone"). A detail shot carries no reference (rule 12), so a hand drawn from the
- * prompt alone was drawn white — Ade's, in Na love or Juju's second chapter. Null where none is said.
+ * with a warm undertone"). Retained for older details and an explicit Without choice; a carried
+ * reference now defines its person's identity instead. Null where none is said.
  */
 export function sheetSkin(sheet: Pick<Sheet, "sections">): string | null {
   const body = sheet.sections.find((section) => section.heading === "Appearance")?.body ?? "";
@@ -423,7 +423,9 @@ export function pictureBench(
   return [
     prompt.replace(/\s+/g, " ").trim(),
     [referenceBriefLine(cited), people ? PICTURE_IDENTITY_LINE : ""].filter((part) => part !== "").join(" "),
-    detailSkinLine(detailed),
+    // A carried image defines the detail's identity too; old records or an explicit Without
+    // choice retain the authored sheet fallback only for a person whose image does not ride.
+    detailSkinLine(detailed.filter((detail) => !cited.some((entry) => entry.kind === "character" && entry.name === detail.name))),
     mood !== undefined && mood !== "" ? `Light and mood: ${mood}` : "",
     "No text in the picture.",
   ]
