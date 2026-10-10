@@ -20,7 +20,7 @@ import {
   type WorldImageReference,
 } from "@arke-studio/contracts";
 import { usableModels } from "./dispatch-bar.js";
-import { setupForMode } from "../lib/composer-mode.js";
+import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { mediaUrl } from "../lib/media.js";
 import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
@@ -168,13 +168,15 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
   // which prices and confirms the picture as any image, and files it as an artifact kept there.
   const bench = useBench();
-  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[] } | null>(null);
+  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[]; setup?: ModeSetup } | null>(null);
   useEffect(() => {
     const asked = pending.current;
     const session = bench?.session;
     if (asked === null || session === undefined || session.id === asked.before || bench?.worldId !== worldId) return;
     pending.current = null;
-    const setup = setupForMode("image", undefined, usableModels(store.state, "image"));
+    // Editing a plan-backed picture must not silently switch it to a paid Bench default.
+    // Keep an unavailable original model too: the Bench requires a usable choice before dispatch.
+    const setup = asked.setup ?? setupForMode("image", undefined, usableModels(store.state, "image"));
     sendBenchCompose(worldId, session.id, { mode: "image", provider: setup.provider, model: setup.model, params: setup.params, brief: asked.brief });
     // Edit prompt (191a): the pictures that were to ride go in as the Bench takes them, one batch, in the order the brief cites them.
     if (asked.refs !== undefined) sendBenchAddReference(worldId, session.id, asked.refs.map((path) => ({ pick: { source: "world-file" as const, path } })));
@@ -192,7 +194,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
     // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
     const sheets = world?.sheets ?? [];
     const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!) };
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!),
+      setup: { provider: picked.model.provider, model: picked.model.id, params: { kind: "image", count: 1, ...(picked.aspect !== undefined ? { aspect: picked.aspect } : {}) } } };
     sendBenchNewSession(worldId);
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
