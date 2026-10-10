@@ -398,12 +398,27 @@ describe("Suggest picture (turn 191a)", () => {
     const next = state();
     await act(async () => __setStateForTest({ ...next, bench: { worldId: FIXTURE_WORLD_ID, session: { id: "se_01J8G00000000000000000NEW2", composer: { mode: "image", provider: "", model: "", params: { kind: "image", count: 1 }, brief: "", activeTokens: [] } } } as never }, { connection: "open" }));
     const compose = asked(m, "bench-compose")[0]!;
+    assert.deepEqual([compose.provider, compose.model, compose.params], ["openai", "gpt-image-2", { kind: "image", count: 1, aspect: "16:9" }]);
     assert.match(compose.brief, /^Odile on the flooded stair, holding the lamp low/);
     assert.match(compose.brief, /Maren is shown in @Image 1\./);
     assert.ok(!/Sereth/.test(compose.brief.split("\n\n")[1] ?? ""), "a person with no picture is not cited");
     const refs = asked(m, "bench-add-reference")[0]!;
     assert.deepEqual(refs.picks.map((pick) => pick.source), [{ source: "world-file", path: "references/maren-kest/head-front.png" }]);
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/artifacts/bench/se_01J8G00000000000000000NEW2`);
+  });
+
+  it("keeps a plan-backed picture's model when editing, even if it has become unavailable", async () => {
+    const m = await mount(2);
+    await press(q(m, '[data-testid="suggest-picture"]'));
+    await answerSuggestion(m, { suggestion: { ...SUGGESTION, aspect: undefined, estimatedMicroUsd: 0,
+      model: { provider: "codex", id: "codex-image", name: "Codex Image", references: 4, plan: "included-plan" } } });
+    await press(q(m, '[data-testid="suggest-edit"]'));
+    const next = state();
+    assert.ok(!next.app.manifest!.models.some((model) => model.provider === "codex" && model.id === "codex-image"));
+    await act(async () => __setStateForTest({ ...next, bench: { worldId: FIXTURE_WORLD_ID, session: { id: "se_01J8G00000000000000000NEW2", composer: { mode: "image", provider: "", model: "", params: { kind: "image", count: 1 }, brief: "", activeTokens: [] } } } as never }, { connection: "open" }));
+    const compose = asked(m, "bench-compose")[0]!;
+    assert.deepEqual([compose.provider, compose.model, compose.params], ["codex", "codex-image", { kind: "image", count: 1 }], "an unavailable plan model is not replaced with a paid default");
+    assert.equal(asked(m, "bench-dispatch").length, 0, "editing never authorizes a generation");
   });
 
   it("says in one clause why nothing was suggested and offers Suggest picture again", async () => {
