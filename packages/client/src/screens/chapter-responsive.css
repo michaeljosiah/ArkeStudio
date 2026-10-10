@@ -718,3 +718,5 @@
   .fy-page-sheet.fy-chapter-read-recovery { inset: 44px 0 0; margin: 0; width: 100%; max-height: calc(100dvh - 44px); border-radius: 0; }
   .fy-chapter-read-recovery .fy-ab__directsheet-foot .ui-btn { flex: 1; justify-content: center; }
 }
+
+.fy-chapter-read-recovery, .fy-chapter-read-recovery * { box-sizing: border-box; }
