@@ -135,3 +135,15 @@
   .fy-abv-modal--phone > .fy-page-sheet__head h2 { font: var(--type-h3); }
   .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { padding-inline: 8px; }
 }
+
+/* Turn 209 gives the scoped recovery and rendering decisions their own compact sheet. */
+.fy-page-sheet.fy-abv-modal.fy-abv-modal--decision { width: min(780px, calc(100% - 48px)); border-radius: 12px; }
+.fy-abv-modal--decision > .fy-page-sheet__head { padding: 20px 24px; }
+.fy-abv-modal--decision .fy-abv-sheet { padding: 24px; gap: 20px; font: var(--type-ui); }
+.fy-abv-modal--decision .fy-abv-sheet > [data-testid="audiobook-export"] { gap: 20px!important; }
+.fy-abv-modal--decision > .fy-page-sheet__foot { padding: 14px 24px; }
+.fy-page-sheet.fy-abv-modal--decision .fy-abv-btn { min-height: 44px; border-radius: 8px; font: var(--type-ui); padding: 10px 14px; }
+.fy-abv-modal--decision .fy-abv-rendering h3 { font: var(--type-h3); }
+.fy-abv-modal--decision .fy-abv-rendering p { font: var(--type-ui); }
+.fy-abv-modal .fy-abv-scope-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.fy-abv-modal .fy-abv-scope-title small { font: var(--type-meta); font-weight: 400; color: var(--muted-foreground); }
