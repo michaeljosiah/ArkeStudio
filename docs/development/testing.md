@@ -810,3 +810,19 @@ turn206 frames directly from the master alongside real components at matching vi
 `paired.html` preserves full frames and separately crops the affected receipt/footer/panel;
 the master chapter background is schematic, while the actual side uses the retained chapter
 screen. The harness uses its own headless Chrome profile and public synthetic content.
+
+
+Chapter export inclusion (turn 209, #1688) has scoped listening/player and video regressions in
+coordinator `test/productions/audiobook-listening.test.ts` and `audiobook-video.test.ts`. They
+cover incomplete/missing chapter refusal, manifests, delivery identity, unchanged encode reuse
+and interrupted-job recovery; client `audiobook-export.test.tsx` covers scope/format changes and
+stale readiness, and `chapter-audiobook.test.tsx` covers the missing-block quote and return.
+Run `node scripts/smoke-chapter-scope-parity.mjs --out <review-directory>` for fourteen literal
+master/full-App pairs: chapter action menus, normal Read, ready Direction, Activity, both export
+formats/scopes, blocked recovery, render progress and desktop/phone return. The bridge validates
+its synthetic events and asserts no export fallback, no implicit read confirmation, no cancellation
+on close, selected-block/focus return and reserved native footers. Use `--frame 209o --width 320`
+or `--frame 209o --text-scale 2` in a separate output directory for supplementary narrow/text-zoom
+captures. Retained detailed destinations and known schematic differences are labelled explicitly
+in `paired.html`; screenshots alone do not establish universal visual parity. Chrome runs headless
+with a dedicated profile; this test never attaches to the installed app or a private world.

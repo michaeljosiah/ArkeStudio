@@ -148,4 +148,4 @@
 .fy-abv-modal .fy-abv-scope-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
 .fy-abv-modal .fy-abv-scope-title small { font: var(--type-meta); font-weight: 400; color: var(--muted-foreground); }
 
-.fy-abv-modal--decision, .fy-abv-modal--decision * { box-sizing: border-box; }
+.fy-page-sheet.fy-abv-modal--decision, .fy-page-sheet.fy-abv-modal--decision * { box-sizing: border-box; }
