@@ -28,8 +28,6 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
-  { group: "Saved looks · proposed for approval", screen: "No search results · keep the current preview and offer one way back", frame: "207g", route: "Audiobook · Looks", status: "drawn", checked: "2026-10-10",
-    controls: [], notes: ["Turn 207 · issue 1680. Proposed and awaiting owner approval. Design only; no application implementation or persistence change is included."] },
   { group: "Saved looks · proposed for approval", screen: "The chapter chooser · 16 looks, named rows and one selected-look preview", frame: "207a", route: "Audiobook · Looks / New look", status: "drawn", checked: "2026-10-10",
     controls: [], notes: ["Turn 207 · issue 1680. Proposed and awaiting owner approval. Design only; no application implementation or persistence change is included."] },
   { group: "Saved looks · proposed for approval", screen: "New look · a short name before accepting, saved looks folded away", frame: "207b", route: "Audiobook · Looks / New look", status: "drawn", checked: "2026-10-10",
@@ -41,6 +39,8 @@ const SCREENS = [
   { group: "Saved looks · proposed for approval", screen: "Legacy, missing preview and rename failure · exact prompt remains readable", frame: "207e", route: "Audiobook · Looks / New look", status: "drawn", checked: "2026-10-10",
     controls: [], notes: ["Turn 207 · issue 1680. Proposed and awaiting owner approval. Design only; no application implementation or persistence change is included."] },
   { group: "Saved looks · proposed for approval", screen: "390 px · candidates, optional name and one price summary", frame: "207f", route: "Audiobook · Looks / New look", status: "drawn", checked: "2026-10-10",
+    controls: [], notes: ["Turn 207 · issue 1680. Proposed and awaiting owner approval. Design only; no application implementation or persistence change is included."] },
+  { group: "Saved looks · proposed for approval", screen: "No search results · keep the current preview and offer one way back", frame: "207g", route: "Audiobook · Looks", status: "drawn", checked: "2026-10-10",
     controls: [], notes: ["Turn 207 · issue 1680. Proposed and awaiting owner approval. Design only; no application implementation or persistence change is included."] },
 
   { group: "Production conversation · drawn", screen: "Turn group · eligible and individual decisions", frame: "196a", route: "Production conversation · design for #1425 / #1426", status: "drawn", checked: "2026-10-04",
