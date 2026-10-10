@@ -12,9 +12,11 @@ export const AudiobookActivitySchema = z.object({
   chapterId: SlugSchema,
   chapterFile: z.string().min(1),
   chapterTitle: z.string().min(1),
+  chapterOrder: z.number().int().min(0).optional(),
   productionTitle: z.string().min(1),
   worldName: z.string().min(1),
   scope: z.enum(["chapter", "block"]),
+  block: z.string().min(1).optional(),
   phase: z.enum(["queued", "reading", "aligning", "stopping", "stopped", "interrupted", "finished", "ready"]),
   startedAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
@@ -27,13 +29,14 @@ export const AudiobookActivitySchema = z.object({
   models: z.array(z.string().min(1)),
   local: z.boolean(),
   plan: z.enum(["free-plan", "free-credit"]).optional(),
-  jobs: z.array(z.object({ id: z.string().min(1), index: z.number().int().min(1), reused: z.boolean() }).strict()),
+  jobs: z.array(z.object({ id: z.string().min(1), index: z.number().int().min(1), reused: z.boolean(), saved: z.number().int().min(0).optional() }).strict()),
   reason: z.string().optional(),
+  interruptedDuring: z.enum(["reading", "aligning"]).optional(),
 }).strict();
 export type AudiobookActivity = z.infer<typeof AudiobookActivitySchema>;
 export type AudiobookActivityUpdate = Partial<Pick<AudiobookActivity, "phase" | "toMake" | "made" | "flagged" | "requests" | "request" | "estimatedMicroUsd" | "models" | "local" | "plan" | "reason">> & { job?: AudiobookActivity["jobs"][number] };
 export const audiobookActivityLive = (run: AudiobookActivity): boolean => ["queued", "reading", "aligning", "stopping"].includes(run.phase);
-export const audiobookActivityPath = (run: AudiobookActivity): string => `/w/${run.worldId}/p/${run.productionId}/story/chapters/${run.chapterId}?view=audiobook`;
+export const audiobookActivityPath = (run: AudiobookActivity): string => `/w/${run.worldId}/p/${run.productionId}/story/chapters/${run.chapterId}?view=audiobook${run.scope === "block" && run.block ? `&block=${encodeURIComponent(run.block)}` : ""}`;
 
 export function audiobookActivityTitle(run: AudiobookActivity): string {
   const noun = run.scope === "block" ? "Block re-read" : "Narration";
@@ -64,12 +67,12 @@ export function audiobookRequestCost(job: Job): { amount: number | null; label: 
 export function audiobookActivityCost(run: AudiobookActivity, jobs: readonly Job[]): string {
   const scope = run.scope === "block" ? "this re-read" : "this read";
   if (run.local) return "local";
-  if (audiobookActivityLive(run)) return run.plan === "free-plan" ? `free plan · ${scope}` : `~${formatMicroUsd(run.estimatedMicroUsd)}${run.plan === "free-credit" ? " from free credit" : ""} for ${scope}`;
+  if (audiobookActivityLive(run) && run.phase !== "stopping") return run.plan === "free-plan" ? `free plan · ${scope}` : `~${formatMicroUsd(run.estimatedMicroUsd)}${run.plan === "free-credit" ? " from free credit" : ""} for ${scope}`;
   const charged = audiobookActivityJobs(run, jobs).filter(j => !j.reused).map(ref => jobs.find(j => j.id === ref.id));
-  const values = charged.map(job => job ? audiobookRequestCost(job) : { amount: null, label: "charge unknown" });
+  const values = charged.map(job => job ? run.phase === "stopping" && ["submitting", "running"].includes(job.status) && speechSettlement(job).actualMicroUsd === null ? { amount: null, label: "charge unknown" } : audiobookRequestCost(job) : { amount: null, label: "charge unknown" });
   const unknown = values.filter(value => value.label === "charge unknown").length;
   const measured = values.reduce((sum, value) => sum + (value.amount ?? 0), 0);
-  if (unknown) return `${values.some(value => value.amount !== null) ? `${formatMicroUsd(measured)} measured · ` : ""}${unknown} request charge${unknown === 1 ? "" : "s"} unknown for ${scope}`;
+  if (unknown) return `${values.some(value => value.amount !== null) ? `${formatMicroUsd(measured)} ${values.filter(value => value.amount !== null).every(value => value.label.endsWith("reported")) ? "reported" : "measured"} · ` : ""}${unknown} request charge${unknown === 1 ? "" : "s"} unknown for ${scope}`;
   if (run.plan === "free-plan" && values.every(value => value.amount === 0)) return `free plan · ${scope}`;
   if (values.every(value => value.amount !== null)) return `${formatMicroUsd(measured)} ${scope}`;
   const estimate = charged.reduce((sum, job) => sum + (job ? audiobookRequestCost(job).amount ?? job.estimatedMicroUsd : 0), 0);
