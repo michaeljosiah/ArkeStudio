@@ -2408,7 +2408,7 @@ export function ChapterWorkspace({
           {view === "audiobook" && audiobook.readSheet !== null && (
             <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} onClose={audiobook.readSheet.cancel} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
-                <ReadSheet sheet={audiobook.readSheet} />
+                <ReadSheet sheet={audiobook.readSheet} headless />
               </aside>
             </PageSheet>
           )}

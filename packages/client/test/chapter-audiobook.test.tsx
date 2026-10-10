@@ -2555,3 +2555,32 @@ describe("edited lines keep their speaker (design turn 198)", () => {
     }
   });
 });
+
+
+it("chapter export recovery quotes only its missing blocks and names the return to export", async () => {
+  const m = await mount(inkbound());
+  await answerOpen(m, { audiobook: record(["title", "p0.0"], { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." }) });
+  await act(async () => q(m, '[data-testid="audiobook-chapter-export"]')!.click());
+  const ask = m.sent.findLast(message => message.kind === "open-audiobook-listening");
+  assert.ok(ask?.kind === "open-audiobook-listening");
+  const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+  await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { productionId: "inkbound", title: "Inkbound", cover: null, scope: { kind: "chapter", chapterId: "neap" }, chapters: [{ chapterId: "neap", order: 2, title: "The counting of bells", state: "part", seconds: 4, blocks: [], pictures: [], opening: null, gaps: [{ at: 4, from: 3, to: 4 }] }] } }));
+  await act(async () => q(m, '[data-testid="audiobook-export-incomplete"] button')!.click());
+  const read = m.sent.findLast(message => message.kind === "read-audiobook-chapter");
+  assert.ok(read?.kind === "read-audiobook-chapter");
+  assert.deepEqual(read.blocks, ["p1.0", "p3.0"]);
+  await act(async () => {
+    __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 2, blocks: 4 });
+    __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 60000, confirmationToken: "recovery", voices: [] });
+  });
+  const quote = q(m, '[data-testid="read-sheet"]')!;
+  assert.equal(quote.getAttribute("aria-label"), "Read remaining blocks");
+  assert.match(quote.textContent!, /Ready2 of 4 blocksTo read2 blocksEstimated total/);
+  assert.match(quote.textContent!, /The 2 current takes stay as they are/);
+  assert.equal(quote.querySelector("h3"), null, "the native sheet supplies the one heading");
+  assert.match(q(m, '[data-testid="audiobook-confirm"]')!.textContent!, /^Read 2 blocks/);
+  await act(async () => [...quote.querySelectorAll("button")].find(button => button.textContent === "Back to export")!.click());
+  assert.equal(q(m, '[data-testid="read-sheet"]'), null);
+  assert.ok(q(m, '[data-testid="audiobook-export"]'));
+  assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");
+});
