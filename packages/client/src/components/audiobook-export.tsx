@@ -194,15 +194,15 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     setVideo(null);
   };
   const scopedChapter = scope.kind === "chapter" ? production.chapters.find((chapter) => chapter.id === scope.chapterId) : undefined;
-  const scopeTitle = scopedChapter === undefined ? production.meta.title : `Chapter ${scopedChapter.order} � ${scopedChapter.title}`;
+  const scopeTitle = scopedChapter === undefined ? production.meta.title : `Chapter ${scopedChapter.order} · ${scopedChapter.title}`;
   const selectedPlan = scope.kind === "chapter" ? plan?.chapters.find((chapter) => chapter.chapterId === scope.chapterId) : undefined;
-  const scopeDetail = selectedPlan === undefined ? null : incomplete ? `${selectedPlan.blocks.length} of ${selectedPlan.blocks.length + missing.length} blocks read` : `${selectedPlan.blocks.length} blocks � ${clockTime(selectedPlan.seconds)}`;
+  const scopeDetail = selectedPlan === undefined ? null : incomplete ? `${selectedPlan.blocks.length} of ${selectedPlan.blocks.length + missing.length} blocks read` : `${selectedPlan.blocks.length} blocks · ${clockTime(selectedPlan.seconds)}`;
   const compactDecision = incomplete || rendering !== null;
   const scopeRow = (
     <div className="fy-abv-opt fy-abv-scope" data-testid="audiobook-export-scope">
       <b>Include</b>
       {chapterId === undefined ? <span>Whole book</span> : <Seg label="Include" value={scope.kind} options={[["chapter", "This chapter"], ["book", "Whole book"]] as const} onChange={selectScope} disabled={busy || rendering !== null} />}
-      {scope.kind === "chapter" && <span className="fy-abv-scope-title">{scopedChapter === undefined ? scope.chapterId : `Chapter ${scopedChapter.order} · ${scopedChapter.title}`}</span>}
+      {scope.kind === "chapter" && <span className="fy-abv-scope-title"><span>{scopeTitle}</span>{scopeDetail !== null && <small>{scopeDetail}</small>}</span>}
     </div>
   );
   const scopeReadiness = (
@@ -319,7 +319,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const renderingBody = rendering === null ? null : <div className="fy-abv-rendering" data-testid="audiobook-export-rendering">
     <h3>Rendering video</h3>
     <progress aria-label="Video render progress" max={100} {...(progress !== null ? { value: progress } : {})} />
-    <div className="fy-abv-foot"><span>{progress === null ? "Starting render…" : `${progress}%${held?.video?.leftSec === null || held?.video?.leftSec === undefined ? "" : ` � about ${Math.max(1, Math.ceil(held.video.leftSec / 60))} minute${held.video.leftSec > 60 ? "s" : ""} left`}`}</span><span className="grow" /><button type="button" className="fy-abv-btn" onClick={() => cancelExport(worldId, rendering)}>Stop</button></div>
+    <div className="fy-abv-foot"><span>{progress === null ? "Starting render…" : `${progress}%${held?.video?.leftSec === null || held?.video?.leftSec === undefined ? "" : ` · about ${Math.max(1, Math.ceil(held.video.leftSec / 60))} minute${held.video.leftSec > 60 ? "s" : ""} left`}`}</span><span className="grow" /><button type="button" className="fy-abv-btn" onClick={() => cancelExport(worldId, rendering)}>Stop</button></div>
     <p>You can close this sheet. The render stays in Activity.</p>
   </div>;
   const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to Chapter ${scopedChapter.order}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
