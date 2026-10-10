@@ -9,7 +9,7 @@ import { resolveHeldJob, stopAudiobook, subscribeAudiobookActivity, useStore } f
 import { closeActivityPanel, openActivityPanel, inspectProviderCalls } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 
-const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : audiobookActivityLive(run) ? "live" : "queued";
+const tone = (run: AudiobookActivity) => run.phase === "ready" ? "ok" : run.phase === "finished" ? "warn" : run.phase === "interrupted" ? "fail" : ["reading", "aligning"].includes(run.phase) ? "live" : "queued";
 
 export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; state: ClientState }) {
   const navigate = useNavigate();
@@ -62,7 +62,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
           const job = state.app.jobs.find(job => job.id === ref.id);
           const aligning = ref.index === run.request && run.phase === "aligning";
           const blocks = Array.isArray(job?.params.blocks) ? job.params.blocks.length : undefined;
-          const phase = aligning ? "aligning locally" : ref.saved !== undefined && ref.saved === blocks ? "saved" : job?.status === "succeeded" ? "audio received" : job?.status ?? "record unavailable";
+          const phase = aligning ? "aligning locally" : ref.saved !== undefined && ref.saved === blocks ? "saved" : ref.saved !== undefined && ref.saved > 0 ? `${ref.saved} block${ref.saved === 1 ? "" : "s"} saved` : job?.status === "succeeded" ? "audio received" : job?.status ?? "record unavailable";
           const charge = job ? audiobookRequestCost(job) : { amount: null, label: "charge unknown" };
           const chargeKind = charge.label.endsWith("reported") ? "reported charge" : charge.label.endsWith("from usage") ? "charge from usage" : "measured charge";
           return <div className="fy-abactivity__request" key={ref.id}>
@@ -76,7 +76,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
             {job && phase !== "saved" && <Button size="sm" variant="ghost" onClick={() => inspectProviderCalls(job.id)}>Provider calls</Button>}
           </div>;
         })}
-        {run.request < run.requests && <div className="fy-abactivity__request"><b>Requests {run.request + 1}{run.requests > run.request + 1 ? `–${run.requests}` : ""} · not sent</b><div className="fy-ap__rowsub">{submittedBlocks.length > 0 ? `${remainingBlocks} blocks · ` : ""}~{formatMicroUsd(remainingEstimate)} remaining estimate</div></div>}
+        {run.request < run.requests && <div className="fy-abactivity__request"><b>Requests {run.request + 1}{run.requests > run.request + 1 ? `–${run.requests}` : ""} · not sent</b><div className="fy-ap__rowsub">{submittedBlocks.length > 0 && remainingBlocks >= 0 ? `${remainingBlocks} blocks · ` : ""}~{formatMicroUsd(remainingEstimate)} remaining estimate</div></div>}
       </details>}
     </div>
   </div>;

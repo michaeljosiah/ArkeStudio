@@ -611,7 +611,7 @@ function HistoryRow({
   if (job.target.kind === "voice-preview" && job.params.purpose === undefined && job.status === "succeeded") {
     const voice = jobOrigin(job);
     const charge = audiobookRequestCost(job);
-    return <div className="fy-ap__row fy-abactivity fy-voicepreview-activity">
+    return <div className="fy-ap__row fy-ap__row--top fy-abactivity fy-voicepreview-activity">
       <span className="fy-ap__dot fy-ap__dot--ok" aria-hidden />
       <div className="fy-ap__main"><div className="fy-ap__rowtitle">{subjectOf(job) ? `${subjectOf(job)} · ` : ""}Voice preview ready</div>
         <div className="fy-ap__rowsub">{labels.place}</div>

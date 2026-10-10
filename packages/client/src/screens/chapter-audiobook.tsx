@@ -1039,7 +1039,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {activity ? <><b>{audiobookActivityStage(activity)}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
           <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             {activity?.phase === "stopping" ? "Stopping…" : "Stop"}

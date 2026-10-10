@@ -241,13 +241,14 @@
 .fy-ap__close { min-width: 32px; min-height: 32px; }
 .fy-ap__tabs { padding: 0 18px; height: auto; border-bottom: 1px solid var(--border); }
 .fy-ap__tabs .fy-seg { display: flex; gap: 20px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-.fy-ap__tabs .fy-seg__item { min-height: 44px; padding: 10px 0; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: var(--type-ui); background: none; box-shadow: none; }
+.fy-ap__tabs .fy-seg__item { min-height: 0; padding: 10px 0; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font: var(--type-ui); background: none; box-shadow: none; }
 .fy-ap__tabs .fy-seg__item--active { border-bottom-color: var(--foreground); }
-.fy-ap__status { min-height: 44px; height: auto; padding: 0 18px; font: var(--type-meta); font-size: var(--text-xs); border: 0; }
+.fy-ap__status { min-height: 44px; height: auto; padding: 0 18px; font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); border: 0; }
 .fy-ap__scope button { min-height: 32px; }
-.fy-ap__body { padding: 16px 18px 24px; }
+.fy-ap__body { padding: 6px 18px 24px; }
 .fy-ap__eyebrow { font: var(--type-label); text-transform: none; letter-spacing: normal; margin: 4px 0 14px; }
-.fy-ap__divider { border: 0; border-top: 1px solid var(--border); margin: 22px 0; }
+.fy-ap__divider { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.fy-ap__foot { padding-top: 0; font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }
 .fy-ap__tabs .fy-seg__item--active::before { display: none; }
 .fy-ap__status { order: 0; }
 @media (max-width: 599px) {
@@ -255,13 +256,14 @@
   .fy-activity-phone > .fy-page-sheet__grab { display: none; }
   .fy-activity-phone > .fy-page-sheet__head { min-height: 58px; padding: 10px 18px; }
   .fy-activity-phone > .fy-page-sheet__head h2 { font: var(--type-h3); }
+  .fy-activity-phone > .fy-page-sheet__head .ui-iconbtn svg { width: 9px; height: 9px; }
   .fy-activity-phone > .fy-page-sheet__body { padding: 0; }
   .fy-activity-phone .fy-ap__tabs { padding: 0 18px; }
   .fy-activity-phone .fy-ap__tabs .fy-seg { width: 100%; justify-content: space-between; gap: 0; }
   .fy-activity-phone .fy-ap__tabs .fy-seg__item { padding: 10px 0; }
   .fy-activity-phone .fy-ap__status { display: flex; padding: 0 18px; }
   .fy-activity-phone .fy-ap__scope button { min-height: 44px; }
-  .fy-activity-phone .fy-ap__body { padding: 16px 18px 24px; }
+  .fy-activity-phone .fy-ap__body { padding: 6px 18px 24px; }
   .fy-activity-phone .fy-abactivity { flex-wrap: nowrap; gap: 10px; padding: 0; }
   .fy-activity-phone .fy-abactivity .fy-ap__actions .ui-btn { min-height: 44px; }
 }

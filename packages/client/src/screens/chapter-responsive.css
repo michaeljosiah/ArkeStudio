@@ -683,8 +683,11 @@
 .fy-chapter-review-sheet .fy-ab__directsheet-foot { flex-wrap: wrap; }
 .fy-chapter-review-sheet .ui-btn { max-width: 100%; height: auto; padding-block: 8px; white-space: normal; }
 /* Turn206 keeps the current reading step distinct from durable saved-block progress. */
-.fy-ab__read-progress [data-testid="audiobook-progress"] { display: inline-flex; gap: 8px; align-items: baseline; font: var(--type-ui); }
+.fy-ab__read-progress [data-testid="audiobook-progress"] { display: inline-flex; gap: 8px; align-items: baseline; font: var(--type-ui); color: var(--foreground); }
+.fy-ab__hold:has(.fy-ab__read-progress) [data-testid="audiobook-listen"] { background: var(--background); color: var(--foreground); border-color: var(--border); }
+.fy-ab__hold:has(.fy-ab__read-progress) [data-testid="audiobook-listen"] svg { display: none; }
 .fy-ab__read-saved { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }
 @media (max-width: 599px) {
   .fy-ab__read-progress [data-testid="audiobook-progress"] { flex-direction: column; align-items: flex-start; gap: 4px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { padding-inline: 18px; }
 }
