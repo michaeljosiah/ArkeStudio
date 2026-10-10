@@ -325,6 +325,10 @@ it("refreshes timing Activity when opened and drops an aborted world from its tr
     return <span data-testid="timing-count">{entries.length}</span>;
   }
   await mount(<Probe />);
+  await act(async () => __setStateForTest({
+    ...FIXTURE_STATE,
+    world: { ...FIXTURE_STATE.world!, productions: FIXTURE_STATE.world!.productions.map(production => ({ ...production, meta: { ...production.meta, format: "story" as const } })) },
+  }, { connection: "open" }));
   assert.ok(sent.some(message => message.kind === "audiobook-word-timing" && message.action === "read"));
   await act(async () => __applyEventForTest({ at, type: "audiobook.word-timing", worldId, productionId, requestId: "01J00000000000000000000001", state: { available: true, running: true, done: 2, total: 3, blocks: [] } }));
   assert.equal(dom.document.querySelector('[data-testid="timing-count"]')?.textContent, "1");
