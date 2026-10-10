@@ -7,6 +7,8 @@ type WireCost = { input?: number; output?: number; [other: string]: unknown };
 export interface WireModel {
   id?: string;
   providerID?: string;
+  /** v2's runtime transport route; retained internally, never a model-picker choice. */
+  package?: string;
   name?: string;
   status?: string;
   disabled?: boolean;

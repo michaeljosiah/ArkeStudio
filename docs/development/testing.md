@@ -307,6 +307,14 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
 
+For the bundled OpenCode Copilot startup race (#1696), run adapter-opencode's package suite
+and coordinator `test/harness/session-files.test.ts`. Adapter `test/v2-model-readiness.test.ts`
+scripts the measured next-17444 scoped catalogue protocol: global-ready/location-pending,
+separate Beats/Continuity/Cast locations, default/fallback choices, 503 warm-up, unsupported or
+missing routes, cancellation, deadlines and incorrect scope. It verifies no prompt is sent
+before readiness and failed creation retires the unpublished session. These fixtures make no
+vendor calls; they do not prove account connectivity or repair a permanently failed runtime sync.
+
 Host lifecycle checks include coordinator `test/harness/owned-child-linux.test.ts` and
 `test/harness/owned-child-windows.test.ts`. They use real native processes on their respective
 platforms: the Linux cases sweep a long-named executable and its helpers after an uncatchable owner exit;

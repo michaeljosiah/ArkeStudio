@@ -25,6 +25,7 @@ import { parseSse } from "../sse.js";
 import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
+import { waitForSessionModel } from "./model-readiness.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import {
   normalizeAttempt,
@@ -54,6 +55,8 @@ export interface OpenCodeV2AdapterOptions {
   streamSilenceMs?: number;
   /** How long init() waits out the server-global warm-up before calling it unready. */
   warmupMs?: number;
+  /** Local ceiling inside the caller's session-creation deadline, overridable in regressions. */
+  modelReadyMs?: number;
   /** One line per adapter-lifecycle fact; the host appends them to logs/harness.jsonl. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -257,28 +260,31 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
-    if (model !== null) this.sessionWindows.set(sessionId, this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null);
-    // The envelope assertion in reqData covers scoped GETs; session create echoes the location
-    // inside data, so assert here too — a session in the wrong directory writes the wrong world.
-    if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {
-      throw new Error(
-        `OpenCode v2 created the session in the wrong location: asked ${wireDirectory(location)}, got ${session.location.directory}`,
-      );
-    }
-    // Pin the agent as session state — v2's answer to the per-prompt agent trap the v1
-    // backing carried (the `build` fallback that silently ate turns). 204 on success;
-    // confirmation arrives as session.agent.selected on the stream.
-    if (input.agent) {
-      try {
-        await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
-      } catch (error) {
-        // The session exists on the server and nobody upstream has its id: a stop between the
-        // two requests would otherwise leave one behind per stop. Retired best-effort, bounded,
-        // and off the caller's signal, which has already fired.
-        await this.http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
-        throw error;
+    let window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null : undefined;
+    try {
+      // The envelope assertion in reqData covers scoped GETs; session create echoes the location
+      // inside data, so assert here too — a session in the wrong directory writes the wrong world.
+      if (location && session?.location?.directory !== undefined && !sameDirectory(session.location.directory, location)) {
+        throw new Error(
+          `OpenCode v2 created the session in the wrong location: asked ${wireDirectory(location)}, got ${session.location.directory}`,
+        );
       }
+      // Pin the agent as session state — v2's answer to the per-prompt agent trap the v1
+      // backing carried (the `build` fallback that silently ate turns). 204 on success;
+      // confirmation arrives as session.agent.selected on the stream.
+      if (input.agent) {
+        await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
+      }
+      const row = await waitForSessionModel(this.http, model, location ?? session.location?.directory, input.signal, this.opts.modelReadyMs);
+      if (row !== null) window = modelMetadata(row).inputTokenLimit ?? null;
+      input.signal?.throwIfAborted();
+    } catch (error) {
+      // Nobody upstream has this id yet. A failed pin, readiness check or stop must not leave
+      // an orphan. Retirement is best-effort, bounded and independent of the caller's signal.
+      await this.http.req<void>("DELETE", `/api/session/${sessionId}`, undefined, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
+      throw error;
     }
+    if (window !== undefined) this.sessionWindows.set(sessionId, window);
     this.sessions.set(sessionId, {
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
