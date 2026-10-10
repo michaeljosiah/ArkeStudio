@@ -80,13 +80,14 @@ it("GPU handoff accepts an exited sibling but still rejects a live endpoint's un
   } finally { client.dispose(); }
 });
 
-it("Qwen v2 declares five shapes and four pictures on the ordinary engine, with no runtime guard", () => {
+it("Qwen v2 declares five shapes at 2K and 1K and three pictures on the ordinary engine, with no runtime guard", () => {
   const row = COMFYUI_MANIFEST_MODELS.find((m) => m.id === recipe.id)!;
   assert.ok(ManifestModelSchema.safeParse(row).success);
   assert.equal(recipe.recipeVersion, 2);
   assert.deepEqual(row.limits.aspects, ["1:1", "16:9", "9:16", "4:3", "3:4"]);
-  assert.deepEqual(row.limits.tiers, { "1K": "1664" });
-  assert.equal(row.accepts.referenceImages, 4);
+  assert.deepEqual(row.limits.tiers, { "1K": "1664", "2K": "2752" });
+  assert.equal(row.limits.resolutions![0], "2752", "a request naming no tier gets the native canvases");
+  assert.equal(row.accepts.referenceImages, 3);
   assert.equal(COMFYUI_MANIFEST_MODELS.find((m) => m.capability === "image")!.id, "comfyui-krea2-image");
   assert.match(row.displayName, /Research/);
   assert.equal(referencePrompt("Keep @Image 1 beside @image2; @Video 1 remains unsupported.", row), "Keep <image1> beside <image2>; @Video 1 remains unsupported.");
@@ -96,7 +97,7 @@ it("Qwen v2 declares five shapes and four pictures on the ordinary engine, with 
   assert.deepEqual(recipe.requires.customNodes, []);
   assert.equal(Object.values(recipe.graph).some((node) => node.class_type === "ArkeQwen21Runtime"), false);
   assert.equal(recipe.graph["9"].inputs.device, "auto");
-  assert.equal(recipe.graph["6"].inputs.steps, 25);
+  assert.equal(recipe.graph["6"].inputs.steps, 40);
   assert.equal(recipe.graph["7"].class_type, "VAEDecodeTiled");
   assert.equal(recipe.referenceConditioning, undefined, "the canvas is always the chosen aspect's");
   assert.equal(recipe.requires.checkpoints.length, 3);
@@ -105,7 +106,7 @@ it("Qwen v2 declares five shapes and four pictures on the ordinary engine, with 
     assert.match(checkpoint.url, /\/resolve\/ace0edeb3791a594ddfa36ed5f41a178a394e921\//);
   }
   const changed = structuredClone(recipe);
-  changed.graph["6"].inputs.steps = 40;
+  changed.graph["6"].inputs.steps = 25;
   assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(recipe));
 });
 
@@ -118,7 +119,7 @@ it("Qwen measures the CUDA adapter rather than borrowing another card's VRAM", (
   assert.equal(fitFor(row, { ...machine, accelerators: ["cuda"], vramMbByAccelerator: { cuda: 14336 } }).fit, "runs-slowly");
 });
 
-for (const count of [0, 1, 4]) it(`Qwen dispatch with ${count} references keeps alpha, order and the chosen canvas`, async () => {
+for (const [count, resolution, width, height] of [[0, undefined, 2752, 1536], [1, "1664", 1664, 928], [3, "2752", 2752, 1536]] as const) it(`Qwen dispatch with ${count} references at ${resolution ?? "no tier"} keeps alpha, order and the chosen canvas`, async () => {
   const uploads: string[] = [];
   let graph: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {};
   const client = new ComfyUiClient(async (url, init) => {
@@ -133,7 +134,7 @@ for (const count of [0, 1, 4]) it(`Qwen dispatch with ${count} references keeps 
   }, base, async () => ({ ok: true }));
   try {
     await client.submit("", { model: recipe.id, capability: "image", recipe: comfyUiRecipeIdentity(recipe),
-      params: { prompt: "Keep the dragon from image 1.", seed: 42, output: { aspect: "16:9" }, references: Array.from({ length: count }, (_, n) => `${n}.png`) },
+      params: { prompt: "Keep the dragon from image 1.", seed: 42, output: { aspect: "16:9", ...(resolution ? { resolution } : {}) }, references: Array.from({ length: count }, (_, n) => `${n}.png`) },
       imageReferences: Array.from({ length: count }, (_, n) => image(n)),
     });
     assert.equal(uploads.length, count);
@@ -143,9 +144,9 @@ for (const count of [0, 1, 4]) it(`Qwen dispatch with ${count} references keeps 
     assert.deepEqual(graph["6"].inputs.latent_image, ["5", 0]);
     assert.deepEqual(graph["6"].inputs.model, ["9", 0]);
     assert.deepEqual(graph["6"].inputs.positive, ["4", 0]);
-    assert.equal(graph["5"].inputs.width, 1664);
-    assert.equal(graph["5"].inputs.height, 928);
-    assert.equal(graph["6"].inputs.steps, 25);
+    assert.equal(graph["5"].inputs.width, width);
+    assert.equal(graph["5"].inputs.height, height);
+    assert.equal(graph["6"].inputs.steps, 40);
     for (let n = 1; n <= 4; n++) {
       if (n <= count) {
         assert.equal(graph[String(10 + n)].inputs.image, `accepted-${n}.png`);
@@ -167,7 +168,7 @@ it("Qwen rejects missing, excessive and unverified references before uploading",
   try {
     for (const request of [
       { params: { prompt: "x", references: ["missing.png"] } },
-      { params: { prompt: "x" }, imageReferences: [image(1), image(2), image(3), image(4), image(5)] },
+      { params: { prompt: "x" }, imageReferences: [image(1), image(2), image(3), image(4)] },
       { params: { prompt: "x" }, imageReferences: [image(1)] },
     ]) await assert.rejects(client.submit("", { model: recipe.id, capability: "image", ...request }));
     assert.equal(calls, 0);

@@ -10,7 +10,7 @@ import { comfyUiRecipeById, comfyUiRecipeIdentity, recipeNodeClasses } from "../
 const [modelsDir, base, destination, ...references] = process.argv.slice(2);
 const recipe = comfyUiRecipeById("comfyui-qwen21-image")!;
 if (!modelsDir || !base || !destination || references.length > recipe.referenceImages!.length) {
-  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <models> <URL> <output directory> [up to four reference PNGs]");
+  throw new Error("Usage: node --import tsx packages/providers/scripts/smoke-qwen21.ts <models> <URL> <output directory> [up to three reference PNGs]");
 }
 const target = resolve(destination);
 await mkdir(target, { recursive: false });
@@ -47,7 +47,7 @@ try {
       prompt: process.env.ARKE_SMOKE_PROMPT ?? (references.length
         ? "Keep the same ceramic teapot from image 1. Photograph it on a pale oak table beside a rain-streaked window at dusk. Warm amber lamplight reflects in the cobalt blue glaze. Preserve its round body, curved spout, handle and brass lid details."
         : "An editorial still-life photograph of a round cobalt blue ceramic teapot with a curved spout and small brass lid, resting on a pale oak table beside loosely folded linen. Soft morning window light from the left, glossy handmade glaze, fine wood grain, a cream kitchen and softly blurred leafy plant. Natural color, precise material detail, no text."),
-      seed: Number(process.env.ARKE_SMOKE_SEED ?? 28471), output: { aspect: process.env.ARKE_SMOKE_ASPECT ?? "16:9", tier: "1K" }, references,
+      seed: Number(process.env.ARKE_SMOKE_SEED ?? 28471), output: { aspect: process.env.ARKE_SMOKE_ASPECT ?? "16:9", ...(process.env.ARKE_SMOKE_RESOLUTION ? { resolution: process.env.ARKE_SMOKE_RESOLUTION } : {}) }, references,
     },
     imageReferences: await Promise.all(references.map(async (path, n) => ({ name: `reference-${n + 1}.png`, contentType: "image/png" as const, data: await readFile(path) }))),
   });

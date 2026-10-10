@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ManifestModel, ModelSampling, RecipeIdentity, AdapterSelection } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
-import { QWEN21_IMAGE, QWEN21_BUCKETS } from "./qwen21-recipe.js";
+import { QWEN21_IMAGE, QWEN21_BUCKETS_2K, QWEN21_TIER_BUCKETS } from "./qwen21-recipe.js";
 import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
 import { SEEDVR2_UPSCALE, SEEDVR2_UPSCALE_MODEL } from "./seedvr2-recipe.js";
 
@@ -963,7 +963,15 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
 export const IMAGE_DIMENSIONS: Record<string, Record<string, { width: number; height: number }>> = {
   [DRAFT_IMAGE.id]: SDXL_BUCKETS,
   [KREA2_IMAGE.id]: KREA2_BUCKETS,
-  [QWEN21_IMAGE.id]: QWEN21_BUCKETS,
+  [QWEN21_IMAGE.id]: QWEN21_BUCKETS_2K,
+};
+
+/**
+ * A recipe with more than one size tier: its canvases for each resolution word its row declares.
+ * Absent, or a word it does not know, and `IMAGE_DIMENSIONS` — the row's first resolution — holds.
+ */
+export const IMAGE_TIER_DIMENSIONS: Record<string, Record<string, Record<string, { width: number; height: number }>>> = {
+  [QWEN21_IMAGE.id]: QWEN21_TIER_BUCKETS,
 };
 
 /**
@@ -1051,8 +1059,8 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
   {
     id: QWEN21_IMAGE.id, provider: "comfyui", capability: "image", displayName: QWEN21_IMAGE.displayName,
     accepts: { referenceImages: QWEN21_IMAGE.referenceImages!.length, referenceRoles: false, startFrame: false, endFrame: false },
-    // One tier: Qwen's native canvases sit near 1.5 megapixels, 1664 on the long edge.
-    limits: { maxPromptChars: 2000, resolutions: ["1664"], tiers: { "1K": "1664" }, aspects: Object.keys(QWEN21_BUCKETS), referenceSyntax: "qwen-image21" },
+    // 2K first, so a request that names no tier gets the native canvases; 1K is the quick one.
+    limits: { maxPromptChars: 2000, resolutions: ["2752", "1664"], tiers: { "1K": "1664", "2K": "2752" }, aspects: Object.keys(QWEN21_BUCKETS_2K), referenceSyntax: "qwen-image21" },
     pricing: { kind: "unmetered" },
     requires: { accelerator: ["cuda"], vramMb: QWEN21_IMAGE.hardware.minVramMb, recommendedVramMb: QWEN21_IMAGE.hardware.recommendedVramMb, memMb: QWEN21_IMAGE.hardware.minMemMb },
   },
