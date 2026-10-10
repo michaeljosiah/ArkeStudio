@@ -35,7 +35,7 @@ async function setup() {
     await opened.store.append({ type: "take-selected", takeId: ids[0]! });
     return { ...opened, ids };
   };
-  const open = async (sessionId: SessionId) => internals.handleClientMessage({ kind: "bench-open", worldId: WORLD_ID, sessionId, requestId: ulid() });
+  const open = async (sessionId: SessionId) => internals.handleClientMessage({ kind: "bench-open", worldId: WORLD_ID, sessionId });
   await internals.refreshWorldSnapshot(WORLD_ID);
   return { coordinator, internals, create, open };
 }
@@ -52,7 +52,7 @@ it("background completion refreshes the session list without displacing the open
   await internals.refreshBench(WORLD_ID, background.session.id);
   assert.equal(coordinator.getState().bench, active, "the workspace and its local panels remain mounted");
   assert.equal(coordinator.getState().world?.benchSessions.find(row => row.id === background.session.id)?.waitingCount, 1);
-  await internals.handleClientMessage({ kind: "bench-close", worldId: WORLD_ID, requestId: ulid() });
+  await internals.handleClientMessage({ kind: "bench-close", worldId: WORLD_ID });
   await internals.refreshBench(WORLD_ID, background.session.id);
   assert.equal(coordinator.getState().bench, null, "completion does not reopen a closed workspace");
   await open(background.session.id);
