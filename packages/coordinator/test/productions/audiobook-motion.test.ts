@@ -29,6 +29,20 @@ const book = "the-ledger-of-nights",
   chapter = "01-neap",
   block = "p0.0";
 
+it("reads timing Activity status without building or inspecting a listening plan", () => withHarness(async (h) => {
+  const store = h.store()!;
+  const getBundle = store.getBundle;
+  store.getBundle = () => { throw new Error("Activity status must not inspect production media"); };
+  try {
+    await h.send({ kind: "audiobook-word-timing", worldId: WORLD_ID, productionId: LEDGER, action: "status", requestId: "01J00000000000000000000001" });
+    const answer = h.events.find(event => event.type === "audiobook.word-timing");
+    assert.ok(answer?.type === "audiobook.word-timing");
+    assert.equal(answer.state.running, false);
+    assert.deepEqual(answer.state.blocks, []);
+    assert.equal(h.enqueued.length, 0);
+  } finally { store.getBundle = getBundle; }
+}));
+
 it("saves a candidate durably without replacing the still, then uses/reverts it without deleting the artifact", async () => {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root);

@@ -15587,6 +15587,13 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         const key = `${store.worldId}/${msg.productionId}`;
         if (msg.action === "stop") { this.preparingWordTiming.get(key)?.abort(); return; }
+        if (msg.action === "status") {
+          // Opening Activity must not mix or hash every recording just to display a count.
+          const availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
+          const progress = this.wordTimingProgress.get(key) ?? { done: 0, total: 0, chapters: [] };
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...progress, blocks: [] } });
+          return;
+        }
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });

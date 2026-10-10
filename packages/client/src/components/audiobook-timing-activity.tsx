@@ -43,7 +43,7 @@ export function useWordTimingActivity(
   useEffect(() => {
     if (connection !== "open" || worldId === undefined) return;
     for (const productionId of productionIds)
-      send({ kind: "audiobook-word-timing", worldId, productionId, action: "read", requestId: ulid() });
+      send({ kind: "audiobook-word-timing", worldId, productionId, action: "status", requestId: ulid() });
   }, [worldId, key, connection]);
   return entries.filter(
     // Closing a world aborts its local preparation. A cached transient event is not a
