@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { WireModel } from "../../src/model-metadata.js";
 
 /**
- * A scripted OpenCode v2 stand-in serving the measured 0.0.0-next-17444 surface: Basic-auth
+ * A scripted OpenCode v2 stand-in serving the measured 2.0.26 surface: Basic-auth
  * challenge on every route, `{ data, location }` envelopes, deep-object location queries,
  * inbox-shaped prompts with durable msg_ ids, session-scoped pending permissions, and an SSE
  * stream with `: heartbeat` comments. Hermetic — the suite runs without a real harness or a
@@ -30,13 +30,14 @@ export class StubOpenCodeV2 {
   private sessionCounter = 0;
   private turnCounter = 0;
   /** Every wire message id ever accepted — ids are durable and globally unique (measured). */
-  readonly promptIds = new Set<string>();
+  readonly promptIds = new Map<string, unknown>();
   /** Pending permission asks by session — served by the session-scoped route only. */
   readonly pendingPermissions = new Map<string, Array<{ id: string; action: string; resources: string[]; save?: string[] }>>();
   /** What GET /api/session/:id/message replays, newest first, per session. */
   readonly messagesBySession = new Map<string, unknown[]>();
   /** Extra latency on the first health answer — the server-global warm-up switch. */
   coldHealthMs = 0;
+  version = "2.0.26";
   /** Answer the next GET .../message with a 503 — the completion-fetch blip switch. */
   failNextMessageFetch = false;
   private healthAnswered = false;
@@ -90,11 +91,11 @@ export class StubOpenCodeV2 {
         const envelope = (data: unknown, directory?: string) =>
           JSON.stringify({ data, ...(directory !== undefined ? { location: { directory } } : {}) });
 
-        if (url.pathname === "/api/health") {
+        if (url.pathname === "/api/info") {
           const respond = () =>
             res
               .writeHead(200, { "Content-Type": "application/json" })
-              .end(JSON.stringify({ healthy: true, version: "0.0.0-next-17444", pid: 4242 }));
+              .end(JSON.stringify({ version: this.version, pid: 4242 }));
           if (!this.healthAnswered && this.coldHealthMs > 0) {
             this.healthAnswered = true;
             setTimeout(respond, this.coldHealthMs);
@@ -165,30 +166,25 @@ export class StubOpenCodeV2 {
               .end(JSON.stringify({ _tag: "InvalidRequestError", message: `Expected a string starting with "msg_", got ${JSON.stringify(id)}`, kind: "Payload" }));
             return;
           }
-          if (typeof id === "string") {
-            if (this.promptIds.has(id)) {
-              res
-                .writeHead(409, { "Content-Type": "application/json" })
-                .end(JSON.stringify({ _tag: "ConflictError", message: `Prompt message ID conflicts with an existing durable record: ${id}`, resource: id }));
-              return;
-            }
-            this.promptIds.add(id);
+          if (typeof id === "string" && this.promptIds.has(id)) {
+            res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(this.promptIds.get(id)));
+            return;
           }
-          res.writeHead(200, { "Content-Type": "application/json" }).end(
-            envelope({
-              id: id ?? `msg_stub_${Date.now().toString(36)}`,
-              sessionID: sessionId,
-              type: "user",
-              payload: { text: prompt?.text ?? "" },
-              delivery: "steer",
-            }),
-          );
+          const entry = {
+            id: id ?? `msg_stub_${Date.now().toString(36)}`,
+            sessionID: sessionId,
+            type: "user",
+            payload: { text: prompt?.text ?? "" },
+            delivery: "steer",
+          };
+          if (typeof id === "string") this.promptIds.set(id, entry);
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(entry));
           return;
         }
 
         m = /^\/api\/session\/([^/]+)\/interrupt$/.exec(url.pathname);
         if (m && req.method === "POST") {
-          res.writeHead(204).end();
+          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ interrupted: false }));
           return;
         }
 
@@ -216,7 +212,7 @@ export class StubOpenCodeV2 {
         m = /^\/api\/session\/([^/]+)\/permission\/([^/]+)\/reply$/.exec(url.pathname);
         if (m && req.method === "POST") {
           const [, sessionId, requestId] = m;
-          const reply = (parsed as { reply?: string } | undefined)?.reply ?? "once";
+          const reply = (parsed as { decision?: string } | undefined)?.decision ?? "once";
           const remaining = (this.pendingPermissions.get(sessionId!) ?? []).filter((p) => p.id !== requestId);
           this.pendingPermissions.set(sessionId!, remaining);
           res.writeHead(204).end();

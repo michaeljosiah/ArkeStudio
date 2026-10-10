@@ -25,7 +25,7 @@ import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
 import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
-import { referenceInputProblem } from "@arke-studio/contracts";
+import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
@@ -82,7 +82,6 @@ import {
   stagedReferenceKey,
   LedgerEntrySchema,
   OPENCODE_AVAILABILITY,
-  arkeAvailability,
   type Capability,
   type ClientMessage,
   type HarnessAvailability,
@@ -196,7 +195,6 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
-  meetsLocalModelMinimum,
   BENCH_DELETE_FILED,
   benchDeleteRefusal,
   engineFloorClause,
@@ -907,7 +905,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex" | "arke";
+    generation: "v2" | "v1" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -920,12 +918,6 @@ export interface CoordinatorOptions {
    * the shared store v1 silently leaned on is closed by design (issue 327 §2).
    */
   relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
-  /**
-   * Put the local runtime's pulled models in front of the writing harness (issue 1247). Called
-   * with the full list whenever the local-runtime poll finds it changed, including the empty
-   * list when Ollama has stopped. Absent for harnesses that read their own configuration.
-   */
-  publishLocalHarnessModels?: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>;
   harnessUnavailableReason?: string;
   harnessEngineOverride?: import("@arke-studio/contracts").HarnessEngine;
   /** The host's effective launch choice, even if discovery failed before producing metadata. */
@@ -1225,14 +1217,8 @@ export class Coordinator {
   private adapterEngineRefresh: Promise<void> = Promise.resolve();
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
-  /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
-  private publishedLocalHarnessModels: string | null = null;
-  /** The rows behind that fingerprint, for checking a later catalogue read against them. */
-  private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
   /** Ollama models a local harness turn named in this run, for quitting's release. */
   private readonly harnessOllamaModels = new Set<string>();
-  /** Pulled models the last listing held back for stating less than a 256k context. */
-  private localModelsBelowMinimum = 0;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
   private cloudLlmKeyStored = false;
   /**
@@ -1248,16 +1234,6 @@ export class Coordinator {
    * decision reads the last outcome rather than the moment.
    */
   private catalogueReadOk = false;
-  /**
-   * Whether what Ollama last listed is what the harness catalogue now carries (issue 1247). A
-   * runtime that has not started answering yet and one with nothing pulled both publish no
-   * rows; only the second is a machine with no local model, and a keyless session is not
-   * decided on the first. False again from a changed listing until the fetch that follows its
-   * publication: in between, the catalogue on display describes the old rows.
-   */
-  private localRuntimeListed = false;
-  private localListingMisses = 0;
-  private localListingSucceededAt = 0;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
   private vendorAuthSettled: Promise<void> = Promise.resolve();
   private settleVendorAuth: () => void = () => {};
@@ -5221,7 +5197,7 @@ export class Coordinator {
       await Promise.all([
         ...local.map((id) => this.providerService.validate(id).catch(() => {})),
         this.refreshLocalResidency(),
-        this.publishLocalHarnessModels(),
+        this.refreshHarnessModels(),
         // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
         // session is refused while it is unread, and nothing else would read it again.
         this.vendorAuthUnread() ? this.refreshVendorAuthTracked() : Promise.resolve(),
@@ -5237,104 +5213,8 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
   }
 
-  /**
-   * What Ollama has pulled, handed to the writing harness when it changes (issue 1247).
-   *
-   * The harness never asks Ollama, so a model somebody pulled from a terminal reaches the
-   * picker only through here. Same cadence as the runtime probe: a pull finishes between
-   * ticks, and a person who just watched one finish will look for the model at once. The
-   * first pass always writes, because the file may still describe last run's models — and
-   * the catalogue is refreshed a moment after the write rather than at once, because the
-   * harness takes about three seconds (measured) to reload its configuration; an immediate
-   * refresh would read the old rows and then cache them. Refreshed and published, not only
-   * invalidated: the screens that show models ask for them on mount and on a harness change,
-   * so a pull that lands while a picker is open would otherwise wait for a Retry.
-   */
-  private publishLocalHarnessModels(): Promise<void> {
-    const publish = this.opts.publishLocalHarnessModels;
-    const client = this.opts.dispatchClients?.["ollama"];
-    if (!publish || !client?.listModels || this.stopping) return Promise.resolve();
-    // Tracked, because the probe that calls this is fire-and-forget: stop() must wait out a
-    // profile write in flight rather than return under it.
-    const work = this.publishLocalHarnessModelsNow(publish, client.listModels.bind(client)).catch(() => {});
-    this.backgroundWork.add(work);
-    void work.finally(() => this.backgroundWork.delete(work));
-    return work;
-  }
-
-  private async publishLocalHarnessModelsNow(
-    publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
-    list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
-  ): Promise<void> {
-    // Not answering is published as nothing pulled — a stale row validates in the picker and
-    // fails on the turn — but remembered apart from it, for the keyless decision below.
-    let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
-    let listed = true;
-    try {
-      // Only models stating a 256k context are offered to the harness at all (issue 1247). The
-      // filter is here, before the profile is written, so the picker, the catalogue and the
-      // unattended default all see the same set, and a pulled model under the minimum is simply
-      // not a writing model rather than one that is listed and then refused.
-      const pulled = await list();
-      this.localListingMisses = 0;
-      this.localListingSucceededAt = Date.now();
-      models = pulled.filter(meetsLocalModelMinimum);
-      this.localModelsBelowMinimum = pulled.length - models.length;
-    } catch {
-      if (++this.localListingMisses === 1 && this.localRuntimeListed && Date.now() - this.localListingSucceededAt <= 90_000) return;
-      listed = false;
-    }
-    const fingerprint = JSON.stringify(models);
-    if (this.stopping) return;
-    if (fingerprint === this.publishedLocalHarnessModels) {
-      // The catalogue already carries this listing, or the fetch that will is scheduled — unless
-      // that fetch failed, or read the catalogue before the harness had reloaded the profile
-      // (three seconds measured, not promised). Nothing else asks again, and a keyless session
-      // would stay refused past the harness's recovery: asked again on this cadence until the
-      // rows it was handed are the rows it lists.
-      if (this.catalogueReadOk && this.catalogueCarries(models)) { this.localRuntimeListed = listed; return; }
-      this.modelCatalog.invalidate();
-      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
-      return;
-    }
-    // Pending until the catalogue carries the new rows: a session decided in between would read
-    // the old catalogue as the answer, and go unmodelled to the cloud default on it.
-    this.localRuntimeListed = false;
-    try {
-      await publish(models);
-    } catch (error) {
-      // Left unpublished on purpose: the next tick tries again with whatever is true then —
-      // and a keyless session stops waiting, since nothing better is coming before that.
-      void this.appLog?.append({ kind: "harness.local-models-unpublished", message: error instanceof Error ? error.message : String(error) });
-      this.settleCatalogue();
-      return;
-    }
-    this.publishedLocalHarnessModels = fingerprint;
-    this.publishedLocalHarnessRows = models;
-    // Shutdown may have started during the write; nothing is scheduled past it.
-    if (this.stopping) { this.settleCatalogue(); return; }
-    const timer = setTimeout(() => {
-      this.lifecycleTimers.delete(timer);
-      if (this.stopping) { this.settleCatalogue(); return; }
-      this.modelCatalog.invalidate();
-      // The fetch a keyless session waits on: the first one that can carry the local rows.
-      // Carried only once the fetch lists what was published: a read that beat the reload is
-      // a successful read of the old rows, and the probe above asks again.
-      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
-    }, 5_000);
-    timer.unref?.();
-    this.lifecycleTimers.add(timer);
-  }
-
-  /**
-   * Fetch and publish the harness catalogue now, tracked so stop() waits it out. `settles`
-   * says whether this fetch is the one a keyless session may wait on: the fetch that follows
-   * the first local-model publication is, because only then does the catalogue carry the
-   * local rows; the fetch at harness-ready is only when nothing local will ever be published.
-   * Settled on failure too: a catalogue that cannot be read is an answer, and a session
-   * waiting on it is refused with that reason rather than built on silence.
-   */
-  private warmModelCatalog(settles: boolean, then?: () => void): void {
+  /** Fetch the authoritative harness catalogue; shutdown drains the read and failure settles admission. */
+  private warmModelCatalog(): void {
     // The gate as it is now: a harness that fails and returns while this fetch is out re-arms
     // the gate, and this fetch's answer belongs to the lifecycle that asked, not the new one.
     const settle = this.settleCatalogue;
@@ -5342,35 +5222,16 @@ export class Coordinator {
     this.backgroundWork.add(work);
     void work.finally(() => {
       this.backgroundWork.delete(work);
-      then?.();
-      if (settles) settle();
+      settle();
     });
   }
 
-  /**
-   * Whether the local rows in the harness catalogue are exactly the models handed to it (issue
-   * 1247). Exactly: a row for a model that was deleted is as stale as a missing row for one
-   * that was pulled, and a default chosen from it would name a model that is not there.
-   */
-  private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
-    const rows = new Map(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => [model.id, model]));
-    if (rows.size !== published.length) return false;
-    return published.every((model) => {
-      const row = rows.get(model.id);
-      if (!row) return false;
-      // A re-pulled tag keeps its id and may change what it can do; the row must say what
-      // was written, where it says anything. Tools and images are written as stated and
-      // read back as stated; the context length is not compared, because the harness
-      // derives its own input limit from it rather than echoing it.
-      if (row.tools !== undefined && row.tools !== model.tools) return false;
-      if (row.inputModalities !== undefined && row.inputModalities.includes("image") !== model.vision) return false;
-      return true;
-    });
-  }
-
-  /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */
-  private localModelsPublishable(): boolean {
-    return this.opts.publishLocalHarnessModels !== undefined && this.opts.dispatchClients?.["ollama"]?.listModels !== undefined;
+  /** OpenCode discovers local models itself; periodically publish its current catalogue to open pickers. */
+  private async refreshHarnessModels(): Promise<void> {
+    if (!this.opts.adapter?.readiness().ready || !this.opts.adapter.capabilities().has("models")) return;
+    const work = this.modelCatalog.get(true).then(() => {}, () => {});
+    this.backgroundWork.add(work);
+    try { await work; } finally { this.backgroundWork.delete(work); }
   }
 
   /** The harness is up: fetch what a keyless session needs before it is built (issue 1247). */
@@ -5378,26 +5239,12 @@ export class Coordinator {
     // A harness coming back after a failure re-opens what that failure settled: the sign-in
     // state on display is still "not started", and a session deciding on it would pin local
     // past a connected account. The catalogue gate re-opens the same way; on that return the
-    // ready-time fetch settles it when the profile already carries the local rows, since no
-    // publication follows an unchanged listing.
+    // ready-time fetch settles it using the returned harness's own catalogue.
     const returning = !this.catalogueGateOpen || !this.vendorAuthGateOpen;
     if (!this.catalogueGateOpen) this.armCatalogueGate();
     if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
-    const recovering = returning && this.publishedLocalHarnessModels !== null;
-    // The returned harness's catalogue is checked against the rows it was handed like any
-    // post-publication read: its first answer may still be the old one, and what the previous
-    // lifecycle had confirmed says nothing about this one. Until it carries them, the probe
-    // keeps asking, and a keyless session is refused rather than run on a cloud-only read.
-    // The same for the sign-in state: the rows on display are the old lifecycle's until this
-    // one's read lands, and a decision in between must wait for it rather than trust them.
-    if (recovering) this.localRuntimeListed = false;
     if (returning) this.vendorAuth.markStale();
-    // A re-armed gate is settled by this fetch whenever no publication will: after a first
-    // publication that failed, the next one is a probe tick away, and a session in between is
-    // refused for the rows being unpublished rather than held past its creation timeout.
-    this.warmModelCatalog(!this.localModelsPublishable() || returning, recovering
-      ? () => { this.localRuntimeListed = this.catalogueCarries(this.publishedLocalHarnessRows); }
-      : undefined);
+    this.warmModelCatalog();
     const settleVendorAuth = this.settleVendorAuth;
     void this.refreshVendorAuthTracked({ patient: true }).finally(() => settleVendorAuth());
   }
@@ -5430,7 +5277,7 @@ export class Coordinator {
     this.settleVendorAuth();
   }
 
-  /** What a keyless session waits on before it is built: the catalogue after the local rows, and the sign-in state. */
+  /** What a keyless session waits on before it is built: the native harness catalogue and sign-in state. */
   private async localDefaultGate(signal?: AbortSignal): Promise<void> {
     // A request stopped while waiting is not built when discovery settles.
     const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
@@ -5492,15 +5339,15 @@ export class Coordinator {
    *
    * Undefined whenever a cloud key is stored — the harness's own default stands then, as it
    * always has — and whenever the catalogue lists nothing local. Of what it lists, the first
-   * local row that passes the same admission check an explicit choice would: Ollama lists the
-   * model pulled or used most recently first, and a model the hardware gate refuses is never
+   * local row that passes the same admission check an explicit choice would, in the harness's
+   * native inventory order. A model the hardware gate refuses is never
    * chosen quietly. There is no routed text default to prefer — `routing.llm` is retired on
    * load (see app-settings) — so the person's way to choose is the agent override in Settings,
    * which sits above this.
    *
    * Read synchronously from the published catalogue rather than fetched, because this runs
-   * inside the session builder; the catalogue is warmed when the harness comes up and after
-   * every local-model publication for exactly that reason.
+   * inside the session builder; the catalogue is warmed when the harness comes up and during
+   * the runtime poll for exactly that reason.
    */
   /**
    * Whether anything cloud could answer a session: a stored key, or an account connected
@@ -5508,11 +5355,6 @@ export class Coordinator {
    * the credential store and so is read from the published sign-in state.
    */
   private cloudCredentialAvailable(): boolean {
-    // Arke's local harness cannot spend a cloud key, so for it none is ever available: every
-    // session without an explicit model gets the application-validated local default — disabled
-    // models, hardware eligibility and Stage's image input all checked — rather than whatever
-    // model the adapter would pick for itself (issue 1247).
-    if (this.opts.adapter?.id === "arke") return false;
     // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
@@ -5529,8 +5371,7 @@ export class Coordinator {
    * can. A catalogue that was read and holds nothing local is an answer — the harness default
    * is what such a machine has always run on — but one that failed to read says nothing about
    * what is installed, and a session built on that silence would run on the cloud default with
-   * a local model possibly sitting right there. Ollama not answering is the same silence one
-   * step earlier: the rows it would have brought are not in the catalogue to read.
+   * a local model possibly sitting right there. OpenCode owns Ollama inventory and reports its available models in that catalogue.
    */
   /**
    * Whether the harness's sign-in state could not be read (issue 1247): the surface exists but
@@ -5545,9 +5386,6 @@ export class Coordinator {
 
   private keylessSessionRefusal(needsImages = false, agent?: string): string | null {
     if (this.cloudCredentialAvailable()) return null;
-    // On Arke's own lane a stored key is not missing, only unusable, so the refusal must not tell
-    // the person to add one; what it can say is about Ollama and its models.
-    const localLane = this.opts.adapter?.id === "arke";
     // Unread is not absent: a connected account pinned local by a faulted read would be the
     // wrong lane chosen quietly, and this is retried on the runtime probe's cadence.
     if (this.vendorAuthUnread()) {
@@ -5558,19 +5396,11 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
     if (!this.catalogueReadOk) {
-      if (localLane) return "Local's models could not be read, so which model would write is unknown. Check that Ollama is running, then retry models in Settings → Harness → Advanced.";
       return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
     }
-    if (this.localModelsPublishable() && !this.localRuntimeListed) {
-      return "The local models are not available to the harness yet, and no cloud key is stored, so nothing can write. Check that Ollama is running and try again in a moment, or add a key.";
-    }
     const offered = this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama");
-    // Pulled, but every one held back by the 256k minimum: without this the session would go to
-    // a cloud default with no key and fail without saying the models were there all along. Stage
-    // included — its own fallback would send the person to choose a model that reads images,
-    // when what is wrong is the window.
-    if (!offered && this.localModelsBelowMinimum > 0) {
-      return "None of the pulled local models has a 256k context window, and no cloud key is stored. Pull one that does, such as Gemma 4 12B, or add a key.";
+    if (offered && !ollamaLlmAvailable(this.readModel.getState().app.providers)) {
+      return "Ollama is not available, and no cloud key is stored. Start Ollama and retry, or add a key.";
     }
     // Local rows the default passed over — switched off, or unable to call tools — are not
     // nothing local: a session going unmodelled past them would run on the cloud default with
@@ -5586,7 +5416,6 @@ export class Coordinator {
       return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for ${which} in Settings → Harness → Advanced, or install Gemma 4 12B.`;
     }
     if (!needsImages && offered) {
-      if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;
@@ -5607,18 +5436,19 @@ export class Coordinator {
     // Rows kept from an earlier read are names, not a catalogue: after a failed refresh they
     // are not chosen from, and the refusal above says why.
     if (!this.catalogueReadOk) return undefined;
-    if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
     if (this.vendorAuthUnread()) return undefined;
+    // Native discovery retains its last inventory through outages. The existing runtime
+    // health probe, including its transient-failure grace, owns whether that inventory can run.
+    if (!ollamaLlmAvailable(app.providers)) return undefined;
     // Every roster agent works through tools — reads, edits, world queries — so a model the
     // runtime says cannot call them would take the session and fail its first turn. Nor is a
-    // model whose capabilities were assumed rather than read (its show failed) chosen
+    // model whose tool support was not confirmed chosen
     // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
     // offered, and a stated refusal is one the person can read; a default has no reader.
-    const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
     // Nor a model the catalogue says waits to be chosen by name: installing a community
     // uncensored variant made it every agent's writer, Content & safety off (issue 1289).
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) &&
-      !assumed.has(model.id) && localModelPolicy(model.id)?.explicitChoiceOnly !== true);
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools === true) &&
+      localModelPolicy(model.id)?.explicitChoiceOnly !== true);
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.
@@ -5691,7 +5521,7 @@ export class Coordinator {
     // Capture this before commands can change the saved preference. Failed discovery has no
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
-    this.launchEngine = generation === "claude" || generation === "codex" || generation === "arke" ? generation
+    this.launchEngine = generation === "claude" || generation === "codex" ? generation
       : generation === "v1" || generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
@@ -21323,27 +21153,7 @@ export class Coordinator {
     const detected = this.opts.detectHarnesses
       ? await this.opts.detectHarnesses(claudePath, codexPath).catch(() => [])
       : [];
-    return [OPENCODE_AVAILABILITY, await this.arkeHarnessAvailability(), ...detected];
-  }
-
-  /**
-   * Whether the local harness could write right now (issue 1247). Nothing to install: it is part
-   * of the app, so the only questions are whether Ollama answers and whether it holds a model the
-   * harness can write with — one that states the 256k window and calls tools. Asked of the same
-   * Ollama client the rest of the coordinator uses, so this and the local-model listing agree.
-   */
-  private async arkeHarnessAvailability(): Promise<HarnessAvailability> {
-    const list = this.opts.dispatchClients?.["ollama"]?.listModels;
-    if (!list) return arkeAvailability("Local writing needs Ollama, which is not set up on this machine.");
-    let pulled: readonly import("@arke-studio/contracts").LocalHarnessModel[];
-    try {
-      pulled = await list.call(this.opts.dispatchClients!["ollama"]!);
-    } catch {
-      return arkeAvailability("Ollama is not answering on this machine.");
-    }
-    const usable = pulled.some((model) => meetsLocalModelMinimum(model) && model.tools && model.assumed !== true);
-    return arkeAvailability(usable ? null
-      : "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
+    return [OPENCODE_AVAILABILITY, ...detected];
   }
 
   /**
@@ -21432,8 +21242,7 @@ export class Coordinator {
   /**
    * Ollama is its own service and outlives Arke, so the models this run loaded would otherwise
    * hold memory until Ollama's idle timeout: five minutes for dispatch requests, and whatever
-   * OpenCode or Codex asked for. The Arke harness releases its own on dispose; this covers the
-   * rest. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
+   * OpenCode or Codex asked for. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
    * that used Ollama — one that never did has no claim on another application's models. Called
    * once the queue, harness children and adapter have stopped, so nothing can load after it.
    */
@@ -21442,7 +21251,7 @@ export class Coordinator {
     if (!client?.unload || !this.localGpu.hasRun("Ollama")) return;
     // Only what this run named: the dispatches' models and the harness turns'. A whole-runtime
     // unload also emptied models another application had loaded into the same Ollama (issue
-    // 1289). The Arke harness hands back its own on dispose, whatever it was asked for by.
+    // 1289).
     const only = new Set([...client.usedModels?.() ?? [], ...this.harnessOllamaModels]);
     if (only.size === 0) return;
     const signal = AbortSignal.timeout(OLLAMA_SHUTDOWN_RELEASE_MS);

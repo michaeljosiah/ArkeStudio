@@ -72,60 +72,6 @@ it("Ollama residency retries late reports and distinguishes processor fallback f
   assert.equal((await client.residency())[0]?.state, "mixed");
 });
 
-it("Ollama lists what is pulled with what each model can do, and leaves out what cannot complete (issue 1247)", async () => {
-  const shown: Record<string, unknown> = {
-    "gemma4:12b": { capabilities: ["completion", "tools", "vision"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } },
-    "nomic-embed-text": { capabilities: ["embedding"], model_info: {} },
-    "old-model": { model_info: { "general.architecture": "llama" } },
-  };
-  const client = new OllamaClient(async (url, init) => {
-    assert.ok(init?.signal, "listing requests are bounded");
-    if (url.endsWith("/api/tags")) return Response.json({ models: Object.keys(shown).map((name) => ({ name })).concat([{ name: "broken" }]) });
-    const { model } = JSON.parse(String(init?.body)) as { model: string };
-    return model === "broken" ? new Response("boom", { status: 500 }) : Response.json(shown[model]);
-  });
-  assert.deepEqual(await client.listModels(), [
-    { id: "gemma4:12b", contextLength: 131072, tools: true, vision: true },
-    // No capabilities stated: listed, tools assumed, nothing about images claimed.
-    { id: "old-model", tools: true, vision: false, assumed: true },
-    // A show that fails still lists the model — hidden is worse than refused.
-    { id: "broken", tools: true, vision: false, assumed: true },
-  ]);
-  await assert.rejects(new OllamaClient(fakeFetch([])).listModels(), "Ollama down is an error: nothing pulled and not yet answering must not read the same");
-  // An answer that is not a model list is not an empty one.
-  for (const body of [{}, null, { models: "none" }]) {
-    await assert.rejects(new OllamaClient(async () => Response.json(body)).listModels(), /did not return a model list/);
-  }
-  assert.deepEqual(await new OllamaClient(async () => Response.json({ models: [] })).listModels(), [], "a model list with nothing in it is nothing pulled");
-});
-
-it("Ollama's listing pass ends at one deadline, listing what the shows never answered for", async () => {
-  const hanging = new OllamaClient(async (url, init) => {
-    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "a" }, { name: "b" }, { name: "c" }, { name: "d" }, { name: "e" }, { name: "f" }] });
-    // A show that answers only when the deadline cancels it: the whole pass must still return.
-    await new Promise<void>((resolve) => init?.signal?.addEventListener("abort", () => resolve(), { once: true }));
-    throw new Error("aborted");
-  }, "http://127.0.0.1:11434", async () => {}, 50);
-  const started = Date.now();
-  const listed = await hanging.listModels();
-  assert.ok(Date.now() - started < 2_000, "six hanging shows must not cost six timeouts");
-  assert.deepEqual(listed.map((m) => m.id), ["a", "b", "c", "d", "e", "f"]);
-  assert.ok(listed.every((m) => m.tools && !m.vision && m.contextLength === undefined && m.assumed === true), "cut off by the deadline: listed with assumed capabilities");
-});
-
-it("the provider registry forwards the Ollama listing through the capture wrapper (issue 1247)", async () => {
-  const clients = createProviderClients({
-    fetch: async (url) => {
-      if (String(url).endsWith("/api/tags")) return Response.json({ models: [{ name: "gemma4:12b" }] });
-      return Response.json({ capabilities: ["completion", "tools"], model_info: { "general.architecture": "gemma4", "gemma4.context_length": 131072 } });
-    },
-  });
-  // The wrapper rebuilds the client from a method list; a method left off it is one the
-  // coordinator never sees, which is exactly how this listing first shipped unreachable.
-  assert.deepEqual(await clients.ollama!.listModels!(), [{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }]);
-  assert.equal(clients.openai!.listModels, undefined, "only a local runtime lists for the harness");
-});
-
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";

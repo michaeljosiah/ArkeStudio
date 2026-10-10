@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   findHarnessModel, harnessModelDisabled, harnessModelManifestEntry, harnessModelMissingInput, harnessModelReference,
-  ManifestModelSchema, ModelInfoSchema, effectiveHarnessEngine, type ModelInfo,
+  AppSettingsSchema, HarnessEngineSchema, ManifestModelSchema, ModelInfoSchema, effectiveHarnessEngine, type ModelInfo,
 } from "../src/index.js";
 
 const legacy = (id: string, providerModelId = id, provider: "anthropic" | "openai" = "anthropic") => ManifestModelSchema.parse({
@@ -12,14 +12,20 @@ const legacy = (id: string, providerModelId = id, provider: "anthropic" | "opena
 const opus: ModelInfo = { id: "claude-example[1m]", provider: "anthropic", aliases: ["opus[1m]", "default"], isDefault: true };
 const sonnet: ModelInfo = { id: "claude-other", provider: "anthropic", aliases: ["sonnet"] };
 
+it("retires the saved Arke choice without losing the remaining executable paths", () => {
+  const saved = AppSettingsSchema.parse({ harness: { engine: "arke", claudePath: "C:/tools/claude.exe", codexPath: "C:/tools/codex.exe" } });
+  assert.deepEqual(saved.harness, { engine: "opencode", claudePath: "C:/tools/claude.exe", codexPath: "C:/tools/codex.exe" });
+  assert.deepEqual(AppSettingsSchema.parse({ ...saved, research: { web: true } }).harness, saved.harness);
+  assert.equal(HarnessEngineSchema.safeParse("arke").success, false, "the retired engine cannot be selected");
+});
+
 it("an explicit launch override chooses one engine and an invalid override preserves settings", () => {
   assert.equal(effectiveHarnessEngine("claude", "opencode"), "opencode");
   assert.equal(effectiveHarnessEngine("codex", "claude"), "claude");
   assert.equal(effectiveHarnessEngine("opencode", "codex"), "codex");
   assert.equal(effectiveHarnessEngine("claude", "unknown"), "claude");
   assert.equal(effectiveHarnessEngine("codex"), "codex");
-  assert.equal(effectiveHarnessEngine("opencode", "arke"), "arke", "the local harness is selectable by override too");
-  assert.equal(effectiveHarnessEngine("arke"), "arke");
+  assert.equal(effectiveHarnessEngine("opencode", "arke"), "opencode", "the retired engine is not a launch override");
 });
 
 describe("harness model identity", () => {

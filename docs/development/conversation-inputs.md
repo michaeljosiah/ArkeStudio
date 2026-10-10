@@ -79,15 +79,15 @@ cd packages/adapter-codex; node --import tsx --test test/steering-protocol.test.
 
 ### OpenCode v2 inbox
 
-`adapter-opencode/test/v2-input-protocol.test.ts` launches its own hidden `opencode2` child with an isolated profile and no provider credentials. Every prompt uses `resume: false`, so no model is called. Measured against `0.0.0-next-17444`, SHA-256 `4f7c5140debf2436d1af9a4eed573b24d7e3a4cf9ddafda2f8994870797be10d` (last run 2 October 2026):
+`adapter-opencode/test/v2-input-protocol.test.ts` launches its own hidden `opencode2` child with an isolated profile and no provider credentials. Admission probes use `resume: false`. A separate writing turn uses a scripted localhost provider to verify configuration, tools, confinement, final text/usage and permission confirmation without a paid request. Measured against **2.0.26**, executable SHA-256 `e13e57a7f6b7abddec887e0b2d912d22484077c50dff5bed4f3199bcf63b6088` (10 October 2026):
 
 | Observation | Measured result | What it establishes |
 |---|---|---|
 | Same input id and payload, repeated | HTTP 200; one inbox row | Native admission deduplication |
-| Same id, changed text | HTTP 409 | Native content-conflict refusal |
+| Same id, changed text | HTTP 200; original text retained | Replay returns the original input; no content-conflict refusal |
 | Pending input cancellation | HTTP 204; inbox becomes empty | Cancellation while still pending |
 | Nonexistent `expectedExecutionID` on an idle session | HTTP 200; input admitted | That precondition is not enforced |
-| Interrupt on an idle session | HTTP 204 | Success alone cannot identify a stopped execution |
+| Interrupt on an idle session | HTTP 200; `{ interrupted: false }` | Idle success does not identify a stopped execution |
 
 These do not prove model-input inclusion, completion races, unchanged execution budgets or lost-receipt reconciliation, so OpenCode keeps the queue fallback. The Claude adapter's ordinary SDK input stream is not treated as a steering contract either.
 

@@ -876,7 +876,6 @@ export function ProductionConversation({
   const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
   const modelEntry = model ? harnessModelManifestEntry(model, state?.app.manifest?.models) : undefined;
   const authorLocation = modelEntry ? (PROVIDERS[modelEntry.provider].local ? "local" : "cloud")
-    : state?.app.harnessInfo?.generation === "arke" ? "local"
       : ["claude", "codex"].includes(state?.app.harnessInfo?.generation ?? "") ? "cloud" : "model";
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   // The effort belongs to a model, so it is kept by the model's reference: this chat's own choice,

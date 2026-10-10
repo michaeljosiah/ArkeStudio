@@ -3,11 +3,10 @@ import { describe, it } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   assembleHarness,
   HarnessPasswordHolder,
-  harnessProfileConfigPath,
   harnessProfileDir,
   passwordFromLine,
   v2ProfileEnv,
@@ -38,6 +37,98 @@ function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000)
 }
 
 describe("the v2 launch protocol (issue 327 §4)", () => {
+  for (const version of ["2.0.25", "2.0.27"]) {
+    it(`reports unsupported ${version} without a fallback and creates no launchable child`, async () => {
+      const appRoot = await tempDir("v2-rejected-");
+      const wiring = await assembleHarness({ appRoot,
+        v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+        v2: { runCommand: async (command, args) => {
+          if (command === "where" || command === "which") return args[0] === "opencode"
+            ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
+          return { status: 0, stdout: `opencode v${version}` };
+        } },
+      });
+      assert.equal(wiring.harness, null);
+      assert.equal(wiring.adapter, null);
+      assert.equal(wiring.supervisor, null);
+      assert.equal(wiring.harnessInfo?.rejectedV2Version, version);
+      assert.match(wiring.unavailableReason ?? "", /installed but unsupported/);
+      assert.ok(wiring.unavailableReason?.includes(version));
+      assert.ok(wiring.unavailableReason?.includes("2.0.26"));
+      assert.deepEqual(wiring.logLines, [wiring.unavailableReason]);
+    });
+  }
+
+  it("retires generated Ollama rows before launch while retaining endpoint and other provider configuration", async () => {
+    const appRoot = await tempDir("v2-profile-retirement-");
+    const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    const path = join(configDir, "opencode.json");
+    const ollama = { name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible",
+      settings: { baseURL: "http://127.0.0.1:11434/v1", apiKey: "ollama" },
+      models: { deleted: { name: "deleted", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } } };
+    const custom = { models: { configured: { name: "Configured model" } } };
+    const launch = () => assembleHarness({ appRoot,
+      v2: { runCommand: async (command) => command === "where" || command === "which"
+        ? { status: 0, stdout: "C:/bin/opencode2.exe" } : { status: 0, stdout: "opencode v2.0.26" } },
+      v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+    });
+    await writeFile(path, JSON.stringify({ providers: { ollama, custom }, model: "custom/configured" }));
+    await launch();
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+      providers: { ollama: { name: ollama.name, package: ollama.package, settings: ollama.settings }, custom }, model: "custom/configured",
+    });
+    const userConfig = { providers: { ollama: { ...ollama, models: { custom: { name: "My custom model", settings: { temperature: 0.4 } } } } } };
+    const original = JSON.stringify(userConfig);
+    await writeFile(path, original);
+    await launch();
+    assert.equal(await readFile(path, "utf8"), original, "user model configuration is not the generated inventory");
+  });
+
+  it("boots the pinned native runtime through the shared launcher and authenticated readiness route", {
+    skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 75_000,
+  }, async () => {
+    const appRoot = await tempDir("v2-native-launch-");
+    const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: {
+      name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible", settings: { baseURL: "http://127.0.0.1:1/v1", apiKey: "ollama" },
+      models: { "deleted-inventory-model": { name: "deleted-inventory-model", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } },
+    } } }));
+    const inherited = Object.fromEntries(["opencode_password", "OpenCode_Server_Password", "opencode_server_username"].map(key => [key, process.env[key]]));
+    let wiring: Awaited<ReturnType<typeof assembleHarness>>;
+    try {
+      process.env["opencode_password"] = "synthetic-personal-password";
+      process.env["OpenCode_Server_Password"] = "synthetic-legacy-password";
+      process.env["opencode_server_username"] = "personal-user";
+      wiring = await assembleHarness({
+        appRoot,
+        v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },
+        v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+      });
+    } finally {
+      for (const [key, value] of Object.entries(inherited)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+    assert.equal(wiring.isV2, true);
+    assert.equal(wiring.harnessInfo?.version, "2.0.26");
+    assert.equal(wiring.harnessInfo?.beta, false);
+    assert.ok(wiring.supervisor && wiring.adapter);
+    try {
+      await wiring.relaunchHarness({});
+      await wiring.supervisor.start();
+      await waitForStatus(wiring.supervisor, "healthy");
+      await wiring.adapter.init?.();
+      assert.equal(wiring.adapter.readiness().ready, true);
+      assert.ok(!(await wiring.adapter.listModels?.())?.some(model => model.provider === "ollama" && model.id === "deleted-inventory-model"),
+        "the real server cannot offer a stale row from Studio's retired generated inventory");
+      assert.ok(!wiring.logLines.some(line => line.includes("[beta]")));
+    } finally {
+      await wiring.adapter.dispose?.(); await wiring.supervisor.stop();
+    }
+  });
+
   it("parses the password line and only the password line", () => {
     assert.equal(passwordFromLine("server password s3cret_value"), "s3cret_value");
     assert.equal(passwordFromLine("  server password s3cret_value \r"), "s3cret_value");
@@ -67,42 +158,8 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(env["XDG_CONFIG_HOME"], join("C:\\root\\harness\\profile", ".config"));
     assert.equal(env["XDG_DATA_HOME"], join("C:\\root\\harness\\profile", ".local", "share"));
     assert.equal(harnessProfileDir("C:\\root"), join("C:\\root", "harness", "profile"));
-    // The config OpenCode resolves against XDG_CONFIG_HOME — inside the redirected profile.
-    assert.equal(harnessProfileConfigPath("C:\\root"), join("C:\\root", "harness", "profile", ".config", "opencode", "opencode.json"));
   });
 
-  it("publishes the local models into the redirected profile, for a v2 launch only (issue 1247)", async () => {
-    const machine = (answers: Record<string, string>) => async (command: string, args: string[]) => {
-      if (command === "where" || command === "which") {
-        const target = args[0]!;
-        return answers[target] !== undefined ? { status: 0, stdout: `C:\\bin\\${target}.exe\n` } : { status: 1, stdout: "" };
-      }
-      const name = command.replace(/^C:\\bin\\/, "").replace(/\.exe$/, "");
-      return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
-    };
-    const appRoot = await tempDir("v2-launch-");
-    const v2 = await assembleHarness({
-      appRoot,
-      v1: { runCommand: machine({}) },
-      v2: { runCommand: machine({ opencode2: "opencode2 v0.0.0-next-17444" }) },
-    });
-    assert.equal(v2.isV2, true);
-    assert.ok(v2.publishLocalModels, "a v2 launch owns its profile and can write into it");
-    await v2.publishLocalModels([{ id: "gemma4:12b", contextLength: 131072, tools: true, vision: false }]);
-    const written = JSON.parse(await readFile(harnessProfileConfigPath(appRoot), "utf8")) as { providers: { ollama: { models: Record<string, unknown> } } };
-    assert.deepEqual(Object.keys(written.providers.ollama.models), ["gemma4:12b"]);
-    await v2.publishLocalModels([]);
-    assert.equal((JSON.parse(await readFile(harnessProfileConfigPath(appRoot), "utf8")) as { providers?: unknown }).providers, undefined);
-
-    // v1 reads the person's own config; there is nothing of Arke's to write into.
-    const v1 = await assembleHarness({
-      appRoot: await tempDir("v2-launch-"),
-      v1: { runCommand: machine({ opencode: "opencode v1.18.18" }) },
-      v2: { runCommand: machine({}) },
-    });
-    assert.equal(v1.isV2, false);
-    assert.equal(v1.publishLocalModels, undefined);
-  });
 
   it("carries a v2 child from password line to authenticated health, no secret in any status", async () => {
     const holder = new HarnessPasswordHolder();
@@ -224,7 +281,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       return answers[name] !== undefined ? { status: 0, stdout: answers[name]! } : { status: 1, stdout: "" };
     };
     // A configured v1 path exists, but v2 on PATH wins: the pass-over is stated (R-4).
-    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v0.0.0-next-17444" };
+    const both = { opencode: "opencode v1.18.18", opencode2: "opencode2 v2.0.26" };
     const wiring = await assembleHarness({
       appRoot: await tempDir("v2-launch-"),
       v1: { configuredPath: process.execPath, runCommand: machine(both) },

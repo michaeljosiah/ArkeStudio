@@ -76,7 +76,7 @@ export async function createPreparedSession(
   session: CreateSessionInput,
   timeoutMs = 30_000,
   signal?: AbortSignal,
-): Promise<SessionRef> {
+): Promise<SessionRef & { model?: string }> {
   return serialized(dir, async () => {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
@@ -86,12 +86,18 @@ export async function createPreparedSession(
     if (signal?.aborted) stop();
     else signal?.addEventListener("abort", stop, { once: true });
     try {
-      const preparationId = await writeSessionFiles(adapter, dir, input, abort.signal);
+      let model: string | undefined;
+      const config = Promise.resolve(input).then(value => {
+        model = value.model ?? value.agents?.[session.agent ?? "sheet-editor"]?.model;
+        return value;
+      });
+      const preparationId = await writeSessionFiles(adapter, dir, config, abort.signal);
       try {
         // A stop that landed while the files were written creates nothing: not every adapter
         // refuses an already-fired signal, and a session opened for a stopped run is an orphan.
         abort.signal.throwIfAborted();
-        return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+        const created = await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+        return { ...created, ...(model !== undefined ? { model } : {}) };
       } finally {
         adapter.abandonSessionPreparation?.(preparationId);
       }
@@ -119,3 +125,8 @@ export async function createPreparedSession(
  * above take the promise, so a caller that only hands the input on has nothing to await.
  */
 export type SessionInput = (input: SessionConfigInput) => SessionConfigInput | Promise<SessionConfigInput>;
+
+/** A local model on a modest card needs more time than the hosted-model default, whichever adapter runs it. */
+export function sessionTurnTimeoutMs(model: string | undefined, hostedMs: number): number {
+  return model?.startsWith("ollama/") ? 10 * 60_000 : hostedMs;
+}

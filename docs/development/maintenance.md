@@ -6,6 +6,16 @@ the filesystem error code. OpenCode's version probe runs on the verified extract
 it is copied into the stage, so the directory being swapped has not executed a binary (#1227).
 Run `node --test apps/desktop/test/runtime-support.test.mjs` for the retry and staging checks.
 
+OpenCode v2 is standardised on stable **2.0.26**. Only that release passes discovery and
+authenticated `/api/info` readiness; older v2 builds have no compatibility path. Update
+`OPENCODE2_PINNED_VERSION` in adapter discovery together with the version, archive hash and
+licence source in `apps/desktop/runtime-sources.json`, and rerun the real-binary checks in
+[testing](testing.md#writing-engines-and-model-control) before moving the pin. Stable v2 uses
+`@opencode/cli-windows-x64` and extracts `package/bin/opencode.exe`; staging renames it to
+`opencode2.exe` to preserve Studio's installed paths. PATH discovery checks both command names
+and keeps v2 binaries out of the v1 adapter. OpenCode remains the bundled default while the
+Arke replacement in [issue #1698](https://github.com/michaeljosiah/ArkeStudio/issues/1698) is deferred.
+
 Commands below run from the repository root unless stated otherwise. Read the script before running a generator: regeneration can fetch remote data or change many files and is not part of ordinary documentation validation.
 
 | Output or asset | Owner / source | Maintenance route |

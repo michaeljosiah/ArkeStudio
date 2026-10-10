@@ -25,6 +25,7 @@ import { parseSse } from "../sse.js";
 import { modelEnabled, modelMetadata, providerNameOf, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
+import { OPENCODE2_PINNED_VERSION } from "../discovery.js";
 import { waitForSessionModel } from "./model-readiness.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import {
@@ -39,8 +40,8 @@ import {
 /**
  * The live OpenCode v2 adapter (issue 327). Drives the authenticated /api surface of an
  * opencode2 standalone server and normalises its event stream into schema-validated harness
- * events. Every wire shape here was measured against 0.0.0-next-17444 — the pinned build —
- * including a full keyed turn with a held tool call and a permission round trip.
+ * events. The supported release is 2.0.26; real-binary tests qualify launch, credential
+ * persistence and a scripted local turn with tool confinement and a permission round trip.
  *
  * It never writes to a world, never calls commit(), and never decides what a ripple is —
  * SPEC-004 owns all of that. This class owns a foreign process's protocol, nothing more.
@@ -141,9 +142,9 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   }
 
   /**
-   * Probe /api/health with warm-up patience; idempotent (R-2). The capability probe via the
-   * OpenAPI document is retired for v2 — GET /doc serves the web UI now (measured) — so the
-   * capability set comes from the pinned contract once health answers.
+   * Probe /api/info with warm-up patience; idempotent (R-2). Only the qualified release
+   * is supported: a running older server must not pass a discovery-only gate.
+   * The capability set comes from the pinned contract once authenticated server info answers.
    */
   async init(): Promise<void> {
     const deadline = Date.now() + (this.opts.warmupMs ?? WARMUP_MS);
@@ -151,11 +152,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     let lastError = "unreachable";
     while (Date.now() < deadline) {
       try {
-        const health = await this.http.req<{ healthy?: boolean; version?: string; pid?: number }>(
-          "GET",
-          "/api/health",
-        );
-        if (health?.healthy === true) {
+        const health = await this.http.req<{ version?: string; pid?: number }>("GET", "/api/info");
+        if (health?.version !== OPENCODE2_PINNED_VERSION) {
+          this.caps = new Set();
+          this.ready = { ready: false, reason: `OpenCode ${health?.version ?? "unknown"} is unsupported; use ${OPENCODE2_PINNED_VERSION}.` };
+          return;
+        }
+        if (typeof health.pid === "number" && health.pid > 0) {
           this.serverVersion = health.version ?? null;
           this.caps = new Set<HarnessCapability>(["events", "models", "permissions", "auth"]);
           this.ready = { ready: true };
@@ -165,7 +168,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           void this.listModels().catch(() => null);
           return;
         }
-        lastError = "health answered but not healthy";
+        lastError = "server info did not contain a valid process id";
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
       }
@@ -299,8 +302,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   /**
    * Fire-and-watch: v2's prompt is async by definition — it returns an inbox entry, and the
    * turn's progress arrives on the stream. The wire id is generated fresh per prompt in the
-   * msg_ namespace (client ids are durable and globally unique — a reuse answers 409, even in
-   * another session; measured). The caller's correlation id stays on this side of the wire.
+   * msg_ namespace: replaying an existing id returns its original input, even when the text
+   * changed. The caller's correlation id stays on this side of the wire.
    */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
     // The turn's completion arrives only on the stream — make sure someone is listening even
@@ -489,7 +492,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       // The contracts' verbs are v2's verbs — once | always | reject — and the optional
       // message carries the refusal reason to the agent (issue 327 §6).
       await this.http.req("POST", `/api/session/${sessionId}/permission/${decision.permissionId}/reply`, {
-        reply: decision.decision,
+        // The stable API renamed the request field; its event still calls the value `reply`.
+        decision: decision.decision,
         ...(decision.message !== undefined ? { message: decision.message } : {}),
       });
     } catch (error) {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { newId, type ConversationId, type MessageId } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
-import type { HarnessAdapter } from "@arke-studio/contracts";
+import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
 import { makeConversationSummariser, refreshConversationSummary } from "../../src/world-chat/summarisation.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -216,7 +216,7 @@ describe("the summariser's model (issue 1289)", () => {
     const root = await tempDir("arke-summary-model-");
     const asked: Array<string | undefined> = [];
     const adapter = {
-      id: "arke",
+      id: "opencode-v2",
       readiness: () => ({ ready: true }),
       capabilities: () => new Set(),
       createSession: async () => ({ sessionId: "s" }),
@@ -240,4 +240,43 @@ describe("the summariser's model (issue 1289)", () => {
     assert.equal(await makeConversationSummariser(adapter, own, root)({ messages: [], model: LOCAL }), "They counted keys.");
     assert.deepEqual(asked, [undefined], "a summariser with a model of its own never borrows the conversation's");
   });
+});
+
+describe("summarisation deadlines follow the prepared model", () => {
+  for (const scenario of [
+    { name: "local named agent", local: true, config: { agents: { "conversation-summarizer": { model: "ollama/local:12b" } } } },
+    { name: "local conversation fallback", local: true, config: {}, fallback: "ollama/local:12b" },
+    { name: "hosted session overriding a local agent", local: false, config: { model: "openai/cloud", agents: { "conversation-summarizer": { model: "ollama/local:12b" } } } },
+  ] satisfies Array<{ name: string; local: boolean; config: SessionConfigInput; fallback?: string }>) {
+    it(scenario.name, async (context) => {
+      context.mock.timers.enable({ apis: ["setTimeout"] });
+      const root = await tempDir("arke-summary-deadline-");
+      let release!: () => void;
+      const reply = new Promise<void>(resolve => { release = resolve; });
+      let dispatched!: () => void;
+      const sent = new Promise<void>(resolve => { dispatched = resolve; });
+      const adapter = {
+        id: "opencode-v2", createSession: async () => ({ sessionId: "s" }),
+        dispatchAsync: async () => { dispatched(); return { sessionId: "s", correlationId: "c" }; },
+        streamEvents() { return { [Symbol.asyncIterator]: async function* () {
+          await reply;
+          yield { type: "message.completed", sessionId: "s", text: '{"summary":"A late local answer."}' };
+        } }; },
+      } as unknown as HarnessAdapter;
+      let finished = false;
+      const summarise = makeConversationSummariser(adapter, async input => {
+        if (scenario.fallback && input.model === undefined) throw new Error("No summarizer choice");
+        return { ...scenario.config, ...input };
+      }, root);
+      const result = summarise({ messages: [], ...(scenario.fallback ? { model: scenario.fallback } : {}) }).finally(() => { finished = true; });
+      try {
+        await sent;
+        context.mock.timers.tick(120_001);
+        await new Promise(resolve => setImmediate(resolve));
+        if (scenario.local) assert.equal(finished, false, "the hosted deadline cannot cut off a local model");
+        release();
+        assert.equal(await result, scenario.local ? "A late local answer." : null);
+      } finally { release(); await result; }
+    });
+  }
 });

@@ -307,9 +307,34 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
 
+For an OpenCode v2 pin change, stage the exact runtime and qualify the actual binary:
+
+```powershell
+npm run prepare:opencode2 --workspace @arke-studio/desktop
+$env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+$env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
+$env:ARKE_LIVE_HARNESS = '1'
+node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
+Remove-Item Env:ARKE_LIVE_HARNESS, Env:ARKE_OPENCODE2_CMD, Env:ARKE_TEST_OPENCODE2
+npm run verify:licenses --workspace @arke-studio/desktop
+npm run smoke:main --workspace @arke-studio/desktop
+```
+
+The tests use disposable profiles, a scripted localhost provider and synthetic credentials.
+They verify authenticated launch, the exact server version, native Ollama discovery with an endpoint-only configuration, pinned
+agent/model configuration, a file-tool loop, outside-directory denial, final text/usage, approval
+confirmation, and durable key add/restart/removal. They make no paid requests and do not qualify
+live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
+fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
+native steering.
+
+Discovery/launcher regressions also reject older and newer v2 versions with no fallback,
+retain the installed version and required pin in the unavailable reason, and create no child.
+
 For the bundled OpenCode Copilot startup race (#1696), run adapter-opencode's package suite
 and coordinator `test/harness/session-files.test.ts`. Adapter `test/v2-model-readiness.test.ts`
-scripts the measured next-17444 scoped catalogue protocol: global-ready/location-pending,
+scripts the scoped catalogue protocol: global-ready/location-pending,
 separate Beats/Continuity/Cast locations, default/fallback choices, 503 warm-up, unsupported or
 missing routes, cancellation, deadlines and incorrect scope. It verifies no prompt is sent
 before readiness and failed creation retires the unpublished session. These fixtures make no

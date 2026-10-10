@@ -104,65 +104,18 @@ export interface DiscoveryOptions {
   runCommand?: CommandRunner;
 }
 
-async function discoverCommand(
-  command: string,
-  opts: DiscoveryOptions,
-): Promise<DiscoveredOpenCode | null> {
-  const run = opts.runCommand ?? runCommand;
-  if (opts.configuredPath && existsSync(opts.configuredPath)) {
-    const version = await versionOf(opts.configuredPath, run);
-    if (version !== null) return { command: opts.configuredPath, source: "configured", version };
-  }
-  const fromPath = await resolveOnPath(command, run);
-  if (fromPath) {
-    return { command: fromPath, source: "path", version: await versionOf(fromPath, run) };
-  }
-  if (opts.bundledPath && existsSync(opts.bundledPath)) {
-    return { command: opts.bundledPath, source: "bundled", version: await versionOf(opts.bundledPath, run) };
-  }
-  return null;
-}
-
 /** Resolve the OpenCode v1 to use, or null with the honest reason. */
 export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<DiscoveredOpenCode | null> {
-  return discoverCommand("opencode", opts);
+  // Stable v2 now also installs as `opencode`. Never send that server v1 requests.
+  const { found } = await discoverGated(["opencode"], opts, version => version?.startsWith("1.") === true);
+  return found;
 }
 
-/**
- * The v2 build floor. Prereleases are `0.0.0-<channel>-<build>`, which no semver comparison
- * orders usefully, so the gate reads the build number. The floor is the build every wire
- * shape in the v2 backing was measured against (issue 327 §3); a binary older than the pin
- * is treated as absent, with the reason surfaced by the caller.
- */
-export const OPENCODE2_MIN_BUILD = 17_444;
+/** Only the release qualified with Studio's adapter and bundle is supported. */
+export const OPENCODE2_PINNED_VERSION = "2.0.26";
 
-/**
- * The prerelease channels the build number can be trusted from. Upstream renamed the channel
- * mid-beta — the pin is `0.0.0-next-17444`, while `beta` and `latest` now publish
- * `0.0.0-beta-<build>` — off ONE monotonic counter, so a channel name change must not read as
- * "older than the pin". Named rather than wildcarded because other channels number differently:
- * `0.0.0-tui-v2-202606261840` would clear any floor on a date-shaped build.
- *
- * Anchored end to end, and that is the whole point: a substring match reads the trusted name out
- * of an untrusted compound channel, so `0.0.0-tui-beta-202606261840` would pass the allowlist
- * built to exclude it. Only the complete shape counts as a channel.
- *
- * The `0.0.0` is literal too. The build counter belongs to that series and to nothing else, so a
- * prerelease of some other line — `1.18.0-beta-202606261840`, `0.1.0-dev-20000` — carries a
- * number this floor cannot read. Stable v2 arrives through the major check above, not here.
- */
-const V2_BUILD_CHANNELS = /^0\.0\.0-(?:next|beta|dev)-(\d+)$/;
-
-/** Whether a discovered v2 version satisfies the pinned-contract gate. */
-export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {
-  if (version === null) return false;
-  // A stable release (2.x and beyond) postdates every prerelease build — and its own prereleases
-  // ("2.0.0-next-3") restart the build counter, so the major check must run FIRST or the
-  // channel branch below rejects a current binary as older than the beta pin.
-  const major = /^(\d+)\./.exec(version);
-  if (major && Number(major[1]) >= 2) return true;
-  const build = V2_BUILD_CHANNELS.exec(version);
-  return build !== null && Number(build[1]) >= minBuild;
+export function meetsV2Gate(version: string | null): boolean {
+  return version === OPENCODE2_PINNED_VERSION;
 }
 
 interface GatedDiscovery {
@@ -177,7 +130,7 @@ interface GatedDiscovery {
  * it responds" was never meant to mean "a stale configured entry hides every other install".
  */
 async function discoverGated(
-  command: string,
+  commands: readonly string[],
   opts: DiscoveryOptions,
   accept: (version: string | null) => boolean,
 ): Promise<GatedDiscovery> {
@@ -185,7 +138,8 @@ async function discoverGated(
   let rejected: DiscoveredOpenCode | null = null;
   const consider = (candidate: DiscoveredOpenCode): DiscoveredOpenCode | null => {
     if (accept(candidate.version)) return candidate;
-    rejected ??= candidate;
+    // The shared `opencode` command may be v1; that is absence of v2, not a rejected v2 install.
+    if (!candidate.version?.startsWith("1.")) rejected ??= candidate;
     return null;
   };
   if (opts.configuredPath && existsSync(opts.configuredPath)) {
@@ -195,10 +149,12 @@ async function discoverGated(
       if (hit) return { found: hit, rejected: null };
     }
   }
-  const fromPath = await resolveOnPath(command, run);
-  if (fromPath) {
-    const hit = consider({ command: fromPath, source: "path", version: await versionOf(fromPath, run) });
-    if (hit) return { found: hit, rejected: null };
+  for (const command of commands) {
+    const fromPath = await resolveOnPath(command, run);
+    if (fromPath) {
+      const hit = consider({ command: fromPath, source: "path", version: await versionOf(fromPath, run) });
+      if (hit) return { found: hit, rejected: null };
+    }
   }
   if (opts.bundledPath && existsSync(opts.bundledPath)) {
     const hit = consider({
@@ -213,9 +169,9 @@ async function discoverGated(
 
 /** Resolve the opencode2 to use — the gate is part of discovery, not a runtime probe. */
 export async function discoverOpenCode2(
-  opts: DiscoveryOptions & { minBuild?: number } = {},
+  opts: DiscoveryOptions = {},
 ): Promise<DiscoveredOpenCode | null> {
-  const { found } = await discoverGated("opencode2", opts, (v) => meetsV2Gate(v, opts.minBuild));
+  const { found } = await discoverGated(["opencode2", "opencode"], opts, meetsV2Gate);
   return found;
 }
 
@@ -223,11 +179,17 @@ export interface DiscoveredHarness {
   generation: "v2" | "v1";
   discovery: DiscoveredOpenCode;
   /**
-   * A v2 binary that answered but failed the build gate, when that is why v2 was not chosen.
-   * Settings states it plainly ("found 0.0.0-next-17400, need ≥17444") instead of claiming
+   * A v2 binary that answered but did not match the qualified release, when that is why v2 was not chosen.
+   * Settings states it plainly ("found 2.0.25, need 2.0.26") instead of claiming
    * nothing is installed (SPEC-005 R-1).
    */
   rejectedV2?: DiscoveredOpenCode;
+}
+
+export interface PreferredHarnessDiscovery {
+  found: DiscoveredHarness | null;
+  /** Retained even when there is no launchable fallback, so absence and incompatibility stay distinct. */
+  rejectedV2: DiscoveredOpenCode | null;
 }
 
 /**
@@ -237,23 +199,23 @@ export interface DiscoveredHarness {
 export async function discoverPreferredHarness(opts: {
   preferV1?: boolean;
   v1?: DiscoveryOptions;
-  v2?: DiscoveryOptions & { minBuild?: number };
-} = {}): Promise<DiscoveredHarness | null> {
-  const gate = (v: string | null) => meetsV2Gate(v, opts.v2?.minBuild);
+  v2?: DiscoveryOptions;
+} = {}): Promise<PreferredHarnessDiscovery> {
+  const gate = meetsV2Gate;
   // Both lanes probe concurrently: each is a PATH walk plus a --version spawn (~300ms
   // typical, seconds on a loaded machine), the probes are independent, and this runs on the
   // visible boot path — serial probing charged every v1-only machine a failed v2 probe
   // before its own discovery even began.
   const [v2, v1] = await Promise.all([
-    discoverGated("opencode2", opts.v2 ?? {}, gate),
+    discoverGated(["opencode2", "opencode"], opts.v2 ?? {}, gate),
     discoverOpenCode(opts.v1 ?? {}),
   ]);
   const withReason = (result: DiscoveredHarness): DiscoveredHarness => ({
     ...result,
     ...(v2.rejected ? { rejectedV2: v2.rejected } : {}),
   });
-  if (!opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
-  if (v1) return withReason({ generation: "v1", discovery: v1 });
-  if (opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
-  return null;
+  const found = !opts.preferV1 && v2.found ? { generation: "v2" as const, discovery: v2.found }
+    : v1 ? withReason({ generation: "v1", discovery: v1 })
+    : v2.found ? { generation: "v2" as const, discovery: v2.found } : null;
+  return { found, rejectedV2: v2.rejected };
 }

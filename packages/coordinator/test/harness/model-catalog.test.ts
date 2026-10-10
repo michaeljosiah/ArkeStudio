@@ -179,6 +179,17 @@ describe("model selection at dispatch", () => {
     const local: ModelInfo = { id: "local-model", provider: "ollama" };
     assert.match(selectHarnessModel("ollama/local-model", [local], app).reason!, /unavailable/);
     app.providers[0]!.validation = "valid";
+    app.providers[0]!.probes = [{ capability: "llm", available: true }];
     assert.equal(selectHarnessModel("ollama/local-model", [local], app).sessionModel, "ollama/local-model");
+  });
+
+  it("requires runtime health for an unmanifested native Ollama choice", () => {
+    const app = new ReadModel("test").getState().app;
+    const local: ModelInfo = { provider: "ollama", id: "unmanifested:8b", tools: true };
+    app.providers = [{ id: "ollama", configured: true, validation: "invalid", probes: [{ capability: "llm", available: false }], fault: null }];
+    assert.match(selectHarnessModel("ollama/unmanifested:8b", [local], app).reason!, /Ollama is unavailable/);
+    app.providers[0]!.validation = "valid";
+    app.providers[0]!.probes[0]!.available = true;
+    assert.equal(selectHarnessModel("ollama/unmanifested:8b", [local], app).sessionModel, "ollama/unmanifested:8b");
   });
 });

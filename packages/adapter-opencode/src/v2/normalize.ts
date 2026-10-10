@@ -6,7 +6,7 @@ import { toolSummary } from "../normalize.js";
  * §6). Side-effect-free and table-testable; the adapter owns the I/O.
  *
  * v2 frames are flat: `{ id, type, data, location?, durable? }` — no payload wrapper, no
- * `properties`. The vocabulary was measured against 0.0.0-next-17444 end to end, including a
+ * `properties`. The vocabulary was measured against 2.0.26 end to end, including a
  * full keyed turn with a held tool call and a permission round trip.
  */
 
