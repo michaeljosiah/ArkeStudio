@@ -192,19 +192,20 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     setResult(null);
     setVideo(null);
   };
+  const scopedChapter = scope.kind === "chapter" ? production.chapters.find((chapter) => chapter.id === scope.chapterId) : undefined;
   const scopeRow = (
     <div className="fy-abv-opt fy-abv-scope" data-testid="audiobook-export-scope">
-      <b>Scope</b>
-      {chapterId === undefined ? <span>Whole book</span> : <Seg label="Scope" value={scope.kind} options={[["chapter", "This chapter"], ["book", "Whole book"]] as const} onChange={selectScope} disabled={busy || rendering !== null} />}
-      {scope.kind === "chapter" && <span className="fy-abv-scope-title">{production.chapters.find((chapter) => chapter.id === scope.chapterId)?.title ?? scope.chapterId}</span>}
+      <b>Include</b>
+      {chapterId === undefined ? <span>Whole book</span> : <Seg label="Include" value={scope.kind} options={[["chapter", "This chapter"], ["book", "Whole book"]] as const} onChange={selectScope} disabled={busy || rendering !== null} />}
+      {scope.kind === "chapter" && <span className="fy-abv-scope-title">{scopedChapter === undefined ? scope.chapterId : `Chapter ${scopedChapter.order} · ${scopedChapter.title}`}</span>}
     </div>
   );
   const scopeReadiness = (
     <>
       {planRefused !== null && <div className="fy-abv-warn" role="status">{planRefused}</div>}
       {incomplete && <div className="fy-abv-scope-notice" role="status" data-testid="audiobook-export-incomplete">
-        <b>This chapter is not ready to export</b>
-        <span>{missing.length > 0 ? `${missing.length} block${missing.length === 1 ? "" : "s"} still to read.` : "The chapter needs a complete saved reading."}</span>
+        <b>Finish reading this chapter</b>
+        <span>{missing.length > 0 ? `${missing.length} block${missing.length === 1 ? "" : "s"} still need a take. Export needs the whole chapter.` : "The chapter needs a complete saved reading."}</span>
         {onReadRemaining !== undefined && missing.length > 0 && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={() => onReadRemaining(missing)}>Read remaining blocks…</button>}
       </div>}
       {omitted.length > 0 && <div className="fy-abv-scope-notice" data-testid="audiobook-export-omitted">
@@ -258,7 +259,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
             Cancel
           </button>
           <button type="button" className="fy-abv-btn pri" style={phone ? { flex: 1 } : undefined} disabled={busy || connection !== "open" || counts === null || counts.chapters === 0 || incomplete || planRefused !== null} onClick={start} data-testid="audiobook-export-start">
-            Export
+            Export player
           </button>
         </>
       )}
@@ -287,12 +288,6 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       <div>
         <VideoFiles worldId={worldId} dir={finished.dir} files={finished.files} />
       </div>
-      <div className="fy-abv-foot" style={{ marginTop: 4 }}>
-        <span className="grow" />
-        <button type="button" className="fy-abv-btn pri" style={phone ? { flex: 1, height: 44, justifyContent: "center" } : undefined} onClick={onClose}>
-          Done
-        </button>
-      </div>
     </>
   );
   const estimate = (onMachine: boolean): ReactNode => (
@@ -304,15 +299,28 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
 
   const timingControl = <WordTimingControl worldId={worldId} productionId={production.meta.id} chapters={scope.kind === "chapter" ? [scope.chapterId] : undefined} enabled={highlights} onReady={(ready) => { setWordTimingReady(ready); if (ready) { setAgain((n) => n + 1); asked.current = openAudiobookListening(worldId, production.meta.id, scope); } }} usePhrases={() => choose({ ...options, captionStyle: "phrases" })} />;
   const framePreview = <VideoExportPreview plan={plan} options={options} ready={wordTimingReady} onPreview={() => setPreview(true)} />;
+  // The native sheet reserves its head and foot. Only the options scroll, including when a
+  // scoped recovery quote covers this sheet; the author returns to the same format and settings.
+  const videoFoot = (
+    <div className="fy-abv-export-foot">
+      {phone && !incomplete && estimate(false)}
+      <div className="fy-abv-foot">
+        <span className="grow" />
+        <button type="button" className="fy-abv-btn" onClick={phone && highlights && !wordTimingReady ? () => choose({ ...options, captionStyle: "phrases" }) : onClose}>{phone && highlights && !wordTimingReady ? "Use phrases" : "Cancel"}</button>
+        <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">{highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render video"}</button>
+      </div>
+    </div>
+  );
+  const footer = finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
+
   if (phone) {
     // One column, from the foot, 44-high presses (197f). The kind is a row of its own here: the
     // phone frame draws Video alone, and the player package must stay reachable from a phone.
     return (
       <>
-      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" headless className="fy-abv-modal fy-abv-modal--phone">
+      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className="fy-abv-modal fy-abv-modal--phone">
         <div className="fy-abv-psheet" data-testid="audiobook-export">
           <div className="fy-abv-grab" />
-          <h3 id="audiobook-export-title" tabIndex={-1}>Export · {kind === "video" ? "Video" : "Audiobook player"}</h3>
           {finished !== null ? (
             finishedBody
           ) : (
@@ -336,19 +344,12 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
               {scopeReadiness}
               {kind === "video" ? (
                 <>
-                  {estimate(false)}
                   {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
-                  <div className="fy-abv-foot">
-                  <button type="button" className="fy-abv-btn" onClick={onClose}>Cancel</button>
-                  <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">
-                    {highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render"}
-                  </button>
-                  </div>
+
                 </>
               ) : (
                 <>
                   {playerLines}
-                  {playerFoot}
                 </>
               )}
             </>
@@ -363,9 +364,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   return (
     <>
       {/* The preview stands in the sheet's place (197b), and Done comes back to it. */}
-      <PageSheet open={!preview} onClose={onClose} title={`Export audiobook · ${production.meta.title}`} headless className={kind === "video" ? "fy-abv-modal fy-abv-modal--video" : "fy-abv-modal"}>
+      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className={kind === "video" ? "fy-abv-modal fy-abv-modal--video" : "fy-abv-modal"}>
         <div className="fy-abv-sheet">
-        <h3 id="audiobook-export-title" tabIndex={-1}>Export audiobook · {production.meta.title}</h3>
         <div className="fy-abv-sub">{sub}</div>
         {finished !== null ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
@@ -403,7 +403,6 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
               <>
                 <div className="fy-abv-opts">{playerRows}</div>
                 {playerLines}
-                {playerFoot}
               </>
             ) : (
               <>
@@ -412,15 +411,6 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
                   {timingControl}<p className="fy-abv-note">Sidecar captions remain plain text.</p>
                 </div><aside>{framePreview}{estimate(true)}</aside></div>}
                 {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
-                <div className="fy-abv-foot">
-                  <span className="grow" />
-                  <button type="button" className="fy-abv-btn" onClick={onClose}>
-                    Cancel
-                  </button>
-                  <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">
-                    {highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render"}
-                  </button>
-                </div>
               </>
             )}
           </div>

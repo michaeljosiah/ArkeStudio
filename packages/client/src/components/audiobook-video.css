@@ -13,14 +13,22 @@
 .fy-page-sheet.fy-abv-modal { inset: 24px; margin: auto; width: min(766px, calc(100% - 48px)); height: fit-content; max-height: calc(100dvh - 48px); border: 1px solid var(--border); border-radius: 16px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); }
 .fy-abv-modal::backdrop { background: color-mix(in srgb, var(--neutral-950) 32%, transparent); }
 .fy-abv-modal > .fy-page-sheet__grab { display: none; }
-.fy-abv-modal > .fy-page-sheet__body { padding: 0; gap: 0; overflow: auto; }
+.fy-abv-modal > .fy-page-sheet__body { padding: 0; gap: 0; min-height: 0; overflow: auto; }
+.fy-abv-modal > .fy-page-sheet__head { flex: none; padding: 16px 22px; }
+.fy-abv-modal > .fy-page-sheet__foot { display: block; flex: none; padding: 16px 22px; }
+.fy-abv-export-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.fy-abv-export-foot > .fy-abv-foot { flex: 1; }
 .fy-abv-modal .fy-abv-sheet { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; font: var(--type-body); }
 .fy-abv-scope { flex-wrap: wrap; }
-.fy-abv-scope-title { min-width: 0; overflow-wrap: anywhere; color: var(--muted-foreground); }
+.fy-abv-scope-title { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; color: var(--foreground); font-weight: 600; }
 .fy-abv-scope-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; font: var(--type-body); overflow-wrap: anywhere; }
 .fy-abv-scope-notice > span { color: var(--muted-foreground); }
 .fy-abv-scope-notice .fy-abv-btn { white-space: normal; height: auto; min-height: 32px; }
 .fy-page-sheet.fy-abv-modal--phone { inset: auto 0 0; width: 100%; max-height: calc(100dvh - 48px); margin: 0; border-radius: 22px 22px 0 0; }
+.fy-abv-modal--phone > .fy-page-sheet__head { padding: 14px 16px; }
+.fy-abv-modal--phone > .fy-page-sheet__foot { padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
+.fy-abv-modal--phone .fy-abv-export-foot { flex-direction: column; align-items: stretch; }
+.fy-abv-modal--phone .fy-abv-foot > .pri { flex: 1; justify-content: center; }
 .fy-abv-modal--phone .fy-abv-psheet { position: static; min-height: 0; max-height: none; border: 0; box-shadow: none; overflow: visible; }
 .fy-abv-modal--phone .fy-abv-scope > b { width: 100%; }
 .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg { flex: 1; }
