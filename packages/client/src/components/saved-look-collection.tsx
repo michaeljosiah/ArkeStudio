@@ -98,10 +98,10 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
   const browse = (id: string | null) => { setSelection(id); setFocused(id); };
   const leave = () => { if (saving !== null) return; if (rename !== null) closeRename(); else onClose(); };
   return (
-    <PageSheet preserveReturnFocus open title={`${fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} onClose={leave} onBack={leave} className="fy-savedlook" footer={<>
-      {fromNewLook ? <Button variant="ghost" onClick={leave} disabled={saving !== null}>Back to New look</Button> : <Button variant="ghost" onClick={leave} disabled={saving !== null}>Back to Looks</Button>}
+    <PageSheet preserveReturnFocus open title={`${fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} onClose={leave} className="fy-savedlook" footer={<>
       {onNewLook !== undefined && <Button variant="secondary" onClick={onNewLook} disabled={rename !== null}>New look</Button>}
       <span className="fy-ch__panelpush" />
+      <Button variant="ghost" onClick={leave} disabled={saving !== null}>{fromNewLook ? "Back to New look" : "Cancel"}</Button>
       <Button variant="primary" disabled={off || gone || (fromNewLook && selected === null) || saving !== null || rename !== null} onClick={() => onChoose(selection)} data-testid="saved-look-use">Use for Chapter {chapterOrder}</Button>
     </>}>
       <div className="fy-savedlook__columns" data-testid="saved-look-collection">

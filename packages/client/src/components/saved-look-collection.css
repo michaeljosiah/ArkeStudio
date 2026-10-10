@@ -17,8 +17,8 @@
 .fy-savedlook__row--on { background: var(--secondary); border: 1px solid var(--foreground); border-radius: 8px; }
 .fy-savedlook__image { width: 42px; height: 60px; border-radius: 5px; object-fit: contain; background: var(--secondary); display: block; flex: none; }
 .fy-savedlook__image--missing { display: flex; align-items: center; justify-content: center; text-align: center; border: 1px dashed var(--border); font: var(--type-meta); color: var(--muted-foreground); overflow: hidden; }
-.fy-savedlook__row .fy-savedlook__image--missing { font-size: 0; }
-.fy-savedlook__row .fy-savedlook__image--missing::after { content: "—"; font: var(--type-meta); }
+.fy-savedlook__image--missing:not(.fy-savedlook__full) { font-size: 0; }
+.fy-savedlook__image--missing:not(.fy-savedlook__full)::after { content: "—"; font: var(--type-meta); }
 .fy-savedlook__words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .fy-savedlook__words b { font-weight: 500; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .fy-savedlook__words small { font: var(--type-meta); color: var(--muted-foreground); }
@@ -47,6 +47,7 @@
 .fy-look__choice { display: flex; gap: 12px; align-items: center; text-align: left; min-height: 78px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 12px; font: var(--type-ui); color: var(--foreground); background: var(--background); cursor: pointer; min-width: 0; }
 .fy-look__choice > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .fy-look__choice b { display: block; margin-bottom: 5px; }
+.fy-look__place { width: 4.1em; white-space: nowrap; }
 .fy-look__details summary { color: var(--muted-foreground); }
 .fy-look__foot, .fy-newlook__foot { width: 100%; padding: 0; border: 0; flex-wrap: wrap; }
 .fy-newlook__top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -67,7 +68,7 @@
   .fy-savedlook__columns { grid-template-columns: 1fr; gap: 16px; }
   .fy-savedlook__list { max-height: min(366px, 45dvh); }
   .fy-savedlook__full { width: 66px; height: 100px; }
-  .fy-savedlook .fy-page-sheet__foot .ui-btn--primary { flex: 1; }
+  .fy-savedlook .fy-page-sheet__foot .ui-btn--primary { flex: 1 1 auto; }
   .fy-savedlook__details { margin-top: 12px; }
   .fy-look__overview { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px 12px; }
   .fy-look__choice { grid-row: 2; grid-column: 1 / -1; }

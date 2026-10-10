@@ -245,7 +245,7 @@ function InFrameRow({ who, label, full, kits, slug, shot, onMake, menu }: {
           )
         ) : (
           <span>
-            {who.kind === "place" ? "place" : look !== undefined ? `${lookName(look)} · ${who.look?.view === "close" ? "close view" : "full body"}` : "main photo"}
+            {who.kind === "place" ? "place" : look !== undefined ? `${lookName(look, kit?.looks)} · ${who.look?.view === "close" ? "close view" : "full body"}` : "main photo"}
             {who.carried ? "" : " · over the limit"}
           </span>
         )}
@@ -416,8 +416,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const lookLabel = (key: string, lookId: string): string => {
     if (lookId === MAIN_PHOTO_LOOK) return "main photo";
     const sheet = suggestion.who.find((who) => who.key === key)?.sheet;
-    const look = world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === lookId);
-    return look === undefined ? "another look" : lookName(look);
+    const looks = world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks;
+    const look = looks?.find((candidate) => candidate.id === lookId);
+    return look === undefined ? "another look" : lookName(look, looks);
   };
   const updatingNow = answered?.state === "working";
   const updateRefused = answered?.state === "refused" ? answered.refused : null;

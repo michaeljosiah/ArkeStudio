@@ -69,7 +69,10 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
       if (coveredNow.current) focusNewestLayer();
       else {
         const backTo = preserveReturnFocus ? originalOpener.current ?? opener : opener;
-        if (backTo instanceof HTMLElement && backTo.isConnected) backTo.focus({ preventScroll: true });
+        if (backTo instanceof HTMLElement && backTo.isConnected) {
+          if (preserveReturnFocus) backTo.focus({ preventScroll: true });
+          else backTo.focus();
+        }
       }
     };
   }, [showing, mounted, modeless, preserveReturnFocus]);
@@ -82,7 +85,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
     <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1 } : {})}
-      onFocusCapture={(event) => { if (preserveReturnFocus && event.target instanceof HTMLElement) lastFocus.current = event.target; }}
+      onFocusCapture={(event) => { if (preserveReturnFocus && !coveredNow.current && event.target instanceof HTMLElement) lastFocus.current = event.target; }}
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
