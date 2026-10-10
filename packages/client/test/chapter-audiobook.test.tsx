@@ -2579,7 +2579,7 @@ it("chapter export recovery quotes only its missing blocks and names the return 
   assert.match(quote.textContent!, /The 2 current takes stay as they are/);
   assert.equal(quote.querySelector("h3"), null, "the native sheet supplies the one heading");
   assert.match(q(m, '[data-testid="audiobook-confirm"]')!.textContent!, /^Read 2 blocks/);
-  await act(async () => [...quote.querySelectorAll("button")].find(button => button.textContent === "Back to export")!.click());
+  await act(async () => [...quote.closest("dialog")!.querySelectorAll(".fy-page-sheet__foot button")].find(button => button.textContent === "Back to export")!.click());
   assert.equal(q(m, '[data-testid="read-sheet"]'), null);
   assert.ok(q(m, '[data-testid="audiobook-export"]'));
   assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");
