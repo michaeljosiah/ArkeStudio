@@ -8,6 +8,7 @@ import {
   comfyUiRecipeIdentity,
   comfyUiRouteRecipe,
   IMAGE_DIMENSIONS,
+  IMAGE_TIER_DIMENSIONS,
   SAMPLING_PARAMS,
   substituteRecipeParams,
   VIDEO_DERIVATIONS,
@@ -584,8 +585,10 @@ export class ComfyUiClient implements ProviderClient {
     if (recipe.capability === "image") {
       // The output spec's shape selects one of this recipe's authored canvases. SDXL keeps
       // its training buckets; Krea's dimensions follow the quality tier its manifest offers.
-      const output = params["output"] as { width?: unknown; height?: unknown; aspect?: unknown } | undefined;
-      const buckets = IMAGE_DIMENSIONS[recipe.id];
+      const output = params["output"] as { width?: unknown; height?: unknown; aspect?: unknown; resolution?: unknown } | undefined;
+      // A recipe with tiers sizes from the chosen tier's canvases; its resolution word says which.
+      const tiered = typeof output?.resolution === "string" ? IMAGE_TIER_DIMENSIONS[recipe.id]?.[output.resolution] : undefined;
+      const buckets = tiered ?? IMAGE_DIMENSIONS[recipe.id];
       if (buckets === undefined) throw new Error(`comfyui: ${recipe.displayName} has no image dimensions`);
       const requestedAspect = output?.aspect ?? params["aspect"] ?? params["aspect_ratio"];
       const aspect =

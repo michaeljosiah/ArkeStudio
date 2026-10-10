@@ -410,7 +410,7 @@ function recipeTileFacts(
 }
 
 /** A local model as a tile: name, size, state, the controls its row had, and its one clause (R-13, R-16). */
-function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngine: boolean }) {
+function LocalTile({ facts }: { facts: LocalFacts }) {
   // Generate's "Edit in Settings" lands here with the model and `sampling` named (design 177c).
   const [params] = useSearchParams();
   const { state } = useStore();
@@ -431,19 +431,12 @@ function LocalTile({ facts, externalEngine }: { facts: LocalFacts; externalEngin
           <span style={{ flex: 1 }} />
           <RuntimeStatus tone={facts.tone}>{facts.word}</RuntimeStatus>
         </div>
-        {/* These terms and setup steps matter before a large download (issue 1226), even when
-            readiness cannot get past an unreachable engine. Keep the measured reason below. */}
+        {/* The terms matter before a large download (issue 1226), even when readiness cannot
+            get past an unreachable engine. Keep the measured reason below. */}
         {facts.model.id === "comfyui-qwen21-image" && (
-          <>
-            <div className="fy-set__why">
-              <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
-            </div>
-            {externalEngine && (
-              <div className="fy-set__why">
-                <span>Dedicated engine profile required · <a className="fy-set__link" href="https://github.com/michaeljosiah/ArkeStudio/blob/e98271edd7d4754fa986128f13379281fa7fff0e/docs/development/qwen21.md#externally-managed-url-engines" target="_blank" rel="noopener noreferrer">Setup</a></span>
-              </div>
-            )}
-          </>
+          <div className="fy-set__why">
+            <span>Noncommercial research · <a className="fy-set__link" href="https://huggingface.co/Qwen/Qwen-Image-2.1/blob/790c92633540aa0cb11d9abf19eb46d861714758/LICENSE" target="_blank" rel="noopener noreferrer">Licence</a></span>
+          </div>
         )}
         {facts.recipe && hasSampling(facts.model) && <SamplingLine model={facts.model} openOnMount={askedSampling} />}
         {/* What an upscaler does and its rate on this machine, measured, or a dash (178c). */}
@@ -562,7 +555,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
   return (
     <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>
       {visual ? (
-        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} externalEngine={comfyui?.engine.source === "user-url"} />)}</div>
+        <div className="fy-tiles">{items.map((i) => i.facts && <LocalTile key={i.model.id} facts={i.facts} />)}</div>
       ) : (
         <div className="fy-rows">
           {items.map((i) =>
