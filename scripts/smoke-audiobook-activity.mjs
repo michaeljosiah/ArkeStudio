@@ -65,9 +65,10 @@ try{
     await until(()=>evaluate("Boolean(document.querySelector('[data-block=\"p0.0\"]'))"));
     await evaluate("document.fonts.ready");await evaluate("window.start();window.phase('aligning')");
     await until(()=>evaluate("Boolean(document.querySelector('.fy-abreceipt'))"));
+    await new Promise(resolve=>setTimeout(resolve,450));
     const receipt=await evaluate(`(()=>{const e=document.querySelector('.fy-abreceipt'),r=e.getBoundingClientRect();return{left:r.left,right:r.right,overflow:e.scrollWidth>e.clientWidth+1,buttons:[...e.querySelectorAll('button')].map(b=>b.getBoundingClientRect().height)};})()`);
-    assert.ok(receipt.left>=0&&receipt.right<=width+1);assert.equal(receipt.overflow,false);if(width<600)assert.ok(receipt.buttons.every(h=>h>=44));
     await shot('receipt-'+width);
+    assert.ok(receipt.left>=0&&receipt.right<=width+1,JSON.stringify({dir,width,receipt}));assert.equal(receipt.overflow,false,JSON.stringify({dir,width,receipt}));if(width<600)assert.ok(receipt.buttons.every(h=>h>=44));
     if(width<600){const footer=await evaluate(`(()=>{const e=document.querySelector('[data-testid=audiobook-hold]'),buttons=[...e.querySelectorAll('button')].map(b=>({text:b.textContent,top:b.getBoundingClientRect().top,height:b.getBoundingClientRect().height}));return{buttons,overflow:e.scrollWidth>e.clientWidth+1};})()`);assert.equal(footer.overflow,false);assert.equal(footer.buttons.length,2);assert.equal(footer.buttons[0].top,footer.buttons[1].top);assert.ok(footer.buttons.every(b=>b.height>=44));records.push({width,footer});}
     await evaluate("window.panel()");await until(()=>evaluate("Boolean(document.querySelector('.fy-abactivity'))"));
     const panel=await evaluate(`(()=>{const e=document.querySelector('.fy-ap'),r=e.getBoundingClientRect();return{left:r.left,right:r.right,overflow:e.scrollWidth>e.clientWidth+1,rows:document.querySelectorAll('[data-testid=audiobook-activity-row]').length};})()`);
