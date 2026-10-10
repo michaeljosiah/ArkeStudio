@@ -1,8 +1,24 @@
 # Code map
 
+Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
+chapter identity. `AudiobookScope` travels through listening/player commands and video options
+to coordinator `productions/audiobook-listening`, `audiobook-export` and `audiobook-video`.
+Scope filters before planning, remains in recovery/manifest/receipts, and partitions delivery
+folders and player position keys while identical chapter encodes stay reusable.
+
 Use this map to locate a change, then follow imports and exact message/event names. Paths in tables are relative to the repository root; workflow paths use the package prefixes stated in the text. This is an ownership map, not a full file inventory.
 
 ## Package relationships
+
+Chapter narration Activity (turn 206): contracts `src/audiobook-activity.ts` owns the operation
+shape, state labels and cost scope; coordinator `src/productions/audiobook-activity.ts` journals
+progress independently of provider completion. `runAudiobookChapter` publishes accepted start,
+request, local alignment, durable block progress and outcome; `Coordinator.readAudiobookChapter`
+freezes owning labels and associates jobs. The `audiobook.activity` event folds into both snapshots.
+Client `components/audiobook-activity.tsx` draws one Activity row per read and bounded receipts;
+`chapter-audiobook.tsx` shows its alignment phase at the foot. Focused coverage is in contracts and
+coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
+`activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.
 
 The client and coordinator share contracts. Providers, voice and the four writing adapters also consume contracts. Desktop composes coordinator and platform integrations. Coordinator's supported dev entry composes providers/voice too, so those package dependencies are intentional. Shared harness assembly imports concrete adapters in `packages/coordinator/src/harness/v2-launch.ts`; Coordinator itself consumes contracts. Check package.json and actual imports when changing dependencies.
 

@@ -636,6 +636,10 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn--ghost { border-color: var(--border); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn svg { width: 13px; height: 13px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .fy-ab__control > :is(.ui-btn, .fy-ab__pill) { flex: 1 1 auto; }
+  /* Turn 206: progress gets its own line; Stop and Listen share the action row. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold > .fy-ab__read-progress { display: contents; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .fy-ab__read-progress > .fy-mono { grid-column: 1 / -1; white-space: normal; }
 }
 @media (max-width: 599px) {
   [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 16px; }

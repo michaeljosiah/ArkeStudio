@@ -16,6 +16,7 @@ import { VOICE_PREVIEW_SCOPE } from "./voice.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
 import { clockTime, roughTime, type AudiobookVideoProgress } from "./audiobook-video.js";
+import { audiobookActivityLive, audiobookJobRun, type AudiobookActivity } from "./audiobook-activity.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
 export function activityJobLabels(
@@ -39,7 +40,7 @@ export function activityJobLabels(
   const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
   const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
   const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
-  const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
+  const kind = job.target.kind === "voice-preview" && job.params.purpose === "audiobook" ? (job.params.hear === true ? "block preview" : "narration request") : job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
   const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
   const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
   const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
@@ -424,9 +425,10 @@ const ARRIVED = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
  * turn 136, R-24). Never opened counts as never seen, so a first look lights for any history at
  * all; the coordinator stamps the instant with the clock that stamps `updatedAt`.
  */
-export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boolean {
+export function arrivedSince(jobs: readonly Job[], seenAt: string | null, reads: readonly AudiobookActivity[] = []): boolean {
+  if (reads.some(run => !audiobookActivityLive(run) && (seenAt === null || run.updatedAt > seenAt))) return true;
   return jobs.some(
-    (job) => ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
+    (job) => !audiobookJobRun(job, reads) && ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
   );
 }
 

@@ -1,3 +1,4 @@
+import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
@@ -1332,6 +1333,7 @@ export class Coordinator {
   private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number; requests?: number; groups?: string[][]; request?: number }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
   private readonly audiobookRequests = new Map<string, string>();
+  private readonly audiobookActivity: AudiobookActivityJournal;
   /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
   private readonly readingBooks = new Map<string, { control: AbortController; worldId: string; productionId: string; requestId: string; chapters?: number; blocks?: number; done?: number }>();
   /**
@@ -1921,7 +1923,18 @@ export class Coordinator {
       this.emit({ at: at(), type: "audiobook.finished", ...ids, ...ending });
       return ending;
     }
+    const runId = ulid();
+    const bundle = store.getBundle();
+    const production = bundle.productions.find(p => p.meta.id === ids.productionId);
+    const chapter = production?.chapters.find(c => c.id === ids.chapterId);
+    let activityRequest = 0;
+    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, startedAt: at() };
+    try {
     await runAudiobookChapter({
+      activity: async patch => {
+        if (patch.request !== undefined) activityRequest = patch.request;
+        await this.audiobookActivity.update(runId, patch, initial);
+      },
       store,
       worldId: ids.worldId,
       productionId: ids.productionId,
@@ -1968,11 +1981,16 @@ export class Coordinator {
         const queued = await this.enqueueBatch(
           requestId,
           command,
-          inputs.map((input) => ({
-            ...bindDesignedNarrator(input, room.designedBinding),
-            ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
-          })),
+          inputs.map((input) => {
+            const bound = bindDesignedNarrator(input, room.designedBinding);
+            return {
+              ...bound,
+              params: { ...bound.params, audiobookRunId: runId, audiobookChapterTitle: initial.chapterTitle, audiobookScope: initial.scope, audiobookRequest: activityRequest },
+              ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+            };
+          }),
         );
+        for (const id of queued.jobIds) await this.audiobookActivity.update(runId, { job: { id, index: Math.max(1, activityRequest), reused: false } });
         return { jobIds: queued.jobIds, ...(queued.reason !== undefined ? { reason: queued.reason } : {}) };
       },
       waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
@@ -2019,6 +2037,10 @@ export class Coordinator {
         }
       },
     });
+    } catch (error) {
+      await this.audiobookActivity.update(runId, { phase: signal.aborted ? "stopped" : "interrupted", reason: describeCoordinatorError(error) });
+      throw error;
+    }
     return ending;
   }
 
@@ -3311,6 +3333,7 @@ export class Coordinator {
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
+    this.audiobookActivity = new AudiobookActivityJournal(opts.appRoot ? join(opts.appRoot, "queue", "audiobook-reads.jsonl") : undefined, run => this.emit({ type: "audiobook.activity", at: run.updatedAt, run }));
     this.changeLog = storage.changeLog;
     this.appLog = storage.appLog;
     storage.onLogChanged(() => this.refreshDiagnosticsLogTail());
@@ -4327,7 +4350,8 @@ export class Coordinator {
           return { ok: false, blockers: [control.signal.aborted ? "the render was cancelled" : describeCoordinatorError(err)] };
         });
         if (result.ok) {
-          sourceFingerprint = `video:${exportId}:${result.made}:${result.files.length}`;
+          const selection = createHash("sha256").update(JSON.stringify([result.scope ?? { kind: "book" }, result.chapterIds ?? []])).digest("hex");
+          sourceFingerprint = `video:${exportId}:${selection}:${result.made}:${result.files.length}`;
           if (last !== undefined) last = { ...last, doneSec: last.totalSec, leftSec: 0 };
           await progress("done", 100, `${result.dir}/${result.files[0]!.name}`, null);
         } else if (control.signal.aborted) await progress("cancelled", 0, null, null);
@@ -4528,6 +4552,7 @@ export class Coordinator {
     await this.seed();
     await this.adapterLibrary?.refresh();
     await this.seedAppConfig();
+    for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
     // which, run too early, is indistinguishable from "not resolved yet" and fails every
@@ -14292,7 +14317,7 @@ export class Coordinator {
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: control.signal, exportId }).catch(
+        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), signal: control.signal, exportId }).catch(
           (err: unknown): { ok: false; blockers: string[] } => {
             void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
             return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
@@ -15407,7 +15432,7 @@ export class Coordinator {
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
         try {
           // No voice is asked for: what plays is judged by the words alone (codex on PR 1491).
-          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
+          const listening = await audiobookListening(store, msg.productionId, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -21466,6 +21491,7 @@ export class Coordinator {
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
+      await this.audiobookActivity.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();

@@ -12,6 +12,7 @@ import {
   orderedShots,
   type ClientMessage,
   type ClientState,
+  type AudiobookActivity,
   type FoundingBuildState,
   type Job,
   type LedgerEntry,
@@ -134,6 +135,30 @@ function activityControl(html: string): string {
   assert.ok(label > 0, "the bell is drawn");
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
+
+it("keeps an aligning chapter in Running after its provider request succeeded, and retains its owned chapter route", () => {
+  const state = quiet();
+  const request = job({ id: "jb_01J8E0000000000000000R1", status: "succeeded", productionId: "bell-watch", params: { purpose: "audiobook" } });
+  const read: AudiobookActivity = {
+    id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_WORLD_ID, productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing",
+    chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "aligning", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 20, made: 6, flagged: 0, requests: 4, request: 2, estimatedMicroUsd: 400000, models: ["Gemini"], local: false, jobs: [{ id: request.id, index: 2, reused: false }],
+  };
+  state.app.jobs = [request]; state.app.audiobookActivity = [read];
+  const html = render(state, "inbox");
+  assert.match(html, /Running · 1/);
+  assert.match(html, /The crossing · Aligning narration/);
+  assert.match(html, /Aligning locally · request 2 of 4/);
+  assert.match(html, /6 of 20 blocks saved/);
+  assert.match(html, /~\$0.40 for this read/);
+  assert.doesNotMatch(html, /voice preview/);
+  assert.equal((html.match(/data-testid="audiobook-activity-row"/g) ?? []).length, 1);
+  state.app.audiobookActivity = [{ ...read, phase: "interrupted", reason: "Studio restarted before this read finished." }];
+  const history = render(state, "inbox");
+  assert.match(history, /Narration interrupted/);
+  assert.match(history, /14 left unread/);
+  assert.doesNotMatch(history, /nothing finished in the last/);
+});
 
 async function mounted(node: React.ReactNode, run: (container: HTMLElement) => Promise<void>): Promise<void> {
   const container = document.createElement("div");

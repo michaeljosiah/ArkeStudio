@@ -5,6 +5,18 @@ import { SlugSchema } from "./ids.js";
 import { AudiobookMotionSchema } from "./audiobook-motion.js";
 import { AcousticWordSchema } from "./audiobook-word-timing.js";
 
+/** Inclusion is independent of how video files are partitioned (turn 209, SPEC-047 R-179). */
+export const AudiobookScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("book") }).strict(),
+  z.object({ kind: z.literal("chapter"), chapterId: SlugSchema }).strict(),
+]);
+export type AudiobookScope = z.infer<typeof AudiobookScopeSchema>;
+
+/** An absent scope is an older whole-book request; an invalid chapter never broadens it. */
+export function audiobookScopeKey(scope: AudiobookScope | undefined): string {
+  return scope?.kind === "chapter" ? `chapter-${scope.chapterId}` : "book";
+}
+
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the made chapters in
  * order, each its takes back to back with nothing added between them — a grouped take was cut at
@@ -93,6 +105,7 @@ export const AudiobookListeningSchema = z
   .object({
     productionId: SlugSchema,
     title: z.string(),
+    scope: AudiobookScopeSchema.optional(),
     /** The book's cover: the world's key art, world-relative, or none. */
     cover: z.string().nullable(),
     chapters: z.array(ListeningChapterSchema),

@@ -198,6 +198,49 @@ async function render(h: Harness, options: Partial<AudiobookVideoOptions>): Prom
 const near = (actual: number, expected: number, within: number, what: string) => assert.ok(Math.abs(actual - expected) <= within, `${what}: ${actual} is not within ${within} of ${expected}`);
 
 describe("the audiobook as a video (turn 197)", () => {
+  it("keeps a chapter's video scope through readiness, cache reuse, job recovery and delivery receipts", () =>
+    withHarness(async (h) => {
+      await read(h.send, "01-neap");
+      await read(h.send, "02-the-same-ink", ["title"]);
+      await read(h.send, "04-her-own-hand");
+      const scope = { kind: "chapter" as const, chapterId: "neap" };
+      await h.send({ kind: "read-audiobook-video", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, options: { ...DEFAULT_VIDEO_OPTIONS, scope } });
+      const state = h.events.filter((event): event is State => event.type === "audiobook.video-state").at(-1)!.state!;
+      assert.deepEqual(state.scope, scope);
+      assert.deepEqual(state.chapters.map((chapter) => chapter.chapterId), ["neap"]);
+      // This test exercises selection, filenames and cache boundaries; codec quality is covered
+      // by the real ffmpeg cases below. A stand-in writes exactly the output the service asks for.
+      const ffmpeg: FfmpegRunner = { slateFont: FONT, run: async (args) => { await writeFile(args[args.length - 1]!, "video"); } };
+      const context = () => ({ ffmpeg, clock: () => CLOCK, exportId: exportId(), signal: new AbortController().signal });
+      const selected = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope, files: "book" }, context());
+      assert.ok(selected.ok, JSON.stringify(selected));
+      assert.deepEqual(selected.scope, scope);
+      assert.deepEqual(selected.chapterIds, ["neap"]);
+      assert.equal(selected.files.length, 1);
+      assert.deepEqual(selected.files[0]!.chapterIds, ["neap"]);
+      assert.match(selected.files[0]!.name, /01-neap\.mp4$/);
+      const book = await exportAudiobookVideo(h.store(), LEDGER, DEFAULT_VIDEO_OPTIONS, context());
+      assert.ok(book.ok, JSON.stringify(book));
+      assert.equal(book.made, 1, "the selected chapter's identical encode is reused by the book");
+      assert.notEqual(book.dir, selected.dir, "whole-book delivery cannot overwrite the chapter receipt");
+      const manifest = JSON.parse(await readFile(join(h.worldDir, selected.dir, "video.json"), "utf8"));
+      assert.deepEqual(manifest.scope, scope);
+      assert.deepEqual(manifest.chapterIds, ["neap"]);
+      await h.send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = h.events.filter((event): event is Extract<DomainEvent, { type: "web-packages.listed" }> => event.type === "web-packages.listed").at(-1)!.packages.find((entry) => entry.dir === selected.dir)!;
+      assert.deepEqual(listed.scope, scope);
+      assert.deepEqual(listed.chapterIds, ["neap"], "the saved chapter delivery survives a book render and reconnect");
+      const incompleteScope = { kind: "chapter" as const, chapterId: "the-same-ink" };
+      const incomplete = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope: incompleteScope }, context());
+      assert.equal(incomplete.ok, false);
+      if (!incomplete.ok) assert.match(incomplete.blockers.join(" "), /this chapter is not read whole yet/);
+      await assert.rejects(exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope: { kind: "chapter", chapterId: "gone" } }, context()), /no longer in this production/);
+      const pending = { exportId: exportId(), startedAt: CLOCK, options: { ...DEFAULT_VIDEO_OPTIONS, scope } };
+      await writeFile(join(h.worldDir, videoCacheFolder(LEDGER), "job.json"), JSON.stringify(pending));
+      assert.deepEqual((await pendingVideoJobs(h.store()))[0]?.options.scope, scope, "a restart resumes exactly the selected chapter");
+      await forgetVideoJob(h.store(), LEDGER);
+    }));
+
   it("says what a render would make before anything is made, and refuses on a machine with no ffmpeg", () =>
     withHarness(async (h) => {
       await read(h.send, "01-neap");

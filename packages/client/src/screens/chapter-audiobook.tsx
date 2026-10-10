@@ -5,6 +5,8 @@ import {
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   audiobookBeatAt,
+  audiobookActivityLive,
+  audiobookActivityStage,
   audiobookBeatCount,
   CADENCE_PHRASE_MAX,
   NOTE_TAG_HOLD,
@@ -163,6 +165,8 @@ export interface ChapterAudiobookInput {
   illustrate?: { press: () => void; busy: boolean; again: boolean; state?: string; running?: { line: string; stop?: () => void } };
   /** The chapter's Looks (design turn 193a), in the same menu (194): opens the Looks sheet; `state` is what it says beside it. */
   looks?: { open: () => void; state?: string };
+  /** Turn 209: the phone's Chapter actions keeps the same chapter as the Export sheet's scope. */
+  export?: () => void;
   /** On a phone (design turn 198, rule 10) the Blocks press and its Reset are in the toolbar's ⋯ menu. */
   seamsInMenu?: boolean;
   /**
@@ -391,6 +395,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const catalogue = useStore().voiceCatalogue;
   const runs = useAudiobookRuns();
   const run = runs[`${worldId}/${prodId}/${chapter.id}`];
+  const activity = state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run));
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
   // The marker menu (R-42): the view's, so the page's `[` and the side's button open the same one.
@@ -1021,12 +1026,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (reading_) {
       return whole(
-        <span className="fy-ab__control">
+        <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {activity ? `${audiobookActivityStage(activity)} · ${activity.made} of ${activity.toMake} blocks saved` : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
-          <Button variant="ghost" onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
-            Stop
+          <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
+            {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
           </Button>
         </span>
       );
@@ -1058,9 +1063,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       </span>
     ) : (
       <ToolMenu
-        label="Direct and illustrate"
+        label={input.seamsInMenu === true ? "Chapter actions" : "Direct and illustrate"}
         testId="direct-illustrate"
-        icon={input.compact === true}
         // On a phone the lines to cast head the menu (design turn 198j), Reset beside them over Direct and illustrate.
         {...(input.seamsInMenu === true && castItems.length > 0 ? { lead: { head: paragraphsToCast(toCast.length), items: castItems, also: seamReset } } : {})}
         items={[
@@ -1089,6 +1093,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             : []),
           ...(input.looks !== undefined
             ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
+            : []),
+          ...(input.seamsInMenu === true && input.export !== undefined
+            ? [{ key: "export", label: "Export…", state: "this chapter", disabled: connection !== "open", press: input.export, testId: "audiobook-chapter-export" }]
             : []),
           // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
           ...(castItems.length === 0 ? seamReset : []),
@@ -1270,6 +1277,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     narrator,
     modelOf,
     makeAgain,
+    readRemaining: (numbers: number[]) => {
+      const keys = rows.filter((_row, index) => numbers.includes(index + 1)).map((row) => row.block.key);
+      if (keys.length > 0) press(keys);
+    },
     resume,
     directionRun,
     directedBlocks,

@@ -920,6 +920,12 @@ export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () =
   return () => filedBatchListeners.delete(listener);
 }
 
+const audiobookActivityListeners = new Set<(run: import("@arke-studio/contracts").AudiobookActivity) => void>();
+export function subscribeAudiobookActivity(listener: (run: import("@arke-studio/contracts").AudiobookActivity) => void): () => void {
+  audiobookActivityListeners.add(listener);
+  return () => { audiobookActivityListeners.delete(listener); };
+}
+
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
   queueResultListeners.add(listener);
   return () => queueResultListeners.delete(listener);
@@ -1282,6 +1288,10 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
           },
         },
       };
+    case "audiobook.activity": {
+      const runs = [event.run, ...(state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
+      return { ...state, app: { ...state.app, audiobookActivity: runs } };
+    }
     case "job.updated": {
       const jobs = [...state.app.jobs];
       const i = jobs.findIndex((j) => j.id === event.job.id);
@@ -1652,6 +1662,7 @@ function handleFrame(json: string): void {
     if (event.type === "voice.designed-listed") for (const listener of projectVoiceListeners) listener(event);
     if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
     if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
+    if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
@@ -2619,7 +2630,7 @@ function handleFrame(json: string): void {
       const held = exportsState[event.exportId];
       exportsState = {
         ...exportsState,
-        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files } },
+        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files, ...(event.result.scope !== undefined ? { scope: event.result.scope } : {}), ...(event.result.chapterIds !== undefined ? { chapterIds: event.result.chapterIds } : {}) } },
       };
     }
     if (event.type === "canon.answer") {
@@ -5354,7 +5365,7 @@ export interface ExportState {
   /** An audiobook video's place while it renders (design turn 197d). */
   video?: import("@arke-studio/contracts").AudiobookVideoProgress;
   /** What an audiobook video made, once it has (197e): its folder and files. */
-  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[] };
+  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[]; scope?: import("@arke-studio/contracts").AudiobookScope; chapterIds?: string[] };
   error: string | null;
 }
 
@@ -5639,9 +5650,9 @@ export function groupChapterBeats(worldId: string, productionId: string, chapter
 }
 
 /** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
-export function openAudiobookListening(worldId: string, productionId: string): string | null {
+export function openAudiobookListening(worldId: string, productionId: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
-  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId }) ? requestId : null;
+  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId, ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** A picture set on a block, or taken off with null (design turn 186c): answered as `audiobook.record` under the id returned. */
@@ -6027,9 +6038,9 @@ export function setAudiobookPictureFocus(worldId: string, productionId: string, 
 }
 
 /** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
-export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string): string | null {
+export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
-  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}) }) ? requestId : null;
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */

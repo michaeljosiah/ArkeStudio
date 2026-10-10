@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PICTURE_CROSSFADE_SEC } from "./audiobook-pictures.js";
-import type { ListeningChapter } from "./audiobook-listening.js";
+import { AudiobookScopeSchema, type AudiobookScope, type ListeningChapter } from "./audiobook-listening.js";
 import { SubtitleOutputModeSchema, type SubtitleOutputMode } from "./subtitles.js";
 import type { AcousticWord } from "./audiobook-word-timing.js";
 import type { AudiobookMotion } from "./audiobook-motion.js";
@@ -21,6 +21,7 @@ export type CaptionPosition = "bottom" | "middle";
 export type CaptionSize = "s" | "m" | "l";
 
 export interface AudiobookVideoOptions {
+  scope?: AudiobookScope;
   /** One file a chapter (the default), or one for the book in parts of at most twelve hours. */
   files: "chapter" | "book";
   shape: VideoShape;
@@ -39,6 +40,7 @@ export interface AudiobookVideoOptions {
 // declarations the engine's bundle has refused as too long to serialize.
 export const AudiobookVideoOptionsSchema: z.ZodType<AudiobookVideoOptions, z.ZodTypeDef, unknown> = z
   .object({
+    scope: AudiobookScopeSchema.optional(),
     files: z.enum(["chapter", "book"]),
     shape: z.enum(VIDEO_SHAPES),
     slowPush: z.boolean(),
@@ -576,8 +578,9 @@ export function videoFileName(book: string, file: { kind: "chapter"; order: numb
 }
 
 /** The dated folder under the world's exports: `na-love-or-juju-video-20261004`. */
-export function videoFolderName(book: string, isoDate: string): string {
-  return `${videoSlug(book)}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
+export function videoFolderName(book: string, isoDate: string, scope?: AudiobookScope): string {
+  // Add scope after truncating the title: long book titles must not erase chapter identity.
+  return `${videoSlug(book)}${scope?.kind === "chapter" ? `-chapter-${scope.chapterId}` : ""}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————
@@ -620,6 +623,7 @@ export function videoEstimate(input: { shape: VideoShape; slowPush: boolean; vid
 // What a render made.
 
 export interface AudiobookVideoFile {
+  chapterIds?: string[];
   /** The file's name in the export's folder. */
   name: string;
   seconds: number;
@@ -640,11 +644,14 @@ export type AudiobookVideoResult =
       /** Chapters encoded by this render; the rest came from the cache. */
       made: number;
       renderedAt: string;
+      scope?: AudiobookScope;
+      chapterIds?: string[];
     }
   | { ok: false; blockers: string[] };
 
 const VideoFileSchema = z
   .object({
+    chapterIds: z.array(z.string().min(1)).min(1).optional(),
     name: z.string().regex(/^[A-Za-z0-9._-]+\.mp4$/),
     seconds: z.number().min(0),
     bytes: z.number().int().min(0),
@@ -655,12 +662,14 @@ const VideoFileSchema = z
   .strict();
 
 export const AudiobookVideoResultSchema: z.ZodType<AudiobookVideoResult, z.ZodTypeDef, unknown> = z.union([
-  z.object({ ok: z.literal(true), dir: z.string().startsWith("exports/"), files: z.array(VideoFileSchema).min(1), made: z.number().int().min(0), renderedAt: z.string().min(1) }).strict(),
+  z.object({ ok: z.literal(true), dir: z.string().startsWith("exports/"), files: z.array(VideoFileSchema).min(1), made: z.number().int().min(0), renderedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(z.string().min(1)).min(1).optional() }).strict(),
   z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
 ]);
 
 /** What the sheet is told before Render: which chapters this render would make, and this machine's rates. */
 export interface AudiobookVideoState {
+  scope?: AudiobookScope;
+  blockers?: string[];
   chapters: Array<{ chapterId: string; seconds: number; rendered: boolean }>;
   rates: VideoRates;
   /** The narrator, for the book file's opening. */
@@ -671,6 +680,8 @@ export interface AudiobookVideoState {
 
 export const AudiobookVideoStateSchema: z.ZodType<AudiobookVideoState, z.ZodTypeDef, unknown> = z
   .object({
+    scope: AudiobookScopeSchema.optional(),
+    blockers: z.array(z.string().min(1)).optional(),
     chapters: z.array(z.object({ chapterId: z.string().min(1), seconds: z.number().min(0), rendered: z.boolean() }).strict()),
     rates: z.record(z.object({ bytesPerSec: z.number().min(0), speed: z.number().positive() }).strict()),
     readBy: z.string(),

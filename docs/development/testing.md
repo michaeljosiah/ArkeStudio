@@ -408,10 +408,13 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
-(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 390, 820, 1440 and 2560
-wide, opens Listen and Export, and checks each layer covers the window from the body with no
-transformed or contained ancestor, Listen leads the head, and the chapter's Voices rail names a
-designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
+(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
+wide, plus 200% text at 1440. Listen covers the window; Export is a native modal on the body,
+within the viewport, with no transformed ancestor or horizontal overflow. The chapter export
+starts at This chapter, blocks an incomplete reading, keeps its options under the missing-block
+read quote, refreshes readiness when saved takes arrive, and returns focus to its stable opener.
+Phone export actions are at least 44px. Listen leads the head, and the chapter's Voices rail names
+a designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
 renders the changed screens as they were at that revision and asserts nothing.
 
 ## Dialogs and sheets
@@ -794,3 +797,11 @@ Escape back to the proposal, then accept once. It checks one active dialog, keyb
 contained price controls and absence of background purchases, and writes screenshots and
 measurements into the printed temporary directory. The fixture uses invented prose and a
 capturing bridge; no installed app, world or paid provider is involved.
+
+Chapter narration Activity (turn 206, #1684) has focused contracts identity/cost tests,
+coordinator `test/productions/audiobook-activity.test.ts` for restart, corruption and stop
+ordering, and `audiobook-grouped.test.ts` for provider success followed by local alignment
+and durable block writes. Client `activity-panel.test.tsx` and
+`queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run
+`node scripts/smoke-audiobook-activity.mjs` with Chrome (`ARKE_CHROME` overrides its path)
+for synthetic screenshots and overflow/action measurements at 1400, 390 and 320 px.
