@@ -785,3 +785,12 @@ live run correlation and per-job frame thumbnails. The focused `approved Stage a
 coordinator case verifies host replay and recovery preserve the immutable video receipt;
 `retained construction` cases preserve human Keep without another renderer handoff.
 The production-card Chrome smoke also checks Stage and run bodies at all four widths.
+
+Audiobook proposal and spend reviews (#1675) use client `test/chapter-audiobook.test.tsx`
+and `test/sheet-stacking.test.tsx`. Run `node scripts/smoke-audiobook-panels.mjs` with Chrome
+installed (`ARKE_CHROME` overrides its path) for the native modal journey at 1800, 1200, 800
+and 390 px: open dock and block, receive an illustration, receive a read quote above it,
+Escape back to the proposal, then accept once. It checks one active dialog, keyboard focus,
+contained price controls and absence of background purchases, and writes screenshots and
+measurements into the printed temporary directory. The fixture uses invented prose and a
+capturing bridge; no installed app, world or paid provider is involved.

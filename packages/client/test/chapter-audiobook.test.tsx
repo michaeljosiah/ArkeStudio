@@ -38,7 +38,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
-Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, showModal() { this.setAttribute("open", ""); }, close() { this.removeAttribute("open"); } });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
   pause() {},
   play: () => Promise.resolve(),
@@ -164,9 +164,11 @@ afterEach(async () => {
   }
 });
 
-const text = (m: Mounted): string => m.container.textContent ?? "";
-const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
-const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector)] as HTMLElement[];
+// PageSheet portals are siblings of the mounted screen; another mounted fixture is not.
+const portals = (m: Mounted): HTMLElement[] => [...m.container.ownerDocument.body.children].filter((node) => !open.some((mounted) => mounted.container === node)) as HTMLElement[];
+const text = (m: Mounted): string => (m.container.textContent ?? "") + portals(m).filter((node) => node.tagName !== "DIALOG" || node.hasAttribute("open")).map((node) => node.textContent ?? "").join("");
+const q = (m: Mounted, selector: string): HTMLElement | null => (m.container.querySelector(selector) ?? portals(m).flatMap((node) => [...node.querySelectorAll(selector)])[0] ?? null) as HTMLElement | null;
+const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector), ...portals(m).flatMap((node) => [...node.querySelectorAll(selector)])] as HTMLElement[];
 
 /** Arke's dock, put away in the Audiobook view until the toolbar's press opens it (design turn 194, rule 13). */
 async function openArke(m: Mounted): Promise<void> {
@@ -311,6 +313,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.match(text(m), /4 blocks · 0 made · 4 not made/);
     const press = q(m, '[data-testid="read-audiobook"]');
     assert.ok(press);
+    assert.equal(q(m, "[data-testid=audiobook-block-title]"), null, "no block is chosen on entry");
     assert.equal(press.textContent, "Read the chapter · 4 blocks", "a local narrator costs nothing, so no price rides on the press");
     assert.ok(!/nothing is|never|until you/i.test(text(m)), "no caption explains the control");
   });
@@ -401,7 +404,7 @@ describe("the Audiobook view (turn 146)", () => {
     );
     const confirm = all(m, "button").find((button) => button.textContent?.startsWith("Confirm 120 characters"));
     assert.ok(confirm, "the price is one press, naming the voice");
-    assert.match(confirm.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 165)");
+    assert.match(q(m, "[data-testid=read-sheet]")?.textContent ?? "", /Low tide · ElevenLabs · cloud/, "the provider by its name and place, never its id (turn 165)");
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(answered.confirmationToken, "tok", "the answer carries the token");
@@ -1022,6 +1025,10 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(accepted.proposalId, "card-1", "the card is named, so only its own extras are written");
     assert.ok(accepted.requestId, "the acceptance is named");
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/);
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, proposalId: "card-1", proposed }));
+    assert.equal(q(m, '[data-testid="direction-accept"]'), null, "a replay cannot re-arm a pending acceptance");
+
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells." };
     const written = record([], texts);
     written.direction = { title: directed(texts.title, "measured"), "p0.0": directed(texts["p0.0"], "urgent") };
@@ -1030,6 +1037,10 @@ describe("the Audiobook view (turn 146)", () => {
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /accepting…/, "still on its way");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", ...ids, requestId: accepted.requestId, record: { ...written, updatedAt: "2026-09-14T10:00:00.000Z" } }));
     assert.match(q(m, '[data-testid="direction-card"]')?.textContent ?? "", /✓ directed · chapter 02 · direction v4 · [0-9]+ blocks · 1 directed · 1 dropped/);
+
+    await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 4, dropped: 0, hash: HASH, proposalId: "card-1", proposed }));
+    assert.equal(q(m, '[data-testid="direction-card"]')?.getAttribute("data-state"), "accepted", "a late replay cannot return an accepted card to proposed");
+    assert.equal(q(m, '[data-testid="direction-accept"]'), null);
     assert.ok(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct again"), "a direction stands, so the prompt is Direct again");
     assert.equal(all(m, ".fy-arke__prompt").some((b) => b.textContent === "Direct this chapter"), false);
   });
@@ -1632,12 +1643,12 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "Looks from the Voices panel");
   });
 
-  it("opens the proposal as a sheet over the main area, beside the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
+  it("opens the proposal as the active modal above the dock: its pace, what needs a look, the dashed chips on the blocks, one Accept", async () => {
     const m = await proposedMount();
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The bell", "The line", "The tide"], "a dashed chip on each block it would go on");
     const sheet = q(m, '[data-testid="illustration-sheet"]')!;
     assert.ok(sheet, "the proposal arrives as a sheet");
-    assert.equal(sheet.parentElement, q(m, '[data-testid="chapter-workspace"]'), "over the chapter's main area, a sibling of it and of the dock, not inside the dock");
+    assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true, "the proposal owns a native modal above the chapter and dock");
     assert.equal(sheet.closest(".fy-arke"), null);
     assert.equal(q(m, ".fy-ills__head h3")!.textContent, "Illustrate · Chapter 2");
     assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
@@ -1665,7 +1676,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(sentOf(m, "discard-illustration").length, 0, "Close discards nothing");
     await act(async () => q(m, '[data-testid="illustration-review"]')!.click());
     assert.ok(q(m, '[data-testid="illustration-sheet"]'), "Review brings it back");
-    await act(async () => void dom.document.dispatchEvent(Object.assign(new Event("keydown"), { key: "Escape" })));
+    await act(async () => void q(m, '[data-testid="illustration-sheet"]')!.closest("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null, "Escape puts it away");
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "proposed");
   });
@@ -1834,6 +1845,29 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(q(m, '[data-testid="illustration-status"]')!.dataset.state, "failed");
     assert.equal(q(m, '[data-testid="illustration-sheet"]'), null);
     assert.equal(q(m, ".fy-illst__line")?.textContent, "Illustratethe chapter has its pictures");
+  });
+});
+
+describe("audiobook action targets (#1675)", () => {
+  it("names a title read and keeps its quote separate from background controls", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => q(m, '[data-block="title"]')!.click());
+    assert.match(q(m, '[data-testid="audiobook-make"]')!.textContent ?? "", /^Read title/);
+    await act(async () => q(m, '[data-testid="audiobook-make"]')!.click());
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 24, estimatedMicroUsd: 2400, confirmationToken: "target-token", voices: [] }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.equal(sheet.getAttribute("aria-label"), "Read title · Chapter 2");
+    assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true);
+    assert.equal(all(m, '[data-testid="audiobook-confirm"]').length, 1, "one spend review");
+    assert.equal(m.container.querySelector('[data-testid="audiobook-confirm"]'), null, "no duplicate toolbar confirmation");
+    await act(async () => q(m, '[data-testid="audiobook-confirm"]')!.click());
+    const read = m.sent.findLast((message) => message.kind === "read-audiobook-chapter");
+    assert.ok(read?.kind === "read-audiobook-chapter");
+    assert.deepEqual(read.blocks, ["title"]);
+    assert.equal(read.confirmationToken, "target-token");
   });
 });
 

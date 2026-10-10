@@ -2323,28 +2323,35 @@ function handleFrame(json: string): void {
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       // A replay reaches every refresh: a window that already holds the run keeps what it knows.
-      if (direction[key]?.state !== "directing") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
+      if (direction[key]?.state !== "directing" && direction[key]?.state !== "accepting") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
     } else if (event.type === "direction.finished") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
-      direction = {
-        ...direction,
-        [key]: {
-          state: event.outcome,
-          directed: event.directed,
-          dropped: event.dropped,
-          ...(event.summary !== undefined ? { summary: event.summary } : {}),
-          ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
-          ...(event.hash !== undefined ? { hash: event.hash } : {}),
-          ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
-          ...(event.cast !== undefined ? { cast: event.cast } : {}),
-          ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
-          ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
-          ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
-          ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
-          ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        },
-      };
+      const before = direction[key];
+      // A held proposal replay must not re-arm its Accept while its write is pending or after
+      // that write was acknowledged. Only a genuinely new proposal replaces that decision.
+      const decided = event.proposalId !== undefined && event.proposalId === before?.proposalId
+        && (before.state === "accepting" || before.state === "accepted");
+      if (!decided) {
+        direction = {
+          ...direction,
+          [key]: {
+            state: event.outcome,
+            directed: event.directed,
+            dropped: event.dropped,
+            ...(event.summary !== undefined ? { summary: event.summary } : {}),
+            ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
+            ...(event.hash !== undefined ? { hash: event.hash } : {}),
+            ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
+            ...(event.cast !== undefined ? { cast: event.cast } : {}),
+            ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
+            ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
+            ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
+            ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
+            ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
+        };
+      }
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
       authoring = {

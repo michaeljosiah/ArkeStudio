@@ -13,16 +13,14 @@
 .fy-ill__bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--foreground) 14%, transparent); position: relative; overflow: hidden; }
 .fy-ill__bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--foreground); border-radius: 3px; }
 
-/*
- * The proposal as a sheet over the main area (design turn 193h, 193j). It stands in the chapter's
- * grid cell, over the centre and not over the dock, so Arke stays where it is. A grid of cards:
- * four across where the sheet is wide, three, two; between 600 and 1099 always two; on a phone one
- * list with Accept held at the foot. The sheet is the size container the columns answer to.
- */
-.fy-sw:has(> .fy-ills) > .fy-sw__centre { grid-area: 1 / 1; }
-.fy-ills { grid-area: 1 / 1; position: relative; z-index: 6; min-width: 0; min-height: 0; display: flex; padding: 14px 28px 18px; box-sizing: border-box; background: color-mix(in srgb, var(--background) 62%, transparent); }
-.fy-ills__sheet { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 26px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 14px; background: var(--background); box-shadow: 0 18px 50px color-mix(in srgb, var(--foreground) 14%, transparent); container: ills / inline-size; }
-.fy-ills__head { display: flex; align-items: center; gap: 12px; flex: none; }
+/* The proposal owns a native modal: its grid and price review cannot share input with the dock. */
+.fy-page-sheet.fy-ills-modal { inset: 40px; width: auto; height: auto; border: 1px solid var(--border); border-radius: 14px; }
+.fy-ills-modal::backdrop { background: color-mix(in srgb, var(--neutral-950) 28%, transparent); }
+.fy-ills-modal > .fy-page-sheet__grab { display: none; }
+.fy-ills-modal > .fy-page-sheet__body { padding: 0; gap: 0; overflow: hidden; }
+.fy-ills { min-width: 0; min-height: 0; display: flex; flex: 1; }
+.fy-ills__sheet { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px 26px; box-sizing: border-box; background: var(--background); container: ills / inline-size; }
+.fy-ills__head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex: none; }
 .fy-ills__head h3 { margin: 0; font: 600 var(--text-md)/1.3 var(--font-sans); outline: none; white-space: nowrap; }
 .fy-ills__sum { min-width: 0; font-size: var(--text-2xs); color: var(--muted-foreground); }
 .fy-ills__short { display: none; }
@@ -62,7 +60,7 @@
 }
 /* 600 to 1099: two across, the sheet over the whole page below the app's bar and beside Arke's rail. */
 @media (max-width: 1099px) {
-  .fy-ills { position: fixed; inset: 52px 42px 0 0; grid-area: auto; padding: 0; z-index: 30; background: var(--background); }
+  .fy-page-sheet.fy-ills-modal { inset: 24px; }
   .fy-ills__sheet { border: 0; border-radius: 0; box-shadow: none; padding: 16px 24px 0; }
   .fy-ills__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fy-ills__foot { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
@@ -70,7 +68,7 @@
 }
 /* A phone: one list, a card a row (193j) with its people in the picture's place, Accept at the foot. */
 @media (max-width: 599px) {
-  .fy-ills { inset: 52px 0 0 0; }
+  .fy-page-sheet.fy-ills-modal { inset: 12px 0 0; border-radius: 14px 14px 0 0; }
   .fy-ills__sheet { padding: 12px 20px 0; gap: 8px; }
   .fy-ills__again, .fy-ills__read, .fy-ills__sum { display: none; }
   .fy-ills__short { display: inline; }
