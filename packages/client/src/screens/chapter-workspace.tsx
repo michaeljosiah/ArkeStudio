@@ -1,5 +1,6 @@
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback } from "react";
@@ -1852,25 +1853,7 @@ export function ChapterWorkspace({
     onPress: audiobook.seams.press,
     pictured,
   });
-  /*
-   * The Audiobook view's side is the block's panel (165k/146b), and it is never left empty
-   * (turn 188). With nothing chosen it used to show the manuscript's rail, the book and the
-   * chapter's continuity, which is not what this view is about. So entering the view with the panel
-   * beside the blocks chooses the first block, once per chapter, and the rail stays with the
-   * manuscript. Where the panel is a sheet, choosing would open it over the page, so nothing is chosen.
-   */
-  const firstBlock = audiobook.rows[0]?.block.key ?? null;
-  const chosenOnEntry = useRef<string | null>(null);
-  const { selected: chosenBlock, setSelected: chooseBlock } = audiobook;
-  useEffect(() => {
-    if (view !== "audiobook" || blockSheet) {
-      chosenOnEntry.current = null;
-      return;
-    }
-    if (firstBlock === null || chosenOnEntry.current === chapter.id) return;
-    chosenOnEntry.current = chapter.id;
-    if (chosenBlock === null) chooseBlock(firstBlock);
-  }, [view, blockSheet, firstBlock, chapter.id, chosenBlock, chooseBlock]);
+  // A block panel opens only after a block is chosen; entering a chapter leaves paid actions put away.
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
   const blockPanel: Parameters<typeof AudiobookSide>[0] = {
     rows: audiobook.rows,
@@ -2397,15 +2380,15 @@ export function ChapterWorkspace({
           <div className="fy-ch__panels">
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
-            <ResponsiveSheet sheet={blockSheet} open title="Read the chapter" onClose={audiobook.readSheet.cancel} className="fy-chapter-block-sheet">
+            <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} onClose={audiobook.readSheet.cancel} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
                 <ReadSheet sheet={audiobook.readSheet} />
               </aside>
-            </ResponsiveSheet>
+            </PageSheet>
           )}
           {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
           {view === "audiobook" && audiobook.directOpen && (
-            <ResponsiveSheet sheet={blockSheet} open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-block-sheet">
+            <PageSheet open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
                 <DirectSheet
                   worldId={worldId}
@@ -2424,7 +2407,7 @@ export function ChapterWorkspace({
                   }}
                 />
               </aside>
-            </ResponsiveSheet>
+            </PageSheet>
           )}
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
           <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />

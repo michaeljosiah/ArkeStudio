@@ -4,6 +4,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { EditorDialog } from "../src/components/editor-dialog.js";
+import { PageSheet } from "../src/components/page-sheet.js";
 import { ResponsiveSheet } from "../src/components/responsive-sheet.js";
 
 /**
@@ -43,10 +44,13 @@ afterEach(async () => {
   dom.document.body.innerHTML = "";
 });
 
+let openQuote: (open: boolean) => void = () => {};
 let openLooks: (open: boolean) => void = () => {};
 function Page() {
   const [looks, setLooks] = useState(false);
   openLooks = setLooks;
+  const [quote, setQuote] = useState(false);
+  openQuote = setQuote;
   return (
     <>
       <ResponsiveSheet sheet open title="Title · title" onClose={() => {}} className="fy-chapter-block-sheet">
@@ -55,6 +59,7 @@ function Page() {
       <EditorDialog open={looks} onClose={() => setLooks(false)} title="Looks · Chapter 1">
         <p data-testid="looks">the looks</p>
       </EditorDialog>
+      <PageSheet open={quote} title="Read Chapter 1" onClose={() => setQuote(false)} className="read-quote"><button>Confirm read</button></PageSheet>
     </>
   );
 }
@@ -74,4 +79,25 @@ describe("a sheet over the block drawer", () => {
     await act(async () => openLooks(false));
     assert.ok(drawer.hasAttribute("open"), "the drawer is back once the sheet goes");
   });
+  it("gives a newer read quote sole control, without closing the covered Looks on Escape", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<Page />));
+    await act(async () => openLooks(true));
+    const looks = dom.document.querySelector(".fy-editordialog")!;
+    await act(async () => openQuote(true));
+    assert.equal(dom.document.querySelectorAll("dialog[open]").length, 1);
+    assert.equal(dom.document.querySelector("dialog[open]")?.classList.contains("read-quote"), true);
+    assert.equal((looks as unknown as HTMLElement).style.display, "none");
+    await act(async () => dom.window.dispatchEvent(Object.assign(new Event("keydown"), { key: "Escape" })));
+    assert.ok(dom.document.querySelector('[data-testid="looks"]'), "a covered sheet ignores keys");
+    await act(async () => dom.document.querySelector(".read-quote")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+    assert.equal((looks as unknown as HTMLElement).style.display ?? "", "");
+    assert.equal(dom.document.querySelectorAll("dialog[open]").length, 0, "the layer resumes above the still-hidden drawer");
+    await act(async () => openLooks(false));
+    assert.equal(dom.document.querySelectorAll("dialog[open]").length, 1);
+    assert.equal(dom.document.querySelector("dialog[open]")?.classList.contains("fy-chapter-block-sheet"), true);
+  });
+
 });

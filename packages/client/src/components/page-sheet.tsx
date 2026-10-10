@@ -36,7 +36,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   useLayoutEffect(() => { setMounted(true); }, []);
   // A sheet opened after this one, drawn on the body, stands in front: the dialog is put away while
   // it is open, its contents kept as they are, and shown again when it goes (see overlays.ts).
-  const place = useOverlay("modal", open);
+  const place = useOverlay("modal", open, () => ref.current);
   const covered = useCoveredAfter(place);
   const coveredNow = useRef(covered);
   coveredNow.current = covered && open;
@@ -50,7 +50,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
     // Beside the page the sheet takes the focus itself, not its first press: its heading is not
     // drawn there, and a ring on the dock's title read as a press waiting (202).
     if (modeless) dialog.focus?.({ preventScroll: true });
-    else dialog.querySelector("h2")?.focus({ preventScroll: true });
+    else dialog.querySelector<HTMLElement>("h2, h3[tabindex]")?.focus({ preventScroll: true });
     return () => {
       dialog.close?.();
       // Put away for a sheet in front, the focus goes to that sheet, not back to the page under both.
@@ -67,7 +67,7 @@ export function PageSheet({ open, onClose, title, children, footer, className, o
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
     <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1 } : {})}
-      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}
       onClick={(event) => {
         if (event.target !== event.currentTarget) return;
         const rect = event.currentTarget.getBoundingClientRect();

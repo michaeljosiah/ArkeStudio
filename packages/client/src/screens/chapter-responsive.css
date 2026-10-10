@@ -668,3 +668,13 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] .ui-btn--primary { font-weight: 600; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] .ui-btn svg { width: 13px; height: 13px; }
 }
+
+/* A chapter decision has its own review, above both the block panel and Arke's dock. */
+.fy-page-sheet.fy-chapter-review-sheet { inset: max(24px, 10dvh) 24px auto; width: min(560px, calc(100% - 48px)); max-height: calc(100dvh - max(24px, 10dvh) - 24px); margin: 0 auto; border: 1px solid var(--border); border-radius: 14px; }
+.fy-chapter-review-sheet::backdrop { background: color-mix(in srgb, var(--neutral-950) 28%, transparent); }
+.fy-chapter-review-sheet > .fy-page-sheet__grab { display: none; }
+.fy-chapter-review-sheet .fy-ch__side { width: 100%; overflow: visible; }
+.fy-chapter-review-sheet .fy-ab__directsheet { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+.fy-chapter-review-sheet .fy-ab__directsheet > div > h3 { display: none; }
+.fy-chapter-review-sheet .fy-ab__directsheet-foot { flex-wrap: wrap; }
+.fy-chapter-review-sheet .ui-btn { max-width: 100%; height: auto; padding-block: 8px; white-space: normal; }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatRunningTime, frameWord, illustrationRowGoes, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
 import { dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
-import { useOverlay } from "../lib/overlays.js";
+import { PageSheet } from "./page-sheet.js";
 import { Button, cx } from "./ui.js";
 
 /**
@@ -221,24 +221,6 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   offline: boolean;
 }) {
   const proposal = run.proposal;
-  const head = useRef<HTMLHeadingElement>(null);
-  // A block drawer open beneath (a modal dialog, drawn above everything) gives way while the sheet is open.
-  useOverlay("layer", true, () => head.current);
-  // Escape reads the latest onClose; the listener itself goes up once per opening.
-  const closing = useRef(onClose);
-  closing.current = onClose;
-  useEffect(() => {
-    const opener = document.activeElement;
-    head.current?.focus({ preventScroll: true });
-    const away = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closing.current();
-    };
-    document.addEventListener("keydown", away);
-    return () => {
-      document.removeEventListener("keydown", away);
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
-    };
-  }, []);
   if (proposal === undefined) return null;
   const skipped = new Set(run.skipped);
   const total = illustrationTotal(proposal.rows, skipped, new Set(run.without));
@@ -255,50 +237,52 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
   return (
-    <div className="fy-ills" data-testid="illustration-sheet" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="fy-ills__sheet" role="dialog" aria-labelledby="fy-ills-title" data-state="proposed">
-        <header className="fy-ills__head">
-          <h3 id="fy-ills-title" tabIndex={-1} ref={head}>Illustrate · Chapter {chapterOrder}</h3>
-          <span className="fy-mono fy-ills__sum" data-testid="illustration-headline">{headline}</span>
-          <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd, proposal.model.plan)}</span>
-          <span className="fy-ills__push" />
-          <Button variant="secondary" className="fy-ills__again" disabled={offline} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
-          <Button variant="secondary" onClick={onClose} data-testid="illustration-close">Close</Button>
-        </header>
-        {ended !== undefined && (
-          <p className="fy-mono fy-ab__card-line" data-testid="illustration-ended">
-            {ended.state === "stopped" ? "stopped" : "made"} · {ended.made.length} of {ended.total}
-            {ended.failed.length > 0 ? ` · ${ended.failed.length} held` : ""}
-          </p>
-        )}
-        <div className="fy-ills__grid">
-          {proposal.rows.map((row) => (
-            <Card
-              key={row.block}
-              row={row}
-              estimated={proposal.estimated}
-              words={wordsOf(row.block)}
-              skipped={skipped.has(row.block)}
-              without={run.without.includes(row.block)}
-              reason={reasons.get(row.block)}
-              slug={slug}
-              disabled={offline}
-              onSkip={() => onSkip(row.block)}
-              onWithout={() => onWithout(row.block)}
-              onMakeLook={onMakeLook}
-            />
-          ))}
-        </div>
-        {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
-        <footer className="fy-ills__foot">
-          <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Read: chapter, cast, looks, art direction</Button>
-          <span className="fy-ills__push" />
-          <Button variant="ghost" onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
-          <Button variant="primary" disabled={offline || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
-            Accept · {priceLabel(total.microUsd, proposal.model.plan)}
-          </Button>
-        </footer>
-      </section>
-    </div>
+    <PageSheet open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
+      <div className="fy-ills" data-testid="illustration-sheet">
+        <section className="fy-ills__sheet" data-state="proposed">
+          <header className="fy-ills__head">
+            <h3 id="fy-ills-title" tabIndex={-1}>Illustrate · Chapter {chapterOrder}</h3>
+            <span className="fy-mono fy-ills__sum" data-testid="illustration-headline">{headline}</span>
+            <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd, proposal.model.plan)}</span>
+            <span className="fy-ills__push" />
+            <Button variant="secondary" className="fy-ills__again" disabled={offline} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
+            <Button variant="secondary" onClick={onClose} data-testid="illustration-close">Close</Button>
+          </header>
+          {ended !== undefined && (
+            <p className="fy-mono fy-ab__card-line" data-testid="illustration-ended">
+              {ended.state === "stopped" ? "stopped" : "made"} · {ended.made.length} of {ended.total}
+              {ended.failed.length > 0 ? ` · ${ended.failed.length} held` : ""}
+            </p>
+          )}
+          <div className="fy-ills__grid">
+            {proposal.rows.map((row) => (
+              <Card
+                key={row.block}
+                row={row}
+                estimated={proposal.estimated}
+                words={wordsOf(row.block)}
+                skipped={skipped.has(row.block)}
+                without={run.without.includes(row.block)}
+                reason={reasons.get(row.block)}
+                slug={slug}
+                disabled={offline}
+                onSkip={() => onSkip(row.block)}
+                onWithout={() => onWithout(row.block)}
+                onMakeLook={onMakeLook}
+              />
+            ))}
+          </div>
+          {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
+          <footer className="fy-ills__foot">
+            <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Read: chapter, cast, looks, art direction</Button>
+            <span className="fy-ills__push" />
+            <Button variant="ghost" onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
+            <Button variant="primary" disabled={offline || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
+              Accept · {priceLabel(total.microUsd, proposal.model.plan)}
+            </Button>
+          </footer>
+        </section>
+      </div>
+    </PageSheet>
   );
 }

@@ -395,7 +395,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const [selected, setSelected] = useState<string | null>(null);
   // The marker menu (R-42): the view's, so the page's `[` and the side's button open the same one.
   const [marker, setMarker] = useState<MarkerAt | null>(null);
-  useEffect(() => setMarker(null), [chapter.id]);
+  useEffect(() => { setMarker(null); setSelected(null); }, [chapter.id]);
 
   // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
   // voice cannot speak now falls back the same way on both sides, or the client would judge
@@ -1015,53 +1015,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         />
       );
     }
-    if (run?.state === "priced" && run.price !== undefined && run.price.requests !== undefined) {
-      // A grouped read is confirmed in its sheet (design turn 185a): the head says what is asked.
-      return whole(
-        <span className="fy-ab__control">
-          <Button variant="primary" disabled data-testid="read-audiobook">
-            Read the chapter · {run.toMake} block{run.toMake === 1 ? "" : "s"} · {run.price.requests} request{run.price.requests === 1 ? "" : "s"} · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}
-          </Button>
-        </span>
-      );
-    }
     if (run?.state === "priced" && run.price !== undefined) {
-      const price = run.price;
-      // The author confirms the estimate. `up to` stays only where every reader is priced by
-      // the character, which a cache hit alone can lower; a token reader's estimate can be
-      // passed, so it is `~`, and its service-limit cap is the dispatcher's guard, never shown
-      // (SPEC-049 R-6) — said here as the maximum, it was $18.49 for about $0.40 of speech.
-      // A chapter Google's free day cannot cover asks in its own words when it costs nothing:
-      // what the author decides is how far the day's reads go. A priced speaker keeps the price
-      // on the button, the day's line beside it (codex on PR 1475).
-      const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
-      return whole(
-        <span className="fy-ab__control">
-          {/* Cast first (design turn 198, rule 13): ticked, as Direct's `Cast the lines first`; unticked, nothing reads. */}
-          {price.toCast !== undefined && <CastFirstCheck count={price.toCast} on={castTick} onChange={setCastTick} />}
-          <Button
-            disabled={starting || (price.toCast !== undefined && !castTick)}
-            data-testid="audiobook-confirm"
-            onClick={() => {
-              // A press that never left has no answer coming, so it is not shown as starting.
-              if (send({ confirmationToken: price.confirmationToken })) setStartingFrom(run);
-            }}
-            title="the words and the voice go to the provider · the text stays in Activity"
-          >
-            {starting ? "starting…" : free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
-              Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
-              {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
-            </>}
-          </Button>
-          {free !== null && <span className="fy-mono" data-testid="audiobook-free-plan">{free.line}</span>}
-          {/* What a first read through a slot-keeping reader adds (SPEC-046 R-40), on the read
-              that incurs it: not in the estimate, so said beside it. */}
-          {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}
-          <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
-            Cancel
-          </Button>
-        </span>
-      );
+      // Every quote has one modal review; the toolbar never duplicates its spend control.
+      return whole(<Button variant="primary" disabled data-testid="read-audiobook">Review read · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}</Button>);
     }
     if (reading_) {
       return whole(
@@ -1214,9 +1170,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
 
   // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
   // request, Google's free day where it is known, the estimate.
-  const readSheet = run?.state === "priced" && run.price?.requests !== undefined
+  const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
+        token: run.price.confirmationToken,
+        title: only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
         blocks: run.toMake,
+        characters: run.price.characters,
+        free: run.price.estimatedMicroUsd === 0,
+        notices: run.price.notices,
+        destinations: run.price.voices.map((voice) => `${voice.label} · ${readerPlace(voice.provider)}`).join(" · "),
         requests: run.price.requests,
         perParagraph: run.price.perParagraph ?? run.toMake,
         voice: run.price.voices.map((voice) => voice.label).join(" · "),
@@ -1907,23 +1869,28 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
     </div>
   );
   return (
-    <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label="Read the chapter">
+    <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label={sheet.title}>
       <div>
-        <h3 className="fy-ab__card-title">Read the chapter</h3>
-        <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"} · {sheet.requests} request{sheet.requests === 1 ? "" : "s"}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>
+        <h3 className="fy-ab__card-title">{sheet.title}</h3>
+        <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>
       </div>
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
-        {row("Requests", `${sheet.requests} · grouped`)}
-        {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+        {sheet.requests !== undefined ? <>
+          {row("Requests", `${sheet.requests} · grouped`)}
+          {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+        </> : row("Characters", sheet.characters.toLocaleString())}
+        {sheet.destinations !== "" && row("Readers", sheet.destinations)}
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
         {row("Estimate", sheet.estimate)}
       </div>
+      {sheet.freeDay !== undefined && <p className="fy-mono" data-testid="audiobook-free-plan">{freePlanAskCopy(sheet.freeDay).line}</p>}
+      {sheet.notices.map((notice) => <p key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</p>)}
       {sheet.castFirst !== undefined && <CastFirstCheck count={sheet.castFirst.count} on={sheet.castFirst.on} onChange={sheet.castFirst.set} />}
       <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
         <Button variant="ghost" onClick={sheet.cancel}>Cancel</Button>
         <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
-          {sheet.starting ? "starting…" : `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}`}
+          {sheet.starting ? "starting…" : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
     </section>
@@ -2987,17 +2954,22 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         <span className="fy-ch__panelpush" />
         {takes.length > 0 && (
           <Button variant="primary" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
-            Make again{price !== null ? ` · ${price}` : ""}
+            Reread {blockReadTarget(row.block.key, rows)}{price !== null ? ` · ${price}` : ""}
           </Button>
         )}
         {unread && (
           <Button variant="primary" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make">
-            Make{price !== null ? ` · ${price}` : ""}
+            Read {blockReadTarget(row.block.key, rows)}{price !== null ? ` · ${price}` : ""}
           </Button>
         )}
       </div>
     </>
   );
+}
+
+/** The paid action names the same block as the panel, including the chapter title. */
+function blockReadTarget(key: string, rows: readonly BlockRow[]): string {
+  return key === AUDIOBOOK_TITLE_KEY ? "title" : `block ${rows.findIndex((row) => row.block.key === key) + 1}`;
 }
 
 /** The block panel's three tabs (design turn 194, rule 12). */
