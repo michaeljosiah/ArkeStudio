@@ -103,14 +103,14 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(ask.scope, scope);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
     assert.equal(q(m, '[data-testid="audiobook-export-start"]')?.hasAttribute("disabled"), true);
-    assert.match(text(q(m, '[data-testid="audiobook-export-incomplete"]')), /2 blocks still to read/);
+    assert.match(text(q(m, '[data-testid="audiobook-export-incomplete"]')), /2 blocks still need a take/);
     await press([...dom.document.querySelectorAll("button")].find((button) => text(button) === "Read remaining blocks…")!);
     assert.deepEqual(missing, [2, 3]);
     await press(q(m, '[data-testid="audiobook-export-video"]'));
     assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, scope);
     assert.equal(q(m, '[aria-label="Files"]'), null, "partitioning is not chapter inclusion");
     assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true);
-    await press([...dom.document.querySelectorAll('[aria-label="Scope"] button')].find((button) => text(button) === "Whole book")!);
+    await press([...dom.document.querySelectorAll('[aria-label="Include"] button')].find((button) => text(button) === "Whole book")!);
     const bookAsk = lastAsk(m, "open-audiobook-listening")!;
     assert.deepEqual(bookAsk.scope, { kind: "book" });
     assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, { kind: "book" });
@@ -136,10 +136,10 @@ describe("Export audiobook (turn 186e)", () => {
     const scope = { kind: "chapter" as const, chapterId: "neap" };
     const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="neap" onClose={() => {}} />);
     const before = lastAsk(m, "open-audiobook-listening")!;
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: before.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
     await press(q(m, '[data-testid="audiobook-export-video"]'));
     await press([...dom.document.querySelectorAll('[aria-label="Shape"] button')].find((button) => text(button) === "1280 × 720")!);
     await press([...dom.document.querySelectorAll('[aria-label="Subtitles"] button')].find((button) => text(button) === "None")!);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: before.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
     const completed = { ...production, chapters: production.chapters.map((chapter) => chapter.id === "neap" ? { ...chapter, audiobook: { ...chapter.audiobook!, takes: 3 } } : chapter) };
     await act(async () => { m.root.render(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={completed} chapterId="neap" onClose={() => {}} />); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 1250)); });
