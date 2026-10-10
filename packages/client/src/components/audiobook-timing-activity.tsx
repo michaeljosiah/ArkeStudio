@@ -70,7 +70,7 @@ export function WordTimingActivityRow({
       ? production?.chapters.find((chapter) => chapter.id === entry.state.chapters![0])
       : undefined;
   return (
-    <div className="fy-ap__row fy-ap__row--top" data-testid="word-timing-activity-row">
+    <div className="fy-ap__row fy-ap__row--top fy-abactivity" data-testid="word-timing-activity-row">
       <span className="fy-ap__dot fy-ap__dot--live" aria-hidden />
       <div className="fy-ap__main">
         <div className="fy-ap__rowtitle">
@@ -80,11 +80,16 @@ export function WordTimingActivityRow({
         <p role="status">
           {entry.state.done} of {entry.state.total} blocks · on this device
         </p>
-        <progress
+        <div
+          className="fy-abactivity__progress"
+          role="progressbar"
           aria-label="Word timing preparation"
-          value={entry.state.done}
-          max={Math.max(1, entry.state.total)}
-        />
+          aria-valuenow={entry.state.done}
+          aria-valuemin={0}
+          aria-valuemax={Math.max(1, entry.state.total)}
+        >
+          <i style={{ width: `${Math.min(100, Math.max(0, entry.state.done / Math.max(1, entry.state.total) * 100))}%` }} />
+        </div>
         <p className="fy-ap__rowsub">The current recordings stay unchanged.</p>
         {connection !== "open" && <p className="fy-ap__reason">Reconnect to see current progress.</p>}
         <div className="fy-ap__actions">

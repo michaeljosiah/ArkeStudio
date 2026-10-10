@@ -315,7 +315,7 @@ it("labels preparation as timing and sends Stop without a narration command", as
   assert.match(dom.document.body.textContent ?? "", /1 of 3 blocks/);
   await press("Stop");
   assert.equal(sent.at(-1)?.kind, "audiobook-word-timing");
-  assert.equal(sent.some((message) => message.kind === "read-audiobook"), false);
+  assert.ok(sent.every((message) => message.kind === "audiobook-word-timing"), "no narration command is sent");
 });
 
 it("refreshes timing Activity when opened and drops an aborted world from its transient rows", async () => {

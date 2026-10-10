@@ -25,6 +25,7 @@
 .fy-abmotion-notice { border-left: 2px solid var(--foreground); padding: 10px 14px; background: var(--secondary); font: var(--type-ui); }
 .fy-abmotion-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--border); }
 .fy-abmotion .ui-btn { min-height: 40px; font: var(--type-ui); border-radius: 999px; }
+.fy-wordtiming-prepare .ui-btn { min-height: 44px; border-radius: 9px; }
 .fy-abmotion-media { max-width: 520px; width: 100%; margin-inline: auto; position: relative; }
 .fy-abmotion-media video { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--secondary); border-radius: 10px; }
 .fy-abmotion-badge { position: absolute; left: 12px; top: 12px; background: rgba(0,0,0,.72); color: white; border-radius: 6px; padding: 5px 8px; font: var(--type-meta); pointer-events: none; }
@@ -100,6 +101,7 @@
 .fy-abv-modal--phone .fy-abv-exportpreview > .fy-abmotion-row, .fy-abv-modal--phone .fy-abv-exportpreview > .fy-abmotion-notice, .fy-abv-modal--phone .fy-abv-exportpreview > .fy-abv-counts { display: none; }
 .fy-abv-modal--phone .fy-wordtiming { padding: 0; }
 .fy-abv-modal--phone .fy-wordtiming .fy-abmotion-notice > button { min-height: 44px; width: 100%; }
+.fy-abv-modal--phone .fy-wordtiming-link { display: inline-flex; align-items: center; min-height: 44px; }
 
 .fy-abmotion .fy-abmotion-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border: none; width: 48px; height: 48px; border-radius: 50%; background: var(--background); color: var(--foreground); cursor: pointer; }
 .fy-abmotion-duration { position: absolute; right: 12px; bottom: 12px; background: rgba(0,0,0,.72); color: white; border-radius: 5px; padding: 3px 7px; font: var(--type-meta); }
