@@ -5339,8 +5339,8 @@ export class Coordinator {
    *
    * Undefined whenever a cloud key is stored — the harness's own default stands then, as it
    * always has — and whenever the catalogue lists nothing local. Of what it lists, the first
-   * local row that passes the same admission check an explicit choice would: Ollama lists the
-   * model pulled or used most recently first, and a model the hardware gate refuses is never
+   * local row that passes the same admission check an explicit choice would, in the harness's
+   * native inventory order. A model the hardware gate refuses is never
    * chosen quietly. There is no routed text default to prefer — `routing.llm` is retired on
    * load (see app-settings) — so the person's way to choose is the agent override in Settings,
    * which sits above this.

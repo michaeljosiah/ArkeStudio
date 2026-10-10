@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { HarnessEngine } from "@arke-studio/contracts";
 import {
@@ -24,6 +24,7 @@ import {
 import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions, type DiscoveredCodex } from "@arke-studio/adapter-codex";
 import type { CodexImageRunner } from "@arke-studio/providers";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
+import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
@@ -108,6 +109,32 @@ export function v2ProfileEnv(profileDir: string): Record<string, string> {
 /** Where a host's harness profile lives, given its app root. */
 export function harnessProfileDir(appRoot: string): string {
   return join(appRoot, "harness", "profile");
+}
+
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Remove the former Studio-generated inventory once; credentials and other provider settings stay in place. */
+async function retireGeneratedOllamaModels(profileDir: string): Promise<void> {
+  const path = join(profileDir, ".config", "opencode", "opencode.json");
+  let config: unknown;
+  try { config = JSON.parse(await readFile(path, "utf8")); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return;
+    throw error;
+  }
+  if (!object(config) || !object(config.providers)) return;
+  const ollama = config.providers["ollama"];
+  if (!object(ollama) || ollama.name !== "Ollama" || ollama.package !== "aisdk:@ai-sdk/openai-compatible" ||
+    !object(ollama.settings) || ollama.settings.apiKey !== "ollama" || !object(ollama.models)) return;
+  // The removed writer used model-id names and zero-cost capability rows. User-defined models
+  // with different names/options are configuration, not an inventory Studio can retire.
+  if (!Object.entries(ollama.models).every(([id, row]) => object(row) && row.name === id &&
+    object(row.cost) && row.cost.input === 0 && row.cost.output === 0 && object(row.capabilities) &&
+    typeof row.capabilities.tools === "boolean" && Object.keys(row).every(key => ["name", "cost", "capabilities", "limit"].includes(key)))) return;
+  delete ollama.models;
+  await atomicWriteFile(path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
@@ -240,7 +267,10 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   const isV2 = harness?.generation === "v2";
   const password = new HarnessPasswordHolder();
   const profileDir = harnessProfileDir(opts.appRoot);
-  if (isV2) await mkdir(profileDir, { recursive: true });
+  if (isV2) {
+    await mkdir(profileDir, { recursive: true });
+    await retireGeneratedOllamaModels(profileDir);
+  }
 
   const supervisor = new ChildSupervisor(
     {

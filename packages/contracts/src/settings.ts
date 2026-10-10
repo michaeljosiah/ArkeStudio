@@ -348,7 +348,12 @@ const AppSettingsObjectSchema = z
      */
     harness: z
       .preprocess(
-        (value) => (HarnessSettingsSchema.safeParse(value).success ? value : { engine: "opencode" }),
+        (value) => {
+          // Retiring an engine must not discard executable paths for the remaining choices.
+          const next = value !== null && typeof value === "object" && (value as { engine?: unknown }).engine === "arke"
+            ? { ...value, engine: "opencode" } : value;
+          return HarnessSettingsSchema.safeParse(next).success ? next : { engine: "opencode" };
+        },
         HarnessSettingsSchema,
       )
       .default({ engine: "opencode" }),

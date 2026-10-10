@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   assembleHarness,
   HarnessPasswordHolder,
@@ -36,9 +37,42 @@ function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000)
 }
 
 describe("the v2 launch protocol (issue 327 §4)", () => {
+  it("retires generated Ollama rows before launch while retaining endpoint and other provider configuration", async () => {
+    const appRoot = await tempDir("v2-profile-retirement-");
+    const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    const path = join(configDir, "opencode.json");
+    const ollama = { name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible",
+      settings: { baseURL: "http://127.0.0.1:11434/v1", apiKey: "ollama" },
+      models: { deleted: { name: "deleted", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } } };
+    const custom = { models: { configured: { name: "Configured model" } } };
+    const launch = () => assembleHarness({ appRoot,
+      v2: { runCommand: async (command) => command === "where" || command === "which"
+        ? { status: 0, stdout: "C:/bin/opencode2.exe" } : { status: 0, stdout: "opencode v2.0.26" } },
+      v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+    });
+    await writeFile(path, JSON.stringify({ providers: { ollama, custom }, model: "custom/configured" }));
+    await launch();
+    assert.deepEqual(JSON.parse(await readFile(path, "utf8")), {
+      providers: { ollama: { name: ollama.name, package: ollama.package, settings: ollama.settings }, custom }, model: "custom/configured",
+    });
+    const userConfig = { providers: { ollama: { ...ollama, models: { custom: { name: "My custom model", settings: { temperature: 0.4 } } } } } };
+    const original = JSON.stringify(userConfig);
+    await writeFile(path, original);
+    await launch();
+    assert.equal(await readFile(path, "utf8"), original, "user model configuration is not the generated inventory");
+  });
+
   it("boots the pinned native runtime through the shared launcher and authenticated readiness route", {
     skip: !process.env["ARKE_TEST_OPENCODE2"], timeout: 75_000,
   }, async () => {
+    const appRoot = await tempDir("v2-native-launch-");
+    const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({ providers: { ollama: {
+      name: "Ollama", package: "aisdk:@ai-sdk/openai-compatible", settings: { baseURL: "http://127.0.0.1:1/v1", apiKey: "ollama" },
+      models: { "deleted-inventory-model": { name: "deleted-inventory-model", capabilities: { tools: true, input: ["text"], output: ["text"] }, cost: { input: 0, output: 0 } } },
+    } } }));
     const inherited = Object.fromEntries(["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].map(key => [key, process.env[key]]));
     let wiring: Awaited<ReturnType<typeof assembleHarness>>;
     try {
@@ -46,7 +80,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       process.env["OPENCODE_SERVER_PASSWORD"] = "synthetic-legacy-password";
       process.env["OPENCODE_SERVER_USERNAME"] = "personal-user";
       wiring = await assembleHarness({
-        appRoot: await tempDir("v2-native-launch-"),
+        appRoot,
         v2: { configuredPath: process.env["ARKE_TEST_OPENCODE2"]! },
         v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
       });
@@ -65,6 +99,8 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
       await waitForStatus(wiring.supervisor, "healthy");
       await wiring.adapter.init?.();
       assert.equal(wiring.adapter.readiness().ready, true);
+      assert.ok(!(await wiring.adapter.listModels?.())?.some(model => model.provider === "ollama" && model.id === "deleted-inventory-model"),
+        "the real server cannot offer a stale row from Studio's retired generated inventory");
       assert.ok(!wiring.logLines.some(line => line.includes("[beta]")));
     } finally {
       await wiring.adapter.dispose?.(); await wiring.supervisor.stop();
