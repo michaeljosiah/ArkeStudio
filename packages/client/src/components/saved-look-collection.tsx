@@ -45,6 +45,7 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
   const list = useRef<HTMLDivElement>(null);
   const renameInput = useRef<HTMLInputElement>(null);
   const renameButton = useRef<HTMLButtonElement>(null);
+  const wasRenaming = useRef(false);
   const optionIds = useId();
   const selected = looks.find((look) => look.id === selection) ?? null;
   const photo = kit === null ? null : mainPhotoFor(kit);
@@ -67,11 +68,16 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
     const file = look === null ? photo?.file : look.file || look.closeFile;
     return file && world ? mediaUrl(world.meta.slug, `references/${sheetId}/${file}`) : null;
   };
-  const closeRename = () => { setRename(null); setRenameError(null); renameButton.current?.focus(); };
+  const closeRename = () => { setRename(null); setRenameError(null); };
   useEffect(() => { setUsageRequest(readAudiobookLooks(worldId, productionId)); }, [worldId, productionId]);
   useEffect(() => {
     if (rename !== null) renameInput.current?.focus();
+    else if (wasRenaming.current) renameButton.current?.focus();
+    wasRenaming.current = rename !== null;
   }, [rename === null]);
+  useEffect(() => {
+    if (gone) { setRename(null); setSaving(null); setRenameError(null); }
+  }, [gone]);
   useEffect(() => subscribeLookRename((answer) => {
     if (answer.requestId !== saving || answer.worldId !== worldId || answer.sheetId !== sheetId) return;
     setSaving(null);

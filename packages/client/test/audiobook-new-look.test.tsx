@@ -99,6 +99,8 @@ const press = async (el: Element | null | undefined) => {
   await act(async () => void el.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event));
 };
 const sentOf = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind);
+// Native-dialog portal values are read from React in linkedom; Chrome verifies their DOM values.
+const fieldValue = (el: Element) => (el as unknown as Record<string, { value: string }>)[Object.keys(el).find(key => key.startsWith("__reactProps$"))!]!.value;
 type Handlers = { onChange?: (event: { target: unknown; currentTarget: unknown }) => void };
 const handlers = (el: Element): Handlers => {
   const key = Object.keys(el).find((candidate) => candidate.startsWith("__reactProps$"));
@@ -111,13 +113,13 @@ describe("the sheet before anything is made", () => {
     assert.ok(bodyAll('[data-testid="new-look-photo"] img')[0], "the main photo");
     const fixed = text(bodyAll('[data-testid="new-look-fixed"]')[0]);
     assert.match(fixed, /Full body/);
-    assert.match(fixed, /Plain background/);
-    assert.match(fixed, /Art direction · v\d/);
+    assert.match(fixed, /plain background/);
+    assert.match(fixed, /art direction v\d/);
     assert.match(fixed, /Close view · ~\$0\.04/);
     for (const box of bodyAll('[data-testid="new-look-fixed"] input')) {
       if (box.getAttribute("data-testid") !== "new-look-close-box") assert.equal((box as HTMLInputElement).disabled, true, "the fixed boxes can be seen and not removed");
     }
-    assert.equal((bodyAll('[data-testid="new-look-clothing"]')[0] as HTMLTextAreaElement).value, "Oilskin coat, hood up; two braids.", "the chapter's line to start from");
+    assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), "Oilskin coat, hood up; two braids.", "the chapter's line to start from");
     assert.match(text(bodyAll('[data-testid="new-look-price"]')[0]), /3 pictures · ~\$0\.12 · close view ~\$0\.04/);
     assert.equal(text(bodyAll('[data-testid="new-look-make"]')[0]), "Make · ~$0.12");
     assert.equal(m.sent.length, 0, "nothing is made until Make");
@@ -126,8 +128,11 @@ describe("the sheet before anything is made", () => {
 
   it("lists the looks the character already has, the Cast page's too", async () => {
     await mount(ready([], [{ id: "council-coat", file: "looks/c.png", kind: "costume", prompt: "Formal council coat", acceptedAt: AT }, { id: "tk_x", file: "takes/x/x.png", kind: "costume", prompt: "Storm coat.", acceptedAt: "2026-10-01T09:00:00.000Z", framing: "full-body", closeFile: "takes/y/y.png" }] as never));
-    const rows = bodyAll('[data-testid="new-look-existing"]').map(text);
-    assert.deepEqual(rows, ["Formal council coat · full", "Storm coat · full, close"]);
+    assert.match(text(bodyAll('[data-testid="new-look-looks"]')[0]), /Saved looks · 2/);
+    assert.equal(bodyAll('[data-testid="saved-look-option"]').length, 0, "folded until browsing");
+    await press(bodyAll('[data-testid="new-look-browse"]')[0]);
+    assert.equal(bodyAll('[data-testid="saved-look-option"]').length, 2);
+    assert.match(text(bodyAll('[data-testid="saved-look-option"]')[0]), /Look · 4 Oct 2026/);
   });
 
   it("cannot make without a clothing line, or while the coordinator is away", async () => {

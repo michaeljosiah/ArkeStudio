@@ -94,6 +94,9 @@ const press = async (el: Element | null | undefined) => {
 const sentOf = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind);
 const tiles = () => bodyAll('[data-testid="saved-look-option"]');
 const browse = async () => press(bodyAll('[data-key="maren-kest"] [data-testid="look-browse"]')[0]);
+// linkedom does not initialize textarea.value when React mounts a delayed native-dialog portal.
+// Assert the controlled value here; the Chrome return-path smoke checks the live DOM as well.
+const fieldValue = (el: Element) => (el as unknown as Record<string, { value: string }>)[Object.keys(el).find(key => key.startsWith("__reactProps$"))!]!.value;
 const chosen = () => bodyAll('[data-key="maren-kest"] [data-testid="look-browse"]')[0]!.getAttribute("data-look");
 const choose = async (index: number) => { await browse(); await press(tiles()[index]); await press(bodyAll('[data-testid="saved-look-use"]')[0]); };
 
@@ -117,7 +120,7 @@ describe("a character with looks (193a)", () => {
     const image = bodyAll('[data-key="maren-kest"] [data-testid="look-image"]')[0]!;
     assert.equal(image.getAttribute("data-view"), "full");
     assert.match(image.getAttribute("src") ?? "", /references\/maren-kest\/takes\/tk_storm\/storm\.png/);
-    assert.equal((bodyAll('[data-key="maren-kest"] textarea')[0] as HTMLTextAreaElement).value, STORM.prompt);
+    assert.equal(fieldValue(bodyAll('[data-key="maren-kest"] textarea')[0]!), STORM.prompt);
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /full body, close/);
     assert.equal(bodyAll('[data-key="maren-kest"] [data-testid="look-make-close"]').length, 0, "it has a close view");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen/);
@@ -157,10 +160,10 @@ describe("a character with looks (193a)", () => {
     const m = await mount(LOOK({ text: STORM.prompt, lookId: STORM.id, conflicts: [{ kind: "chapter", part: "Hood", a: "down", b: "up" }] }));
     const row = bodyAll('[data-key="maren-kest"] [data-testid="look-conflict"]')[0]!;
     assert.equal(text(row), "Hoodchapter down · look upMake again");
-    assert.equal((bodyAll('[data-key="maren-kest"] textarea')[0] as HTMLTextAreaElement).value, STORM.prompt, "the line is the look's, not the chapter's");
+    assert.equal(fieldValue(bodyAll('[data-key="maren-kest"] textarea')[0]!), STORM.prompt, "the line is the look's, not the chapter's");
     await press(bodyAll('[data-testid="look-conflict-make"]')[0]);
     assert.ok(bodyAll('[data-testid="new-look-sheet"]')[0], "Make again opens the sheet to make the look again");
-    assert.equal((bodyAll('[data-testid="new-look-clothing"]')[0] as HTMLTextAreaElement).value, STORM.prompt);
+    assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), STORM.prompt);
     assert.equal(sentOf(m, "generate-character-looks").length, 0, "nothing is made until Make");
   });
 });
@@ -171,8 +174,8 @@ describe("making a look from the sheet", () => {
     assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]), "New look…");
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /head and shoulders · no look/);
     await press(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]);
-    assert.equal(bodyAll('[data-testid="look-sheet"]').length, 0, "the Looks gives way while a look is made");
-    assert.equal((bodyAll('[data-testid="new-look-clothing"]')[0] as HTMLTextAreaElement).value, "Oilskin coat, dark and stiff with salt.");
+    assert.equal(bodyAll('[data-testid="look-sheet"]').length, 1, "the covered Looks stays mounted to preserve the return path");
+    assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), "Oilskin coat, dark and stiff with salt.");
     await press(bodyAll('[data-testid="new-look-cancel"]')[0]);
     assert.ok(bodyAll('[data-testid="look-sheet"]')[0], "Cancel returns to the Looks");
   });
@@ -236,7 +239,7 @@ describe("a choice shows at once (2026-10-04, 0.5.60-local.14)", () => {
     await choose(1);
     assert.equal(chosen(), STORM.id, "the explicit choice appears at once");
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /full body, close/);
-    assert.equal((bodyAll('[data-key="maren-kest"] textarea')[0] as HTMLTextAreaElement).value, "Storm coat, hood up; two braids.", "the look's own line");
+    assert.equal(fieldValue(bodyAll('[data-key="maren-kest"] textarea')[0]!), "Storm coat, hood up; two braids.", "the look's own line");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saving…/);
     const chose = sentOf(m, "choose-audiobook-look")[0]!;
     const written = LOOK({ text: STORM.prompt, lookId: STORM.id, reading: "Oilskin coat, dark and stiff with salt." });
@@ -370,7 +373,7 @@ describe("the mood line", () => {
   it("is a row of its own, editable, written as the author's", async () => {
     const m = await mount(LOOK());
     const mood = bodyAll('[data-key="mood"] textarea')[0] as HTMLTextAreaElement;
-    assert.equal(mood.value, "Teal water, amber lamplight; fine grain.");
+    assert.equal(fieldValue(mood), "Teal water, amber lamplight; fine grain.");
     assert.match(text(bodyAll('[data-key="mood"]')[0]), /Mood.*from the art direction/);
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(mood), "value")?.set;
