@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ulid, type AudiobookWordTimingState } from "@arke-studio/contracts";
+import { captionWordParts, clockTime, ulid, type AudiobookWordTimingState } from "@arke-studio/contracts";
 import { send, subscribeAudiobookWordTiming, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
@@ -25,6 +25,7 @@ export function WordTimingControl({
   const slug = useStore().state?.world?.meta.slug;
   const [state, setState] = useState<AudiobookWordTimingState | null>(null);
   const [review, setReview] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const asked = useRef<string | null>(null);
   const runningRequest = useRef<string | null>(null);
   const ready = state !== null && state.blocks.length > 0 && state.blocks.every((b) => b.ready);
@@ -76,98 +77,42 @@ export function WordTimingControl({
   );
   if (!enabled) return null;
   const pending = state?.blocks.filter((b) => !b.ready) ?? [];
-  return (
-    <div className="fy-wordtiming">
-      <div className="fy-abv-opt">
-        <b>Word timing</b>
-        <span role="status">
-          {state === null
-            ? "Checking saved readings…"
-            : state.running
-              ? `Preparing ${state.done} of ${state.total} blocks…`
-              : ready
-                ? "Ready · matched to the current audio and words"
-                : `${pending.length} blocks need timing`}
-        </span>
-        <span className="grow" />
-        {state?.running ? (
-          <Button variant="outline" onClick={() => request("stop")}>
-            Stop
-          </Button>
-        ) : (
-          !ready && (
-            <Button variant="outline" disabled={state?.available !== true} onClick={() => request("prepare")}>
-              Prepare word timing
-            </Button>
-          )
-        )}
-      </div>
-      {state?.available === false && (
-        <p className="fy-abv-note">{state.reason ?? "The local voice runtime is unavailable"}</p>
-      )}
-      {!ready && (
-        <p className="fy-abv-note">
-          Uses the saved audio on this machine. No new reading or API charge.{" "}
-          {pending.length > 0 && (
-            <button type="button" className="fy-abv-btn" onClick={() => setReview(true)}>
-              Review blocks
-            </button>
-          )}
-        </p>
-      )}
-      <EditorDialog
-        open={review}
-        onClose={() => setReview(false)}
-        title="Word timing needs a check"
-        subtitle="Export waits until every selected block is ready"
-        width={680}
-        panelClassName="fy-abmotion"
-      >
-        <div className="fy-wordtiming-list">
-          {pending.map((block) => (
-            <div key={`${block.chapterId}/${block.key}`}>
-              <b>{block.label}</b>
-              <p>{block.reason}</p>
-              {block.file !== undefined && slug !== undefined && (
-                <audio
-                  controls
-                  preload="none"
-                  aria-label={`Saved reading · ${block.label}`}
-                  src={mediaUrl(slug, block.file)}
-                  onPlay={(event) => {
-                    const audio = event.currentTarget;
-                    claimRead(`word-timing-review:${block.chapterId}/${block.key}`, () => audio.pause());
-                  }}
-                  onPause={() => releaseRead(`word-timing-review:${block.chapterId}/${block.key}`)}
-                  onEnded={() => releaseRead(`word-timing-review:${block.chapterId}/${block.key}`)}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="fy-abmotion-foot">
-          <Button
-            variant="outline"
-            onClick={() => {
-              usePhrases();
-              setReview(false);
-            }}
-          >
-            Use phrase captions
-          </Button>
-          <span />
-          <Button
-            variant="primary"
-            disabled={state?.available !== true || state.running}
-            onClick={() => {
-              request("prepare");
-              setReview(false);
-            }}
-          >
-            Prepare again
-          </Button>
-        </div>
-      </EditorDialog>
+  const chosen = state?.blocks.find((block) => `${block.chapterId}/${block.key}` === selected);
+  const openReview = () => { setSelected(null); setReview(true); };
+  return <div className="fy-wordtiming">
+    <div className="fy-abmotion-notice">
+      <b>{state === null ? "Checking word timing…" : state.running ? "Preparing word timing" : ready ? "Word timing ready" : state.available ? "Word timing not prepared" : "Word timing unavailable"}</b>
+      <p role="status">{state?.running ? `${state.done} of ${state.total} blocks` : ready ? `${state!.blocks.length} of ${state!.blocks.length} blocks · matches this reading` : state?.available === false ? state.reason ?? "No supported word aligner on this desktop" : "Needed for current-word highlighting"}</p>
+      {state?.running ? <><progress aria-label="Timing preparation" max={Math.max(1, state.total)} value={state.done}/><Button variant="outline" onClick={() => request("stop")}>Stop</Button></> : ready ? <button type="button" className="fy-wordtiming-link" onClick={openReview}>Review timing</button> : state?.available === false ? <Button variant="outline" onClick={usePhrases}>Use phrase captions</Button> : <Button variant="outline" disabled={state?.available !== true} onClick={() => request("prepare")}>Prepare word timing</Button>}
     </div>
-  );
+    {!ready && <p className="fy-abv-note">Uses the saved audio on this machine. No new reading or API charge. {pending.length > 0 && <button type="button" className="fy-wordtiming-link" onClick={openReview}>Review blocks</button>}</p>}
+    <EditorDialog open={review} onClose={() => setReview(false)} labelledBy="word-timing-title" width={720} panelClassName="fy-abmotion">
+      <div className="fy-abmotion-head"><div><h3 id="word-timing-title">Word timing</h3><p>{state?.blocks.length ?? 0} blocks · current audio and words</p></div><button type="button" aria-label="Close" onClick={() => setReview(false)}>×</button></div>
+      <div className="fy-wordtiming-list">
+        {pending.length > 0 && <div className="fy-abmotion-notice"><b>{pending.length} blocks need timing</b><p>Highlighting waits until every selected block is ready. Phrase captions remain available.</p></div>}
+        <div className="fy-abmotion-row"><b>{(state?.blocks.length ?? 0) - pending.length} blocks ready</b><span className="grow"/><span className="fy-abmotion-meta">Current audio and words</span></div>
+        {(ready ? state?.blocks ?? [] : pending).map((block) => <div className="fy-wordtiming-block" key={`${block.chapterId}/${block.key}`}><div><b>{block.label}</b><p>{block.ready ? "Matches this reading" : block.reason}</p></div><Button variant="outline" onClick={() => setSelected(`${block.chapterId}/${block.key}`)}>Review</Button></div>)}
+        {chosen !== undefined && slug !== undefined && <TimingLine key={`${chosen.chapterId}/${chosen.key}`} block={chosen} slug={slug} />}
+        <p>Prepared on this desktop from the saved reading. No new narration.</p>
+      </div>
+      <div className="fy-abmotion-foot"><Button variant="outline" onClick={() => { usePhrases(); setReview(false); }}>Use phrase captions</Button><span className="grow"/>{pending.length > 0 && <Button variant="outline" disabled={state?.available !== true || state.running} onClick={() => { request("prepare"); setReview(false); }}>Prepare again</Button>}<Button variant="primary" onClick={() => setReview(false)}>Done</Button></div>
+    </EditorDialog>
+  </div>;
+}
+
+function TimingLine({ block, slug }: { block: AudiobookWordTimingState["blocks"][number]; slug: string }) {
+  const audio = useRef<HTMLAudioElement>(null);
+  const from = block.fromSec ?? 0, to = block.toSec ?? 0;
+  const [at, setAt] = useState(from), [playing, setPlaying] = useState(false);
+  const key = `word-timing-review:${block.chapterId}/${block.key}`;
+  useEffect(() => () => { audio.current?.pause(); releaseRead(key); }, [key]);
+  const play = () => { const element = audio.current; if (!element) return; if (playing) element.pause(); else { if (element.currentTime < from || to > 0 && element.currentTime >= to) element.currentTime = from; void element.play().catch(() => setPlaying(false)); } };
+  const text = block.text ?? "";
+  const parts = block.words === undefined ? [{ text, active: false }] : captionWordParts({ startSec: from, endSec: to, text, words: block.words }, at);
+  return <div>
+    {text !== "" && <div className="fy-wordtiming-line">{parts.map((part, index) => part.active ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</div>}
+    <audio ref={audio} preload="metadata" aria-label={`Saved reading · ${block.label}`} src={block.file === undefined ? undefined : mediaUrl(slug, block.file)} onLoadedMetadata={() => { if (audio.current !== null) audio.current.currentTime = from; }} onPlay={() => { setPlaying(true); claimRead(key, () => audio.current?.pause()); }} onPause={() => { setPlaying(false); releaseRead(key); }} onEnded={() => { setPlaying(false); releaseRead(key); }} onTimeUpdate={(event) => { setAt(event.currentTarget.currentTime); if (to > 0 && event.currentTarget.currentTime >= to) event.currentTarget.pause(); }} />
+    <div className="fy-abmotion-row"><Button variant="outline" disabled={block.file === undefined} onClick={play}>{playing ? "Pause" : "▶ Play line"}</Button><b>{clockTime(Math.max(0, at - from))} / {clockTime(Math.max(0, to - from))}</b><span className="grow"/><span className="fy-abmotion-meta">{block.ready ? "Timing preview" : "Timing not ready"}</span></div>
+    {to > from && <input aria-label="Reading position" type="range" min={from} max={to} step={0.01} value={Math.min(to, Math.max(from, at))} onChange={(event) => { const next = Number(event.target.value); if (audio.current) audio.current.currentTime = next; setAt(next); }} />}
+  </div>;
 }

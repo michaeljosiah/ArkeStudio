@@ -23,6 +23,7 @@ import { claimRead, releaseRead } from "../lib/reply-reads.js";
 import { usableModels } from "./dispatch-bar.js";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
+import { Seg } from "./audiobook-video.js";
 
 /** Turn 208: a separate clip choice always keeps its source picture. */
 export function AudiobookMotionControl({
@@ -32,6 +33,9 @@ export function AudiobookMotionControl({
   block,
   picture,
   slug,
+  label = "Picture",
+  chapterLabel,
+  holdLabel,
 }: {
   worldId: string;
   productionId: string;
@@ -39,6 +43,9 @@ export function AudiobookMotionControl({
   block: string;
   picture: AudiobookPicture;
   slug: string;
+  label?: string;
+  chapterLabel?: string;
+  holdLabel?: string;
 }) {
   const store = useStore();
   const models = usableModels(store.state, "video").filter(audiobookMotionModel);
@@ -56,6 +63,9 @@ export function AudiobookMotionControl({
   const [reason, setReason] = useState<string | null>(null);
   const [behavior, setBehavior] = useState<"repeat" | "hold">("repeat");
   const [reading, setReading] = useState(false);
+  const [viewChosen, setViewChosen] = useState(false);
+  const viewChosenRef = useRef(viewChosen);
+  viewChosenRef.current = viewChosen;
   const asked = useRef<string | null>(null);
   const ids = { worldId, productionId, chapterFile, block };
   const candidate = picture.motionCandidate;
@@ -81,8 +91,8 @@ export function AudiobookMotionControl({
         if (answer.state === "making") setState("making");
         if (answer.state === "review") setState("review");
         if (answer.state === "chosen") {
-          setOpen(false);
           setState("edit");
+          if (!viewChosenRef.current) setOpen(false);
         }
         if (answer.state === "failed") {
           setReason(answer.reason ?? "The clip could not be made");
@@ -92,7 +102,7 @@ export function AudiobookMotionControl({
     [],
   );
   useEffect(() => {
-    if (!open || review || state === "making") return;
+    if (!open || review || viewChosen || state === "making") return;
     // Invalidate immediately: an old response can arrive during the next debounce.
     asked.current = null;
     setQuote(null);
@@ -109,9 +119,10 @@ export function AudiobookMotionControl({
       });
     }, 200);
     return () => clearTimeout(timer);
-  }, [open, model?.id, duration, quality, prompt, picture.file, picture.at, review, state]);
+  }, [open, model?.id, duration, quality, prompt, picture.file, picture.at, review, state, viewChosen]);
   const choose = (choice: "candidate" | "still" | "behavior", next = behavior) => {
     asked.current = ulid();
+    if (choice !== "behavior") { setViewChosen(false); viewChosenRef.current = false; }
     setReason(null);
     if (
       !send({
@@ -137,223 +148,55 @@ export function AudiobookMotionControl({
       setReason("Reconnect before generating");
     }
   };
-  return (
-    <>
-      <div className="fy-abmotion-actions">
-        {chosen !== undefined && (
-          <>
-            <span className="fy-mono">Clip · {chosen.seconds}s · muted</span>
-            <select
-              aria-label="Clip playback"
-              value={chosen.behavior}
-              onChange={(e) => choose("behavior", e.target.value as "repeat" | "hold")}
-            >
-              <option value="repeat">Repeat</option>
-              <option value="hold">Hold last frame</option>
-            </select>
-            <Button variant="outline" onClick={() => choose("still")}>
-              Use still
-            </Button>
-          </>
-        )}
-        {picture.motion?.active === false && candidate === undefined && (
-          <Button variant="outline" onClick={() => choose("candidate", picture.motion!.behavior)}>
-            Use clip
-          </Button>
-        )}
-        <Button
-          variant="outline"
-          disabled={store.connection !== "open"}
-          onClick={() => {
-            setOpen(true);
-            setReason(null);
-          }}
-        >
-          {candidate !== undefined ? "Review clip" : state === "making" ? "Making clip…" : "Animate"}
-        </Button>
+  const showingChosen = viewChosen && chosen !== undefined && !review && state !== "making";
+  const shownClip = review ? candidate : showingChosen ? chosen : undefined;
+  const close = () => { setOpen(false); setReading(false); };
+  const sourceCard = (retained = false) => <div className="fy-abmotion-source">
+    <img src={mediaUrl(slug, picture.file)} alt="Original picture" />
+    <div><b>{retained ? "Original picture" : "Start frame"}</b><p>{retained ? "Kept with this clip" : `${label} · original picture`}</p></div>
+    {retained && <Button variant="outline" onClick={() => choose("still")}>Use still</Button>}
+  </div>;
+  const afterClip = <div className="fy-abmotion-option"><b>After the clip</b><Seg label="Clip playback" value={showingChosen ? chosen!.behavior : behavior} options={[["repeat", "Repeat"], ["hold", "Hold last frame"]] as const} onChange={(next) => showingChosen ? choose("behavior", next) : setBehavior(next)} /></div>;
+  return <>
+    <div className="fy-abmotion-actions">
+      <span className="fy-abmotion-meta">{holdLabel}</span><span className="grow" />
+      {picture.motion?.active === false && candidate === undefined && <Button variant="outline" onClick={() => choose("candidate", picture.motion!.behavior)}>Use clip</Button>}
+      <Button variant="outline" disabled={store.connection !== "open"} onClick={() => { setOpen(true); setViewChosen(chosen !== undefined); setReason(null); }}>
+        {candidate !== undefined ? "Review clip" : state === "making" ? "Making clip…" : chosen !== undefined ? "Clip in use" : "Animate"}
+      </Button>
+    </div>
+    {!open && reason !== null && <p role="alert" className="fy-abv-warn">{reason}</p>}
+    <EditorDialog open={open} onClose={close} width={showingChosen ? 620 : 720} labelledBy="motion-dialog-title" panelClassName="fy-abmotion">
+      <div className="fy-abmotion-head"><div><h3 id="motion-dialog-title">{state === "making" ? "Generating" : review ? "Choose the clip" : showingChosen ? label : "Animate picture"}</h3><p>{label}{chapterLabel !== undefined ? ` · ${chapterLabel}` : ""}</p></div><button type="button" aria-label="Close" onClick={close}>×</button></div>
+      {open && reading && shownClip !== undefined ? <MotionReadingPreview worldId={worldId} productionId={productionId} chapterId={store.state?.world?.productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile)?.id ?? chapterFile} block={block} picture={{ ...picture, motion: { ...shownClip, active: true, behavior: showingChosen ? chosen!.behavior : behavior } }} slug={slug} onClose={() => setReading(false)} /> :
+      <div className="fy-abmotion-body">
+        {shownClip !== undefined ? <>
+          <div className="fy-abmotion-media"><video key={shownClip.artifactId} src={mediaUrl(slug, shownClip.file)} poster={mediaUrl(slug, picture.file)} controls muted onVolumeChange={(event) => { if (!event.currentTarget.muted) event.currentTarget.muted = true; }} playsInline loop={(showingChosen ? chosen!.behavior : behavior) === "repeat"} /><span className="fy-abmotion-badge">Clip · muted</span></div>
+          <div className="fy-abmotion-row"><span className="fy-abmotion-meta">{shownClip.width} × {shownClip.height} · {shownClip.seconds}s{holdLabel !== undefined ? ` · ${holdLabel}` : ""}</span><span className="grow" />{review ? <Button variant="outline" onClick={() => setReading(true)}>▶ Preview with reading</Button> : <b>Clip in use</b>}</div>
+          {afterClip}
+          {review && <p className="fy-abmotion-meta">{behavior === "repeat" ? "Repeats" : "Holds the last frame"} until the next picture or the end of the chapter. Preview includes the repeat boundary.</p>}
+          {sourceCard(showingChosen)}
+          {showingChosen && <div className="fy-abmotion-row"><Button variant="outline" onClick={() => { setViewChosen(false); setState("edit"); }}>Make another clip</Button><a href={`#/w/${encodeURIComponent(worldId)}/artifacts`}>View in Library</a></div>}
+          <p className="fy-abmotion-notice">{showingChosen ? "Slow push applies to stills. The clip keeps its own movement." : `${shownClip.height}p clip · scaled to fill the export. No upscaling has been run.`}</p>
+        </> : state === "making" ? <>
+          {sourceCard()}<p>The picture remains in use</p><progress aria-label="Generating clip" /><p className="fy-abmotion-meta">Making 1 clip · closing this sheet keeps the job running. A completed clip is kept in Library.</p>
+        </> : <>
+          {sourceCard()}
+          <label className="fy-abmotion-field">Motion<textarea value={prompt} maxLength={10000} onChange={(e) => setPrompt(e.target.value)} rows={3} /></label>
+          <label className="fy-abmotion-option"><b>Model</b><select value={model?.id ?? ""} onChange={(e) => setModelId(e.target.value)}>{models.map((m) => <option value={m.id} key={m.id}>{m.displayName}</option>)}</select></label>
+          {models.length === 0 && <p role="status">No enabled model can start from this picture. Enable a first-frame video model in Settings.</p>}
+          <div className="fy-abmotion-pair"><label className="fy-abmotion-field">Length<select value={duration} onChange={(e) => setSeconds(Number(e.target.value))}>{durations.map((n) => <option key={n} value={n}>{n} seconds</option>)}</select></label>{resolutions.length > 0 && <label className="fy-abmotion-field">Resolution<select value={quality} onChange={(e) => setResolution(e.target.value)}>{resolutions.map((r) => <option key={r}>{r}</option>)}</select></label>}</div>
+          <p className="fy-abmotion-meta">Start-frame models only · sound is muted in the audiobook</p>
+          <div className="fy-abmotion-quote"><div className="fy-abmotion-row"><b>{quote === null ? "Getting price…" : quote.estimatedMicroUsd === 0 ? model?.pricing.kind === "included-plan" ? "Included in your plan" : "No API charge" : `${formatMicroUsd(quote.estimatedMicroUsd)} at most`}</b><span className="grow" /><b>{quote?.typicalRunSec !== undefined ? `~${Math.ceil(quote.typicalRunSec / 60)} min on the reference machine` : "Time not measured"}</b></div><p>{quality !== undefined ? `${quality} source · ` : ""}exported at your chosen size. Upscaling is separate.</p></div>
+        </>}
+        {reason !== null && <p role="alert" className="fy-abv-warn">{reason}</p>}
+      </div>}
+      <div className="fy-abmotion-foot">
+        {showingChosen ? <span className="fy-abmotion-meta">Clip sound is always muted</span> : <Button variant="outline" onClick={() => review ? choose("still") : close()}>{review ? "Keep still" : "Cancel"}</Button>}<span className="grow" />
+        {showingChosen ? <Button variant="primary" onClick={close}>Done</Button> : state === "making" ? <Button variant="outline" onClick={() => send({ kind: "stop-audiobook-motion", ...ids, requestId: ulid() })}>Stop</Button> : review ? <Button variant="primary" onClick={() => choose("candidate")}>Use clip</Button> : <Button variant="primary" disabled={quote === null || store.connection !== "open"} onClick={make}>Generate clip</Button>}
       </div>
-      {!open && reason !== null && (
-        <p role="alert" className="fy-abv-warn">
-          {reason}
-        </p>
-      )}
-      <EditorDialog
-        open={open}
-        onClose={() => {
-          setOpen(false);
-          setReading(false);
-        }}
-        title={state === "making" ? "Making your clip" : review ? "Review clip" : "Animate picture"}
-        subtitle="Your original picture stays saved"
-        width={800}
-        panelClassName="fy-abmotion"
-      >
-        {open && reading && candidate !== undefined ? (
-          <MotionReadingPreview
-            worldId={worldId}
-            productionId={productionId}
-            chapterId={
-              store.state?.world?.productions
-                .find((p) => p.meta.id === productionId)
-                ?.chapters.find((c) => c.file === chapterFile || c.id === chapterFile)?.id ?? chapterFile
-            }
-            block={block}
-            picture={{ ...picture, motion: { ...candidate, active: true, behavior } }}
-            slug={slug}
-            onClose={() => setReading(false)}
-          />
-        ) : (
-          <>
-            <div className="fy-abmotion-body">
-              <div className="fy-abmotion-preview">
-                {review ? (
-                  <video
-                    key={candidate.artifactId}
-                    src={mediaUrl(slug, candidate.file)}
-                    poster={mediaUrl(slug, picture.file)}
-                    controls
-                    muted
-                    onVolumeChange={(event) => {
-                      if (!event.currentTarget.muted) event.currentTarget.muted = true;
-                    }}
-                    playsInline
-                    loop={behavior === "repeat"}
-                  />
-                ) : (
-                  <img src={mediaUrl(slug, picture.file)} alt="The starting picture" />
-                )}
-                <p className="fy-mono">
-                  {review
-                    ? `${candidate.seconds}s · ${candidate.width} × ${candidate.height} · muted`
-                    : "Starting picture · first frame"}
-                </p>
-                {review && (
-                  <Button variant="outline" onClick={() => setReading(true)}>
-                    Preview with reading
-                  </Button>
-                )}
-              </div>
-              <div className="fy-abmotion-fields">
-                {state === "making" ? (
-                  <>
-                    <p role="status">
-                      Generating one clip. The current picture stays in the audiobook until you choose Use
-                      clip.
-                    </p>
-                    <p>Closing this sheet keeps the job running. A completed clip is kept in Library.</p>
-                  </>
-                ) : review ? (
-                  <>
-                    <h3>Keep the motion?</h3>
-                    <p>The clip is muted. Your narration remains the only voice.</p>
-                    <label>
-                      After the clip ends
-                      <select
-                        value={behavior}
-                        onChange={(e) => setBehavior(e.target.value as "repeat" | "hold")}
-                      >
-                        <option value="repeat">Repeat</option>
-                        <option value="hold">Hold last frame</option>
-                      </select>
-                    </label>
-                    <p>It continues until the next picture or the end of the chapter.</p>
-                  </>
-                ) : (
-                  <>
-                    <label>
-                      Motion
-                      <textarea
-                        value={prompt}
-                        maxLength={10000}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        rows={5}
-                      />
-                    </label>
-                    <label>
-                      Model
-                      <select value={model?.id ?? ""} onChange={(e) => setModelId(e.target.value)}>
-                        {models.map((m) => (
-                          <option value={m.id} key={m.id}>
-                            {m.displayName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {models.length === 0 && (
-                      <p role="status">
-                        No enabled model can start from this picture. Enable a first-frame video model in
-                        Settings.
-                      </p>
-                    )}
-                    <div className="fy-abmotion-pair">
-                      <label>
-                        Length
-                        <select value={duration} onChange={(e) => setSeconds(Number(e.target.value))}>
-                          {durations.map((n) => (
-                            <option key={n} value={n}>
-                              {n} seconds
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {resolutions.length > 0 && (
-                        <label>
-                          Resolution
-                          <select value={quality} onChange={(e) => setResolution(e.target.value)}>
-                            {resolutions.map((r) => (
-                              <option key={r}>{r}</option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                    <p>Fits the export frame. Upscaling is not included.</p>
-                    <p className="fy-abmotion-price">
-                      {quote === null
-                        ? "Getting price…"
-                        : quote.estimatedMicroUsd === 0
-                          ? model?.pricing.kind === "included-plan" ? "Included in your plan" : "No API charge"
-                          : `${formatMicroUsd(quote.estimatedMicroUsd)} at most`}{" "}
-                      {quote?.typicalRunSec !== undefined
-                        ? `· about ${Math.ceil(quote.typicalRunSec / 60)} min on the reference machine`
-                        : "· time not measured"}
-                    </p>
-                  </>
-                )}
-                {reason !== null && (
-                  <p role="alert" className="fy-abv-warn">
-                    {reason}
-                  </p>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-        <div className="fy-abmotion-foot">
-          <Button variant="outline" onClick={() => (review ? choose("still") : setOpen(false))}>
-            {review ? "Keep still" : "Close"}
-          </Button>
-          <span />
-          {state === "making" ? (
-            <Button
-              variant="outline"
-              onClick={() => send({ kind: "stop-audiobook-motion", ...ids, requestId: ulid() })}
-            >
-              Stop
-            </Button>
-          ) : review ? (
-            <Button variant="primary" onClick={() => choose("candidate")}>
-              Use clip
-            </Button>
-          ) : (
-            <Button variant="primary" disabled={quote === null || store.connection !== "open"} onClick={make}>
-              Generate clip
-            </Button>
-          )}
-        </div>
-      </EditorDialog>
-    </>
-  );
+    </EditorDialog>
+  </>;
 }
 
 function MotionReadingPreview({

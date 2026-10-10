@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -501,11 +501,18 @@ it("renders chosen motion with measured highlighted words, repeats/holds its clo
   const repeat = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });
   assert.ok(repeat.result.ok, JSON.stringify(repeat.result));
   const repeatFile = join(h.worldDir, repeat.result.dir, repeat.result.files[0]!.name);
+  const reviewDir = process.env["ARKE_MOTION_REVIEW_DIR"];
+  if (reviewDir !== undefined) {
+    await mkdir(reviewDir, { recursive: true });
+    await copyFile(repeatFile, join(reviewDir, "motion-word-captions.mp4"));
+    await copyFile(clip, join(reviewDir, "fixture-clip.mp4"));
+    await runner.run(["-y", "-ss", "1.2", "-i", repeatFile, "-frames:v", "1", join(reviewDir, "motion-word-captions.png")], () => {}, signal);
+  }
   const info = await probe(repeatFile);
   assert.equal(info.streams.filter((stream) => stream.codec_type === "audio").length, 1, "only the narration mix is mapped");
   const sidecar = await readFile(repeatFile.replace(/\.mp4$/, ".srt"), "utf8");
   assert.doesNotMatch(sidecar, /\\c&H|<font|\\k/, "sidecars stay plain text");
-  const rendering = h.calls.filter((args) => args.includes("-filter_complex_script")).at(-1)!;
+  const rendering = h.calls.filter((args) => args.includes("-/filter_complex")).at(-1)!;
   assert.ok(rendering.includes("-stream_loop"), "repeat reads a looping input");
   await chooseAudiobookMotion(store, LEDGER, "01-neap", "p0.0", "behavior", "hold");
   const hold = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });

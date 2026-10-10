@@ -95,6 +95,10 @@ export const AudiobookWordTimingStateSchema = z
           key: z.string(),
           label: z.string(),
           file: z.string().optional(),
+          text: z.string().optional(),
+          fromSec: z.number().min(0).optional(),
+          toSec: z.number().positive().optional(),
+          words: z.array(AcousticWordSchema).optional(),
           ready: z.boolean(),
           reason: z.string().optional(),
         })

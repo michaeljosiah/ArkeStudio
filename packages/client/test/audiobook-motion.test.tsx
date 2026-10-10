@@ -130,7 +130,7 @@ it("requires a current quote to generate, then an explicit choice to adopt the d
       state: "review",
     });
   });
-  assert.match(dom.document.body.textContent ?? "", /Your original picture stays saved/);
+  assert.match(dom.document.body.textContent ?? "", /Start frame/);
   await press("Use clip");
   const choose = sent.find((m) => m.kind === "choose-audiobook-motion");
   assert.ok(choose?.kind === "choose-audiobook-motion");
@@ -194,8 +194,10 @@ it("keeps highlighted export unready when native word timing is unavailable and 
     }),
   );
   assert.equal(ready.at(-1), false);
-  assert.ok(button("Prepare word timing")?.hasAttribute("disabled"));
+  assert.equal(button("Prepare word timing"), undefined);
+  assert.ok(button("Use phrase captions"));
   await press("Review blocks");
-  assert.ok(dom.document.querySelector("audio[controls]"));
+  await press("Review");
+  assert.ok(dom.document.querySelector("audio"));
   assert.ok(button("Use phrase captions"));
 });

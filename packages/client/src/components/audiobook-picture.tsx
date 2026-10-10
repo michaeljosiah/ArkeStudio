@@ -351,7 +351,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </div>
         </>
       )}
-      {!open && here !== null && world !== null && <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} />}
+      {!open && here !== null && world !== null && <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} />}
     </section>
   );
 }
