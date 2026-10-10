@@ -50,6 +50,7 @@ import { Chat, ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X 
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
+import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -1128,8 +1129,10 @@ export function ChapterWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   // Timing (design turn 187) is the third view, in the address the same way.
   const viewParam = searchParams.get("view");
-  const view: "manuscript" | "audiobook" | "timing" = viewParam === "audiobook" ? "audiobook" : viewParam === "timing" ? "timing" : "manuscript";
-  const chooseView = (next: "manuscript" | "audiobook" | "timing") =>
+  const view = chapterView(worldId, prodId, chapter.id, viewParam);
+  useEffect(() => { rememberChapterView(worldId, prodId, chapter.id, view); }, [worldId, prodId, chapter.id, view]);
+  const chooseView = (next: "manuscript" | "audiobook" | "timing") => {
+    rememberChapterView(worldId, prodId, chapter.id, next);
     setSearchParams(
       (params) => {
         const copy = new URLSearchParams(params);
@@ -1139,6 +1142,7 @@ export function ChapterWorkspace({
       },
       { replace: true },
     );
+  };
   // The record a run finished with stands until a fresh open replaces it, as the cast's does:
   // the run's last word arrives on its finished event, and what the disk holds now is read
   // again only when the chapter is.
