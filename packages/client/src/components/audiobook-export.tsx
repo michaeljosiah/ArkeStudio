@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { audiobookScopeKey, clockTime, DEFAULT_VIDEO_OPTIONS, ulid, type AudiobookListening, type AudiobookScope, type AudiobookVideoOptions, type AudiobookVideoResult, type ProductionBundle, type VideoShape } from "@arke-studio/contracts";
 import {
+  cancelExport,
   exportAudiobookPlayer,
   exportAudiobookVideo,
   listWebPackages,
@@ -311,7 +312,13 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       </div>
     </div>
   );
-  const footer = finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
+  const renderingBody = rendering === null ? null : <div className="fy-abv-rendering" data-testid="audiobook-export-rendering">
+    <h3>Rendering video</h3>
+    <progress aria-label="Video render progress" max={100} {...(progress !== null ? { value: progress } : {})} />
+    <div className="fy-abv-foot"><span>{progress === null ? "Starting render…" : `${progress}%`}</span><span className="grow" /><button type="button" className="fy-abv-btn" onClick={() => cancelExport(worldId, rendering)}>Stop</button></div>
+    <p>You can close this sheet. The render stays in Activity.</p>
+  </div>;
+  const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to Chapter ${scopedChapter.order}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
 
   if (phone) {
     // One column, from the foot, 44-high presses (197f). The kind is a row of its own here: the
@@ -320,8 +327,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       <>
       <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className="fy-abv-modal fy-abv-modal--phone">
         <div className="fy-abv-psheet" data-testid="audiobook-export">
-          <div className="fy-abv-grab" />
-          {finished !== null ? (
+          {renderingBody !== null ? renderingBody : finished !== null ? (
             finishedBody
           ) : (
             <>
@@ -367,14 +373,14 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className={kind === "video" ? "fy-abv-modal fy-abv-modal--video" : "fy-abv-modal"}>
         <div className="fy-abv-sheet">
         <div className="fy-abv-sub">{sub}</div>
-        {finished !== null ? (
+        {renderingBody !== null ? <div data-testid="audiobook-export">{renderingBody}</div> : finished !== null ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
-            <div className="fy-abv-opts">{scopeRow}</div>
+            {scopeRow}
             {finishedBody}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
-            <div className="fy-abv-opts">{scopeRow}</div>
+            {scopeRow}
             <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
               <button type="button" role="radio" aria-checked={kind === "player"} className={kind === "player" ? "fy-abv-kind on" : "fy-abv-kind"} onClick={() => setKind("player")}>
                 <span className="r" />
