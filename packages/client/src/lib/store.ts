@@ -2616,7 +2616,7 @@ function handleFrame(json: string): void {
       const held = exportsState[event.exportId];
       exportsState = {
         ...exportsState,
-        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files } },
+        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files, ...(event.result.scope !== undefined ? { scope: event.result.scope } : {}), ...(event.result.chapterIds !== undefined ? { chapterIds: event.result.chapterIds } : {}) } },
       };
     }
     if (event.type === "canon.answer") {
@@ -5351,7 +5351,7 @@ export interface ExportState {
   /** An audiobook video's place while it renders (design turn 197d). */
   video?: import("@arke-studio/contracts").AudiobookVideoProgress;
   /** What an audiobook video made, once it has (197e): its folder and files. */
-  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[] };
+  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[]; scope?: import("@arke-studio/contracts").AudiobookScope; chapterIds?: string[] };
   error: string | null;
 }
 

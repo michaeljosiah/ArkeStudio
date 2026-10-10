@@ -1,5 +1,11 @@
 # Code map
 
+Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
+chapter identity. `AudiobookScope` travels through listening/player commands and video options
+to coordinator `productions/audiobook-listening`, `audiobook-export` and `audiobook-video`.
+Scope filters before planning, remains in recovery/manifest/receipts, and partitions delivery
+folders and player position keys while identical chapter encodes stay reusable.
+
 Use this map to locate a change, then follow imports and exact message/event names. Paths in tables are relative to the repository root; workflow paths use the package prefixes stated in the text. This is an ownership map, not a full file inventory.
 
 ## Package relationships

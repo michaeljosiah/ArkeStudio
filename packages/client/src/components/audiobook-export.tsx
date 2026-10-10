@@ -125,7 +125,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     if (rendering === null || held === undefined) return;
     if (held.made !== undefined && held.status === "done") {
       setRendering(null);
-      setVideo({ ok: true, dir: held.made.dir, files: held.made.files, made: 0, renderedAt: new Date().toISOString() });
+      setVideo({ ok: true, ...held.made, made: 0, renderedAt: new Date().toISOString() });
     } else if (held.status === "cancelled" || held.status === "failed") {
       setRendering(null);
       setVideo({ ok: false, blockers: [held.status === "cancelled" ? "the render was cancelled" : (held.error ?? "the render failed")] });

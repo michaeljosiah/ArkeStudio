@@ -3,7 +3,6 @@ import { copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, write
 import { join } from "node:path";
 import {
   assertSlateLabelSupported,
-  audiobookScopeKey,
   AudiobookVideoOptionsSchema,
   BOOK_OPENING_SEC,
   bookParts,
@@ -572,7 +571,7 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
   const work = join(store.dir, videoCacheFolder(productionId), `work-${context.exportId}`);
   // Scope partitions delivery folders, not chapter encodes: identical pixels and audio remain
   // reusable, while a chapter render cannot replace a whole-book manifest from the same day.
-  const folder = videoFolderName(`${book.title}${book.scope.kind === "chapter" ? `-${audiobookScopeKey(book.scope)}` : ""}`, job.startedAt);
+  const folder = videoFolderName(book.title, job.startedAt, book.scope);
   const dir = join(store.dir, "exports", folder);
   const totalSec = book.chapters.reduce((sum, planned) => sum + planned.chapter.seconds, 0);
   const started = now();

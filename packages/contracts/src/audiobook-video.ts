@@ -522,8 +522,9 @@ export function videoFileName(book: string, file: { kind: "chapter"; order: numb
 }
 
 /** The dated folder under the world's exports: `na-love-or-juju-video-20261004`. */
-export function videoFolderName(book: string, isoDate: string): string {
-  return `${videoSlug(book)}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
+export function videoFolderName(book: string, isoDate: string, scope?: AudiobookScope): string {
+  // Add scope after truncating the title: long book titles must not erase chapter identity.
+  return `${videoSlug(book)}${scope?.kind === "chapter" ? `-chapter-${scope.chapterId}` : ""}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————

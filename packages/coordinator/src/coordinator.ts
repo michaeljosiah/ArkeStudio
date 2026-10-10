@@ -4344,7 +4344,8 @@ export class Coordinator {
           return { ok: false, blockers: [control.signal.aborted ? "the render was cancelled" : describeCoordinatorError(err)] };
         });
         if (result.ok) {
-          sourceFingerprint = `video:${exportId}:${JSON.stringify(result.scope ?? { kind: "book" })}:${(result.chapterIds ?? []).join(",")}:${result.made}:${result.files.length}`;
+          const selection = createHash("sha256").update(JSON.stringify([result.scope ?? { kind: "book" }, result.chapterIds ?? []])).digest("hex");
+          sourceFingerprint = `video:${exportId}:${selection}:${result.made}:${result.files.length}`;
           if (last !== undefined) last = { ...last, doneSec: last.totalSec, leftSec: 0 };
           await progress("done", 100, `${result.dir}/${result.files[0]!.name}`, null);
         } else if (control.signal.aborted) await progress("cancelled", 0, null, null);
