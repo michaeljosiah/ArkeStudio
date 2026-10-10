@@ -1297,11 +1297,14 @@ describe("the director reads the book (design turn 184)", () => {
       "Chapter|synopsis · point of view Maren Kest · v4",
       "Tone|quiet dread",
       "Speakers|Maren Kest — their sheets",
-      "Narrator|George — low, warm",
+      "Narrator|George",
       "Notes|book note · 1 speaker note",
       "Before|nothing directed yet",
     ]);
     const sheet = q(m, '[data-testid="direct-sheet"]')!;
+    const narrator = all(m, '[data-testid="direct-reads"] .fy-ab__read')[3]!.querySelector("span")!;
+    assert.equal(narrator.getAttribute("title"), "low, warm");
+    assert.equal(narrator.getAttribute("aria-description"), "low, warm");
     assert.match(sheet.textContent ?? "", /Cast the lines first/);
     assert.match(sheet.textContent ?? "", /nothing spent/);
     await act(async () => q(m, '[data-testid="direct-sheet-direct"]')!.click());

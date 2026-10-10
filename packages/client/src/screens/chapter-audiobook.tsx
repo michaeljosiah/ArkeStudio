@@ -3400,10 +3400,10 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
   const castFirst = castNeeded && cast;
   const speakersNoted = !castFirst && allNotes;
   const pad = String(chapterOrder).padStart(2, "0");
-  const row = (label: string, value: string) => (
+  const row = (label: string, value: string, description?: string) => (
     <div className="fy-ab__read" key={label}>
       <b>{label}</b>
-      <span>{value}</span>
+      <span title={description} aria-description={description}>{value}</span>
     </div>
   );
   const check = (label: string, on: boolean, set: (on: boolean) => void, data?: string, disabled = false) => (
@@ -3429,7 +3429,7 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
           {row("Chapter", [reads.chapter.synopsis ? "synopsis" : "no synopsis", ...(reads.chapter.pov !== undefined ? [`point of view ${reads.chapter.pov}`] : []), `v${reads.chapter.version}`].join(" · "))}
           {row("Tone", reads.tone ?? "none")}
           {row("Speakers", reads.speakers.length === 0 ? "none" : `${reads.speakers.join(" · ")} — their sheets`)}
-          {row("Narrator", `${reads.narrator.label}${reads.narrator.description !== undefined ? ` — ${reads.narrator.description}` : ""}`)}
+          {row("Narrator", reads.narrator.label, reads.narrator.description)}
           {row("Notes", [...(reads.notes.book ? ["book note"] : []), ...(reads.notes.chapter ? ["chapter note"] : []), `${reads.notes.speakers} speaker note${reads.notes.speakers === 1 ? "" : "s"}`].join(" · "))}
           {row("Before", reads.before === null ? "first chapter" : reads.before.blocks === 0 ? "nothing directed yet" : `chapter ${String(reads.before.order).padStart(2, "0")} · ${reads.before.blocks} directed`)}
         </div>

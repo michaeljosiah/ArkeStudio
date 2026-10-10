@@ -6680,6 +6680,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-vd__note--stacked > .fy-vd__note-input:focus { color: var(--foreground); }
 .fy-ab__text--proposed .fy-ab__mk, .fy-ab__text--proposed .fy-ab__mks, .fy-ab__text--proposed .fy-ab__emph { outline: 1.5px dashed var(--muted-foreground); outline-offset: 1px; border-radius: 4px; }
 .fy-ab__directsheet { display: flex; flex-direction: column; gap: 10px; }
+.fy-page-sheet__head + .fy-page-sheet__body .fy-ab__directsheet .fy-ab__card-title { display: none; }
 .fy-ab__reads { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; }
 .fy-ab__read { display: flex; align-items: center; gap: 10px; min-width: 0; height: 30px; padding: 0 10px; font-size: 12px; }
 .fy-ab__read + .fy-ab__read { border-top: 1px solid var(--border); }
