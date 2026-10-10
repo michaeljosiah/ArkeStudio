@@ -147,6 +147,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
+    lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
     productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("production-setup.result"), worldId: UlidSchema,

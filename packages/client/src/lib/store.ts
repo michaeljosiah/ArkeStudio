@@ -823,6 +823,16 @@ export function subscribeBenchTakeDeleted(listener: (answer: BenchTakeDeleted) =
 }
 
 export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
+export type LookRenameResult = Extract<DomainEvent, { type: "reference.look-renamed" }>;
+const lookRenameListeners = new Set<(result: LookRenameResult) => void>();
+export function subscribeLookRename(listener: (result: LookRenameResult) => void): () => void {
+  lookRenameListeners.add(listener);
+  return () => { lookRenameListeners.delete(listener); };
+}
+export function renameSavedLook(worldId: string, sheetId: string, lookId: string, name: string, expectedName: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "rename-character-look", worldId, sheetId, lookId, name, expectedName, requestId }) ? requestId : null;
+}
 const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
 export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
   referenceImageListeners.add(listener);
@@ -1765,6 +1775,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "reference.images") {
       for (const listener of referenceImageListeners) listener(event);
+    }
+    if (event.type === "reference.look-renamed") {
+      for (const listener of lookRenameListeners) listener(event);
     }
     if (event.type === "world.artifacts") {
       for (const listener of worldArtifactListeners) listener(event);
@@ -4250,7 +4263,7 @@ export function acceptChapterLook(
   worldId: string,
   sheetId: string,
   takeId: string,
-  options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
+  options: { name?: string; closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
 ): boolean {
   return send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
 }

@@ -231,7 +231,7 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
                   key={look.id}
                   disabled={locked}
                   on={lookInUse?.id === look.id}
-                  label={lookTileLabel(look.prompt, look.kind)}
+                  label={(look.name ?? lookTileLabel(look.prompt, look.kind))}
                   sub={look.attachedTo?.kind === "scene" ? "this scene" : "this production"}
                   thumb={<span className="fy-chardialog__thumb"><img src={mediaUrl(world.meta.slug, `references/${sheetId}/${look.file}`)} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /></span>}
                   onPress={() => useLook(look)}

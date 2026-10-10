@@ -453,6 +453,8 @@ export const ADAPT_FROM_SCHEMA_VERSION = 70;
  * and before a creation that writes one.
  */
 export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
+/** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
+export const LOOK_NAMES_SCHEMA_VERSION = 72;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -460,6 +462,10 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
+      if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
+        const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
+        if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
+      }
       const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);

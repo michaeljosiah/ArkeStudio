@@ -8,6 +8,7 @@ import {
   normalizeViewName,
   orderedLocationViews,
   ReferenceKitSchema,
+  CharacterLookSchema,
   type Job,
   type Compilation,
   type LocationView,
@@ -438,6 +439,7 @@ export async function acceptCharacterLook(
     file: string;
     kind: NonNullable<ReferenceKit["looks"]>[number]["kind"];
     prompt: string;
+    name?: string;
     jobId?: Job["id"];
     takeId: Take["id"];
     artDirectionVersion: number;
@@ -468,6 +470,7 @@ export async function acceptCharacterLook(
           file: input.file,
           kind: input.kind,
           prompt: input.prompt,
+          ...(input.name?.trim() ? { name: CharacterLookSchema.shape.name.unwrap().parse(input.name.trim()) } : {}),
           ...(input.jobId ? { sourceJobId: input.jobId } : {}),
           sourceTakeId: input.takeId,
           artDirectionVersion: input.artDirectionVersion,
@@ -510,6 +513,20 @@ export async function attachCloseView(
     review,
     options,
   );
+}
+
+/** Only metadata changes: the read and base-hash fence preserve every generation and attachment field. */
+export async function renameCharacterLook(store: WorldStore, sheetId: string, lookId: string, name: string, expectedName: string | null, options: ReferenceMutationOptions = {}): Promise<void> {
+  const next = name.trim();
+  if (next !== "") CharacterLookSchema.shape.name.parse(next);
+  const loaded = await readKit(store, sheetId);
+  const look = loaded?.kit.looks?.find((entry) => entry.id === lookId);
+  if (loaded === null || look === undefined) throw new Error("This saved look is no longer available.");
+  if ((look.name ?? null) !== expectedName) throw new Error("This look was renamed elsewhere. Review its current name and try again.");
+  if ((look.name ?? "") === next) return;
+  const { name: _oldName, ...rest } = look;
+  const renamed = next === "" ? rest : { ...rest, name: next };
+  await writeKit(store, sheetId, { ...loaded.kit, looks: loaded.kit.looks!.map((entry) => entry.id === lookId ? renamed : entry) }, loaded.raw, undefined, options);
 }
 
 export async function promoteCharacterLook(
