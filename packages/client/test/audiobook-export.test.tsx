@@ -122,7 +122,7 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(lastAsk(m, "read-audiobook-video")!.options.scope, { kind: "book" });
     assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true, "the old chapter quote is not a book quote");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: bookAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope: { kind: "book" } } }));
-    assert.match(text(q(m, '[data-testid="audiobook-export-omitted"]')), /1 incomplete chapter will be left outNeap/);
+    assert.match(text(q(m, '[data-testid="audiobook-export-omitted"]')), /1 incomplete chapter will be left outChapter 2 · Neap/);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
     assert.ok(q(m, '[data-testid="audiobook-export-omitted"]'), "a late chapter reply cannot replace the chosen book plan");
   });

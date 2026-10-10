@@ -1637,7 +1637,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null, "closed until pressed");
     await act(async () => looks!.click());
     assert.ok(document.body.querySelector('[data-testid="look-sheet"]'), "the Looks sheet opens on the body");
-    assert.equal(sentOf(m, "read-audiobook-looks").length, 1, "which chapters chose which look is asked when it opens");
+    assert.equal(sentOf(m, "read-audiobook-looks").length, 0, "the chapter overview opens without loading a character's saved-look usage (turn 210)");
     await act(async () => (document.body.querySelector('[data-testid="look-done"]') as HTMLButtonElement).click());
     assert.equal(document.body.querySelector('[data-testid="look-sheet"]'), null);
     // The rail's Voices reaches them too (rule 18), which is how Manuscript does.
@@ -2543,7 +2543,7 @@ describe("edited lines keep their speaker (design turn 198)", () => {
       assert.equal(q(m, '.fy-ch__viewline [data-testid="audiobook-cast"]'), null, "no press of its own on the line");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
       assert.equal(q(m, ".fy-ab__toolmenu--lead .fy-ab__menu-hd")?.textContent, "2 paragraphs to cast");
-      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Direct and illustrate"]);
+      assert.deepEqual(all(m, ".fy-ab__toolmenu--lead .fy-ab__menu-opt").map((item) => item.textContent), ["Cast 2 paragraphs", "Cast the chapter4", "Chapter actions"]);
       await act(async () => q(m, '[data-testid="direct-illustrate-items"]')!.click());
       assert.ok(q(m, '[data-testid="direct-audiobook"]'), "Direct and illustrate opens its own items");
       await act(async () => q(m, '[data-testid="direct-illustrate"]')!.click());
@@ -2579,7 +2579,7 @@ it("chapter export recovery quotes only its missing blocks and names the return 
   assert.match(quote.textContent!, /The 2 current takes stay as they are/);
   assert.equal(quote.querySelector("h3"), null, "the native sheet supplies the one heading");
   assert.match(q(m, '[data-testid="audiobook-confirm"]')!.textContent!, /^Read 2 blocks/);
-  await act(async () => [...quote.closest("dialog")!.querySelectorAll(".fy-page-sheet__foot button")].find(button => button.textContent === "Back to export")!.click());
+  await act(async () => [...quote.closest("dialog")!.querySelectorAll<HTMLButtonElement>(".fy-page-sheet__foot button")].find(button => button.textContent === "Back to export")!.click());
   assert.equal(q(m, '[data-testid="read-sheet"]'), null);
   assert.ok(q(m, '[data-testid="audiobook-export"]'));
   assert.equal(m.sent.filter(message => message.kind === "read-audiobook-chapter").length, 1, "returning from the quote never confirms it");

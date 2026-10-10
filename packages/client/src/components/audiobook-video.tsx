@@ -139,7 +139,7 @@ export function videoQuote(state: AudiobookVideoState | null, options: Audiobook
 }
 
 /** The Video options (197a): Files, Shape, Pictures, Subtitles, Openings, Chapters, Audio. */
-export function VideoOptionRows({ options, setOptions, plan, split, onShape }: { options: AudiobookVideoOptions; setOptions: (next: AudiobookVideoOptions) => void; plan: AudiobookListening | null; split: string; onShape: (shape: VideoShape) => void }) {
+export function VideoOptionRows({ options, setOptions, split, onShape }: { options: AudiobookVideoOptions; setOptions: (next: AudiobookVideoOptions) => void; plan: AudiobookListening | null; split: string; onShape: (shape: VideoShape) => void }) {
   const burned = burnsIn(options);
   return <>
     {options.scope?.kind !== "chapter" && <div className="fy-abv-opt"><b>Files</b><Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "One for the book"]] as const} onChange={(files) => setOptions({ ...options, files })} /><span className="grow" /><i>{split}</i></div>}
