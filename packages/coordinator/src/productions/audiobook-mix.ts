@@ -76,6 +76,7 @@ async function decode(dir: string, file: string, ffmpeg: FfmpegRunner | undefine
     await rm(toExtendedLength(out), { force: true }).catch(() => {});
   }
 }
+export { decode as decodeAudiobookAudio };
 
 /** Linear interpolation to another rate: only for a plain WAV on a machine with no ffmpeg. */
 export function resample(pcm: SpeechPcm, rate: number): SpeechPcm {

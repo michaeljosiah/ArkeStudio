@@ -1,12 +1,12 @@
 # Turn 208 — audiobook motion and highlighted captions
 
-**Proposed, awaiting owner approval. Design only for #1672.** No product behavior, world schema or provider integration changes in this PR. The review page is an HTML copy of turn 208 in the design master, using the same tokens and existing public artwork. No private chapter text or images are included.
+**Approved by the owner on 2026-10-10 with turns 206–209. Implementation for #1672 is in progress in PR 1687.** The review page is an HTML copy of turn 208 in the design master, using the same tokens and existing public artwork. No private chapter text or images are included.
 
-Open [the focused HTML review](audiobook-motion-208.review.html), or [the master](Arke%20Studio.dc.html#t208). The owner can approve motion and captions separately. An approved drawing is a prerequisite to implementation in this session.
+Open [the focused HTML review](audiobook-motion-208.review.html), or [the master](Arke%20Studio.dc.html#t208). The owner approved the complete turn before implementation. Extra UI surfaces still require a design approval.
 
-## What approval would cover
+## Approved scope
 
-- **Motion:** one Animate action on an existing still, an editable motion prompt and a supported first-frame model, explicit resolution/time/price, a muted candidate review, and Use clip. Repeat is proposed as the default; Hold last frame is the alternative. Use still reverses the choice. The clip lasts on the picture's existing clock until the next picture, which can span several blocks.
+- **Motion:** one Animate action on an existing still, an editable motion prompt and a supported first-frame model, explicit resolution/time/price, a muted candidate review, and Use clip. Repeat is the approved default; Hold last frame is the alternative. Use still reverses the choice. The clip lasts on the picture's existing clock until the next picture, which can span several blocks.
 - **Captions:** Phrases remains the default. Highlight current word appears only for burned-in captions, preserves short two-line cues and plain sidecars, and waits for validated timing. Preparation operates on the saved reading, with stale/unmatched block review and an explicit phrase-caption escape. No approximate timing is silently presented as word-accurate.
 
 Review decisions are therefore bounded: the Animate entry and choice flow; Repeat versus Hold as the default; the retained source still; the new caption style and timing readiness states. Implementation may need a further design if evaluation shows an extra alignment setup or correction surface is needed.
@@ -25,7 +25,7 @@ Review decisions are therefore bounded: the Animate entry and choice flow; Repea
 
 These conclusions are from current `origin/main` (`9caa8ad0`) and live SPEC-047 R-66–R-74, R-132–R-145 and R-147–R-152, plus master turns 194, 197 and 198. Spec requirements are not inferred from the issue's description. Turn 197 itself already states that saved takes keep no word times.
 
-## Delivery slices after approval
+## Implementation slices
 
 1. **Motion data and playback.** Add source-preserving media identity, compatibility/version guards, shared hold/seek behavior and thumbnail handling. Cover in-app playback, the packaged player and video export together. Missing media is visible; export refuses until the author chooses the still or restores the clip.
 2. **Animate and review.** Reuse the queue, quote, first-frame dispatch, Library filing and explicit acceptance. Generation never attaches on completion. Bind results to the exact block/source; a late candidate cannot replace a changed picture. Keep source look/shot/focus and joins/splits behavior. Update render cache identity for motion and end behavior.

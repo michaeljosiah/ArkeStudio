@@ -145,6 +145,7 @@ export function mountAudiobookPlayer(root, options) {
     }
   }
   // Listen on the book opens on Continue when a place is kept here, and plays at once when not.
+  if (Number.isFinite(options.startAt) && chapters[ci]) t = Math.max(0, Math.min(chapters[ci].seconds, options.startAt));
   let mode = options.autoplay && !(options.continueFirst && saved && playable(ci)) ? "playing" : "poster";
   let playing = false;
   let sheetOpen = false;
@@ -178,6 +179,7 @@ export function mountAudiobookPlayer(root, options) {
 .abp [hidden]{display:none!important}
 .abp-pic{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;opacity:0;transition:opacity 1s ease}
 .abp-pic.on{opacity:1}
+.abp-clipnote{position:absolute;left:24px;top:76px;color:white;font-size:12px;z-index:2}
 .abp-scrim-top{position:absolute;left:0;right:0;top:0;height:160px;background:linear-gradient(to bottom,color-mix(in srgb,var(--abp-bg) 72%,transparent),transparent);pointer-events:none}
 .abp-scrim-bot{position:absolute;left:0;right:0;bottom:0;height:330px;background:linear-gradient(to top,color-mix(in srgb,var(--abp-bg) 90%,transparent) 12%,transparent);pointer-events:none}
 .abp-top{position:absolute;left:32px;right:24px;top:26px;display:flex;align-items:flex-start;gap:4px}
@@ -257,7 +259,7 @@ export function mountAudiobookPlayer(root, options) {
   root.tabIndex = 0;
   root.innerHTML =
     "<style>" + css + "</style>" +
-    '<img class="abp-pic" data-ref="picA" alt=""><img class="abp-pic" data-ref="picB" alt="">' +
+    '<img class="abp-pic" data-ref="picA" alt=""><video class="abp-pic" data-ref="clipA" muted playsinline preload="auto"></video><img class="abp-pic" data-ref="picB" alt=""><video class="abp-pic" data-ref="clipB" muted playsinline preload="auto"></video><span class="abp-clipnote" data-ref="clipNote" role="status"></span>' +
     '<div class="abp-scrim-top abp-chrome"></div><div class="abp-scrim-bot abp-chrome"></div>' +
     '<div class="abp-top abp-chrome"><div class="abp-title"><div class="abp-eyebrow" data-ref="eyebrow"></div><div class="abp-chap" data-ref="chap"></div></div>' +
     '<button type="button" class="abp-ib abp-text-top" data-act="text" data-ref="textTop" aria-label="Text" title="Text">' + icon(I.text) + "</button>" +
@@ -304,6 +306,21 @@ export function mountAudiobookPlayer(root, options) {
   let segIndex = 0;
   let shown = 0;
   let shownSrc = null;
+  let shownKey = null;
+  const clips = [ref("clipA"), ref("clipB")];
+  const clipPictures = [null, null];
+  const clipFadeUntil = [0, 0];
+  const clipFailures = new Set();
+  const reducedMotion = win.matchMedia ? win.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  const onClipError = (event) => {
+    const index = clips.indexOf(event.target);
+    if (index < 0) return;
+    const picture = clipPictures[index];
+    if (picture && picture.motion) clipFailures.add(picture.motion.src);
+    clips[index].classList.remove("on");
+    if (index === shown) ref("clipNote").textContent = "clip unavailable · showing the still";
+  };
+  for (const clip of clips) { clip.muted = true; clip.addEventListener("error", onClipError); }
 
   // ---- the audio, back to back -----------------------------------------------------------------
   const chapter = () => chapters[ci];
@@ -545,21 +562,45 @@ export function mountAudiobookPlayer(root, options) {
   function pictureAt(c, at) {
     let found = null;
     for (const picture of c.pictures) if (picture.at <= at + 1e-6) found = picture;
-    return found ? found.src : c.opening || options.cover || null;
+    return found || { at: 0, src: c.opening || options.cover || null };
   }
-  function showPicture(src) {
-    if (src === shownSrc) return;
-    shownSrc = src;
-    const next = 1 - shown;
-    const incoming = el.pics[next];
-    const outgoing = el.pics[shown];
-    if (src) {
-      incoming.setAttribute("src", src);
-      incoming.classList.add("on");
-    } else incoming.classList.remove("on");
-    outgoing.classList.remove("on");
-    shown = next;
-    syncSession();
+  function showPicture(picture) {
+    const key = (chapter() ? chapter().id : "") + "|" + JSON.stringify(picture);
+    if (key !== shownKey) {
+      clipFadeUntil[shown] = shownKey !== null && key.split("|")[0] === shownKey.split("|")[0] ? Date.now() + 1000 : 0;
+      shownKey = key;
+      shownSrc = picture.src;
+      const next = 1 - shown;
+      const incoming = el.pics[next];
+      if (picture.src) { incoming.setAttribute("src", picture.src); incoming.classList.add("on"); }
+      else incoming.classList.remove("on");
+      el.pics[shown].classList.remove("on");
+      clips[shown].classList.remove("on");
+      clips[next].pause?.();
+      clipPictures[next] = picture;
+      if (picture.motion) clips[next].setAttribute("src", picture.motion.src);
+      else clips[next].removeAttribute("src");
+      shown = next;
+      syncSession();
+    }
+    // The audio is the clock even after seeking, changing speed, or a repeat boundary.
+    for (let index = 0; index < clips.length; index++) {
+      const clip = clips[index];
+      const current = clipPictures[index];
+      const motion = current && current.motion;
+      const outgoing = index !== shown && Date.now() < clipFadeUntil[index];
+      const visible = (index === shown || outgoing) && motion && !current.motionProblem && !(reducedMotion && reducedMotion.matches) && !clipFailures.has(motion.src);
+      if (!visible) { clip.classList.remove("on"); clip.pause?.(); continue; }
+      const elapsed = Math.max(0, t - current.at);
+      const target = motion.behavior === "repeat" ? elapsed % motion.seconds : Math.min(elapsed, Math.max(0, motion.seconds - 1 / 120));
+      if (Number.isFinite(target) && clip.readyState >= 1 && Math.abs(clip.currentTime - target) > 0.12) clip.currentTime = target;
+      clip.muted = true;
+      clip.playbackRate = speed;
+      if (index === shown) clip.classList.add("on");
+      if (playing && (motion.behavior === "repeat" || elapsed < motion.seconds - 1 / 120)) { if (clip.paused) { const result = clip.play(); if (result && result.catch) result.catch(() => {}); } }
+      else clip.pause?.();
+    }
+    ref("clipNote").textContent = picture.motionProblem || (picture.motion && clipFailures.has(picture.motion.src) ? "clip unavailable · showing the still" : "");
   }
   function sentenceAt(c, at) {
     const block = blockAt(c, at);
@@ -670,7 +711,7 @@ export function mountAudiobookPlayer(root, options) {
     renderFollow();
     renderSheet();
     renderPoster();
-    showPicture(c ? pictureAt(c, t) : options.cover || null);
+    showPicture(c ? pictureAt(c, t) : { at: 0, src: options.cover || null });
     syncSession();
     syncPosition();
   }
@@ -930,6 +971,7 @@ export function mountAudiobookPlayer(root, options) {
       if (playing) pause();
     },
     destroy() {
+      for (const clip of clips) { clip.removeEventListener("error", onClipError); clip.pause?.(); clip.removeAttribute("src"); }
       for (const audio of players) {
         audio.removeEventListener("ended", onEnded);
         audio.removeEventListener("timeupdate", onTime);

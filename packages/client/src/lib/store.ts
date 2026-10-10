@@ -759,6 +759,18 @@ export function subscribeAudiobookVideoExported(listener: (answer: AudiobookVide
 }
 export type AudiobookVideoStateAnswer = Extract<DomainEvent, { type: "audiobook.video-state" }>;
 const audiobookVideoStateListeners = new Set<(answer: AudiobookVideoStateAnswer) => void>();
+export type AudiobookMotionAnswer = Extract<DomainEvent, { type: "audiobook.motion" }>;
+const audiobookMotionListeners = new Set<(answer: AudiobookMotionAnswer) => void>();
+export function subscribeAudiobookMotion(listener: (answer: AudiobookMotionAnswer) => void): () => void {
+  audiobookMotionListeners.add(listener);
+  return () => audiobookMotionListeners.delete(listener);
+}
+export type AudiobookWordTimingAnswer = Extract<DomainEvent, { type: "audiobook.word-timing" }>;
+const audiobookWordTimingListeners = new Set<(answer: AudiobookWordTimingAnswer) => void>();
+export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTimingAnswer) => void): () => void {
+  audiobookWordTimingListeners.add(listener);
+  return () => audiobookWordTimingListeners.delete(listener);
+}
 export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void {
   audiobookVideoStateListeners.add(listener);
   return () => audiobookVideoStateListeners.delete(listener);
@@ -1728,6 +1740,8 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.video-exported") {
       for (const listener of audiobookVideoExportedListeners) listener(event);
     }
+    if (event.type === "audiobook.motion") for (const listener of audiobookMotionListeners) listener(event);
+    if (event.type === "audiobook.word-timing") for (const listener of audiobookWordTimingListeners) listener(event);
     if (event.type === "audiobook.video-state") {
       for (const listener of audiobookVideoStateListeners) listener(event);
     }

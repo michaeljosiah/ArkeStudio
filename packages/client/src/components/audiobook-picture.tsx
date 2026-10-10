@@ -28,6 +28,7 @@ import { Button, Textarea, cx } from "./ui.js";
 import { usePictureSuggestion, type PictureSuggestionState } from "./audiobook-suggest.js";
 import { PictureCard, PicturePress } from "./audiobook-picture-card.js";
 import { chosenFrom, madePicture } from "./audiobook-made-picture.js";
+import { AudiobookMotionControl } from "./audiobook-motion.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -350,6 +351,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </div>
         </>
       )}
+      {!open && here !== null && world !== null && <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} />}
     </section>
   );
 }

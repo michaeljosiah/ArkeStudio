@@ -161,7 +161,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-nine is the beats a chapter was grouped by, named on its audiobook record (design turn 201).
 // Seventy is the story a production setup is adapted from, on its strict draft (design turn 205).
 // Seventy-one is a micro drama's Target, on the draft and on season.json (design turn 205).
-export const SUPPORTED_SCHEMA_VERSION = 71;
+// Seventy-two is a saved kit look's optional name (turn 207); seventy-three adds retained
+// audiobook motion and exact-audio word timing to the strict chapter record (turn 208).
+export const SUPPORTED_SCHEMA_VERSION = 73;
 
 export class WorldOpenError extends Error {
   constructor(

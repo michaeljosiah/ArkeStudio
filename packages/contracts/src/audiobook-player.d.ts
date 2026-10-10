@@ -31,7 +31,7 @@ export interface AudiobookPlayerChapter {
   audio?: AudiobookPlayerAudio[];
   blocks: AudiobookPlayerBlock[];
   gaps: ReadonlyArray<{ at: number; from: number; to: number }>;
-  pictures: ReadonlyArray<{ at: number; src: string }>;
+  pictures: ReadonlyArray<{ at: number; src: string; motion?: { src: string; seconds: number; behavior: "repeat" | "hold" }; motionProblem?: string }>;
   /** What shows before the chapter's first picture. */
   opening: string | null;
 }
@@ -46,6 +46,8 @@ export interface AudiobookPlayerOptions {
   storageKey?: string | null;
   /** Listen on a chapter: start there, at the kept place when it is in that chapter. */
   chapterId?: string;
+  /** An explicit preview start on the selected chapter's clock; never changes a saved listening place. */
+  startAt?: number;
   /** Play at once rather than open on the poster. */
   autoplay?: boolean;
   /** With `autoplay`: still open on Continue when a place is kept on this device. */

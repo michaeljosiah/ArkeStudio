@@ -19,6 +19,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { BodyLayer } from "./body-layer.js";
 import { EditorDialog } from "./editor-dialog.js";
+import { WordTimingControl } from "./audiobook-word-timing.js";
 import { Button } from "./ui.js";
 import { Folder, Seg, SHAPES, Toggle, VideoFiles, VideoOptionRows, VideoPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
 
@@ -69,6 +70,8 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
   const [video, setVideo] = useState<AudiobookVideoResult | null>(null);
   const [again, setAgain] = useState(0);
   const [preview, setPreview] = useState(false);
+  const [wordTimingReady, setWordTimingReady] = useState(false);
+  const highlights = options.captionStyle === "word" && (options.subtitles === "burn-in" || options.subtitles === "burn-in+sidecar");
   const state = useVideoState(worldId, production.meta.id, options, connection === "open" && kind === "video", again);
   const quote = videoQuote(state, options);
   useEffect(() => {
@@ -153,7 +156,7 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
   const length = whole.reduce((sum, chapter) => sum + chapter.seconds, 0);
   const finished = kind === "video" && video?.ok === true ? video : null;
   const progress = held?.status === "running" ? Math.round(held.percent) : null;
-  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null;
+  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null && (!highlights || wordTimingReady);
   const sub = finished !== null ? `video · ${finished.made === 0 ? "nothing changed · " : ""}rendered ${stamp(finished.renderedAt)}` : plan === null ? "…" : `${whole.length} of ${plan.chapters.length} chapter${plan.chapters.length === 1 ? "" : "s"} read · ${clockTime(length)}`;
   const blockers = kind === "video" && video?.ok === false ? video.blockers : [];
 
@@ -359,6 +362,7 @@ export function AudiobookExportSheet({ worldId, production, onClose }: { worldId
               <>
                 <div className="fy-abv-opts">
                   <VideoOptionRows options={options} setOptions={choose} plan={plan} split={quote?.split ?? "…"} onShape={shape} />
+                  <WordTimingControl worldId={worldId} productionId={production.meta.id} enabled={highlights} onReady={(ready) => { setWordTimingReady(ready); if (ready) { setAgain((n) => n + 1); asked.current = openAudiobookListening(worldId, production.meta.id); } }} usePhrases={() => choose({ ...options, captionStyle: "phrases" })} />
                 </div>
                 {estimate(true)}
                 {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}

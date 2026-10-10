@@ -4,6 +4,8 @@ import {
   burnedCues,
   CARD_TITLE_SHARE,
   captionFontPx,
+  captionWordParts,
+  audiobookMotionTime,
   clockTime,
   coverCrop,
   cueAt,
@@ -26,6 +28,7 @@ import {
   type ListeningChapter,
   type VideoShape,
   type VideoSegment,
+  type VideoCue,
 } from "@arke-studio/contracts";
 import { downloadMedia } from "../lib/download.js";
 import { mediaUrl } from "../lib/media.js";
@@ -168,6 +171,7 @@ export function VideoOptionRows({ options, setOptions, plan, split, onShape }: {
         <Seg label="Position" value={options.captionPosition} options={[["bottom", "Bottom"], ["middle", "Middle"]] as const} disabled={!burned} onChange={(captionPosition) => setOptions({ ...options, captionPosition })} />
         <Seg label="Size" value={options.captionSize} options={[["s", "S"], ["m", "M"], ["l", "L"]] as const} disabled={!burned} onChange={(captionSize) => setOptions({ ...options, captionSize })} />
       </div>
+      {burned && <div className="fy-abv-opt"><b>Style</b><Seg label="Caption style" value={options.captionStyle ?? "phrases"} options={[["phrases", "Phrases"], ["word", "Highlight current word"]] as const} onChange={(captionStyle) => setOptions({ ...options, captionStyle })} /><span className="grow" /><i>Sidecars stay plain</i></div>}
       <div className="fy-abv-opt">
         <b>Openings</b>
         <Toggle on={options.titleCards} onChange={(titleCards) => setOptions({ ...options, titleCards })}>
@@ -204,6 +208,11 @@ export function withShape(options: AudiobookVideoOptions, shape: VideoShape, cho
 
 type Natural = Record<string, { width: number; height: number }>;
 
+function captionView(cue: VideoCue | null, at: number, style: AudiobookVideoOptions["captionStyle"]): ReactNode {
+  if (cue === null) return null;
+  return style === "word" ? captionWordParts(cue, at).map((part, index) => <span key={index} style={part.active ? { background: "var(--caption-current-word)", color: "var(--caption-current-word-ink)", borderRadius: 3, padding: "0 3px", textShadow: "none" } : undefined}>{part.text}</span>) : cue.text;
+}
+
 /** The shapes the file's crop is worked out against: 16:9 at either size crops alike. */
 const WIDE = shapeSize("1920x1080");
 const TALL = shapeSize("1080x1920");
@@ -229,7 +238,7 @@ function Frame({
   /** Where the preview stands on the chapter's clock: how far Slow push has come. */
   at: number;
   slowPush: boolean;
-  caption: string | null;
+  caption: ReactNode;
   captionSize: number;
   position: "bottom" | "middle";
   natural: Natural;
@@ -238,10 +247,24 @@ function Frame({
 }) {
   const file = segment?.file ?? null;
   const known = file === null ? undefined : natural[file];
+  const clip = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (clip.current === null || segment?.motion === undefined) return;
+    const video = clip.current;
+    const seek = () => { video.currentTime = audiobookMotionTime(segment.motion!.seconds, at - (segment.motionAt ?? segment.from), segment.motion!.behavior); };
+    if (video.readyState >= 1) seek();
+    else video.addEventListener("loadedmetadata", seek, { once: true });
+    return () => video.removeEventListener("loadedmetadata", seek);
+  }, [at, segment]);
   let picture: ReactNode = null;
   if (segment !== null && file !== null) {
     const load = (event: { currentTarget: HTMLImageElement }) => onNatural(file, { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
-    if (segment.kind === "card" || segment.kind === "cover") picture = <img className="blur" src={url(file)} alt="" onLoad={load} />;
+    if (segment.motion !== undefined) {
+      const shape = width < height ? TALL : WIDE;
+      const crop = coverCrop(segment.motion.width, segment.motion.height, shape.width, shape.height, segment.focus ?? { x: .5, y: .5 });
+      const scale = width / crop.width;
+      picture = <video ref={clip} src={url(segment.motion.file)} muted playsInline preload="auto" style={{ position: "absolute", left: -crop.x * scale, top: -crop.y * scale, width: segment.motion.width * scale, height: segment.motion.height * scale, maxWidth: "none" }} />;
+    } else if (segment.kind === "card" || segment.kind === "cover") picture = <img className="blur" src={url(file)} alt="" onLoad={load} />;
     else if (known === undefined) picture = <img className="fill" src={url(file)} alt="" onLoad={load} />;
     else {
       // The file's own crop (turn 197's correction): the picture covering the frame around its
@@ -413,9 +436,9 @@ export function VideoPreview({ worldId, productionId, plan, options, onClose }: 
           </button>
         </div>
         <div style={{ display: "flex", gap: 28, alignItems: "flex-start" }}>
-          <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={cueAt(wide, at)?.text ?? null} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+          <Frame url={url} segment={framed} width={720} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(wide, at), at, options.captionStyle)} captionSize={captionFontPx(landscape, options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Frame url={url} segment={framed} width={228} height={405} at={at} slowPush={options.slowPush} caption={cueAt(tall, at)?.text ?? null} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
+            <Frame url={url} segment={framed} width={228} height={405} at={at} slowPush={options.slowPush} caption={captionView(cueAt(tall, at), at, options.captionStyle)} captionSize={captionFontPx("1080x1920", options.captionSize, 405)} position={options.captionPosition} natural={natural} onNatural={onNatural} burned={burned} />
           </div>
           {target !== null && target.file !== null && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0 }}>
