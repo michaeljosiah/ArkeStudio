@@ -1922,7 +1922,7 @@ export class Coordinator {
     const production = bundle.productions.find(p => p.meta.id === ids.productionId);
     const chapter = production?.chapters.find(c => c.id === ids.chapterId);
     let activityRequest = 0;
-    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, startedAt: at() };
+    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", ...(chapter ? { chapterOrder: chapter.order } : {}), productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, ...(options.only?.length === 1 ? { block: options.only[0]! } : {}), startedAt: at() };
     try {
     await runAudiobookChapter({
       activity: async patch => {

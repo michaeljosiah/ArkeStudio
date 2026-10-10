@@ -802,3 +802,8 @@ and durable block writes. Client `activity-panel.test.tsx` and
 `queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run
 `node scripts/smoke-audiobook-activity.mjs` with Chrome (`ARKE_CHROME` overrides its path)
 for synthetic screenshots and overflow/action measurements at 1400, 390 and 320 px.
+`node scripts/smoke-audiobook-parity.mjs --output <review-directory>` renders the eight approved
+turn206 frames directly from the master alongside real components at matching viewports. Its
+`paired.html` preserves full frames and separately crops the affected receipt/footer/panel;
+the master chapter background is schematic, while the actual side uses the retained chapter
+screen. The harness uses its own headless Chrome profile and public synthetic content.

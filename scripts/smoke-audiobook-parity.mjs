@@ -1,0 +1,83 @@
+import assert from "node:assert/strict";
+import { build } from "esbuild";
+import { parseHTML } from "linkedom";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
+
+// Turn206's approved frames beside real components, using synthetic public example content.
+// The app chrome in the master is schematic; the receipt/panel/footer comparisons are cropped
+// separately so that unrelated retained chapter controls cannot conceal a changed target.
+const root = fileURLToPath(new URL("../", import.meta.url));
+const outputArg = process.argv.indexOf("--output");
+const dir = outputArg >= 0 ? resolve(process.argv[outputArg + 1]) : await mkdtemp(join(tmpdir(), "arke-206-parity-"));
+await mkdir(dir, { recursive: true });
+const master = parseHTML(await readFile(join(root, "design-system/Arke Studio.dc.html"), "utf8")).document;
+const masterStyles = [...master.querySelectorAll("style")].map(element => element.outerHTML).join("\n");
+const masterLinks = [...master.querySelectorAll('link[rel="stylesheet"]')].map(element => element.outerHTML.replace('href="_ds/', 'href="/design/_ds/')).join("\n");
+const frames = [
+  ["206a",1360,790,".notice",".fy-abreceipt"], ["206b",1360,790,".panel",".fy-ap"],
+  ["206c",520,650,null,null], ["206d",1040,940,null,null],
+  ["206e",390,844,".foot","[data-testid=audiobook-hold]"], ["206f",390,844,null,null],
+  ["206g",390,844,".notice",".fy-abreceipt"], ["206h",320,844,null,null],
+];
+for (const [id] of frames) {
+  const frame = master.querySelector(`[id="${id}"] .v206`);
+  assert.ok(frame, `missing approved ${id}`);
+  await writeFile(join(dir, `${id}-approved.html`), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${masterLinks}${masterStyles}<style>html,body{margin:0;padding:0;background:var(--background)}</style></head><body>${frame.outerHTML}</body></html>`);
+}
+const styles = [...(await readFile(join(root,"packages/client/src/main.tsx"),"utf8")).matchAll(/^import "([^"]+\.css)";/gm)].map(match=>match[0]).join("\n");
+await build({stdin:{resolveDir:join(root,"packages/client/src"),loader:"tsx",contents:`
+import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';
+import {MemoryRouter,Routes,Route} from 'react-router';
+import {ChapterScreen} from './screens/chapter-workspace';import {ActivityPanel} from './components/activity-panel';import {AudiobookActivityRow} from './components/audiobook-activity';import {QueueToaster} from './components/queue-toaster';
+import {openActivityPanel} from './lib/activity-panel';import {__setReleasesForTest} from './lib/releases';
+import {__setBridgeForTest,__setStateForTest,__applyEventForTest} from './lib/store';import {FIXTURE_STATE} from '../test/fixture-state';
+${styles}
+const frame=new URLSearchParams(location.search).get('frame'),state=structuredClone(FIXTURE_STATE),world=state.world,at=new Date().toISOString().slice(0,10)+'T13:00:00.000Z';
+state.app.jobs=[];state.app.builds=[];state.app.spend=null;state.app.queues=state.app.queues.map(q=>({...q,paused:false,held:0}));state.worlds=state.worlds.map(w=>({...w,attention:undefined}));
+world.proposals=[];world.referenceTakes=[];world.externalEdits=[];world.artifacts=world.artifacts.map(a=>({...a,extraction:undefined}));
+const salt=world.productions.find(p=>p.meta.id==='saltlight'),hash='sha256:'+'a'.repeat(64);
+world.meta.name='The Undersong';world.productions=[{...salt,meta:{...salt.meta,id:'bell-watch',format:'story',title:'Bell Watch'},takes:[],scenes:[],story:{version:3},chapters:[{id:'crossing',file:'01-crossing',order:4,title:'The crossing',status:'drafting',version:4,words:120,bodyHash:hash}]}];
+const ids={worldId:world.meta.worldId,productionId:'bell-watch',chapterId:'crossing'},read={id:'01J8F3K2QW9VZX4N7M0RTYB6HD',...ids,chapterFile:'01-crossing',chapterTitle:'The crossing',chapterOrder:4,productionTitle:'Bell Watch',worldName:'The Undersong',scope:'chapter',phase:'aligning',startedAt:at,updatedAt:at,toMake:12,made:3,flagged:0,requests:4,request:2,estimatedMicroUsd:240000,models:['Gemini 3.8 Flash TTS'],local:false,jobs:[{id:'req1',index:1,reused:false,saved:3},{id:'req2',index:2,reused:false}]};
+const job=(id,cost,status='succeeded',extra={})=>({id,idempotencyKey:read.id,worldId:ids.worldId,productionId:ids.productionId,target:{kind:'voice-preview',id:'narrator'},capability:'voice-tts',provider:'google',model:'gemini-tts',params:{purpose:'audiobook',blocks:id==='req1'?['p0.0','p1.0','p2.0']:['p3.0','p4.0','p5.0']},estimatedMicroUsd:cost,providerCostMicroUsd:status==='succeeded'?cost:undefined,status,providerJobId:'provider-'+id,attempt:1,error:null,createdAt:at,updatedAt:at,...extra});
+const jobs=[job('req1',50000),job('req2',60000)];
+const preview=job('preview',10000,'succeeded',{target:{kind:'voice-preview',id:'maren-kest/google/reader/voice'},params:{characterName:'Maren Kest'},updatedAt:at.replace('13:','12:')});
+state.app.manifest.models.push({...state.app.manifest.models[0],provider:'google',id:'gemini-tts',displayName:'Gemini 3.8 Flash TTS'});
+const blocked={...read,phase:'interrupted',chapterTitle:'The long crossing beyond the northern watchhouse',reason:'The provider did not confirm whether the request was accepted.'};
+if(frame==='206b'||frame==='206f'){state.app.jobs=[...jobs,preview];state.app.audiobookActivity=[{...read,phase:frame==='206b'?'reading':'aligning'}];if(frame==='206f'){state.app.jobs.push(job('block',40000));state.app.audiobookActivity.push({...read,id:'01J8F3K2QW9VZX4N7M0RTYB6HE',scope:'block',block:'p1.0',phase:'ready',toMake:1,made:1,requests:1,request:1,updatedAt:at.replace('13:','11:'),jobs:[{id:'block',index:1,reused:false}]});}}
+if(frame==='206h'){state.app.jobs=[jobs[0],job('req2',60000,'needs-reconciliation')];state.app.audiobookActivity=[blocked];}
+window.sent=[];__setReleasesForTest([]);__setBridgeForTest({appVersion:'fixture',platform:'test',connect(){},subscribe(){},send(json){window.sent.push(JSON.parse(json));}});__setStateForTest(state,{connection:'open'});
+const alternatives=[['Queued',{...read,phase:'queued',made:0,request:0,jobs:[]},[]],['Ready',{...read,phase:'ready',made:12,request:4,jobs:[{id:'all',index:1,reused:false}]},[job('all',210000)]],['Finished with flags',{...read,phase:'finished',made:10,flagged:2,request:4,jobs:[{id:'all',index:1,reused:false}]},[job('all',210000)]],['Interrupted during alignment',{...read,phase:'interrupted',interruptedDuring:'aligning',reason:'Local transcription is unavailable.'},jobs],['Stopping',{...read,phase:'stopping'},[jobs[0],job('req2',60000,'running')]],['Stopped',{...read,phase:'stopped'},[jobs[0],job('req2',60000,'cancelled')]]];
+flushSync(()=>createRoot(document.getElementById('root')).render(<MemoryRouter initialEntries={['/w/'+world.meta.worldId+'/p/bell-watch/story/chapters/crossing?view=audiobook']}><QueueToaster/><ActivityPanel/>{frame==='206c'?<div className='parity-detail'><h2>Activity · Inbox</h2><AudiobookActivityRow run={read} state={{...state,app:{...state.app,jobs}}}/></div>:frame==='206d'?<div className='parity-grid'>{alternatives.map(([label,run,list])=><div className='parity-card' key={label}><div className='parity-label'>{label}</div><AudiobookActivityRow run={run} state={{...state,app:{...state.app,jobs:list}}}/></div>)}</div>:<Routes><Route path='/w/:worldId/p/:prodId/story/chapters/:chapterId' element={<ChapterScreen/>}/></Routes>}</MemoryRouter>));
+window.openChapter=()=>{const ask=window.sent.findLast(m=>m.kind==='open-chapter');if(!ask)return false;flushSync(()=>__applyEventForTest({type:'chapter.open-result',at,requestId:ask.requestId,...ids,disposition:'opened',body:'The river was quieter than Maren remembered. Across the water, the old watchhouse held a single light.\\n\\n“Wait here. I’ll see whether they kept the gate open.”\\n\\nShe stepped onto the first board. The boatman kept his hand on the rope.\\n\\nA bell sounded once beyond the trees.',version:4,hash,versions:[1,2,3]}));return true;};
+window.start=()=>flushSync(()=>{__applyEventForTest({type:'audiobook.started',at,...ids,requestId:read.id,toMake:12,blocks:12,requests:4});if(frame!=='206e')__applyEventForTest({type:'audiobook.activity',at,run:{...read,phase:'queued',made:0,request:0,jobs:[]}});__applyEventForTest({type:'audiobook.activity',at,run:{...read,phase:frame==='206e'?'aligning':'reading',made:frame==='206e'?3:0,request:frame==='206e'?2:1}});});
+window.panel=()=>flushSync(()=>openActivityPanel('inbox'));window.fixtureReady=true;
+`},bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"actual.js")});
+await writeFile(join(dir,"actual.html"),'<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="actual.css"><style>body{margin:0;background:var(--background)}#root{height:100dvh}.parity-detail{padding:28px}.parity-detail h2{font:var(--type-h3);margin:0 0 20px}.parity-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:24px;background:var(--secondary)}.parity-card{padding:20px;border:1px solid var(--border);border-radius:10px;background:var(--background)}.parity-card .fy-abactivity{margin:0}.parity-label{font:var(--type-label);color:var(--muted-foreground);margin-bottom:14px}</style></head><body><div id="root"></div><script src="actual.js"></script></body></html>');
+const server=createServer(async(req,res)=>{try{const path=new URL(req.url,"http://localhost").pathname;const base=path.startsWith('/design/')?join(root,'design-system'):dir;const file=resolve(base,path.startsWith('/design/')?path.slice(8):path.slice(1)||'paired.html');if(!file.startsWith(resolve(base)+sep))throw Error();res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404);res.end();}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+server.address().port;
+const chrome=process.env.ARKE_CHROME??(process.platform==='win32'?'C:/Program Files/Google/Chrome/Application/chrome.exe':'/usr/bin/google-chrome');
+const profile=await mkdtemp(join(tmpdir(),'arke-206-chrome-'));const child=spawn(chrome,['--headless=new','--no-first-run','--no-default-browser-check','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{windowsHide:true,stdio:'ignore'});
+const until=async read=>{const end=Date.now()+20000;while(Date.now()<end){try{const result=await read();if(result)return result;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('Fixture did not become ready');};let socket;
+try{const port=await until(async()=>(await readFile(join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);const tabs=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();socket=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);await new Promise((r,j)=>{socket.onopen=r;socket.onerror=j;});let seq=0;const pending=new Map();socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(m.error):p.resolve(m.result);}};
+const cdp=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
+const evaluate=async expression=>{const r=await cdp('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
+const shot=async(name,selector)=>{const clip=selector?await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1}})()`):undefined;const r=await cdp('Page.captureScreenshot',{format:'png',...(clip?{clip}:{})});await writeFile(join(dir,name+'.png'),Buffer.from(r.data,'base64'));};
+await cdp('Page.enable');await cdp('Emulation.setFocusEmulationEnabled',{enabled:true});const measurements=[];
+for(const[id,width,height,approvedTarget,actualTarget]of frames){await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await cdp('Page.navigate',{url:url+'/'+id+'-approved.html'});await until(()=>evaluate("Boolean(document.querySelector('.v206'))"));await evaluate('document.fonts.ready');await shot(id+'-approved');if(approvedTarget)await shot(id+'-approved-target',approvedTarget);
+await cdp('Page.navigate',{url:url+'/actual.html?frame='+id});await until(()=>evaluate('window.fixtureReady'));if(!['206c','206d'].includes(id)){await until(()=>evaluate('window.openChapter()'));await until(()=>evaluate("Boolean(document.querySelector('[data-block]'))"));}await evaluate('document.fonts.ready');
+if(['206a','206e','206g'].includes(id))await evaluate('window.start()');if(['206b','206f','206h'].includes(id))await evaluate('window.panel()');if(id==='206c')await evaluate("document.querySelector('summary').click()");await new Promise(r=>setTimeout(r,450));
+const metrics=await evaluate(`({overflow:document.documentElement.scrollWidth>innerWidth,rows:[...document.querySelectorAll('.fy-abactivity')].map(e=>({text:e.innerText,rect:JSON.stringify(e.getBoundingClientRect()),overflow:e.scrollWidth>e.clientWidth+1})),buttons:[...document.querySelectorAll('.fy-abactivity .ui-btn,.fy-abreceipt button')].map(e=>({text:e.innerText,height:e.getBoundingClientRect().height}))})`);measurements.push({id,width,height,...metrics});assert.equal(metrics.overflow,false,id+' root overflow');assert.ok(metrics.rows.every(r=>!r.overflow),id+' row overflow');await shot(id+'-actual');if(actualTarget)await shot(id+'-actual-target',actualTarget);
+if(id==='206f'){await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Open block').click()");await until(()=>evaluate("Boolean(document.querySelector('[data-block=\"p1.0\"].fy-ab__block--selected'))"));assert.equal(await evaluate("window.sent.some(m=>['read-audiobook-chapter','read-audiobook-block','direct-audiobook-chapter'].includes(m.kind))"),false,'returning to the saved block does not start work');}
+if(id==='206h'){await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Resolve request').click()");await until(()=>evaluate("Boolean(document.querySelector('details[open]'))"));assert.equal(await evaluate("window.sent.some(m=>m.kind==='resolve-held-job')"),false,'opening resolution never resubmits');}
+}
+const pair=(id,target=false)=>`<section id="${id}${target?'-target':''}"><h2>${id}${target?' · affected surface':' · full frame'}</h2><div class="pair"><figure><figcaption>Approved master</figcaption><img src="${id}-approved${target?'-target':''}.png"></figure><figure><figcaption>Actual implementation</figcaption><img src="${id}-actual${target?'-target':''}.png"></figure></div></section>`;
+await writeFile(join(dir,'paired.html'),`<!doctype html><html><head><meta charset="utf-8"><title>Turn206 · approved / actual</title><style>body{font:15px system-ui;margin:24px;background:#eee;color:#222}h1{font-size:24px}h2{font-size:18px}section{margin:28px 0}.pair{display:flex;gap:20px;align-items:flex-start;overflow:auto}figure{margin:0;flex:none}figcaption{padding:8px 0;font-weight:600}img{display:block;max-width:none;border:1px solid #bbb}p{max-width:850px}</style></head><body><h1>Turn206 · approved master / actual implementation</h1><p>Both sides use the same state and viewport. Full chapter backgrounds in206a/e/g are schematic in the approved turn; cropped pairs isolate the receipt or footer.206c/d are isolated real operation components, matching the approved component studies.</p>${frames.map(([id,,,target])=>pair(id)+(target?pair(id,true):'')).join('')}</body></html>`);
+await writeFile(join(dir,'measurements.json'),JSON.stringify(measurements,null,2));
+await cdp('Emulation.setDeviceMetricsOverride',{width:1180,height:1050,deviceScaleFactor:1,mobile:false});await cdp('Page.navigate',{url:url+'/paired.html#206f'});await until(()=>evaluate("[...document.images].every(i=>i.complete)"));await shot('paired-206f');
+console.log(JSON.stringify({directory:dir,frames:measurements.map(({id,overflow})=>({id,overflow}))}));
+}finally{socket?.close();child.kill();await new Promise(r=>server.close(r));}

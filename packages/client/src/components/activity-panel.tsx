@@ -1,5 +1,5 @@
 import { AudiobookActivityRow } from "./audiobook-activity.js";
-import { audiobookActivityLive, audiobookJobRun } from "@arke-studio/contracts";
+import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
@@ -28,7 +28,7 @@ import { Badge, Button, Callout, IconButton, Input, cx } from "./ui.js";
 import { ChevronLeft, FileText, Trash } from "./icons.js";
 import { ProviderCallInspector } from "./provider-calls.js";
 import { VideoDoneRow, VideoRunningRow } from "./audiobook-video.js";
-import { historyNote, type NoteTone } from "./queue-note.js";
+import { historyNote, subjectOf, type NoteTone } from "./queue-note.js";
 import { mediaUrl } from "../lib/media.js";
 import { dayLabel, shortDate, shortDateTime } from "../lib/format.js";
 import { bundledReleases } from "../lib/releases.js";
@@ -82,7 +82,7 @@ import {
  * no portal to give.
  */
 
-const TAB_LABEL: Record<ActivityTab, string> = { new: "What's new", inbox: "Inbox", spend: "Spend" };
+const TAB_LABEL: Record<ActivityTab, string> = { new: "What’s new", inbox: "Inbox", spend: "Spend" };
 const TABS: readonly ActivityTab[] = ["new", "inbox", "spend"];
 const TERMINAL = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
 /** Earlier reaches back this far (R-22); the ledger holds everything beyond it. */
@@ -235,32 +235,29 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
         <>
           <div className="fy-ap__tabs">
             <div className="fy-seg" role="tablist">
-              {(phone && needs > 0 ? ["inbox", "new", "spend"] as const : TABS).map((tab) => (
+              {TABS.map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   role="tab"
                   aria-selected={panel.tab === tab}
+                  aria-label={label(tab)}
                   className={cx("fy-seg__item", panel.tab === tab && "fy-seg__item--active")}
                   onClick={() => showActivityTab(tab)}
                 >
-                  {label(tab)}
+                  {TAB_LABEL[tab]}
                 </button>
               ))}
             </div>
           </div>
           {panel.tab !== "new" && (
             <div className="fy-ap__status">
-              <span>{status}</span>
+              <span>{scope === "active" ? state.world?.meta.name ?? status : "All worlds"}</span>
               <span className="fy-ap__push" />
               {activeWorldId && (
                 <span className="fy-ap__scope">
-                  <button type="button" aria-pressed={scope === "active"} onClick={() => setScope("active")}>
-                    this world
-                  </button>
-                  <span>·</span>
-                  <button type="button" aria-pressed={scope === "all"} onClick={() => setScope("all")}>
-                    all worlds
+                  <button type="button" aria-pressed={scope === "all"} onClick={() => setScope(scope === "active" ? "all" : "active")}>
+                    {scope === "active" ? "All worlds" : "This world"} ▾
                   </button>
                 </span>
               )}
@@ -282,8 +279,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
     </div>
   );
   return phone ? <PageSheet open onClose={closeActivityPanel} title="Activity" className="fy-activity-phone"
-    {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}
-    footer={activeWorldId && panel.calls === undefined && panel.tab !== "new" ? <><span>{scope === "active" ? "this world" : "all worlds"}</span><Button onClick={() => setScope(scope === "active" ? "all" : "active")}>{scope === "active" ? "All worlds" : "This world"}</Button></> : undefined}>{content}</PageSheet> : content;
+    {...(panel.calls !== undefined ? { onBack: leaveProviderCalls } : {})}>{content}</PageSheet> : content;
 }
 
 function Eyebrow({ children, first = false }: { children: ReactNode; first?: boolean }) {
@@ -319,7 +315,12 @@ function Inbox({
   const inScope = (worldId: string | undefined): boolean =>
     scope === "all" || activeWorldId === null || worldId === undefined || worldId === activeWorldId;
   const reads = (state.app.audiobookActivity ?? []).filter(run => inScope(run.worldId));
-  const liveReads = reads.filter(audiobookActivityLive);
+  // A later successful chapter read answers the chapter remedy, but cannot settle an older
+  // provider request whose charge is still unknown. Keep that exact request's decision here.
+  const attentionReads = reads.filter(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))
+    || (["interrupted", "finished"].includes(run.phase) && !reads.some(later => later.worldId === run.worldId && later.productionId === run.productionId && later.chapterId === run.chapterId && later.scope === "chapter" && later.phase === "ready" && later.startedAt > run.startedAt)));
+  const liveReads = reads.filter(run => audiobookActivityLive(run) && !attentionReads.includes(run));
+  const ordinaryNeeds = needsYou.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, attentionReads)));
   const ordinaryRunning = running.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, reads)));
   const jobs = [...state.app.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const cutoff = Date.now() - HISTORY_DAYS * 86_400_000;
@@ -347,19 +348,20 @@ function Inbox({
     }
     return null;
   };
-  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && needsYou.length === 0;
+  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
   const rows: ReactNode[] = [];
   let day: string | null = null;
   const recent = [
     ...history.map(job => ({ at: job.updatedAt, job })),
-    ...reads.filter(run => !audiobookActivityLive(run) && Date.parse(run.updatedAt) >= cutoff).map(run => ({ at: run.updatedAt, run })),
+    ...reads.filter(run => !audiobookActivityLive(run) && !attentionReads.includes(run) && Date.parse(run.updatedAt) >= cutoff).map(run => ({ at: run.updatedAt, run })),
   ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, HISTORY_ROWS);
   for (const entry of recent) {
     const label = dayLabel(entry.at);
     if (label !== day) {
-      rows.push(<Eyebrow key={`day:${label}`}>{label}</Eyebrow>);
+      rows.push(<hr className="fy-ap__divider" key={`divider:${label}`} />);
+      rows.push(<Eyebrow key={`day:${label}`}>Earlier · {label.toLowerCase()}</Eyebrow>);
       day = label;
     }
     if ("run" in entry) { rows.push(<AudiobookActivityRow key={entry.run.id} run={entry.run} state={state} />); continue; }
@@ -389,8 +391,9 @@ function Inbox({
         <div className="fy-ap__empty">Nothing running, nothing waiting on you</div>
       ) : (
         <>
-          {needsYou.length > 0 && <Eyebrow first>Needs you · {needsYou.length}</Eyebrow>}
-          {needsYou.map((entry, i) => (
+          {ordinaryNeeds.length + attentionReads.length > 0 && <Eyebrow first>Needs you · {ordinaryNeeds.length + attentionReads.length}</Eyebrow>}
+          {attentionReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
+          {ordinaryNeeds.map((entry, i) => (
             <NeedsYouRow
               key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`}
               entry={entry}
@@ -398,7 +401,7 @@ function Inbox({
               navigate={navigate}
             />
           ))}
-          {ordinaryRunning.length + liveReads.length > 0 && <Eyebrow first={needsYou.length === 0}>Running · {ordinaryRunning.length + liveReads.length}</Eyebrow>}
+          {ordinaryRunning.length + liveReads.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length}</Eyebrow>}
           {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
           {ordinaryRunning.map((entry) =>
             entry.video !== undefined ? (
@@ -450,9 +453,8 @@ function Inbox({
         </div>
       ))}
       {rows}
-      <div className="fy-ap__foot">
-        {recent.length > 0 ? `last ${HISTORY_DAYS} days` : `nothing finished in the last ${HISTORY_DAYS} days · the ledger holds everything`}
-      </div>
+      {attentionReads.some(run => state.app.jobs.some(job => job.status === "needs-reconciliation" && audiobookJobRun(job, [run]))) ? <><hr className="fy-ap__divider" /><div className="fy-ap__foot">The original request and its charge remain in Activity.</div></>
+        : recent.length === 0 && attentionReads.length === 0 && <div className="fy-ap__foot">nothing finished in the last {HISTORY_DAYS} days · the ledger holds everything</div>}
     </>
   );
 }
@@ -604,6 +606,20 @@ function HistoryRow({
   const origin = retry ? jobOrigin(job) : null;
   const diagnostic = [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · ");
   const sub = [note.meta, labels.place].filter((part) => part.length > 0).join(" · ");
+  // Turn 206 keeps an audition visibly distinct from the chapter operation. Older prose,
+  // chapter and sheet-section jobs still retain their own existing history/recovery rows.
+  if (job.target.kind === "voice-preview" && job.params.purpose === undefined && job.status === "succeeded") {
+    const voice = jobOrigin(job);
+    const charge = audiobookRequestCost(job);
+    return <div className="fy-ap__row fy-abactivity fy-voicepreview-activity">
+      <span className="fy-ap__dot fy-ap__dot--ok" aria-hidden />
+      <div className="fy-ap__main"><div className="fy-ap__rowtitle">{subjectOf(job) ? `${subjectOf(job)} · ` : ""}Voice preview ready</div>
+        <div className="fy-ap__rowsub">{labels.place}</div>
+        <div className="fy-ap__rowsub">{labels.model} · {charge.amount !== null ? `${formatMicroUsd(charge.amount)} for this preview` : `${charge.label} for this preview`}</div>
+        {voice && <div className="fy-ap__actions"><Button size="sm" variant="outline" onClick={() => { closeActivityPanel(); navigate(voice.path); }}>Open voice</Button></div>}
+      </div>
+    </div>;
+  }
   return (
     <div className={cx("fy-ap__row", (note.reason || retry || confirming === job.id) && "fy-ap__row--top")}>
       {thumb ? <img className="fy-ap__thumb" src={thumb} alt="" /> : <span className={cx("fy-ap__dot", DOT[note.tone])} />}
