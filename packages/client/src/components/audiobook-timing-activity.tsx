@@ -46,7 +46,10 @@ export function useWordTimingActivity(
       send({ kind: "audiobook-word-timing", worldId, productionId, action: "read", requestId: ulid() });
   }, [worldId, key, connection]);
   return entries.filter(
-    (entry) => scope === "all" || activeWorldId === null || entry.worldId === activeWorldId,
+    // Closing a world aborts its local preparation. A cached transient event is not a
+    // running job in another world, and must disappear before its final reply arrives.
+    (entry) => entry.worldId === worldId &&
+      (scope === "all" || activeWorldId === null || entry.worldId === activeWorldId),
   );
 }
 

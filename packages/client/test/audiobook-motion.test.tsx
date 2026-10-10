@@ -6,8 +6,8 @@ import { parseHTML } from "linkedom";
 import type { ClientMessage, AudiobookPicture, AudiobookMotionQuote } from "@arke-studio/contracts";
 import { AudiobookMotionControl } from "../src/components/audiobook-motion.js";
 import { WordTimingControl } from "../src/components/audiobook-word-timing.js";
-import { WordTimingActivityRow } from "../src/components/audiobook-timing-activity.js";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { useWordTimingActivity, WordTimingActivityRow } from "../src/components/audiobook-timing-activity.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -316,4 +316,18 @@ it("labels preparation as timing and sends Stop without a narration command", as
   await press("Stop");
   assert.equal(sent.at(-1)?.kind, "audiobook-word-timing");
   assert.equal(sent.some((message) => message.kind === "read-audiobook"), false);
+});
+
+it("refreshes timing Activity when opened and drops an aborted world from its transient rows", async () => {
+  function Probe() {
+    const state = useStore().state!;
+    const entries = useWordTimingActivity(state, "all", state.world?.meta.worldId ?? null);
+    return <span data-testid="timing-count">{entries.length}</span>;
+  }
+  await mount(<Probe />);
+  assert.ok(sent.some(message => message.kind === "audiobook-word-timing" && message.action === "read"));
+  await act(async () => __applyEventForTest({ at, type: "audiobook.word-timing", worldId, productionId, requestId: "01J00000000000000000000001", state: { available: true, running: true, done: 2, total: 3, blocks: [] } }));
+  assert.equal(dom.document.querySelector('[data-testid="timing-count"]')?.textContent, "1");
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world: null }, { connection: "open" }));
+  assert.equal(dom.document.querySelector('[data-testid="timing-count"]')?.textContent, "0", "a world close aborts local timing and must hide its old progress");
 });

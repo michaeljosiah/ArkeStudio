@@ -1,4 +1,5 @@
 import { AudiobookActivityRow } from "./audiobook-activity.js";
+import { useWordTimingActivity, WordTimingActivityRow } from "./audiobook-timing-activity.js";
 import { audiobookActivityLive, audiobookJobRun, audiobookRequestCost } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
@@ -118,6 +119,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const [scope, setScope] = useState<"active" | "all">("active");
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
+  const timing = useWordTimingActivity(state, scope, activeWorldId);
   const update = useUpdateStatus();
   const waiting = waitingUpdate(update);
 
@@ -348,7 +350,7 @@ function Inbox({
     }
     return null;
   };
-  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
+  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && timing.length === 0 && ordinaryNeeds.length === 0 && attentionReads.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
   const rows: ReactNode[] = [];
@@ -401,8 +403,9 @@ function Inbox({
               navigate={navigate}
             />
           ))}
-          {ordinaryRunning.length + liveReads.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length}</Eyebrow>}
+          {ordinaryRunning.length + liveReads.length + timing.length > 0 && <Eyebrow first={ordinaryNeeds.length + attentionReads.length === 0}>Running · {ordinaryRunning.length + liveReads.length + timing.length}</Eyebrow>}
           {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
+          {timing.map(entry => <WordTimingActivityRow key={`${entry.worldId}/${entry.productionId}`} entry={entry} state={state} />)}
           {ordinaryRunning.map((entry) =>
             entry.video !== undefined ? (
               <VideoRunningRow key={entry.ref} exportId={entry.ref} worldId={activeWorldId} video={entry.video} percent={entry.percent ?? 0} phone={phone} />

@@ -88,7 +88,6 @@ export function AudiobookMotionControl({
         if (answer.requestId !== asked.current) return;
         if (answer.state === "quoted") {
           setQuote(answer.quote ?? null);
-          setReason(null);
         }
         if (answer.state === "making") setState("making");
         if (answer.state === "review") setState("review");
