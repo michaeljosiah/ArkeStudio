@@ -1,3 +1,5 @@
+import { AudiobookActivityRow } from "./audiobook-activity.js";
+import { audiobookActivityLive, audiobookJobRun } from "@arke-studio/contracts";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router";
 import {
@@ -316,6 +318,9 @@ function Inbox({
   const [confirming, setConfirming] = useState<string | null>(null);
   const inScope = (worldId: string | undefined): boolean =>
     scope === "all" || activeWorldId === null || worldId === undefined || worldId === activeWorldId;
+  const reads = (state.app.audiobookActivity ?? []).filter(run => inScope(run.worldId));
+  const liveReads = reads.filter(audiobookActivityLive);
+  const ordinaryRunning = running.filter(entry => !state.app.jobs.some(job => job.id === entry.ref && audiobookJobRun(job, reads)));
   const jobs = [...state.app.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const cutoff = Date.now() - HISTORY_DAYS * 86_400_000;
   // A job whose generation succeeded but whose result is still being prepared is Running, and
@@ -324,7 +329,7 @@ function Inbox({
   const settled = (job: Job): boolean =>
     TERMINAL.has(job.status) && !(job.status === "succeeded" && job.finalization !== undefined && job.finalization.status !== "complete");
   const history = jobs
-    .filter((job) => settled(job) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff)
+    .filter((job) => settled(job) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff && !audiobookJobRun(job, reads))
     .slice(0, HISTORY_ROWS);
   // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build record's
   // own keys, so an item never dispatched — no route, no credential — is as visible and as
@@ -342,17 +347,23 @@ function Inbox({
     }
     return null;
   };
-  const quiet = running.length === 0 && needsYou.length === 0;
+  const quiet = ordinaryRunning.length === 0 && liveReads.length === 0 && needsYou.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
   const rows: ReactNode[] = [];
   let day: string | null = null;
-  for (const job of history) {
-    const label = dayLabel(job.updatedAt);
+  const recent = [
+    ...history.map(job => ({ at: job.updatedAt, job })),
+    ...reads.filter(run => !audiobookActivityLive(run) && Date.parse(run.updatedAt) >= cutoff).map(run => ({ at: run.updatedAt, run })),
+  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, HISTORY_ROWS);
+  for (const entry of recent) {
+    const label = dayLabel(entry.at);
     if (label !== day) {
       rows.push(<Eyebrow key={`day:${label}`}>{label}</Eyebrow>);
       day = label;
     }
+    if ("run" in entry) { rows.push(<AudiobookActivityRow key={entry.run.id} run={entry.run} state={state} />); continue; }
+    const job = entry.job;
     rows.push(
       <HistoryRow
         key={job.id}
@@ -387,8 +398,9 @@ function Inbox({
               navigate={navigate}
             />
           ))}
-          {running.length > 0 && <Eyebrow first={needsYou.length === 0}>Running · {running.length}</Eyebrow>}
-          {running.map((entry) =>
+          {ordinaryRunning.length + liveReads.length > 0 && <Eyebrow first={needsYou.length === 0}>Running · {ordinaryRunning.length + liveReads.length}</Eyebrow>}
+          {liveReads.map(run => <AudiobookActivityRow key={run.id} run={run} state={state} />)}
+          {ordinaryRunning.map((entry) =>
             entry.video !== undefined ? (
               <VideoRunningRow key={entry.ref} exportId={entry.ref} worldId={activeWorldId} video={entry.video} percent={entry.percent ?? 0} phone={phone} />
             ) : (
@@ -439,7 +451,7 @@ function Inbox({
       ))}
       {rows}
       <div className="fy-ap__foot">
-        {history.length > 0 ? `last ${HISTORY_DAYS} days` : `nothing finished in the last ${HISTORY_DAYS} days · the ledger holds everything`}
+        {recent.length > 0 ? `last ${HISTORY_DAYS} days` : `nothing finished in the last ${HISTORY_DAYS} days · the ledger holds everything`}
       </div>
     </>
   );

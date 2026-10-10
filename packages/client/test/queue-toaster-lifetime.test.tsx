@@ -9,6 +9,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { QueueToaster } from "../src/components/queue-toaster.js";
 import { __applyEventForTest, __pendingQueueRequestsForTest, __setBridgeForTest, __setStateForTest, generateMainPhoto } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import type { AudiobookActivity } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
@@ -45,6 +46,36 @@ async function mount(t: TestContext) {
   await act(async () => root.render(<MemoryRouter><QueueToaster /><Page /></MemoryRouter>));
   return { container, tick };
 }
+
+it("announces a chapter once, never renews the start on request progress, and gives one outcome its own lifetime", async t => {
+  const { container, tick } = await mount(t);
+  const at = "2026-10-10T12:00:00.000Z";
+  const run: AudiobookActivity = { id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_STATE.world!.meta.worldId, productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing", chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "queued", startedAt: at, updatedAt: at, toMake: 20, made: 0, flagged: 0, requests: 4, request: 0, estimatedMicroUsd: 400000, models: ["Gemini"], local: false, jobs: [] };
+  const send = async (patch: Partial<AudiobookActivity>) => {
+    await act(async () => __applyEventForTest({ type: "audiobook.activity", at, run: { ...run, ...patch } }));
+    await tick(0);
+  };
+  await send({});
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 1);
+  await tick(4000);
+  await send({ phase: "aligning", request: 1 });
+  assert.match(container.textContent!, /Aligning narration/);
+  await tick(2000); await tick(0); await tick(400);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0);
+  await send({ phase: "reading", request: 2 });
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "another request does not reopen the notice");
+  await send({ phase: "interrupted", made: 6, reason: "Alignment stopped." });
+  assert.match(container.textContent!, /Alignment stopped/);
+  await tick(11999);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 1);
+  await tick(1); await tick(0); await tick(400);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0);
+  await send({ phase: "interrupted", made: 6, reason: "Alignment stopped." });
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "replayed outcome never reannounces");
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, audiobookActivity: [{ ...run, id: "01J8F3K2QW9VZX4N7M0RTYB6HE", phase: "ready" }] } }));
+  await tick(0);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "snapshot history is quiet");
+});
 
 it("expires receipts and refusals across navigation even after a pointer is released outside the toaster (issue 1001)", async (t) => {
     const { container, tick } = await mount(t);
