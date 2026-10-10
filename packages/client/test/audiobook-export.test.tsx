@@ -282,8 +282,11 @@ describe("Export audiobook · Video (turn 197)", () => {
       assert.match(ask.exportId, /^vb_[0-9A-HJKMNP-TV-Z]{26}$/);
       const video = { title: "Inkbound", chapter: 1, of: 1, doneSec: 724, totalSec: 1900, leftSec: 180 };
       await act(async () => __applyEventForTest({ at: AT, type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: ask.exportId, deliveryKind: "audiobook-video", status: "running", percent: 41, output: null, video, error: null }));
-      assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /rendering · 41%$/);
-      assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true, "one render at a time");
+      assert.match(text(q(m, '[data-testid="audiobook-export-rendering"]')), /Rendering video41%StopYou can close this sheet/);
+      assert.equal(q(m, '[data-testid="audiobook-export-rendering"] progress')?.getAttribute("value"), "41");
+      assert.equal(q(m, '[data-testid="audiobook-video-render"]'), null, "one render at a time");
+      await press(button("Stop"));
+      assert.deepEqual(lastAsk(m, "cancel-export"), { kind: "cancel-export", worldId: FIXTURE_WORLD_ID, exportId: ask.exportId });
       const files = [{ name: "inkbound-01-slack-water.mp4", seconds: 1900, bytes: 338 * 1024 * 1024, shape: "1920x1080" as const, sidecars: [".srt" as const, ".vtt" as const], picture: "artifacts/stair.png" }];
       await act(async () => __applyEventForTest({ at: AT, type: "audiobook.video-exported", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: ask.exportId, result: { ok: true, dir: "exports/inkbound-video-20261003", files, made: 1, renderedAt: AT } }));
       const sheet = text(q(m, '[data-testid="audiobook-export"]'));
