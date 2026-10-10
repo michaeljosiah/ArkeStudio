@@ -31,7 +31,16 @@ export interface AudiobookPlayerChapter {
   audio?: AudiobookPlayerAudio[];
   blocks: AudiobookPlayerBlock[];
   gaps: ReadonlyArray<{ at: number; from: number; to: number }>;
-  pictures: ReadonlyArray<{ at: number; src: string; motion?: { src: string; seconds: number; behavior: "repeat" | "hold" }; motionProblem?: string }>;
+  pictures: ReadonlyArray<{
+    at: number;
+    src: string;
+    /** The picture's hold on the chapter clock. Older packages derive it from the next picture. */
+    seconds?: number;
+    /** Normalized position in the source still; Slow push keeps this point still. */
+    focus?: { x: number; y: number };
+    motion?: { src: string; seconds: number; behavior: "repeat" | "hold" };
+    motionProblem?: string;
+  }>;
   /** What shows before the chapter's first picture. */
   opening: string | null;
 }
@@ -42,7 +51,7 @@ export interface AudiobookPlayerOptions {
   /** The book's cover, shown where a chapter has no picture. */
   cover?: string | null;
   chapters: AudiobookPlayerChapter[];
-  /** Where the listener's place, speed, sleep choice and Text are kept on this device; none keeps nothing. */
+  /** Where place, speed, sleep, Text and Slow push choice are kept on this device; none keeps nothing. */
   storageKey?: string | null;
   /** Listen on a chapter: start there, at the kept place when it is in that chapter. */
   chapterId?: string;

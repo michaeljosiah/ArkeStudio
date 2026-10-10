@@ -45,7 +45,7 @@ function fullHash(bytes: Uint8Array): string {
 
 /** What a package's chapter depends on, to read the book again under the gate and compare. */
 function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.motion ?? null, picture.motionProblem ?? null]), chapter.opening]));
+  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.seconds, picture.focus ?? null, picture.motion ?? null, picture.motionProblem ?? null]), chapter.opening]));
 }
 
 const extensionOf = (file: string) => {
@@ -132,7 +132,7 @@ export async function exportAudiobookPlayer(
         state: "read" as const,
         seconds: chapter.seconds,
         gaps: [],
-        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)!, ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
+        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, seconds: entry.seconds, src: pictureName.get(entry.file)!, ...(entry.focus !== undefined ? { focus: entry.focus } : {}), ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
         opening: picture(chapter.opening),
       };
       const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
