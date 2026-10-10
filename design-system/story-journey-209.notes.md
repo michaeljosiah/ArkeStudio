@@ -1,6 +1,7 @@
-# Story to audiobook — proposed turn 209
+# Story to audiobook — approved turn 209
 
-Status: **awaiting owner approval; no application implementation**. Drawn 2026-10-10.
+Status: **owner approved turns 206–209 on 2026-10-10; implementation in progress**.
+This change records the approved design; it contains no application implementation.
 
 The owner liked the three destination designs but asked how an end user reaches them from
 Story. This proposal connects Activity (turn 206, #1684), saved Looks (207, #1680) and motion /
@@ -10,7 +11,7 @@ Open [the clickable review](story-journey-209.review.html). Start at Story and p
 The harbour, then the chapter's Audiobook tab. The review navigator also exposes alternate
 states. Companion proposals remain in draft PRs #1685, #1686 and #1687.
 
-## Changes for approval
+## Approved changes
 
 - Keep the existing Story rail and chapter view switch. Label **Direct and illustrate** on
   desktop; show Direct, Illustrate and Looks together with their states. Add one quiet
@@ -40,7 +41,7 @@ subtitles remain available. Turn 208 owns the actual alignment prerequisites and
 The live private SPEC-047 was read, including R-66/R-71/R-72, R-112/R-114/R-118/R-146,
 R-123/R-126/R-129 and R-132–R-145. Turn 209 deliberately proposes an extension to toolbar and
 export scope rules, not an assertion that they already permit this behavior. Amend SPEC-047
-in the implementation session after approval. No private spec was changed for this design-only
+in the implementation session. No private spec was changed for this design-only
 artifact. No app code, world data, generation service or harness was changed.
 
 ## Review coverage and limitations
