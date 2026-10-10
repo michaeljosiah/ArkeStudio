@@ -1,7 +1,8 @@
 # Saved looks — approved turn 207
 
 The owner approved turns 206–209 on 2026-10-10 before implementation. PR #1686 implements
-turn 207 and turn 209’s compact chapter Looks overview and nested return paths. SPEC-017
+turn 207 and turn 209’s nested return paths. The literal audit below found that the compact
+209 overview still needs a separately approved preservation design before it can match. SPEC-017
 R-29 and SPEC-047 R-180 record the behavior in the private specification set.
 
 A look has an optional short name separate from its generation prompt. The shared collection
@@ -39,3 +40,23 @@ Browser fixtures use public Undersong sample assets and an in-memory command bri
 not mutate an installed app or a real world. Native persistence is covered separately by the
 coordinator tests. Screenshots are session review artifacts; no private manuscript or character
 reference files were published.
+
+## Literal master audit, still in progress
+
+The owner subsequently requested a literal side-by-side completeness audit. Twelve matched
+approved/actual pairs cover 207a–g and Looks-related 209d/e/n/t/v. Source screenshots are rendered
+directly from the approved master; actual screenshots render application components and CSS
+with bundled Geist and fictional sample data. The fixture background differs from the chapter
+workspace and is labeled explicitly. Earlier responsive tests are not a claim of visual parity.
+
+The audit found corrections in subtitle, row usage, provenance, candidate-card dimensions,
+quote position, phone actions and rename layout. Those approved-207 corrections are in progress
+and must be recaptured before this PR is ready. The detailed requirements retain full Name and
+Face facts under Details even where an illustrative frame omits those rows; the comparison
+matrix identifies this rather than calling it an exact drawing match.
+
+209 explicitly defers destination details to 206–208. Its chooser and New look drawings are
+navigation schematics; detailed 207 controls remain authoritative. The actual 209 overview
+still exposes legacy Place, Mood, clothing, Add a character and Derive controls. Proposed turn
+210 would preserve these in a secondary Chapter details disclosure. It awaits owner approval;
+no 210 application implementation has been made. Approved 207/209 source frames are unchanged.
