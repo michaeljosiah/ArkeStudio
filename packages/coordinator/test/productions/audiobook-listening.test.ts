@@ -248,6 +248,10 @@ describe("the audiobook as the player (turn 186e)", () => {
       const manifest = JSON.parse(await readFile(join(worldDir, result.dir, "manifest.json"), "utf8"));
       assert.deepEqual(manifest.scope, scope);
       assert.deepEqual(manifest.chapters.map((chapter: { id: string }) => chapter.id), ["neap"]);
+      await send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = events.filter((event): event is Packages => event.type === "web-packages.listed").at(-1)!.packages.find((entry) => entry.dir === result.dir)!;
+      assert.deepEqual(listed.scope, scope, "reconnect keeps the saved delivery's selection");
+      assert.deepEqual(listed.chapterIds, ["neap"]);
       const page = await readFile(join(worldDir, result.dir, "player.html"), "utf8");
       assert.ok(page.includes(`arke-ab-${WORLD_ID}-${LEDGER}-chapter-neap`), "chapter place does not overwrite the whole-book place");
       const incomplete = await exportPlayer(send, events, { kind: "chapter", chapterId: "the-same-ink" });

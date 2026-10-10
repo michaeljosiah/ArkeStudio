@@ -131,6 +131,31 @@ describe("Export audiobook (turn 186e)", () => {
     assert.deepEqual(lastAsk(m, "export-audiobook-player")!.scope, scope);
   });
 
+  it("refreshes readiness after a scoped read without resetting the export's chosen format and settings", async () => {
+    const production = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const scope = { kind: "chapter" as const, chapterId: "neap" };
+    const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="neap" onClose={() => {}} />);
+    const before = lastAsk(m, "open-audiobook-listening")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: before.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
+    await press(q(m, '[data-testid="audiobook-export-video"]'));
+    await press([...dom.document.querySelectorAll('[aria-label="Shape"] button')].find((button) => text(button) === "1280 × 720")!);
+    await press([...dom.document.querySelectorAll('[aria-label="Subtitles"] button')].find((button) => text(button) === "None")!);
+    const completed = { ...production, chapters: production.chapters.map((chapter) => chapter.id === "neap" ? { ...chapter, audiobook: { ...chapter.audiobook!, takes: 3 } } : chapter) };
+    await act(async () => { m.root.render(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={completed} chapterId="neap" onClose={() => {}} />); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1250)); });
+    const after = lastAsk(m, "open-audiobook-listening")!;
+    assert.notEqual(after.requestId, before.requestId);
+    assert.deepEqual(after.scope, scope);
+    const videoAsk = lastAsk(m, "read-audiobook-video")!;
+    assert.deepEqual([videoAsk.options.scope, videoAsk.options.shape, videoAsk.options.subtitles], [scope, "1280x720", "none"]);
+    assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), true, "the changed saved reading waits for its own quote");
+    await act(async () => {
+      __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: after.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [{ ...PLAN.chapters[1]!, state: "read", gaps: [] }] } });
+      __applyEventForTest({ at: AT, type: "audiobook.video-state", requestId: videoAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", state: { chapters: [{ chapterId: "neap", seconds: 4, rendered: false }], rates: {}, readBy: "Read by George", running: null, scope } });
+    });
+    assert.equal(q(m, '[data-testid="audiobook-video-render"]')?.hasAttribute("disabled"), false);
+  });
+
   it("counts only the chapters read whole, and each picture once with the cover", () => {
     assert.deepEqual(packageCounts(PLAN), { chapters: 1, of: 2, pictures: 2 });
   });

@@ -27,6 +27,12 @@
 .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { flex: 1; justify-content: center; padding-inline: 8px; }
 .fy-abv-modal--phone .fy-abv-scope-title { flex-basis: 100%; }
 .fy-abv-modal--phone .fy-abv-scope-notice .fy-abv-btn { min-height: 44px; }
+.fy-abv-modal .fy-abv-opt, .fy-abv-modal .fy-abv-est { flex-wrap: wrap; }
+.fy-abv-modal .fy-abv-seg { max-width: 100%; flex-wrap: wrap; }
+.fy-abv-modal .fy-abv-kind, .fy-abv-modal .fy-abv-kind > div { min-width: 0; overflow-wrap: anywhere; }
+.fy-abv-modal .fy-abv-btn { height: auto; min-height: 32px; white-space: normal; }
+.fy-abv-modal--phone .fy-abv-opt > b { width: auto; flex-basis: 100%; }
+.fy-abv-modal--phone .fy-abv-btn, .fy-abv-modal--phone .fy-abv-seg button, .fy-abv-modal--phone .fy-abv-chk { min-height: 44px; height: auto; white-space: normal; }
 
 .fy-abv-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .fy-abv-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }

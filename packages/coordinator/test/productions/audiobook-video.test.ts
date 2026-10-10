@@ -221,6 +221,10 @@ describe("the audiobook as a video (turn 197)", () => {
       const manifest = JSON.parse(await readFile(join(h.worldDir, selected.dir, "video.json"), "utf8"));
       assert.deepEqual(manifest.scope, scope);
       assert.deepEqual(manifest.chapterIds, ["neap"]);
+      await h.send({ kind: "list-web-packages", worldId: WORLD_ID, requestId: REQUEST });
+      const listed = h.events.filter((event): event is Extract<DomainEvent, { type: "web-packages.listed" }> => event.type === "web-packages.listed").at(-1)!.packages.find((entry) => entry.dir === selected.dir)!;
+      assert.deepEqual(listed.scope, scope);
+      assert.deepEqual(listed.chapterIds, ["neap"], "the saved chapter delivery survives a book render and reconnect");
       const incompleteScope = { kind: "chapter" as const, chapterId: "the-same-ink" };
       const incomplete = await exportAudiobookVideo(h.store(), LEDGER, { ...DEFAULT_VIDEO_OPTIONS, scope: incompleteScope }, context());
       assert.equal(incomplete.ok, false);

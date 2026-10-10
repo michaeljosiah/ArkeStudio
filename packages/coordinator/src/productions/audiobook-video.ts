@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   assertSlateLabelSupported,
   AudiobookVideoOptionsSchema,
+  AudiobookScopeSchema,
+  SlugSchema,
   BOOK_OPENING_SEC,
   bookParts,
   burnedCues,
@@ -38,6 +40,7 @@ import {
   type VideoCue,
   type VideoRates,
   type VideoSegment,
+  type WebPackagesListed,
 } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "../takes/export.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -686,15 +689,18 @@ export async function exportAudiobookVideo(store: WorldStore, productionId: stri
 }
 
 /** A finished video folder, for Publications: read by its own manifest. */
-export async function listVideoExports(store: WorldStore): Promise<Array<{ kind: "audiobook-video"; productionId: string; title: string; dir: string; exportedAt: string }>> {
+export async function listVideoExports(store: WorldStore): Promise<WebPackagesListed["packages"]> {
   const exportsDir = join(store.dir, "exports");
-  const out: Array<{ kind: "audiobook-video"; productionId: string; title: string; dir: string; exportedAt: string }> = [];
+  const out: WebPackagesListed["packages"] = [];
   for (const entry of await readdir(toExtendedLength(exportsDir), { withFileTypes: true }).catch(() => [])) {
     if (!entry.isDirectory() || !/-video-\d{8}$/.test(entry.name)) continue;
     try {
-      const raw = JSON.parse(await readFile(toExtendedLength(join(exportsDir, entry.name, "video.json")), "utf8")) as { kind?: unknown; productionId?: unknown; title?: unknown; files?: unknown; provenance?: { exportedAt?: unknown } };
+      const raw = JSON.parse(await readFile(toExtendedLength(join(exportsDir, entry.name, "video.json")), "utf8")) as { kind?: unknown; productionId?: unknown; title?: unknown; files?: unknown; scope?: unknown; chapterIds?: unknown; provenance?: { exportedAt?: unknown } };
       if (raw.kind !== "audiobook-video" || typeof raw.productionId !== "string" || typeof raw.provenance?.exportedAt !== "string" || !Array.isArray(raw.files) || raw.files.length === 0) continue;
-      out.push({ kind: "audiobook-video", productionId: raw.productionId, title: typeof raw.title === "string" ? raw.title : raw.productionId, dir: `exports/${entry.name}`, exportedAt: raw.provenance.exportedAt });
+      const scope = AudiobookScopeSchema.safeParse(raw.scope);
+      const chapterIds = SlugSchema.array().min(1).safeParse(raw.chapterIds);
+      if (raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
+      out.push({ kind: "audiobook-video", productionId: raw.productionId, title: typeof raw.title === "string" ? raw.title : raw.productionId, dir: `exports/${entry.name}`, exportedAt: raw.provenance.exportedAt, ...(scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}) });
     } catch {
       // A folder with no readable manifest is no video.
     }

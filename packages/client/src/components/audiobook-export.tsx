@@ -103,7 +103,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       exporting.current = null;
       making.current = null;
       setBusy(false);
-      setResult({ ok: true, id, dir: found.dir, file: `${found.dir}/player.html`, chapters: 0, pictures: 0, bytes: 0, joined: false });
+      setResult({ ok: true, id, dir: found.dir, file: `${found.dir}/player.html`, chapters: 0, pictures: 0, bytes: 0, joined: false, ...(found.scope !== undefined ? { scope: found.scope } : {}), ...(found.chapterIds !== undefined ? { chapterIds: found.chapterIds } : {}) });
     });
     asked.current = openAudiobookListening(worldId, production.meta.id, scope);
     return () => {
@@ -251,11 +251,9 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
         </>
       ) : (
         <>
-          {(
-            <button type="button" className="fy-abv-btn" onClick={onClose}>
-              Cancel
-            </button>
-          )}
+          <button type="button" className="fy-abv-btn" onClick={onClose}>
+            Cancel
+          </button>
           <button type="button" className="fy-abv-btn pri" style={phone ? { flex: 1 } : undefined} disabled={busy || connection !== "open" || counts === null || counts.chapters === 0 || incomplete || planRefused !== null} onClick={start} data-testid="audiobook-export-start">
             Export
           </button>
