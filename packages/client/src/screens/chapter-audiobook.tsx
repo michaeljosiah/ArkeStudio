@@ -1,5 +1,6 @@
 import { castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useLocation } from "react-router";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
@@ -396,9 +397,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const activity = state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run));
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
+  const location = useLocation();
+  const requestedBlock = new URLSearchParams(location.search).get("block");
+  const openedBlock = useRef<string | null>(null);
   // The marker menu (R-42): the view's, so the page's `[` and the side's button open the same one.
   const [marker, setMarker] = useState<MarkerAt | null>(null);
   useEffect(() => { setMarker(null); setSelected(null); }, [chapter.id]);
+  useEffect(() => {
+    const entry = `${location.key}/${requestedBlock}`;
+    if (!requestedBlock || !body || openedBlock.current === entry) return;
+    const frame = requestAnimationFrame(() => {
+      const row = [...document.querySelectorAll<HTMLElement>("[data-block]")].find(element => element.dataset.block === requestedBlock);
+      if (row) { openedBlock.current = entry; setSelected(requestedBlock); row.scrollIntoView({ block: "center" }); }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [chapter.id, location.key, requestedBlock, body]);
 
   // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
   // voice cannot speak now falls back the same way on both sides, or the client would judge
@@ -1026,7 +1039,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {activity ? `${audiobookActivityStage(activity)} · ${activity.made} of ${activity.toMake} blocks saved` : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
           <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             {activity?.phase === "stopping" ? "Stopping…" : "Stop"}

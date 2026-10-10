@@ -10,6 +10,9 @@ progress independently of provider completion. `runAudiobookChapter` publishes a
 request, local alignment, durable block progress and outcome; `Coordinator.readAudiobookChapter`
 freezes owning labels and associates jobs. The `audiobook.activity` event folds into both snapshots.
 Client `components/audiobook-activity.tsx` draws one Activity row per read and bounded receipts;
+its single-block return carries a `block` query to `useChapterAudiobook`, which selects and
+scrolls to that passage once per navigation without restarting work. Group request details use
+the operation journal's durable saved count rather than inferring saved takes from job success.
 `chapter-audiobook.tsx` shows its alignment phase at the foot. Focused coverage is in contracts and
 coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
 `activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.

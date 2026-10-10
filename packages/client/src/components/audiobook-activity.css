@@ -1,8 +1,14 @@
 /* Turn 206: cost scope and the full chapter name stay readable at phone width. */
+.fy-abactivity { gap: 10px; padding: 0; margin-bottom: 22px; border: 0; }
+.fy-abactivity .fy-ap__actions { margin-top: 12px; }
+.fy-abactivity .fy-ap__actions .ui-btn { min-height: 32px; padding: 7px 11px; font: var(--type-label); border-radius: 7px; box-shadow: none; }
+.fy-abactivity .ui-btn--primary { background: var(--foreground); color: var(--background); }
+.fy-abactivity .fy-ap__rowsub { margin-top: 4px; }
 .fy-abactivity:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.fy-abactivity .fy-ap__rowtitle { display: block; font: var(--type-ui); font-weight: var(--weight-semibold); white-space: normal; overflow-wrap: anywhere; }
+.fy-abactivity .fy-ap__dot--queued { background: var(--foreground); }
+.fy-abactivity .fy-ap__rowtitle { display: block; font: var(--type-ui); font-weight: var(--weight-semibold); line-height: var(--leading-normal); letter-spacing: normal; white-space: normal; overflow-wrap: anywhere; }
 .fy-abactivity .fy-ap__rowsub { font: var(--type-meta); font-size: var(--text-xs); white-space: normal; overflow-wrap: anywhere; color: var(--muted-foreground); }
-.fy-abactivity .fy-ap__reason { font: var(--type-ui); }
+.fy-abactivity .fy-ap__reason { font: var(--type-ui); line-height: var(--leading-normal); color: var(--foreground); }
 .fy-abactivity__stage { font: var(--type-ui); margin-top: 12px; }
 .fy-abactivity__progress { height: 4px; background: var(--secondary); border-radius: 2px; margin: 9px 0 6px; overflow: hidden; }
 .fy-abactivity__progress i { display: block; height: 100%; background: var(--foreground); }
@@ -10,16 +16,30 @@
 .fy-abactivity__requests summary { font: var(--type-label); padding: 8px 0; cursor: pointer; }
 .fy-abactivity__requests summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .fy-abactivity__request { border-top: 1px solid var(--border); padding: 10px 0; font: var(--type-ui); }
-.fy-abreceipt { width: 100%; }
+.fy-abactivity__requests summary + .fy-abactivity__request { margin-top: 4px; }
+.fy-abactivity__request:last-child { border-bottom: 1px solid var(--border); }
+.fy-abactivity__request .fy-ap__rowsub { margin-top: 3px; }
+.fy-abactivity__request-head { display: flex; align-items: baseline; gap: 8px; }
+.fy-abactivity__request-head b { flex: 1; }
+.fy-abreceipt { width: min(420px, calc(100vw - 24px)); gap: 12px; }
+.fy-abreceipt .fy-note__end { gap: 5px; margin-top: 0; }
+.fy-abreceipt .fy-note__title { letter-spacing: normal; }
+[data-sonner-toaster][data-x-position="right"]:has(.fy-abreceipt) { width: 420px; right: 22px; top: 54px; }
+[data-sonner-toast]:has(.fy-abreceipt) { width: 100% !important; }
 .fy-abreceipt .fy-note__title { font: var(--type-ui); font-weight: var(--weight-semibold); white-space: normal; overflow-wrap: anywhere; }
 .fy-abreceipt .fy-note__meta { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); white-space: normal; }
-.fy-abreceipt .fy-note__close { min-width: 28px; min-height: 28px; font: var(--type-body); }
+.fy-abreceipt .fy-note__close { min-width: 28px; min-height: 28px; font: var(--type-label); color: var(--foreground); }
 .fy-abreceipt > .fy-ap__dot { margin-top: 6px; }
+.fy-abreceipt .fy-note__title { line-height: var(--leading-snug); }
+.fy-abreceipt .fy-note__meta { margin-top: 4px; }
+.fy-abreceipt .fy-note__end .ui-btn { min-height: 32px; font: var(--type-label); border-radius: 7px; box-shadow: none; }
 @media (max-width: 600px) {
-  .fy-abactivity .ui-btn, .fy-abactivity__requests summary { min-height: 44px; }
-  .fy-abactivity .fy-ap__actions .ui-btn { flex: 1; }
-  .fy-abreceipt { flex-wrap: wrap; }
-  .fy-abreceipt .fy-note__body { flex: 1; min-width: 200px; }
-  .fy-abreceipt .fy-note__end { width: calc(100% - 19px); margin-left: 19px; justify-content: space-between; }
+  .fy-activity-phone .fy-abactivity .ui-btn, .fy-activity-phone .fy-abactivity__requests summary { min-height: 44px; }
+  .fy-activity-phone .fy-abactivity__requests summary { padding: 14px 0; }
+  .fy-activity-phone .fy-abactivity .fy-ap__actions .ui-btn { flex: 1; }
+  [data-sonner-toaster][data-x-position="right"]:has(.fy-abreceipt) { width: calc(100vw - 24px); left: 12px; right: 12px; top: 56px; }
+  .fy-abreceipt { padding: 12px; gap: 8px; flex-wrap: wrap; }
+  .fy-abreceipt .fy-note__body { flex: 1; min-width: 220px; }
+  .fy-abreceipt .fy-note__end { width: calc(100% - 15px); margin-left: 15px; justify-content: space-between; }
   .fy-abreceipt .fy-note__end .ui-btn, .fy-abreceipt .fy-note__close { min-height: 44px; min-width: 44px; }
 }

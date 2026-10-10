@@ -47,6 +47,7 @@ export class AudiobookActivityJournal {
       const next = AudiobookActivitySchema.parse({
         ...initial, phase: "queued", toMake: 0, made: 0, flagged: 0, requests: 0, request: 0,
         estimatedMicroUsd: 0, models: [], local: false, ...held, ...change,
+        ...(change.phase === "interrupted" && held && ["reading", "aligning"].includes(held.phase) ? { interruptedDuring: held.phase } : {}),
         updatedAt: this.now(), jobs: job ? [...jobs.filter(ref => ref.id !== job.id), job] : jobs,
       });
       if (this.path) {

@@ -476,6 +476,7 @@ describe("a chapter read grouped (design turn 185)", () => {
       assert.equal(takes.length, blocks);
       assert.equal(Object.keys(record.flags).length, 0);
       assert.equal(h.activity[0]?.phase, "queued");
+      assert.equal(h.activity.findLast(update => update.job?.saved !== undefined)?.job?.saved, blocks, "request detail names saved blocks only after the durable keeps");
       assert.deepEqual(h.activity.at(-1), { phase: "ready", made: blocks, flagged: 0 }, "completion follows the durable block writes");
       assert.ok(takes.every((take) => take.grouped?.request === "jb_01J8G000000000000000000001" && take.grouped.blocks.length === blocks && take.loudness !== undefined));
       assert.equal(takes.reduce((sum, take) => sum + (take.costMicroUsd ?? 0), 0), 1_001, "the request's actual, shared by characters");
@@ -520,6 +521,9 @@ describe("a chapter read grouped (design turn 185)", () => {
       const record = await recordOf(worldDir);
       const flagged = Object.entries(record.flags);
       assert.equal(flagged.length, 1);
+      const saved = Object.keys(record.takes).length;
+      assert.equal(h.activity.findLast(update => update.job?.saved !== undefined)?.job?.saved, saved, "flagged cuts never count as saved request takes");
+      assert.deepEqual(h.activity.at(-1), { phase: "finished", made: saved, flagged: 1 }, "completion distinguishes saved takes from the flagged cut");
       const [key, flag] = flagged[0]!;
       assert.ok(flag.reason.startsWith(SPLIT_DID_NOT_MATCH));
       assert.ok(flag.split?.heard.startsWith("Maren reads that. Then"));
