@@ -184,7 +184,7 @@ export interface ChapterAudiobookInput {
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; fromExport?: boolean; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
 
 /** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
 export interface DirectAlso {
@@ -793,6 +793,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // `Make again` reads these blocks alone (R-30), held across the same chain of answers as the
   // consent is, and cleared with it: the chapter's own press reads what is not made.
   const only = useRef<readonly string[] | null>(null);
+  const fromExport = useRef(false);
   // The chapter's press casts the paragraphs left to cast first (design turn 198, rule 13), held
   // across the same chain of answers and cleared with it; the confirm's tick is the author's say.
   const castFirst = useRef(false);
@@ -808,6 +809,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   useEffect(() => {
     uploadAllowed.current = null;
     only.current = null;
+    fromExport.current = false;
     castFirst.current = false;
   }, [chapter.id]);
   // Each price asked comes with the box ticked again, as Direct's sheet opens with it ticked.
@@ -846,20 +848,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       setUpload(null);
       uploadAllowed.current = null;
       only.current = intent.blocks ?? null;
+      fromExport.current = intent.fromExport === true;
       castFirst.current = intent.castFirst === true;
       send();
     },
     [worldId, prodId, chapter.id, chapter.file, send],
   );
   const press = useCallback(
-    (blocks: readonly string[] | null) => {
+    (blocks: readonly string[] | null, recovery = false) => {
       if (locked || connection !== "open" || reading_) return;
       // Unsaved typing is not what is read (R-2): the press waits out the autosave, as the
       // chapter's other reads do, and the workspace sends it once the save lands.
       // The chapter's read under a reading that needs the cast casts what is left first (design
       // turn 198): ticked by default in the confirm, and done at once where nothing is asked.
       const castingFirst = blocks === null && reading !== "narrator" && toCast.length > 0;
-      const intent: AudiobookIntent = { kind: "read", ...(blocks !== null ? { blocks } : {}), ...(castingFirst ? { castFirst: true } : {}) };
+      const intent: AudiobookIntent = { kind: "read", ...(recovery ? { fromExport: true } : {}), ...(blocks !== null ? { blocks } : {}), ...(castingFirst ? { castFirst: true } : {}) };
       if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
       resume(intent);
     },
@@ -1197,7 +1200,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
         token: run.price.confirmationToken,
-        title: only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
+        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
+        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
         blocks: run.toMake,
         characters: run.price.characters,
         free: run.price.estimatedMicroUsd === 0,
@@ -1296,7 +1300,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     makeAgain,
     readRemaining: (numbers: number[]) => {
       const keys = rows.filter((_row, index) => numbers.includes(index + 1)).map((row) => row.block.key);
-      if (keys.length > 0) press(keys);
+      if (keys.length > 0) press(keys, true);
     },
     resume,
     directionRun,
@@ -1889,7 +1893,7 @@ function packTurnsFor(rows: readonly BlockRow[]) {
  * The sheet a grouped read is confirmed in (design turn 185a): the blocks and the requests, as
  * many as a block a request would make, Google's free day where it is known, and the estimate.
  */
-export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]> }) {
+export function ReadSheet({ sheet, headless = false }: { sheet: NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]>; headless?: boolean }) {
   const row = (label: string, value: string) => (
     <div className="fy-ab__read" key={label}>
       <b>{label}</b>
@@ -1899,26 +1903,32 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
   return (
     <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label={sheet.title}>
       <div>
-        <h3 className="fy-ab__card-title">{sheet.title}</h3>
-        <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>
+        {!headless && <h3 className="fy-ab__card-title">{sheet.title}</h3>}
+        {sheet.recovery !== null && <p className="fy-mono fy-ab__card-line">{sheet.recovery.chapter}</p>}
+        {sheet.recovery === null && <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>}
       </div>
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
-        {sheet.requests !== undefined ? <>
+        {sheet.recovery !== null ? <>
+          {row("Ready", `${sheet.recovery.ready} of ${sheet.recovery.total} blocks`)}
+          {row("To read", `${sheet.blocks} blocks`)}
+          {row("Estimated total", sheet.estimate)}
+        </> : <>{sheet.requests !== undefined ? <>
           {row("Requests", `${sheet.requests} · grouped`)}
           {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
         </> : row("Characters", sheet.characters.toLocaleString())}
         {sheet.destinations !== "" && row("Readers", sheet.destinations)}
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
-        {row("Estimate", sheet.estimate)}
+        {row("Estimate", sheet.estimate)}</>}
       </div>
+      {sheet.recovery !== null && <p>The {sheet.recovery.ready} current takes stay as they are.</p>}
       {sheet.freeDay !== undefined && <p className="fy-mono" data-testid="audiobook-free-plan">{freePlanAskCopy(sheet.freeDay).line}</p>}
       {sheet.notices.map((notice) => <p key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</p>)}
       {sheet.castFirst !== undefined && <CastFirstCheck count={sheet.castFirst.count} on={sheet.castFirst.on} onChange={sheet.castFirst.set} />}
       <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
-        <Button variant="ghost" onClick={sheet.cancel}>Cancel</Button>
+        <Button variant="ghost" onClick={sheet.cancel}>{sheet.recovery !== null ? "Back to export" : "Cancel"}</Button>
         <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
-          {sheet.starting ? "starting…" : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
+          {sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
     </section>
