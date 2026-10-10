@@ -106,6 +106,7 @@ function LookLine({ row, disabled, onWrite }: { row: Row; disabled: boolean; onW
       <div className="fy-look__tx">
         {row.label !== null && <b>{row.label}</b>}
         <Field row={row} label={row.label ?? tag ?? "Line"} disabled={disabled} onWrite={onWrite} />
+        {tag === null && row.sheet === undefined && <span className="fy-ch__who-where--warn" data-testid="look-unlinked">Identity not linked · confirm which character this is</span>}
       </div>
       {row.source !== null && <span className="fy-look__src fy-mono">{row.source}</span>}
     </div>

@@ -61,11 +61,11 @@ describe("Suggest picture (R-99)", () => {
       assert.equal(schemaVersion(), AUDIOBOOK_LOOK_SCHEMA_VERSION);
       assert.deepEqual(seen[0]!.lines.map((line) => line.label), ["Place", "Maren Kest", "Bray Half-Hitch"]);
       assert.deepEqual(picked.lines.map((line) => line.label), ["Place", "Maren Kest", "Bray Half-Hitch"], "the look lines it used");
-      // Who is in it: the model's own names, held to the chapter — "nobody" is no one.
-      assert.deepEqual(picked.who.map((who) => [who.key, who.carried, who.reference !== null]), [["maren-kest", true, true], ["bray-half-hitch", false, false]]);
+      // Unknown identities remain visible and unchecked, never silently converted to nobody.
+      assert.deepEqual(picked.who.map((who) => [who.key, who.carried, who.reference !== null]), [["maren-kest", true, true], ["bray-half-hitch", false, false], ["nobody", false, false]]);
       // The price: one picture and the one reference that rides, from the manifest's own figures.
       assert.equal(picked.estimatedMicroUsd, 45_000);
-      assert.equal(picked.look?.who.join(","), "maren-kest,bray-half-hitch");
+      assert.equal(picked.look?.who.join(","), "maren-kest,bray-half-hitch,nobody");
       // Nothing was made or spent.
       assert.equal(madeEvents(events).length, 0);
     }));
@@ -230,18 +230,19 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
     );
   });
 
-  it("carries no reference for a detail shot, and Generate sends none", () =>
+  it("carries the detail owner's chosen look through the quote and Generate", () =>
     withHarness(
       async (h) => {
         await chooseMarensLook(h);
         await suggest(h.send);
         const picked = suggestion(h.events).suggestion!;
-        assert.deepEqual(picked.who, [], "a detail shot carries no reference");
-        assert.equal(picked.estimatedMicroUsd, 40_000, "one picture and no reference");
-        assert.equal(picked.shot?.checks.find((check) => check.id === "reference")?.label, "Detail");
-        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: [], frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000A" });
+        assert.deepEqual(picked.who.map((who) => who.key), ["maren-kest"]);
+        assert.equal(picked.who[0]?.look?.view, "full");
+        assert.equal(picked.estimatedMicroUsd, 45_000, "one picture with the detail reference");
+        assert.equal(picked.shot?.checks.find((check) => check.id === "reference")?.label, "1 of 1 shown in detail has a reference");
+        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: picked.who.map((who) => who.key), frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000A" });
         assert.equal(madeEvents(h.events).at(-1)!.state, "made");
-        assert.deepEqual((h.enqueued[0]!.params as { references?: string[] }).references ?? [], []);
+        assert.equal((h.enqueued[0]!.params as { references?: string[] }).references?.length, 1);
       },
       { prepare: prepareLook, picture: async () => ({ frame: "Detail, her hand on the ledger", inFrame: [], expressions: {}, details: [{ of: "maren-kest", part: "hand", state: "still" }], notInFrame: [], place: null, prompt: "Detail shot, tight on a hand flat on the open ledger, the oilskin cuff dark with salt. Her face is out of frame. Grey dawn light." }) },
     ));

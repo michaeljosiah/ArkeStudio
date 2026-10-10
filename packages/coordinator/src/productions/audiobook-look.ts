@@ -15,6 +15,7 @@ import {
   pictureOwnLooks,
   placePictures,
   productionStyleFor,
+  shortNameOf,
   type AudiobookBlock,
   type AudiobookLook,
   type ChapterAudiobook,
@@ -45,7 +46,7 @@ import { makeAdapterJsonDeriver } from "./continuity.js";
  */
 
 /** The sizes the prompt is held to: a long chapter or a crowded cast cannot crowd the words out. */
-export const LOOK_BOUNDS = { people: 12, section: 240, place: 200, art: 400, chapter: 60_000, block: 320 } as const;
+export const LOOK_BOUNDS = { people: 24, section: 240, identity: 1_200, place: 200, art: 400, chapter: 60_000, block: 320 } as const;
 
 const RawLookSchema = z.object({
   place: z.object({ text: z.string(), blocks: z.array(z.string()).optional() }).nullable().optional(),
@@ -74,6 +75,10 @@ export interface ChapterPerson {
   billing?: string;
   essence?: string;
   appearance?: string;
+  /** Authored identity context, not appearance or evidence that someone is in frame. */
+  identity?: string;
+  aliases?: string[];
+  pov?: true;
   /** The sheet says this character is never to be pictured (issue 905): no line, no reference, never in a prompt. */
   neverDepicted: boolean;
   /** Where the prose first names them, so the order is the story's. */
@@ -98,21 +103,29 @@ function mentionAt(body: string, name: string): number {
 export function nameAt(body: string, name: string): number {
   const whole = mentionAt(body, name);
   if (whole >= 0) return whole;
-  const parts = name.split(/\s+/).filter((part) => part.length >= 3 && !/^(the|of|and|von|van|de|la)$/i.test(part));
+  const parts = name.replace(/["“”‘’()]/g, " ").split(/\s+/).filter((part) => part.length >= 3 && !/^(the|of|and|von|van|de|la|mrs?|miss|dr|sir)$/i.test(part));
   const hits = parts.map((part) => mentionAt(body, part)).filter((index) => index >= 0);
   return hits.length === 0 ? -1 : Math.min(...hits);
 }
 
 /**
- * Who is in a chapter: every character sheet the prose names, and every speaker the cast names with
- * no sheet. Leads first, then in the order the prose first names them; bounded for the prompt.
+ * Bounded identity candidates: POV and authored looks first, then named people and speakers,
+ * followed by other sheets for relationship resolution. The model still decides visible presence.
  */
-export function chapterPeople(store: WorldStore, plan: Pick<AudiobookPlan, "body" | "cast">): ChapterPerson[] {
-  const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && sheet.retired !== true);
+export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<AudiobookPlan, "body" | "cast"> & Partial<Pick<AudiobookPlan, "chapter" | "record">>, productionId?: string): ChapterPerson[] {
+  const bundle = store.getBundle();
+  const sheets = bundle.sheets.filter((sheet) => sheet.type === "character" && sheet.retired !== true);
+  const chapter = bundle.productions.filter((production) => productionId === undefined || production.meta.id === productionId).flatMap((production) => production.chapters).find((candidate) => candidate.id === plan.chapter?.id);
+  const pov = chapter?.pov;
+  const held = plan.record === undefined || plan.record === null || plan.record === "unreadable" ? undefined : plan.record.look;
   const people = new Map<string, ChapterPerson>();
   const personOf = (sheet: Sheet, first: number): ChapterPerson => {
     const essence = clip(section(sheet, /^essence/i), LOOK_BOUNDS.section);
     const appearance = clip(section(sheet, /^appearance|^look/i), LOOK_BOUNDS.section);
+    const identitySections = sheet.sections.filter((entry) => /essence|relationship|family|background|history|name|identity|connection|backstory|biography|origin/i.test(entry.heading));
+    identitySections.sort((a, b) => Number(/relationship|family|name|identity/i.test(b.heading)) - Number(/relationship|family|name|identity/i.test(a.heading)));
+    const identity = clip([sheet.role, ...identitySections.map((entry) => `${entry.heading}: ${entry.body}`)].filter(Boolean).join("; "), LOOK_BOUNDS.identity);
+    const aliases = [...new Set([shortNameOf(sheet), ...[...sheet.name.matchAll(/["“(]([^"”()]+)["”)]/g)].map((match) => match[1]!.trim())])].filter((name) => name !== sheet.name && !/^(the|mrs?|miss|ms|dr|sir)$/i.test(name));
     return {
       key: sheet.id,
       name: sheet.name,
@@ -120,29 +133,52 @@ export function chapterPeople(store: WorldStore, plan: Pick<AudiobookPlan, "body
       ...(sheet.billing !== undefined ? { billing: sheet.billing } : {}),
       ...(essence !== undefined ? { essence } : {}),
       ...(appearance !== undefined ? { appearance } : {}),
+      ...(identity !== undefined ? { identity } : {}),
+      ...(aliases.length > 0 ? { aliases } : {}),
+      ...(pov === sheet.id ? { pov: true as const } : {}),
       neverDepicted: sheet.neverDepicted === true,
       first,
     };
   };
   for (const sheet of sheets) {
-    const at = nameAt(plan.body, sheet.name);
-    if (at >= 0) people.set(sheet.id, personOf(sheet, at));
+    const person = personOf(sheet, Number.MAX_SAFE_INTEGER);
+    const hits = [sheet.name, ...(person.aliases ?? [])].map((name) => nameAt(plan.body, name)).filter((at) => at >= 0);
+    const at = hits.length > 0 ? Math.min(...hits) : Number.MAX_SAFE_INTEGER;
+    // Candidates include sheets not named literally: the writing service resolves POV pronouns
+    // and relationships from context. Being a candidate never puts someone in a picture.
+    people.set(sheet.id, { ...person, first: held?.characters[sheet.id] !== undefined || pov === sheet.id ? -1 : at });
   }
   const cast = plan.cast !== null && plan.cast !== "unreadable" ? plan.cast.lines : [];
   for (const line of cast) {
     const first = Math.max(0, plan.body.indexOf(line.quote.slice(0, 20)));
     if (line.sheet !== undefined) {
       // A speaker whose sheet the prose never names by name still speaks in the chapter.
-      const sheet = people.has(line.sheet) ? undefined : sheets.find((candidate) => candidate.id === line.sheet);
-      if (sheet !== undefined) people.set(sheet.id, personOf(sheet, first));
+      const person = people.get(line.sheet);
+      if (person !== undefined) people.set(line.sheet, { ...person, first: Math.min(person.first, first) });
       continue;
     }
+    if (resolveChapterPerson([...people.values()], line.speaker) !== undefined) continue;
     const key = lookKey({ name: line.speaker });
-    if (!people.has(key)) people.set(key, { key, name: line.speaker, neverDepicted: false, first });
+    if (!people.has(key)) people.set(key, { key, name: line.speaker, identity: "Unlinked cast name: resolve against the character sheets where the context establishes who this is.", neverDepicted: false, first });
   }
+  const related = new Set(sheets.filter((sheet) => people.get(sheet.id)!.first < Number.MAX_SAFE_INTEGER).flatMap((sheet) => sheet.links));
+  const rank = (person: ChapterPerson): number => person.first < 0 ? 0 : person.first < Number.MAX_SAFE_INTEGER ? 1 : related.has(person.key) ? 2 : 3;
   return [...people.values()]
-    .sort((a, b) => (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
+    .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
     .slice(0, LOOK_BOUNDS.people);
+}
+
+/** Exact keys win; names and authored aliases resolve only when they identify one sheet. */
+export function resolveChapterPerson<T extends { key: string; name: string; aliases?: readonly string[] }>(people: readonly T[], value: string): T | undefined {
+  const exact = people.find((person) => person.key === value.trim());
+  if (exact !== undefined) return exact;
+  const name = value.trim().toLowerCase();
+  const matches = people.filter((person) => [person.name, ...(person.aliases ?? [])].some((alias) => alias.toLowerCase() === name));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function personIdentity(person: Pick<ChapterPerson, "aliases" | "identity" | "pov">): string {
+  return `${person.pov ? " · chapter viewpoint" : ""}${person.aliases?.length ? ` · also called: ${person.aliases.join(", ")}` : ""}${person.identity ? ` · identity context: ${person.identity}` : ""}`;
 }
 
 /**
@@ -185,7 +221,7 @@ export interface LookDeriverInput {
   title: string;
   art?: string;
   /** `look` is the clothing line of the look this character already has chosen or carried into the chapter (design turn 193). */
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "essence" | "appearance"> & { look?: string }>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "sheet" | "essence" | "appearance" | "aliases" | "identity" | "pov"> & { look?: string }>;
   places: readonly ChapterPlace[];
   blocks: ReadonlyArray<{ key: string; text: string; speaker?: string }>;
 }
@@ -202,7 +238,7 @@ function promptBlocks(blocks: LookDeriverInput["blocks"]): string {
 
 export function buildLookPrompt(input: LookDeriverInput, retryNote?: string): string {
   const people = input.people
-    .map((person) => `[${person.key}] ${person.name}${person.appearance !== undefined ? ` — the sheet says: ${person.appearance}` : ""}${person.essence !== undefined ? ` · who they are: ${person.essence}` : ""}${person.look !== undefined ? ` · the look chosen for them: ${person.look}` : ""}`)
+    .map((person) => `[${person.key}] ${person.name}${person.appearance !== undefined ? ` — the sheet says: ${person.appearance}` : ""}${person.essence !== undefined ? ` · who they are: ${person.essence}` : ""}${personIdentity(person)}${person.look !== undefined ? ` · the look chosen for them: ${person.look}` : ""}`)
     .join("\n");
   const chosen = input.people.some((person) => person.look !== undefined);
   const places = input.places.map((place) => `${place.name}${place.look !== undefined ? ` — ${place.look}` : ""}`).join("\n");
@@ -210,9 +246,9 @@ export function buildLookPrompt(input: LookDeriverInput, retryNote?: string): st
 {"place": {"text": "<where, when and the light: one or two phrases>", "blocks": ["<key of a block that says so>"]}, "mood": "<the book's look as light, colour, grain and lens>", "characters": [{"who": "<the character's key>", "text": "<what they wear and carry and how they appear in this chapter>", "blocks": ["<keys of the blocks it comes from>"]}]}
 
 Rules — each is enforced mechanically after you answer:
-- "who" is one of the keys listed under Characters; any other is dropped. At most ${LOOK_CHARACTERS_MAX} characters.
+- Characters are identity candidates, not a cast to put into the scene. Resolve the chapter viewpoint, pronouns, familiar names and family relationships from the chapter and the identity context. Return the canonical character key, never an alias for a known person. A relative mentioned or remembered is not necessarily present. If identity is uncertain, use the literal name or relationship from the block and cite that block; it will be shown as unlinked for the author to check. At most ${LOOK_CHARACTERS_MAX} characters.
 - Every line is what a camera would see: clothes, what is carried, hair, how they stand or are marked (wet, hurt, tired). Never personality, feelings or backstory.
-- Take it from the chapter's own words. Where the chapter says nothing of how someone looks, leave them out: a character the chapter does not describe is better absent than invented. The sheet is what they look like at all times; the line is what the chapter adds or changes.
+- Take it from the chapter's own words. Include visibly present people even when unnamed, silent or asleep; describe only their visible posture or action when no clothing is stated. Never invent clothing. The sheet is what they look like at all times; the line is what the chapter adds or changes.
 - At most ${LOOK_LINE_MAX} characters a line, and short is better: a coat, a lamp, a scarf.
 - "blocks" are keys of blocks listed below, the ones the detail comes from.
 - Never rewrite the chapter. Nothing you write goes into the prose.
@@ -255,20 +291,17 @@ export interface VerifiedLook {
  * only where the chapter has it, and a line over the bound is cut at a word. A character the sheet
  * never lets be pictured has no line.
  */
-export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people"> & { blocks: ReadonlyArray<{ key: string }>; hidden?: readonly string[] }): VerifiedLook {
+export function verifyLook(raw: RawLook, input: Pick<LookDeriverInput, "people"> & { blocks: ReadonlyArray<{ key: string; text?: string }>; hidden?: readonly string[] }): VerifiedLook {
   let dropped = 0;
   const keys = new Set(input.blocks.map((block) => block.key));
   const only = (blocks: readonly string[] | undefined): string[] => [...new Set((blocks ?? []).filter((key) => keys.has(key)))].slice(0, 80);
-  const lookup = new Map<string, ChapterPerson | (typeof input.people)[number]>();
-  for (const person of input.people) {
-    lookup.set(person.key, person);
-    lookup.set(person.name.toLowerCase(), person);
-  }
   const hidden = new Set(input.hidden ?? []);
   const characters: DerivedLook["characters"] = [];
   const seen = new Set<string>();
   for (const entry of raw.characters ?? []) {
-    const person = lookup.get(entry.who) ?? lookup.get(entry.who.trim().toLowerCase());
+    const named = entry.who.trim();
+    const evidence = input.blocks.some((block) => entry.blocks?.includes(block.key) && block.text !== undefined && mentionAt(block.text, named) >= 0);
+    const person = resolveChapterPerson(input.people, named) ?? (named.length > 0 && named.length <= 120 && evidence ? { key: lookKey({ name: named }), name: named } : undefined);
     const text = clip(entry.text, LOOK_LINE_MAX);
     if (person === undefined || hidden.has(person.key) || text === undefined || seen.has(person.key)) {
       dropped += 1;
@@ -324,7 +357,7 @@ export interface DerivedChapterLook {
  */
 export async function deriveChapterLook(store: WorldStore, productionId: string, chapterId: string, deriver: LookDeriver, signal?: AbortSignal): Promise<DerivedChapterLook> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: await anyNarrator(store, productionId) });
-  const people = chapterPeople(store, plan);
+  const people = chapterPeople(store, plan, productionId);
   const sheets = store.getBundle().sheets;
   const blocks = plan.blocks.map((planned) => {
     const speaker = blockSpeakers(sheets, planned.block);
@@ -345,8 +378,11 @@ export async function deriveChapterLook(store: WorldStore, productionId: string,
   if (signal?.aborted) throw new Error("stopped");
   const raw = await deriver({ title: plan.chapter.title, ...(art !== undefined ? { art } : {}), people: told, places: chapterPlaces(store, plan), blocks }, signal);
   if (signal?.aborted) throw new Error("stopped");
-  const verified = verifyLook(raw, { people: visible, blocks });
-  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash, carried, moodCut: verified.moodCut };
+  const verified = verifyLook(raw, { people, blocks, hidden: people.filter((person) => person.neverDepicted).map((person) => person.key) });
+  // Preserve the existing carry for named speakers, POV and authored choices even when the
+  // reader finds no outfit. Merely supplying another sheet as identity context cannot carry it.
+  const present = new Set([...verified.look.characters.map((person) => person.key), ...visible.filter((person) => person.first < Number.MAX_SAFE_INTEGER).map((person) => person.key)]);
+  return { look: verified.look, dropped: verified.dropped, hash: plan.chapter.hash, carried: Object.fromEntries(Object.entries(carried).filter(([key]) => present.has(key))), moodCut: verified.moodCut };
 }
 
 /** What a derive wrote: the record, and how many of the author's lines it left alone. */

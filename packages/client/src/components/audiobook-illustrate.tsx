@@ -175,7 +175,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           <span className="fy-ills__who" key={entry.key} data-testid="illustration-who">
             <Face who={entry} slug={slug} />
             {entry.name}
-            {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : "no look"}</span>}
+            {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : entry.sheet === undefined ? "identity not linked · check the character" : "no look"}</span>}
           </span>
         ))}
         {people.length === 0 && <span className="fy-ills__note">{row.who.length > 0 ? "place only" : "no reference rides"}</span>}

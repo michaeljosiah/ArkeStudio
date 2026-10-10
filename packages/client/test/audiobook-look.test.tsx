@@ -107,6 +107,8 @@ describe("the look sheet", () => {
     assert.equal(bodyAll(".ui-textarea").length, 3);
     assert.match(text(sheet), /Place/);
     assert.match(text(sheet), /Maren Kest/);
+    assert.match(text(bodyAll('[data-key="sereth"] [data-testid="look-unlinked"]')[0]), /Identity not linked/);
+    assert.equal(bodyAll('[data-key="maren-kest"] [data-testid="look-unlinked"]').length, 0);
     assert.match(text(sheet), /2 characters · 0 looks chosen · edited · saved\s*used by every picture in this chapter/);
     assert.equal(text(bodyAll('[data-testid="look-derive"]')[0]), "Derive again");
   });

@@ -1725,7 +1725,7 @@ export class Coordinator {
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
-            // Whose hand a detail shows, and the skin their sheet gives: no reference rides a detail.
+            // The sheet fallback is used only when this detail owner's reference does not ride.
             detailed: pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets),
             requestId: ulid(),
             ceilingMicroUsd: Math.max(0, run.confirmedMicroUsd - progress.spentMicroUsd),

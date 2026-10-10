@@ -78,22 +78,43 @@ describe("the eyes: a close frame on her, without him (193i)", () => {
   });
 });
 
-describe("the hands: a detail carries no reference (193i)", () => {
-  it("has nobody in frame and nothing riding, not even the place", () => {
+describe("the hands: detail owners carry identity references (#1677)", () => {
+  it("has no full person in frame and carries the detail owners without the place", () => {
     const held = hold(HANDS);
     assert.deepEqual(held.inFrame, []);
     assert.deepEqual(held.details.map((d) => [d.of, d.part]), [["ife", "hand"], ["adeyemi-ade-akinola", "forearm"]]);
-    assert.deepEqual(briefRiders(held), [], "a detail shot carries no reference");
+    assert.deepEqual(briefRiders(held).map((who) => who.key), ["ife", "adeyemi-ade-akinola"]);
   });
 
   it("is a detail on the card with its faces said to be out of frame", () => {
-    const checks = checksOf(HANDS, HANDS_BLOCK, []);
+    const checks = checksOf(HANDS, HANDS_BLOCK, riding(["ife", "adeyemi-ade-akinola"]));
     assert.equal(checks["reference"]!.ok, true);
-    assert.equal(checks["reference"]!.label, "Detail");
-    assert.equal(checks["reference"]!.note, "nobody in frame, so no reference rides");
+    assert.equal(checks["reference"]!.label, "2 of 2 shown in detail have a reference");
+    assert.equal(checks["reference"]!.note, undefined);
     assert.equal(checks["expression"]!.ok, true);
     assert.equal(checks["expression"]!.note, "faces out of frame, said so");
     assert.equal(checks["garments"]!.ok, true, "bangles, the watch and the sleeve are the looks' and the block's");
+  });
+
+  it("marks missing detail references instead of passing because inFrame is empty", () => {
+    const check = checksOf(HANDS, HANDS_BLOCK, [])["reference"]!;
+    assert.equal(check.ok, false);
+    assert.match(check.note!, /Ife · no reference/);
+  });
+
+  it("keeps an unresolved relationship visible and does not guess a sheet", () => {
+    const raw = { ...HANDS, details: [{ of: "her mother", part: "hand" }] };
+    const held = hold(raw);
+    assert.deepEqual(held.details, [{ of: "her mother", part: "hand" }]);
+    assert.equal(briefRiders(held)[0]?.sheet, undefined);
+    assert.match(checksOf(raw, HANDS_BLOCK, [])["reference"]!.note!, /identity not linked · confirm the character/);
+  });
+
+  it("uses a familiar name for its canonical detail owner and excludes never-depicted aliases", () => {
+    const people = [{ ...person("maren", "Maren Kest"), aliases: ["Rena"] }, { ...person("lena", "Lena Kest"), aliases: ["Mother"], neverDepicted: true }];
+    const held = holdBrief({ ...HANDS, details: [{ of: "Rena", part: "hand" }, { of: "Mother", part: "hand" }] }, { people, places: [], prompt: HANDS.prompt, fallback: () => [] });
+    assert.deepEqual(held.details, [{ of: "maren", part: "hand" }]);
+    assert.deepEqual(briefRiders(held).map((who) => [who.key, who.sheet]), [["maren", "maren"]]);
   });
 
   it("is marked when the prompt does not say the faces are out of frame", () => {

@@ -467,7 +467,8 @@ describe("what the Rides line says (turn 194g)", () => {
   });
 
   it("says a detail carries no faces and a frame with nobody carries the place", () => {
-    assert.equal(ridesLabel([person("ife", "Ife", "full")], { frame: "Detail, her hand on his wrist" }), "no reference · no faces");
+    assert.equal(ridesLabel([person("ife", "Ife", "full")], { frame: "Detail, her hand on his wrist" }), "Full body · no faces");
+    assert.equal(ridesLabel([], { frame: "Detail, her hand on his wrist" }), "no reference · no faces");
     assert.equal(ridesLabel([{ key: "club", name: "The club", sheet: "club", kind: "place", reference: "references/club/e.png", carried: true }], { frame: "Establishing, the club" }), "Place view");
     assert.equal(ridesLabel([], undefined), "no reference");
   });

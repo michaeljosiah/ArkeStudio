@@ -50,7 +50,7 @@ const viewOf = (who: Pick<PictureWho, "look">): (typeof VIEWS)[number] => (who.l
  * it, `Full body · no close view`. Where people rode different images the line names who rode which,
  * by the names the rows use (`Ade close view · Tunde full body`), because one bare word for each
  * would say two images rode without saying whose; the card never claims one view for a picture that
- * mixed them. Then `Place view`, `no reference`, and a detail's `no reference · no faces`.
+ * mixed them. Then `Place view`, `no reference`, and `no faces` on a detail.
  */
 export function ridesLabel(
   who: readonly PictureWho[],
@@ -62,15 +62,16 @@ export function ridesLabel(
     hasClose?: (who: PictureWho) => boolean | undefined;
   } = {},
 ): string {
-  if (shot !== undefined && frameWord(shot.frame) === "Detail") return "no reference · no faces";
+  const detail = shot !== undefined && frameWord(shot.frame) === "Detail";
   const people = who.filter((entry) => entry.kind === "character" && entry.carried);
-  if (people.length === 0) return who.some((entry) => entry.kind === "place" && entry.carried) ? "Place view" : "no reference";
+  if (people.length === 0) return detail ? "no reference · no faces" : who.some((entry) => entry.kind === "place" && entry.carried) ? "Place view" : "no reference";
   const labelOf = options.labelOf ?? ((entry: PictureWho) => entry.name);
   const groups = VIEWS.map((view) => ({ view, people: people.filter((entry) => viewOf(entry) === view) })).filter((group) => group.people.length > 0);
   const parts = groups.length === 1 ? [groups[0]!.view] : groups.map((group) => `${group.people.map(labelOf).join(", ")} ${group.view}`);
   // The frame asked for faces and a look could only give its full body (rule 8): the line says why.
   const word = frameWord(shot?.frame);
   if (word !== null && CLOSE_FRAMES.has(word) && people.some((entry) => entry.look?.view === "full" && options.hasClose?.(entry) === false)) parts.push("no close view");
+  if (detail) parts.push("no faces");
   const line = parts.join(" · ");
   return `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
 }

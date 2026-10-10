@@ -114,6 +114,10 @@ describe("the brief a picture is made from (R-99)", () => {
     assert.deepEqual(detailed, [{ name: "Ife", part: "hand", skin: "Dark brown skin kept to a high gloss" }, { name: "Ade", part: "mouth and hand", skin: "Deep brown skin with a warm undertone" }]);
     assert.equal(pictureBench("Detail, her thumb across his lower lip.", [], undefined, detailed),
       "Detail, her thumb across his lower lip.\n\nIfe's hand: dark brown skin kept to a high gloss. Ade's mouth and hand: deep brown skin with a warm undertone.\n\nNo text in the picture.");
+    const referenced = pictureBench("Detail, her thumb across his lower lip.", [{ name: "Ife", kind: "character", token: "Image 1" }], undefined, detailed);
+    assert.match(referenced, /Ife is shown in @Image 1/);
+    assert.doesNotMatch(referenced, /Ife's hand: dark brown skin/);
+    assert.match(referenced, /Ade's mouth and hand: deep brown skin/, "only the uncited person's fallback remains");
   });
 });
 
