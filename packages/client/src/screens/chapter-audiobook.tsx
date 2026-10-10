@@ -1081,12 +1081,12 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         // On a phone the lines to cast head the menu (design turn 198j), Reset beside them over Direct and illustrate.
         {...(input.seamsInMenu === true && castItems.length > 0 ? { lead: { head: paragraphsToCast(toCast.length), items: castItems, also: seamReset } } : {})}
         items={[
-          ...(input.readingInMenu !== undefined
+          ...(input.readingInMenu !== undefined && input.seamsInMenu !== true
             ? [{ key: "reading", label: `${READINGS.find((r) => r.reading === input.reading)?.label ?? input.reading} · ${narrator.label ?? input.readingInMenu.narrator}`, state: "reading", disabled: false, press: input.readingInMenu.open, testId: "audiobook-reading-item" }]
             : []),
-          ...beatGroup,
           {
             key: "direct",
+            ...(input.seamsInMenu === true ? { section: "Direct and illustrate" } : {}),
             label: directedBlocks > 0 ? "Direct again" : "Direct this chapter",
             state: proposal !== null ? "proposed" : directedBlocks > 0 ? "directed" : "",
             // A held proposal answers the press until it is accepted or discarded (turn 184b).
@@ -1108,10 +1108,14 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
             : []),
           ...(input.seamsInMenu === true && input.export !== undefined
-            ? [{ key: "export", label: "Export…", state: "this chapter", disabled: connection !== "open", press: input.export, testId: "audiobook-chapter-export" }]
+            ? [{ key: "export", label: "Export…", state: "This chapter", separator: true, disabled: connection !== "open", press: input.export, testId: "audiobook-chapter-export" }]
             : []),
-          // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
-          ...(castItems.length === 0 ? seamReset : []),
+          ...(input.seamsInMenu === true && input.readingInMenu !== undefined
+            ? [{ key: "reading", label: `${READINGS.find((r) => r.reading === input.reading)?.label ?? input.reading} · ${narrator.label ?? input.readingInMenu.narrator}`, state: "Reading settings", separator: true, disabled: false, press: input.readingInMenu.open, testId: "audiobook-reading-item" }]
+            : []),
+          ...(input.seamsInMenu === true
+            ? [{ key: "blocks", label: "Blocks", state: seamLabel ?? "", disabled: false, children: [...beatGroup, { key: "blocks-reset", label: "Reset", state: seamLabel ?? "none set", disabled: seamsHeld || ((recordOrNull?.seams?.length ?? 0) === 0 && (recordOrNull?.beats?.length ?? 0) === 0), press: resetSeams, testId: "audiobook-blocks-reset" }], testId: "audiobook-blocks-menu" }]
+            : []),
         ]}
       />
     );
@@ -1981,7 +1985,7 @@ function usePopover() {
 const SPOKEN_GAP = <span className="fy-sr-only"> </span>;
 
 /** One item of a toolbar menu: the label, its state at the right in mono, and its press. */
-export interface ToolMenuItem { key: string; label: string; state: string; disabled: boolean; press: () => void; testId?: string; /** A mark before the label (design turn 201): Group by beats' GroupMark. */ mark?: ReactNode }
+export type ToolMenuItem = { key: string; label: string; state: string; disabled: boolean; testId?: string; mark?: ReactNode; section?: string; separator?: boolean } & ({ press: () => void; children?: never } | { children: readonly ToolMenuItem[]; press?: never });
 
 /**
  * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
@@ -2001,12 +2005,13 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
 }) {
   const pop = usePopover();
   const [inner, setInner] = useState(false);
+  const [submenu, setSubmenu] = useState<ToolMenuItem | null>(null);
   useEffect(() => {
-    if (!pop.open) setInner(false);
+    if (!pop.open) { setInner(false); setSubmenu(null); }
   }, [pop.open]);
   useEffect(() => {
     if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
-  }, [pop.open, inner]);
+  }, [pop.open, inner, submenu]);
   const leading = lead !== undefined && lead.items.length > 0 && !inner;
   if (leading) {
     return (
@@ -2061,25 +2066,8 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
       </button>
       {pop.open && (
         <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end" role="menu" aria-label={label} onKeyDown={pop.onKey}>
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              aria-disabled={item.disabled}
-              className="fy-ab__menu-opt"
-              onClick={() => {
-                if (item.disabled) return;
-                pop.close(false);
-                item.press();
-              }}
-              {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
-            >
-              {item.mark}
-              <span className="fy-ab__menu-label">{item.label}</span>
-              {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
-            </button>
-          ))}
+          {submenu !== null && <div className="fy-ab__menu-hd">{submenu.label}</div>}
+          {(submenu?.children ?? items).map((item) => <ToolMenuOption key={item.key} item={item} onChildren={() => setSubmenu(item)} onDone={() => pop.close(false)} />)}
         </div>
       )}
     </span>
@@ -2087,15 +2075,20 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
 }
 
 /** One item of a toolbar menu, as the toolbar's menus draw it: its label, its state at the right. */
-function ToolMenuOption({ item, onDone }: { item: ToolMenuItem; onDone: () => void }) {
+function ToolMenuOption({ item, onDone, onChildren }: { item: ToolMenuItem; onDone: () => void; onChildren?: () => void }) {
   return (
+    <>
+    {item.separator && <div className="fy-ab__menu-rule" role="separator" />}
+    {item.section !== undefined && <div className="fy-ab__menu-hd">{item.section}</div>}
     <button
       type="button"
       role="menuitem"
       aria-disabled={item.disabled}
       className="fy-ab__menu-opt"
+      aria-haspopup={item.children !== undefined ? "menu" : undefined}
       onClick={() => {
         if (item.disabled) return;
+        if (item.children !== undefined) { onChildren?.(); return; }
         onDone();
         item.press();
       }}
@@ -2104,7 +2097,9 @@ function ToolMenuOption({ item, onDone }: { item: ToolMenuItem; onDone: () => vo
       {item.mark}
       <span className="fy-ab__menu-label">{item.label}</span>
       {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
+      {item.children !== undefined && <ChevronRight size={13} stroke={2} aria-hidden="true" />}
     </button>
+    </>
   );
 }
 

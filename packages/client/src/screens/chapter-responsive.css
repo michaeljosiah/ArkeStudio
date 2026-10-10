@@ -691,3 +691,9 @@
   .fy-ab__read-progress [data-testid="audiobook-progress"] { flex-direction: column; align-items: flex-start; gap: 4px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { padding-inline: 18px; }
 }
+
+/* Turn 209: Reading settings opens from the named chapter menu at every narrow width. */
+@media (max-width: 1099px) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external { position: static; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external .fy-ab__reading-menu { left: auto; right: var(--ab-gutter, 16px); top: calc(100% - 6px); max-width: calc(100vw - 2 * var(--ab-gutter, 16px)); }
+}
