@@ -918,6 +918,12 @@ export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () =
   return () => filedBatchListeners.delete(listener);
 }
 
+const audiobookActivityListeners = new Set<(run: import("@arke-studio/contracts").AudiobookActivity) => void>();
+export function subscribeAudiobookActivity(listener: (run: import("@arke-studio/contracts").AudiobookActivity) => void): () => void {
+  audiobookActivityListeners.add(listener);
+  return () => { audiobookActivityListeners.delete(listener); };
+}
+
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
   queueResultListeners.add(listener);
   return () => queueResultListeners.delete(listener);
@@ -1280,6 +1286,10 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
           },
         },
       };
+    case "audiobook.activity": {
+      const runs = [event.run, ...(state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
+      return { ...state, app: { ...state.app, audiobookActivity: runs } };
+    }
     case "job.updated": {
       const jobs = [...state.app.jobs];
       const i = jobs.findIndex((j) => j.id === event.job.id);
@@ -1650,6 +1660,7 @@ function handleFrame(json: string): void {
     if (event.type === "voice.designed-listed") for (const listener of projectVoiceListeners) listener(event);
     if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
     if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
+    if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }

@@ -8,6 +8,7 @@ import {
   soloTurns,
   SPLIT_DID_NOT_MATCH,
   type AudiobookReader,
+  type AudiobookActivityUpdate,
   type Job,
   type ManifestModel,
   type SpeechTurn,
@@ -380,6 +381,7 @@ async function world(): Promise<{ store: WorldStore; close: () => Promise<void>;
 }
 
 interface RunHarness {
+  activity: AudiobookActivityUpdate[];
   events: AudiobookRunEvent[];
   sent: EnqueueInput[];
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
@@ -389,6 +391,7 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
   const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
   const events: AudiobookRunEvent[] = [];
+  const activity: AudiobookActivityUpdate[] = [];
   const sent: EnqueueInput[] = [];
   const jobs = new Map<string, Job>();
   // What the transcriber hears next: each stretch of the latest request is a block's words.
@@ -403,6 +406,7 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
       narrator: READER,
       catalogue: [KORE],
       signal: new AbortController().signal,
+      activity: async update => { activity.push(update); },
       ...(extra.confirmationToken !== undefined ? { confirmationToken: extra.confirmationToken } : {}),
       ...(extra.only !== undefined ? { only: extra.only } : {}),
       requireUploadConfirmation: () => false,
@@ -429,13 +433,14 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
       findJobs: () => [],
       actualCost: async () => opts.actual ?? 1_000,
       wordTimes: (wav) => {
+        assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
         return timeWords(wav, async () => heard[call++] ?? "");
       },
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
     });
-  return { events, sent, run };
+  return { events, sent, run, activity };
 }
 
 const recordOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json"), "utf8")));
@@ -457,6 +462,7 @@ describe("a chapter read grouped (design turn 185)", () => {
       assert.equal(card.requests, 1, "the whole chapter fits one request");
       assert.equal(card.perParagraph, blocks);
       assert.equal(h.sent.length, 0, "nothing sent before the answer");
+      assert.equal(h.activity.length, 0, "a price proposal is not a read operation");
       await h.run({ confirmationToken: card.confirmationToken });
       assert.equal(h.sent.length, 1, "one request for every block");
       const turns = h.sent[0]!.params["turns"] as SpeechTurn[];
@@ -469,6 +475,8 @@ describe("a chapter read grouped (design turn 185)", () => {
       const takes = Object.values(record.takes);
       assert.equal(takes.length, blocks);
       assert.equal(Object.keys(record.flags).length, 0);
+      assert.equal(h.activity[0]?.phase, "queued");
+      assert.deepEqual(h.activity.at(-1), { phase: "ready", made: blocks, flagged: 0 }, "completion follows the durable block writes");
       assert.ok(takes.every((take) => take.grouped?.request === "jb_01J8G000000000000000000001" && take.grouped.blocks.length === blocks && take.loudness !== undefined));
       assert.equal(takes.reduce((sum, take) => sum + (take.costMicroUsd ?? 0), 0), 1_001, "the request's actual, shared by characters");
       assert.equal(takes.reduce((sum, take) => sum + take.estimatedMicroUsd, 0), h.sent[0]!.estimatedMicroUsd);

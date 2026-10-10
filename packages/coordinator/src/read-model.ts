@@ -259,6 +259,11 @@ export class ReadModel {
         });
         return;
       }
+      case "audiobook.activity": {
+        const runs = [event.run, ...(this.state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
+        this.state = { ...this.state, app: { ...this.state.app, audiobookActivity: runs } };
+        return;
+      }
       case "job.updated": {
         const jobs = [...this.state.app.jobs];
         const i = jobs.findIndex((j) => j.id === event.job.id);

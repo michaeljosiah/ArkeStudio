@@ -454,6 +454,14 @@ describe("the audiobook run (turn 146)", () => {
       assert.ok(takes.every((a) => a.links.includes("neap")), "linked to the chapter");
       const record = await readRecord(worldDir);
       assert.equal(Object.keys(record.takes).length, progress.length);
+      const activity = events.filter(e => e.type === "audiobook.activity").map(e => e.run);
+      assert.equal(activity[0]?.phase, "queued");
+      assert.equal(activity.at(-1)?.phase, "ready");
+      assert.equal(activity.at(-1)?.made, Object.keys(record.takes).length);
+      assert.equal(activity.at(-1)?.worldId, WORLD_ID);
+      assert.equal(activity.at(-1)?.chapterFile, "01-neap");
+      assert.equal(activity.at(-1)?.local, true);
+      assert.equal(new Set(activity.map(run => run.id)).size, 1, "all saved blocks belong to one read operation");
       assert.ok(record.takes["title"]?.reader.provider === "kokoro");
       assert.equal(bundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "neap")?.audiobook && "takes" in bundle().productions.find((p) => p.meta.id === LEDGER)!.chapters.find((c) => c.id === "neap")!.audiobook!, true, "the summary carries the stamp");
 

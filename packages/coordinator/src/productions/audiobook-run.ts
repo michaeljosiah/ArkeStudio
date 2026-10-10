@@ -1,3 +1,4 @@
+import type { AudiobookActivityUpdate } from "@arke-studio/contracts";
 import { chapterParagraphs, readBreaksFor, DEFAULT_GROUP_PACKING, groupedText, SPLIT_DID_NOT_MATCH, type AudiobookGrouped, type AudiobookLoudness, type AudiobookSplitFlag, freeCreditDraw, freeCreditOverrun, freeLimitReason, freePlanFailure, freePlanShortfall, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readsGrouped, shareByCharacters, speechAsks, type FreePlanAllowance, type FreePlanShort, type GroupPacking, type ReadBreak, type SpeechQuote, type SpeechTurn } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
@@ -138,6 +139,8 @@ export interface AudiobookRunDeps {
   wordTimes?: (wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>;
   mediaProbe?: MediaProbe;
   emit: (event: AudiobookRunEvent) => void;
+  /** Accepted operation progress, durably published independently of provider job success. */
+  activity?: (update: AudiobookActivityUpdate) => Promise<void>;
   now: () => string;
 }
 
@@ -737,14 +740,18 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const { store, productionId, chapterId, narrator, signal, emit } = deps;
   let made = 0;
   let flaggedCount = 0;
-  const finish = (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) =>
+  let expected = 0;
+  const finish = async (outcome: Extract<AudiobookRunEvent, { type: "finished" }>["outcome"], extra: { record?: ChapterAudiobook; reason?: string } = {}) => {
+    const incomplete = outcome === "read" && made + flaggedCount < expected;
+    await deps.activity?.({ phase: outcome === "stopped" ? "stopped" : outcome !== "read" || incomplete ? "interrupted" : flaggedCount > 0 ? "finished" : "ready", made, flagged: flaggedCount, ...(extra.reason !== undefined ? { reason: extra.reason } : incomplete ? { reason: "Reading ended before every requested block was saved." } : {}) });
     emit({ type: "finished", outcome, made, flagged: flaggedCount, ...extra });
+  };
 
   const transcriber = deps.wordTimes !== undefined;
   const preparation = await prepareChapter(store, productionId, chapterId, { narrator, models: deps.models, catalogue: deps.catalogue, transcriber, ...(deps.creditLeftMicroUsd !== undefined ? { creditLeftMicroUsd: deps.creditLeftMicroUsd } : {}), ...(deps.freePlanAllowance !== undefined ? { freePlanAllowance: deps.freePlanAllowance } : {}) }, deps.now, deps.only, undefined, deps.castFirst !== undefined ? { castPending: true } : {});
   if (preparation.kind !== "ready") {
     if (preparation.kind === "unavailable") emit({ type: "started", toMake: 0, blocks: 0 });
-    finish(preparation.kind, { reason: preparation.reason });
+    await finish(preparation.kind, { reason: preparation.reason });
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
@@ -760,7 +767,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     }
     const refused = await deps.castFirst();
     if (refused !== null) {
-      finish("refused", { reason: refused });
+      await finish("refused", { reason: refused });
       return;
     }
     const { castFirst: _castFirst, ...read } = deps;
@@ -775,13 +782,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const counted = groups.length > 0 ? { requests, groups: groups.map((group) => group.kept.map((block) => block.block.key)).filter((keys) => keys.length >= 2) } : {};
   emit({ type: "started", toMake: toMake.length, blocks: plan.blocks.length, ...counted });
   if (toMake.length === 0) {
-    finish("read", { record });
+    await finish("read", { record });
     return;
   }
   // Google has said the day is used up: the run ends before a word is sent, as it would at the
   // first refusal, and says when the day resets — rather than sitting at `reading… 0 of 122`.
   if (freePlan?.allowance.reached === true) {
-    finish("failed", { reason: freeLimitReason(freePlan.allowance), record });
+    await finish("failed", { reason: freeLimitReason(freePlan.allowance), record });
     return;
   }
   const token = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
@@ -793,7 +800,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // given for other words (codex on PR 1187). Judged before any consent is asked, so a chapter
   // that moved never puts a question under the book that the book's answer cannot follow.
   if (deps.priced !== undefined && asks && deps.priced !== token) {
-    finish("refused", { reason: "moved since the book was priced" });
+    await finish("refused", { reason: "moved since the book was priced" });
     return;
   }
   for (const reader of clones) {
@@ -808,9 +815,15 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
 
+  expected = toMake.length;
+  const quotes = misses.flatMap(block => block.quotes);
+  const activityPlan = quotes.length > 0 && quotes.every(quote => quote.plan === quotes[0]!.plan) ? quotes[0]!.plan : undefined;
+  await deps.activity?.({ phase: "queued", toMake: toMake.length, requests, made: 0, flagged: 0, estimatedMicroUsd: estimate, local: speaking.every(block => block.local), models: [...new Set(speaking.map(block => block.model.displayName))], ...(activityPlan !== undefined ? { plan: activityPlan } : {}) });
   const landingDir = audiobookLanding(productionId, chapterFile);
-  const progress = (block: Speaking, outcome: "made" | "adopted" | "flagged", reason?: string) =>
+  const progress = async (block: Speaking, outcome: "made" | "adopted" | "flagged", reason?: string) => {
+    await deps.activity?.({ made, flagged: flaggedCount });
     emit({ type: "progress", block: block.block.key, outcome, ...(reason !== undefined ? { reason } : {}), made, toMake: toMake.length });
+  };
   // The loudness each filed take was brought to (design turn 185), by artifact, for its take.
   const loudnessOf = new Map<string, AudiobookLoudness>();
   const file = async (block: Speaking, sourcePath: string, input: { jobId?: string; parts: number; estimatedMicroUsd: number; costMicroUsd: number | null; adopted?: true; grouped?: AudiobookGrouped; loudness?: AudiobookLoudness }): Promise<ArtifactSidecar> => {
@@ -938,11 +951,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   const flag = async (block: Speaking, reason: string) => {
     await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now() } } }));
     flaggedCount += 1;
-    progress(block, "flagged", reason);
+    await progress(block, "flagged", reason);
   };
 
   let jobInFlight: string | null = null;
   const onAbort = () => {
+    void deps.activity?.({ phase: "stopping" }).catch(() => {});
     if (jobInFlight !== null) void deps.cancelJob(jobInFlight).catch(() => {});
   };
 
@@ -959,6 +973,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   let requestAt = 0;
   const readGroup = async (group: PreparedGroup, settled: Set<string>): Promise<{ ended: string } | null> => {
     requestAt += 1;
+    await deps.activity?.({ phase: "reading", request: requestAt });
     const keys = group.members.map((block) => block.block.key);
     emit({ type: "request", index: requestAt, of: requests, keys: group.kept.map((block) => block.block.key) });
     const identity = groupIdentity(group);
@@ -968,6 +983,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       const stillThere = await readFile(toExtendedLength(join(store.dir, fromPortable(prior.job.landedFiles![0]!)))).then(() => true).catch(() => false);
       if (!stillThere) prior = null;
     }
+    if (prior) await deps.activity?.({ job: { id: prior.job.id, index: requestAt, reused: true } });
     let job: Job;
     if (prior?.kind === "landed") job = prior.job;
     else {
@@ -1030,6 +1046,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       return null;
     }
     const pcm = readSpeechWav(bytes);
+    await deps.activity?.({ phase: "aligning" });
     const heard = await deps.wordTimes(bytes, signal);
     if (signal.aborted) return null;
     const cuts = splitRequest(group.members.map((block) => ({ key: block.block.key, text: block.text, ...(block.sounds === true ? { sounds: true } : {}) })), heard.words, heard.seconds, (start, end) => audioHash(writeSpeechWav(sliceSpeech(pcm, start, end))), splitAudio(pcm), preparation.prepared.lexicon);
@@ -1055,13 +1072,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         await keep(block, artifact, provenance);
         // A request that ran long is said on its takes' progress; the record keeps no note, which
         // would be another strict field and another world schema for what the cut already dropped.
-        progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
+        await progress(block, "made", cut.longTail ? LONG_TAIL : undefined);
       } else {
         const split: AudiobookSplitFlag = { artifactId: artifact.id, heard: cut.heard.slice(0, 4000), request: job.id, offsetSec: grouped.offsetSec, durationSec: grouped.durationSec };
         const reason = `${SPLIT_DID_NOT_MATCH} · ${cut.longTail ? `${LONG_TAIL} · ` : ""}\u201c${cut.heard.length > 80 ? `${cut.heard.slice(0, 79)}\u2026` : cut.heard}\u201d`;
         await write((current) => ({ ...current, updatedAt: deps.now(), flags: { ...current.flags, [block.block.key]: { reason, at: deps.now(), split } } }));
         flaggedCount += 1;
-        progress(block, "flagged", reason);
+        await progress(block, "flagged", reason);
       }
     }
     await unlink(toExtendedLength(landed)).catch(() => {});
@@ -1079,26 +1096,26 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         try {
           const read = await readGroup(group, settled);
           if (read !== null) {
-            finish("failed", { reason: read.ended, record });
+            await finish("failed", { reason: read.ended, record });
             return;
           }
         } catch (err) {
           if (signal.aborted) break;
           const message = err instanceof Error ? err.message : String(err);
           if (err instanceof RecordWriteError) {
-            finish("failed", { reason: message, record });
+            await finish("failed", { reason: message, record });
             return;
           }
           try {
             for (const kept of group.kept) if (!settled.has(kept.block.key)) await flag(kept, message);
           } catch (flagErr) {
-            finish("failed", { reason: flagErr instanceof Error ? flagErr.message : String(flagErr), record });
+            await finish("failed", { reason: flagErr instanceof Error ? flagErr.message : String(flagErr), record });
             return;
           }
         }
         continue;
       }
-      if (misses.includes(block)) requestAt += block.parts.length;
+      await deps.activity?.({ phase: "reading" });
       try {
         // A direction this reader cannot express is refused in one clause (R-9), never sent
         // and never made neutral: the block is flagged, and the panel says which control.
@@ -1136,7 +1153,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           const artifact = await file(block, sourcePath, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
           await keep(block, artifact, { parts: made.parts, estimatedMicroUsd: 0, costMicroUsd: 0 });
           await unlink(toExtendedLength(sourcePath)).catch(() => {});
-          progress(block, "made");
+          await progress(block, "made");
           continue;
         }
         if (block.local) {
@@ -1148,13 +1165,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           const provenance = { parts: result.parts, estimatedMicroUsd: 0, costMicroUsd: 0, ...(result.cached ? { adopted: true as const } : {}) };
           const artifact = await file(block, join(store.dir, fromPortable(result.file)), provenance);
           await keep(block, artifact, provenance);
-          progress(block, result.cached ? "adopted" : "made");
+          await progress(block, result.cached ? "adopted" : "made");
           continue;
         }
         if (block.cacheFile !== null && !misses.includes(block)) {
           const artifact = await file(block, join(store.dir, fromPortable(block.cacheFile)), { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
           await keep(block, artifact, { parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, adopted: true });
-          progress(block, "adopted");
+          await progress(block, "adopted");
           continue;
         }
         if (block.parts.length > 1 && block.format === "flac") {
@@ -1184,6 +1201,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         };
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
+          requestAt += 1;
+          await deps.activity?.({ phase: "reading", request: requestAt });
           // Paid for already, or on its way: the queue's rows outlive this process, so a part
           // whose job landed before the take was filed is filed now, and one still being made
           // is waited for, before another request is asked for (R-16).
@@ -1194,6 +1213,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           }
           let job: Job;
           if (prior !== null) {
+            await deps.activity?.({ job: { id: prior.job.id, index: requestAt, reused: true } });
             firstJob ??= prior.job.id;
             if (prior.kind === "running") {
               jobInFlight = prior.job.id;
@@ -1281,26 +1301,26 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         await keep(block, artifact, { parts: landed.length, estimatedMicroUsd: estimated, costMicroUsd: cost });
         for (const rel of landed) await unlink(toExtendedLength(join(store.dir, fromPortable(rel)))).catch(() => {});
         if (landed.length > 1) await unlink(toExtendedLength(sourcePath)).catch(() => {});
-        progress(block, "made");
+        await progress(block, "made");
       } catch (err) {
         if (signal.aborted) break;
         const message = err instanceof Error ? err.message : String(err);
         // The record could not be written at all: the world's claim is gone, or it closed under
         // the run. Nothing more can be kept, so the run ends rather than flagging every block.
         if (err instanceof RecordWriteError) {
-          finish("failed", { reason: message, record });
+          await finish("failed", { reason: message, record });
           return;
         }
         try {
           await flag(block, message);
         } catch (flagErr) {
-          finish("failed", { reason: flagErr instanceof Error ? flagErr.message : String(flagErr), record });
+          await finish("failed", { reason: flagErr instanceof Error ? flagErr.message : String(flagErr), record });
           return;
         }
         // A free plan's end stops the chapter (design turn 182): the day's limit fails every
         // later read the same way, and a billed key must not keep reading on a free price.
         if (err instanceof FreePlanEnded) {
-          finish("failed", { reason: err.reason, record });
+          await finish("failed", { reason: err.reason, record });
           return;
         }
       }
@@ -1309,10 +1329,10 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     signal.removeEventListener("abort", onAbort);
   }
   if (signal.aborted) {
-    finish("stopped", { record });
+    await finish("stopped", { record });
     return;
   }
-  finish("read", { record });
+  await finish("read", { record });
 }
 
 /**

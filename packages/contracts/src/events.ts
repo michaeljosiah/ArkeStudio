@@ -1,3 +1,4 @@
+import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { AccountStateSchema } from "./account.js";
@@ -1114,6 +1115,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * provider and its share; a progress event per block as its take lands or is flagged; then
    * finished with a named ending. Keyed like continuity's and the cast's runs.
    */
+  z.object({ ...base, type: z.literal("audiobook.activity"), run: AudiobookActivitySchema }).strict(),
   z
     .object({
       ...base,

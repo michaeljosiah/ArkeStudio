@@ -55,6 +55,7 @@ import "./components/production-studio.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
+import "./components/audiobook-activity.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";
 import "./screens/audiobook-show.css";

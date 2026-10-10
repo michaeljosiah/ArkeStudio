@@ -794,3 +794,11 @@ Escape back to the proposal, then accept once. It checks one active dialog, keyb
 contained price controls and absence of background purchases, and writes screenshots and
 measurements into the printed temporary directory. The fixture uses invented prose and a
 capturing bridge; no installed app, world or paid provider is involved.
+
+Chapter narration Activity (turn 206, #1684) has focused contracts identity/cost tests,
+coordinator `test/productions/audiobook-activity.test.ts` for restart, corruption and stop
+ordering, and `audiobook-grouped.test.ts` for provider success followed by local alignment
+and durable block writes. Client `activity-panel.test.tsx` and
+`queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run
+`node scripts/smoke-audiobook-activity.mjs` with Chrome (`ARKE_CHROME` overrides its path)
+for synthetic screenshots and overflow/action measurements at 1400, 390 and 320 px.
