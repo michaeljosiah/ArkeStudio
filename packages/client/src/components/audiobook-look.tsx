@@ -16,12 +16,13 @@ import {
   type ReferenceKit,
 } from "@arke-studio/contracts";
 import { resolveModel, worldModel } from "./dispatch-bar.js";
-import { EditorDialog } from "./editor-dialog.js";
+import { PageSheet } from "./page-sheet.js";
+import { SavedLookCollection, SavedLookImage } from "./saved-look-collection.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
-import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, readAudiobookLooks, rejectReferenceTake, setAudiobookLook, useAudiobookAsks, useAudiobookRecords, useStore } from "../lib/store.js";
+import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, useAudiobookRecords, useStore } from "../lib/store.js";
 import { lookJobState, lookJobs, useQueueRefusals } from "./look-jobs.js";
-import { Button, Select, Textarea, cx } from "./ui.js";
+import { Button, Select, Textarea } from "./ui.js";
 
 /**
  * The chapter's Looks (design turn 191c, 193a; SPEC-047 R-98, R-112..R-116): the place, the mood
@@ -132,16 +133,15 @@ export function closeViewCost(model: Parameters<typeof estimateCharacterImageMic
 }
 
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */
-function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook, onChoose, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
+function CharacterRow({ row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
   row: Row;
   kit: ReferenceKit | null;
   slug: string;
   orderOf: (file: string) => number | null;
-  usage: Record<string, number[]>;
   off: boolean;
   onWrite: (target: LookTarget, text: string | null) => void;
   onNewLook: (row: Row) => void;
-  onChoose: (row: Row, lookId: string | null) => void;
+  onBrowse: (row: Row) => void;
   closeState: (look: CharacterLook) => CloseViewState;
   onMakeClose: (row: Row, look: CharacterLook) => void;
   onAcceptClose: (row: Row, look: CharacterLook, take: { id: string; path: string }) => void;
@@ -157,14 +157,22 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
   const from = line.from !== undefined ? orderOf(line.from) : null;
   const close: CloseViewState = chosen === null ? { kind: "none" } : chosen.closeFile !== undefined ? { kind: "accepted", path: `references/${sheet}/${chosen.closeFile}` } : closeState(chosen);
   const priced = (label: string) => `${label}${closeCost !== "" ? ` · ${closeCost}` : ""}`;
-  const here = (id: string): string | null => {
-    const chapters = usage[id];
-    return chapters === undefined || chapters.length === 0 ? null : `chapter${chapters.length === 1 ? "" : "s"} ${[...chapters].sort((a, b) => a - b).join(", ")}`;
-  };
+  const gone = line.lookId !== undefined && chosen === null;
   return (
     <div className="fy-look__char" data-testid="look-line" data-key={row.id}>
+      <div className="fy-look__overview">
+        <SavedLookImage src={photo !== null ? mediaUrl(slug, `references/${sheet}/${photo.file}`) : null} className="fy-look__avatar" />
+        <div className="fy-look__person"><b>{row.label}</b><small>{looks.length} saved look{looks.length === 1 ? "" : "s"}</small></div>
+        <button type="button" className="fy-look__choice" onClick={() => onBrowse(row)} data-testid="look-browse" data-look={line.lookId ?? "main"}>
+          <SavedLookImage src={gone ? null : chosen !== null ? mediaUrl(slug, `references/${sheet}/${chosen.file}`) : photo !== null ? mediaUrl(slug, `references/${sheet}/${photo.file}`) : null} />
+          <span><b>{gone ? "Saved look unavailable" : chosen !== null ? lookName(chosen, looks) : "Main photo"}</b><small>{gone ? "Choose another look" : chosen !== null ? "Chosen for this chapter" : "Choose or make a look"}</small></span><span aria-hidden="true">›</span>
+        </button>
+        <Button variant="ghost" disabled={off} onClick={() => onNewLook(row)} data-testid="look-new">New look…</Button>
+      </div>
+      <details className="fy-look__details">
+      <summary>Clothing and details{(line.conflicts?.length ?? 0) > 0 ? " · check clothing" : ""}{chosen !== null && kit !== null && lookOlderFace(kit, chosen) ? " · older face" : ""}</summary>
       <div className="fy-look__charhead">
-        {chosen !== null ? (
+        {gone ? <SavedLookImage src={null} className="fy-look__full" /> : chosen !== null ? (
           <img className="fy-look__full" src={mediaUrl(slug, `references/${sheet}/${chosen.file}`)} alt="" data-testid="look-image" data-view="full" />
         ) : photo !== null && sheet !== undefined ? (
           <img className="fy-look__main" src={mediaUrl(slug, `references/${sheet}/${photo.file}`)} alt="" data-testid="look-image" data-view="main" />
@@ -175,7 +183,7 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
           <b>{row.label}</b>
           <Field row={row} label={row.label ?? "Line"} disabled={off} onWrite={onWrite} />
           <div className="fy-look__facts fy-mono" data-testid="look-facts">
-            <span data-testid="look-state">{chosen !== null ? (close.kind === "accepted" ? "full body, close" : "full body · no close view") : looks.length > 0 ? "no look · the main photo rides" : "head and shoulders · no look"}</span>
+            <span data-testid="look-state">{gone ? "Saved look unavailable" : chosen !== null ? (close.kind === "accepted" ? "full body, close" : "full body · no close view") : looks.length > 0 ? "no look · the main photo rides" : "head and shoulders · no look"}</span>
             {row.source !== null && <span>{row.source}</span>}
             {from !== null && <span data-testid="look-from">from chapter {from}</span>}
             {chosen !== null && kit !== null && lookOlderFace(kit, chosen) && <span className="fy-ch__who-where--warn" data-testid="look-older">older face</span>}
@@ -233,26 +241,7 @@ function CharacterRow({ row, kit, slug, orderOf, usage, off, onWrite, onNewLook,
           )}
         </div>
       </div>
-      {sheet !== undefined && (
-        <div className="fy-look__picker" role="listbox" aria-label={`${row.label ?? "Character"}'s looks`} data-testid="look-picker">
-          <button type="button" role="option" aria-selected={chosen === null} className={cx("fy-look__tile", chosen === null && "fy-look__tile--on")} disabled={off} onClick={() => onChoose(row, null)} data-testid="look-tile" data-look="main">
-            {photo !== null ? <img src={mediaUrl(slug, `references/${sheet}/${photo.file}`)} alt="" /> : <i aria-hidden="true" />}
-            <span className="fy-mono">Main photo</span>
-          </button>
-          {looks.map((look) => (
-            <button key={look.id} type="button" role="option" aria-selected={chosen?.id === look.id} className={cx("fy-look__tile", chosen?.id === look.id && "fy-look__tile--on")} disabled={off} onClick={() => onChoose(row, look.id)} data-testid="look-tile" data-look={look.id} title={lookClothing(look)}>
-              <img src={mediaUrl(slug, `references/${sheet}/${look.file}`)} alt="" />
-              <span className="fy-mono">{lookName(look)}</span>
-              {here(look.id) !== null && <span className="fy-mono fy-look__tileuse" data-testid="look-usage">{here(look.id)}</span>}
-              {kit !== null && lookOlderFace(kit, look) && <span className="fy-mono fy-look__tileuse fy-ch__who-where--warn">older face</span>}
-            </button>
-          ))}
-          <button type="button" className="fy-look__tile fy-look__tile--new" disabled={off} onClick={() => onNewLook(row)} data-testid="look-new">
-            <i aria-hidden="true" />
-            <span className="fy-mono">{looks.length === 0 ? "Make a look" : "New look"}</span>
-          </button>
-        </div>
-      )}
+      </details>
     </div>
   );
 }
@@ -340,13 +329,12 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     const index = blockKeys.indexOf(key);
     return index < 0 ? null : index + 1;
   };
-  const asks = useAudiobookAsks();
   const jobs = store.state?.app.jobs ?? [];
   const queueRefused = useQueueRefusals();
   const [asked, setAsked] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
-  const [usageAsk, setUsageAsk] = useState<string | null>(null);
   const [making, setMaking] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
+  const [browsing, setBrowsing] = useState<string | null>(null);
   /** Close views asked for here, by look: the request whose job is that row's. */
   const [closeAsked, setCloseAsked] = useState<Record<string, string>>({});
   /** Close views accepted or discarded here, shown so at once: the kit's snapshot follows. */
@@ -388,13 +376,12 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     if (written.length > 0) setWriting((held) => held.filter((press) => !written.includes(press)));
   }, [look]);
   const [adding, setAdding] = useState<Array<{ key: string; name: string; sheet?: string }>>([]);
-  // Which chapters chose each look (R-114): asked when the sheet opens and again when a choice is made, so a picker is never a chapter behind.
-  const chosenSignature = Object.entries(look?.characters ?? {}).map(([key, line]) => `${key}:${line.lookId ?? ""}`).join("|");
   useEffect(() => {
     if (!open) {
       setAdding([]);
       setRefused(null);
       setMaking(null);
+      setBrowsing(null);
       setCloseAsked({});
       setCloseAccepted({});
       setDiscarded([]);
@@ -402,10 +389,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       // until their answer or the record settles them (codex on PR 1559).
       return;
     }
-    setUsageAsk(readAudiobookLooks(worldId, productionId));
-  }, [open, worldId, productionId, chosenSignature]);
-  const usageAnswer = usageAsk === null ? undefined : asks[usageAsk];
-  const usage = usageAnswer?.state === "looks" ? usageAnswer.usage : {};
+  }, [open]);
   const off = connection !== "open";
   const derive = () => {
     setRefused(null);
@@ -470,9 +454,39 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
     const request = makeChapterLook(worldId, row.sheet, { framing: "close", prompt: lookClothing(chosen), count: 1, closeOf: { lookId: chosen.id } });
     if (request !== null) setCloseAsked((heldAsks) => ({ ...heldAsks, [chosen.id]: request }));
   };
+  const footer = (
+          <div className="fy-look__foot">
+            {addable.length > 0 && (
+              <Select
+                label="Add"
+                value=""
+                disabled={off}
+                onChange={(event) => {
+                  const sheet = addable.find((candidate) => candidate.id === event.target.value);
+                  if (sheet !== undefined) setAdding((heldRows) => [...heldRows, { key: sheet.id, name: sheet.name, sheet: sheet.id }]);
+                }}
+                data-testid="look-add"
+              >
+                <option value="">Add a character</option>
+                {addable.map((sheet) => (
+                  <option key={sheet.id} value={sheet.id}>
+                    {sheet.name}
+                  </option>
+                ))}
+              </Select>
+            )}
+            <span className="fy-ch__panelpush" />
+            <Button variant="secondary" disabled={off || asked !== null} onClick={derive} data-testid="look-derive">
+              {asked !== null ? "Reading…" : look === null ? "Derive" : "Derive again"}
+            </Button>
+            <Button variant="primary" onClick={onClose} data-testid="look-done">
+              Done
+            </Button>
+          </div>
+  );
   return (
     <>
-      <EditorDialog open={open && making === null} onClose={onClose} width={1040} title={`Looks · Chapter ${chapterOrder}`} panelClassName="fy-look">
+      <PageSheet preserveReturnFocus open={open} onClose={onClose} title={`Looks · Chapter ${chapterOrder}`} className="fy-look" footer={footer}>
         <div className="fy-look__body" data-testid="look-sheet">
           {rows.length === 0 && adding.length === 0 && (
             <p className="fy-mono fy-look__none" data-testid="look-none">
@@ -487,11 +501,10 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
                 kit={kitOf(world, row.sheet)}
                 slug={slug}
                 orderOf={orderOf}
-                usage={usage}
                 off={off}
                 onWrite={write}
                 onNewLook={(entry) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: entry.text })}
-                onChoose={choose}
+                onBrowse={(entry) => setBrowsing(entry.id)}
                 closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
                 onMakeClose={makeClose}
                 onAcceptClose={(entry, chosen, take) => {
@@ -532,36 +545,13 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
             </div>
           )}
           {refused !== null && <p className="fy-mono fy-ch__who-where--warn" data-testid="look-refused">{refused}</p>}
-          <div className="fy-look__foot">
-            {addable.length > 0 && (
-              <Select
-                label="Add"
-                value=""
-                disabled={off}
-                onChange={(event) => {
-                  const sheet = addable.find((candidate) => candidate.id === event.target.value);
-                  if (sheet !== undefined) setAdding((heldRows) => [...heldRows, { key: sheet.id, name: sheet.name, sheet: sheet.id }]);
-                }}
-                data-testid="look-add"
-              >
-                <option value="">Add a character</option>
-                {addable.map((sheet) => (
-                  <option key={sheet.id} value={sheet.id}>
-                    {sheet.name}
-                  </option>
-                ))}
-              </Select>
-            )}
-            <span className="fy-ch__panelpush" />
-            <Button variant="secondary" disabled={off || asked !== null} onClick={derive} data-testid="look-derive">
-              {asked !== null ? "Reading…" : look === null ? "Derive" : "Derive again"}
-            </Button>
-            <Button variant="primary" onClick={onClose} data-testid="look-done">
-              Done
-            </Button>
-          </div>
+
         </div>
-      </EditorDialog>
+      </PageSheet>
+      {browsing !== null && (() => {
+        const row = rows.find((entry) => entry.id === browsing);
+        return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;
+      })()}
       {making !== null && (
         <NewLookSheet open onClose={() => setMaking(null)} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />
       )}

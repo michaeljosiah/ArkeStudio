@@ -186,7 +186,7 @@ function LookMenu({ id, label, who, kit, slug, chapter, mode, onMode, chosen, of
         {looks.map((look) => (
           <button key={look.id} type="button" className={cx("fy-pcard__tile", chosen === look.id && "fy-pcard__tile--on")} aria-pressed={chosen === look.id} disabled={off || who.sheet === undefined} title={lookClothing(look)} onClick={() => onChoose(look.id)} data-testid="picture-card-look-tile" data-look={look.id}>
             <img src={mediaUrl(slug, `references/${who.sheet}/${look.file}`)} alt="" />
-            <span>{lookName(look)}</span>
+            <span>{lookName(look, looks)}</span>
           </button>
         ))}
         {/* The main photo for this picture alone has to be there to ride; as the chapter's choice it is choosing none. */}

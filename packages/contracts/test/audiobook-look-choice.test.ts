@@ -258,10 +258,10 @@ describe("a look's clothing line", () => {
     assert.equal(lookClothing({ prompt: "Grey wool coat. No jewellery." }), "Grey wool coat. No jewellery.".replace(" No jewellery.", ""), "a plain line keeps its sentences bar a bare negative");
   });
 
-  it("names a look by the first thing worn", () => {
-    assert.equal(lookName({ prompt: ADE }), "Unstructured soft cream…");
-    assert.equal(lookName({ prompt: TUNDE }), "Washed navy polo shirt with…");
-    assert.equal(lookName({ prompt: "Storm coat, hood up; two braids.", framing: "full-body" }), "Storm coat");
+  it("uses an authored name separately from the exact prompt, and a date for legacy looks", () => {
+    assert.equal(lookName({ prompt: "A long generation prompt.", name: "Storm coat" }), "Storm coat");
+    assert.match(lookName({ prompt: "A long generation prompt.", acceptedAt: AT }), /^Look · 3 Oct 2026/);
+    assert.equal(lookName({ prompt: "A long generation prompt." }), "Look");
   });
 });
 

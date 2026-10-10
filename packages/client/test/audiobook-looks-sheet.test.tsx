@@ -92,21 +92,27 @@ const press = async (el: Element | null | undefined) => {
   await act(async () => void el.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event));
 };
 const sentOf = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind);
-const tiles = () => bodyAll('[data-key="maren-kest"] [data-testid="look-tile"]');
+const tiles = () => bodyAll('[data-testid="saved-look-option"]');
+const browse = async () => press(bodyAll('[data-key="maren-kest"] [data-testid="look-browse"]')[0]);
+const chosen = () => bodyAll('[data-key="maren-kest"] [data-testid="look-browse"]')[0]!.getAttribute("data-look");
+const choose = async (index: number) => { await browse(); await press(tiles()[index]); await press(bodyAll('[data-testid="saved-look-use"]')[0]); };
 
 describe("a character with looks (193a)", () => {
   it("offers the main photo, each look the kit holds and New look, with none ringed when none is chosen", async () => {
     await mount(LOOK());
+    assert.equal(tiles().length, 0, "the overview stays compact");
+    await browse();
     assert.deepEqual(tiles().map((tile) => tile.getAttribute("data-look")), ["main", STORM.id, HARBOUR.id], "newest look first, the main photo leads");
     assert.equal(tiles()[0]!.getAttribute("aria-selected"), "true", "no look chosen: the main photo rides");
     assert.equal(tiles()[1]!.getAttribute("aria-selected"), "false");
-    assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]), "New look");
+    assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]), "New look…");
     assert.equal(bodyAll('[data-key="maren-kest"] [data-testid="look-image"]')[0]!.getAttribute("data-view"), "main");
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /no look · the main photo rides/);
   });
 
   it("rings the chosen look, shows its full-body image, its words and that it has a close view", async () => {
     await mount(LOOK({ text: STORM.prompt, lookId: STORM.id, reading: "Oilskin coat." }));
+    await browse();
     assert.equal(tiles()[1]!.getAttribute("aria-selected"), "true");
     const image = bodyAll('[data-key="maren-kest"] [data-testid="look-image"]')[0]!;
     assert.equal(image.getAttribute("data-view"), "full");
@@ -119,20 +125,21 @@ describe("a character with looks (193a)", () => {
 
   it("chooses a look on a press, and the main photo takes the choice away", async () => {
     const m = await mount(LOOK());
-    await press(tiles()[1]);
+    await choose(1);
     const chose = sentOf(m, "choose-audiobook-look")[0]!;
     assert.deepEqual([chose.productionId, chose.chapterFile, chose.key, chose.sheet, chose.lookId], ["saltlight", "07-the-tenth-key", "maren-kest", "maren-kest", STORM.id]);
-    await press(tiles()[0]);
+    await choose(0);
     assert.equal(sentOf(m, "choose-audiobook-look")[1]!.lookId, null);
   });
 
   it("names the chapters that chose each look, asked of the coordinator when the sheet opens", async () => {
     const m = await mount(LOOK());
+    await browse();
     const asked = sentOf(m, "read-audiobook-looks")[0];
     assert.ok(asked, "the usage is asked for");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.looks", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", usage: { [STORM.id]: [5, 3] } } as DomainEvent));
-    assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-usage"]')[0]), "chapters 3, 5");
-    assert.equal(bodyAll('[data-key="maren-kest"] [data-testid="look-usage"]').length, 1, "a look no chapter chose says nothing");
+    assert.match(text(tiles()[1]), /Chapters 3, 5/);
+    assert.match(text(tiles()[2]), /No chapters/);
   });
 
   it("says where a carried choice came from, by the chapter's number", async () => {
@@ -161,7 +168,7 @@ describe("a character with looks (193a)", () => {
 describe("making a look from the sheet", () => {
   it("shows Make a look for a character with none, and opens the sheet with the chapter's line", async () => {
     await mount(LOOK(), state([]));
-    assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]), "Make a look");
+    assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]), "New look…");
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /head and shoulders · no look/);
     await press(bodyAll('[data-key="maren-kest"] [data-testid="look-new"]')[0]);
     assert.equal(bodyAll('[data-testid="look-sheet"]').length, 0, "the Looks gives way while a look is made");
@@ -205,7 +212,8 @@ describe("making a look from the sheet", () => {
 
   it("is read-only while the coordinator is away", async () => {
     await mount(LOOK(), state(), "closed");
-    assert.ok(tiles().every((tile) => (tile as HTMLButtonElement).disabled));
+    await browse();
+    assert.equal((bodyAll('[data-testid="saved-look-use"]')[0] as HTMLButtonElement).disabled, true);
     assert.equal((bodyAll('[data-testid="look-derive"]')[0] as HTMLButtonElement).disabled, true);
   });
 });
@@ -225,8 +233,8 @@ async function rerender(m: Mounted, world: ClientState, look: ChapterAudiobook["
 describe("a choice shows at once (2026-10-04, 0.5.60-local.14)", () => {
   it("rings the look pressed, counts it and says saving before the record comes back, then saved", async () => {
     const m = await mount(LOOK());
-    await press(tiles()[1]);
-    assert.equal(tiles()[1]!.getAttribute("aria-selected"), "true", "the look pressed is ringed at once");
+    await choose(1);
+    assert.equal(chosen(), STORM.id, "the explicit choice appears at once");
     assert.match(text(bodyAll('[data-key="maren-kest"] [data-testid="look-state"]')[0]), /full body, close/);
     assert.equal((bodyAll('[data-key="maren-kest"] textarea')[0] as HTMLTextAreaElement).value, "Storm coat, hood up; two braids.", "the look's own line");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saving…/);
@@ -234,14 +242,14 @@ describe("a choice shows at once (2026-10-04, 0.5.60-local.14)", () => {
     const written = LOOK({ text: STORM.prompt, lookId: STORM.id, reading: "Oilskin coat, dark and stiff with salt." });
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: chose.requestId, record: { ...record(written), updatedAt: "2026-10-04T09:00:05.000Z" } }));
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/, "its own answer settles it, before the chapter view hands the record down");
-    assert.equal(tiles()[1]!.getAttribute("aria-selected"), "true");
+    assert.equal(chosen(), STORM.id);
     await rerender(m, state(), written, "2026-10-04T09:00:05.000Z");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/);
   });
 
   it("settles a press the record shows even when its own answer was replaced by a later one", async () => {
     const m = await mount(LOOK());
-    await press(tiles()[1]);
+    await choose(1);
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /saving…/);
     await rerender(m, state(), LOOK({ text: STORM.prompt, lookId: STORM.id }), "2026-10-04T09:00:05.000Z");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /1 look chosen · derived · saved/);
@@ -249,10 +257,10 @@ describe("a choice shows at once (2026-10-04, 0.5.60-local.14)", () => {
 
   it("puts a refused choice back, with the reason", async () => {
     const m = await mount(LOOK());
-    await press(tiles()[1]);
+    await choose(1);
     const chose = sentOf(m, "choose-audiobook-look")[0]!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "07-the-tenth-key", requestId: chose.requestId, refused: "that look is gone" }));
-    assert.equal(tiles()[0]!.getAttribute("aria-selected"), "true", "the main photo rides again");
+    assert.equal(chosen(), "main", "the main photo rides again");
     assert.equal(text(bodyAll('[data-testid="look-refused"]')[0]), "that look is gone");
     assert.match(text(bodyAll('[data-testid="look-summary"]')[0]), /0 looks chosen · derived · saved/);
   });

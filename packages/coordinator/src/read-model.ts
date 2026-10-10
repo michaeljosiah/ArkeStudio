@@ -464,6 +464,7 @@ export class ReadModel {
       case "proposal.resolved":
       case "proposal.blocked":
       case "main-photo.acceptance":
+      case "reference.look-renamed":
       case "authoring.progress":
       case "authoring.status":
       case "permission.pending":

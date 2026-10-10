@@ -237,7 +237,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
   return (
-    <PageSheet open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
+    <PageSheet preserveReturnFocus open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
       <div className="fy-ills" data-testid="illustration-sheet">
         <section className="fy-ills__sheet" data-state="proposed">
           <header className="fy-ills__head">

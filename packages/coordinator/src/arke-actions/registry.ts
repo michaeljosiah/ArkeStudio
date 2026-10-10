@@ -396,6 +396,7 @@ const CLIENT_COMMAND_METADATA = {
   "accept-character-sheet": action("world", "take-review", "reference-kit", "authored-change", ["sheets", "references", "takes"]),
   "generate-character-looks": action("world", "generation", "job-queue", "spend-and-compute", ["sheets", "art-direction", "references"]),
   "accept-character-look": action("world", "take-review", "reference-kit", "authored-change", ["sheets", "references", "takes"]),
+  "rename-character-look": action("world", "authored-diff", "reference-kit", "authored-change", ["sheets", "references"]),
   "reject-reference-take": action("world", "take-review", "take-review", "authored-change", ["sheets", "takes"]),
   "promote-character-look": action("world", "authored-diff", "reference-kit", "authored-change", ["sheets", "references"]),
   "attach-character-look": action("world", "authored-diff", "reference-kit", "authored-change", ["sheets", "references", "production-metadata", "scenes"]),
