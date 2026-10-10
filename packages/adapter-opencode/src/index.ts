@@ -12,6 +12,7 @@ export {
   meetsV2Gate,
   OPENCODE2_PINNED_VERSION,
   type DiscoveredHarness,
+  type PreferredHarnessDiscovery,
   type DiscoveredOpenCode,
   type DiscoveryOptions,
 } from "./discovery.js";

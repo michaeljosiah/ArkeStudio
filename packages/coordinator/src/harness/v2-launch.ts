@@ -6,6 +6,7 @@ import {
   discoverPreferredHarness,
   OpenCodeAdapter,
   OpenCodeV2Adapter,
+  OPENCODE2_PINNED_VERSION,
   v2BasicAuth,
   type DiscoveredHarness,
   type DiscoveryOptions,
@@ -259,11 +260,21 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       logLines: [`Codex ${found.version}: ${found.source}, private app-server with confined Arke tools`],
     };
   }
-  const harness = await discoverPreferredHarness({
+  const discovery = await discoverPreferredHarness({
     ...(opts.preferV1 !== undefined ? { preferV1: opts.preferV1 } : {}),
     ...(opts.v1 ? { v1: opts.v1 } : {}),
     ...(opts.v2 ? { v2: opts.v2 } : {}),
   });
+  const harness = discovery.found;
+  if (!harness && discovery.rejectedV2) {
+    const rejected = discovery.rejectedV2;
+    const reason = `OpenCode ${rejected.version ?? "(unknown version)"} is installed but unsupported. Use OpenCode ${OPENCODE2_PINNED_VERSION}.`;
+    return {
+      harness: null, isV2: false, supervisor: null, adapter: null,
+      harnessInfo: { generation: "v2", source: rejected.source, version: rejected.version, beta: false, rejectedV2Version: rejected.version },
+      unavailableReason: reason, relaunchHarness: async () => {}, logLines: [reason],
+    };
+  }
   const isV2 = harness?.generation === "v2";
   const password = new HarnessPasswordHolder();
   const profileDir = harnessProfileDir(opts.appRoot);

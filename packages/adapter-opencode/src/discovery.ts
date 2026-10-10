@@ -186,6 +186,12 @@ export interface DiscoveredHarness {
   rejectedV2?: DiscoveredOpenCode;
 }
 
+export interface PreferredHarnessDiscovery {
+  found: DiscoveredHarness | null;
+  /** Retained even when there is no launchable fallback, so absence and incompatibility stay distinct. */
+  rejectedV2: DiscoveredOpenCode | null;
+}
+
 /**
  * Both binaries coexist by design; v2 wins unless Settings says otherwise (issue 327 §3).
  * The choice is a launch-time decision — it never changes under a running session.
@@ -194,7 +200,7 @@ export async function discoverPreferredHarness(opts: {
   preferV1?: boolean;
   v1?: DiscoveryOptions;
   v2?: DiscoveryOptions;
-} = {}): Promise<DiscoveredHarness | null> {
+} = {}): Promise<PreferredHarnessDiscovery> {
   const gate = meetsV2Gate;
   // Both lanes probe concurrently: each is a PATH walk plus a --version spawn (~300ms
   // typical, seconds on a loaded machine), the probes are independent, and this runs on the
@@ -208,8 +214,8 @@ export async function discoverPreferredHarness(opts: {
     ...result,
     ...(v2.rejected ? { rejectedV2: v2.rejected } : {}),
   });
-  if (!opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
-  if (v1) return withReason({ generation: "v1", discovery: v1 });
-  if (opts.preferV1 && v2.found) return { generation: "v2", discovery: v2.found };
-  return null;
+  const found = !opts.preferV1 && v2.found ? { generation: "v2" as const, discovery: v2.found }
+    : v1 ? withReason({ generation: "v1", discovery: v1 })
+    : v2.found ? { generation: "v2" as const, discovery: v2.found } : null;
+  return { found, rejectedV2: v2.rejected };
 }

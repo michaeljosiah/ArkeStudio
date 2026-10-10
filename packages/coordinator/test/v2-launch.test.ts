@@ -37,6 +37,28 @@ function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000)
 }
 
 describe("the v2 launch protocol (issue 327 §4)", () => {
+  for (const version of ["2.0.25", "2.0.27"]) {
+    it(`reports unsupported ${version} without a fallback and creates no launchable child`, async () => {
+      const appRoot = await tempDir("v2-rejected-");
+      const wiring = await assembleHarness({ appRoot,
+        v1: { runCommand: async () => ({ status: 1, stdout: "" }) },
+        v2: { runCommand: async (command, args) => {
+          if (command === "where" || command === "which") return args[0] === "opencode"
+            ? { status: 0, stdout: "C:\\bin\\opencode.exe\n" } : { status: 1, stdout: "" };
+          return { status: 0, stdout: `opencode v${version}` };
+        } },
+      });
+      assert.equal(wiring.harness, null);
+      assert.equal(wiring.adapter, null);
+      assert.equal(wiring.supervisor, null);
+      assert.equal(wiring.harnessInfo?.rejectedV2Version, version);
+      assert.match(wiring.unavailableReason ?? "", /installed but unsupported/);
+      assert.ok(wiring.unavailableReason?.includes(version));
+      assert.ok(wiring.unavailableReason?.includes("2.0.26"));
+      assert.deepEqual(wiring.logLines, [wiring.unavailableReason]);
+    });
+  }
+
   it("retires generated Ollama rows before launch while retaining endpoint and other provider configuration", async () => {
     const appRoot = await tempDir("v2-profile-retirement-");
     const configDir = join(harnessProfileDir(appRoot), ".config", "opencode");

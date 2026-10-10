@@ -329,6 +329,9 @@ live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native pro
 fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
 native steering.
 
+Discovery/launcher regressions also reject older and newer v2 versions with no fallback,
+retain the installed version and required pin in the unavailable reason, and create no child.
+
 For the bundled OpenCode Copilot startup race (#1696), run adapter-opencode's package suite
 and coordinator `test/harness/session-files.test.ts`. Adapter `test/v2-model-readiness.test.ts`
 scripts the scoped catalogue protocol: global-ready/location-pending,
