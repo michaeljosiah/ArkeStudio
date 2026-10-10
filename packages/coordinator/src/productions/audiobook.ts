@@ -44,6 +44,7 @@ import {
   type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
+import { AUDIOBOOK_MOTION_SCHEMA_VERSION } from "../world/commit.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
@@ -164,6 +165,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   // A record with no picture is written without the field, in the shape the builds before
   // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
+  if (Object.values(pictures ?? {}).some((picture) => picture.motion !== undefined || picture.motionCandidate !== undefined) || Object.keys(record.wordTiming ?? {}).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_MOTION_SCHEMA_VERSION, "audiobook-motion-and-word-timing");
   const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
   if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
   // The chapter's look, or a picture that keeps the lines it was made under (design turn 191c,

@@ -45,7 +45,7 @@ function fullHash(bytes: Uint8Array): string {
 
 /** What a package's chapter depends on, to read the book again under the gate and compare. */
 function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at]), chapter.opening]));
+  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.motion ?? null, picture.motionProblem ?? null]), chapter.opening]));
 }
 
 const extensionOf = (file: string) => {
@@ -105,7 +105,9 @@ export async function exportAudiobookPlayer(
     };
     for (const chapter of whole) for (const block of chapter.blocks) await resolve(block.file);
     for (const chapter of whole) if (chapter.mix !== undefined) await resolve(chapter.mix.file);
-    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
+    const motionProblems = whole.flatMap((chapter) => chapter.pictures.filter((p) => p.motionProblem !== undefined).map((p) => `${chapter.title}: ${p.motionProblem} · choose Use still before exporting`));
+    if (motionProblems.length > 0) return { ok: false, blockers: motionProblems };
+    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.flatMap((picture) => [picture.file, ...(picture.motion !== undefined ? [picture.motion.file] : [])]), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
     for (const file of pictureFiles) await resolve(file);
     if (outside.length > 0) return { ok: false, blockers: outside.map((file) => `${file} is not a file inside this world — the package would carry something else`) };
 
@@ -130,7 +132,7 @@ export async function exportAudiobookPlayer(
         state: "read" as const,
         seconds: chapter.seconds,
         gaps: [],
-        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)! }] : [])),
+        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)!, ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
         opening: picture(chapter.opening),
       };
       const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
@@ -273,7 +275,10 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   }
   for (const chapter of manifest.chapters) {
     for (const piece of chapter.audio ?? []) if (!listed.has(piece.src)) problems.push(`${piece.src} is not in the package`);
-    for (const shown of chapter.pictures) if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+    for (const shown of chapter.pictures) {
+      if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+      if (shown.motion !== undefined && !listed.has(shown.motion.src)) problems.push(`${shown.motion.src} is not in the package`);
+    }
   }
   if (!(await stat(toExtendedLength(join(dir, "player.html"))).then((s) => s.isFile(), () => false))) problems.push("player.html is missing from the package");
   return problems;

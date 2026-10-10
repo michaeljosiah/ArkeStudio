@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -21,6 +21,11 @@ import { exportAudiobookVideo, forgetVideoJob, pendingVideoJobs, readPictureSize
 import type { WorldStore } from "../../src/world/store.js";
 import type { FfmpegRunner } from "../../src/takes/export.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
+import { anyNarrator } from "../../src/productions/audiobook-listening.js";
+import { planAudiobook } from "../../src/productions/audiobook.js";
+import { quoteAudiobookMotion, saveAudiobookMotionCandidate, chooseAudiobookMotion } from "../../src/productions/audiobook-motion.js";
+import { prepareAudiobookWordTiming } from "../../src/productions/audiobook-word-timing.js";
 
 /**
  * The audiobook as a video (design turn 197): rendered for real through the ffmpeg the app ships,
@@ -516,3 +521,50 @@ describe("the audiobook as a video (turn 197)", () => {
       { ffmpeg: true },
     ));
 });
+
+
+it("renders chosen motion with measured highlighted words, repeats/holds its clock and keeps plain sidecars", { skip }, () => withHarness(async (h) => {
+  await read(h.send, "01-neap");
+  await h.send({ kind: "set-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", picture: { file: "world-art.png", source: "world" }, requestId: REQUEST });
+  const store = h.store();
+  const runner = realRunner(h.calls), signal = new AbortController().signal;
+  const clip = join(h.root, "moving.mp4");
+  await runner.run(["-y", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=0.5", "-f", "lavfi", "-i", "sine=frequency=880:duration=0.5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", clip], () => {}, signal);
+  const filed = await fileArtifact(store, { sourcePath: clip, mediaProbe: { durationSec: async () => .5, info: async () => ({ durationSec: .5, width: 320, height: 180, hasVideo: true, hasAudio: true }) } });
+  assert.ok(filed.outcome === "filed");
+  const model: ManifestModel = { id: "fixture", displayName: "Fixture", provider: "fal", capability: "video", modes: { "first-frame": { locked: [] } }, accepts: { referenceImages: 0, startFrame: true, endFrame: false }, limits: { durations: { "5": "5" } }, pricing: { kind: "unmetered" } };
+  const quote = await quoteAudiobookMotion(store, LEDGER, "01-neap", "p0.0", model, { kind: "video", durationSec: 5 }, "A small movement.");
+  await saveAudiobookMotionCandidate(store, LEDGER, "01-neap", "p0.0", quote, filed.artifact.id);
+  await chooseAudiobookMotion(store, LEDGER, "01-neap", "p0.0", "candidate", "repeat", filed.artifact.id);
+  const plan = await planAudiobook(store, LEDGER, "01-neap", { narrator: await anyNarrator(store, LEDGER) });
+  for (const { block } of plan.blocks) {
+    const words = block.text.trim().split(/\s+/), step = .9 / words.length;
+    await prepareAudiobookWordTiming(store, LEDGER, plan, block.key, async () => ({ text: block.text, seconds: 1, engine: { id: "whisper.cpp/dtw-word-boundaries-v1", version: "test", model: "fixture" }, words: words.map((text, i) => ({ text, startSec: .05 + i * step, endSec: .05 + (i + .65) * step, probability: .95 })) }), signal);
+  }
+  const repeat = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });
+  assert.ok(repeat.result.ok, JSON.stringify(repeat.result));
+  const repeatFile = join(h.worldDir, repeat.result.dir, repeat.result.files[0]!.name);
+  const reviewDir = process.env["ARKE_MOTION_REVIEW_DIR"];
+  if (reviewDir !== undefined) {
+    await mkdir(reviewDir, { recursive: true });
+    await copyFile(repeatFile, join(reviewDir, "motion-word-captions.mp4"));
+    await copyFile(clip, join(reviewDir, "fixture-clip.mp4"));
+    await runner.run(["-y", "-ss", "1.2", "-i", repeatFile, "-frames:v", "1", join(reviewDir, "motion-word-captions.png")], () => {}, signal);
+  }
+  const info = await probe(repeatFile);
+  assert.equal(info.streams.filter((stream) => stream.codec_type === "audio").length, 1, "only the narration mix is mapped");
+  const sidecar = await readFile(repeatFile.replace(/\.mp4$/, ".srt"), "utf8");
+  assert.doesNotMatch(sidecar, /\\c&H|<font|\\k/, "sidecars stay plain text");
+  const rendering = h.calls.filter((args) => args.includes("-/filter_complex")).at(-1)!;
+  assert.ok(rendering.includes("-stream_loop"), "repeat reads a looping input");
+  await chooseAudiobookMotion(store, LEDGER, "01-neap", "p0.0", "behavior", "hold");
+  const hold = await render(h, { shape: "1280x720", titleCards: false, slowPush: true, subtitles: "burn-in+sidecar", captionStyle: "word" });
+  assert.ok(hold.result.ok, JSON.stringify(hold.result));
+  assert.equal(hold.result.made, 1, "behavior changes invalidate rendered pixels");
+  const holdFile = join(h.worldDir, hold.result.dir, hold.result.files[0]!.name);
+  const a = await frameLuma(holdFile, 2.2, 320, 180), b = await frameLuma(holdFile, 2.6, 320, 180);
+  const difference = a.subarray(0, 320 * 80).reduce((sum, value, i) => sum + Math.abs(value - b[i]!), 0) / (320 * 80);
+  assert.ok(difference < 1.5, `held frame stays still above the captions: ${difference}`);
+  const finalInfo = await probe(holdFile);
+  near(Number(finalInfo.format.duration), hold.result.files[0]!.seconds, .1, "motion export follows narration length");
+}, { ffmpeg: true }));

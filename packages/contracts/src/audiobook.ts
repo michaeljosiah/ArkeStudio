@@ -9,6 +9,7 @@ import { textDigest } from "./subtitles.js";
 import { expectedSpeechSeconds } from "./speech-pricing.js";
 import { AudiobookGroupedSchema, AudiobookLoudnessSchema, AudiobookSplitFlagSchema } from "./audiobook-grouped.js";
 import { AudiobookPictureSchema } from "./audiobook-pictures.js";
+import { AudiobookWordTimingSchema } from "./audiobook-word-timing.js";
 import { AudiobookLookSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
 import { AudiobookBedSchema, AudiobookBlockSoundSchema, AudiobookReactionSchema, BlockTimingSchema } from "./audiobook-timing.js";
 
@@ -736,6 +737,8 @@ export const ChapterAudiobookSchema = z
      * record with none, which the builds before them read as before (R-73).
      */
     pictures: z.record(z.string(), AudiobookPictureSchema).optional(),
+    /** Acoustic words tied to the exact saved take, never the grouped splitter's estimates. */
+    wordTiming: z.record(z.string(), AudiobookWordTimingSchema).optional(),
     /**
      * The chapter's look (design turn 191c, SPEC-047 R-98): the place, the time and the light, and
      * what each character wears and carries here, read once from the prose and kept, every line

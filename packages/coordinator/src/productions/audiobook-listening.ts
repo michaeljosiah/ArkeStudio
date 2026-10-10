@@ -26,6 +26,8 @@ import type { WorldStore } from "../world/store.js";
 import { planAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { renderChapterMix } from "./audiobook-mix.js";
 import { chapterTiming } from "./audiobook-timing.js";
+import { applyAudiobookWordTiming } from "./audiobook-word-timing.js";
+import { checkAudiobookMotion } from "./audiobook-motion.js";
 import type { FfmpegRunner } from "../takes/export.js";
 
 /**
@@ -160,7 +162,10 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
     const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
-    chapters.push(listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) }));
+    const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
+    await applyAudiobookWordTiming(store, plan, chapter);
+    await checkAudiobookMotion(store, chapter);
+    chapters.push(chapter);
   }
   return { productionId, title: production.meta.title, cover, chapters, scope };
 }

@@ -340,6 +340,9 @@ import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./production
 import { BeatRefusal, groupChapterByBeats, makeAdapterBeatsDeriver, type BeatsDeriver } from "./productions/audiobook-beats.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
+import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandidate, quotedMotionSource } from "./productions/audiobook-motion.js";
+import type { AudiobookWordTimingState } from "@arke-studio/contracts";
+import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
@@ -1339,6 +1342,10 @@ export class Coordinator {
    * race between enqueue returning and the provider finishing can never lose a block.
    */
   private readonly audiobookJobs = new JobWaiters();
+  private readonly makingMotion = new Map<string, AbortController>();
+  private readonly preparingWordTiming = new Map<string, AbortController>();
+  private readonly wordTimingRequests = new Map<string, string>();
+  private readonly wordTimingProgress = new Map<string, { done: number; total: number; chapters: string[] }>();
   private waitForAudiobookJob(jobId: string): Promise<Job> {
     return this.audiobookJobs.wait(jobId);
   }
@@ -15530,6 +15537,103 @@ export class Coordinator {
         }
         return;
       }
+      case "quote-audiobook-motion":
+      case "make-audiobook-motion":
+      case "stop-audiobook-motion":
+      case "choose-audiobook-motion": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (chapter === undefined) return;
+        const key = `${store.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
+        const ids = { requestId: msg.requestId, worldId: store.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
+        const { block: _motionBlock, ...recordIds } = ids;
+        const emit = (state: "quoted" | "making" | "review" | "chosen" | "failed", detail: { quote?: import("@arke-studio/contracts").AudiobookMotionQuote; reason?: string } = {}) => this.emit({ at: this.nowIso(), type: "audiobook.motion", ...ids, state, ...detail });
+        if (msg.kind === "stop-audiobook-motion") { this.makingMotion.get(key)?.abort(); return; }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          if (msg.kind === "choose-audiobook-motion") {
+            const record = await chooseAudiobookMotion(store, msg.productionId, chapter.file, msg.block, msg.choice, msg.behavior, msg.artifactId);
+            this.emit({ at: this.nowIso(), type: "audiobook.record", ...recordIds, record });
+            this.refreshIfStillOpen(store);
+            emit("chosen"); return;
+          }
+          const input = msg.kind === "make-audiobook-motion" ? msg.quote : msg;
+          const modelId = typeof input.model === "string" ? input.model : input.model.id;
+          const model = this.opts.manifest?.models.find((m) => m.id === modelId);
+          if (model === undefined || !this.benchModelEligible(model)) throw new Error("this motion model is unavailable");
+          const quote = await quoteAudiobookMotion(store, msg.productionId, chapter.file, msg.block, model, input.params, input.prompt);
+          if (msg.kind === "quote-audiobook-motion") { emit("quoted", { quote }); return; }
+          if (this.makingMotion.has(key)) throw new Error("a clip is already being made here");
+          if (quote.sourceHash !== msg.quote.sourceHash || quote.sourceAt !== msg.quote.sourceAt || quote.sourceFile !== msg.quote.sourceFile) throw new Error("the source picture changed · review a new quote");
+          if (quote.estimatedMicroUsd > msg.quote.estimatedMicroUsd) throw new Error("the price changed · review a new quote");
+          this.makingMotion.set(key, control);
+          emit("making", { quote });
+          const made = await this.makeBenchPicture(store, { title: `Chapter ${chapter.order} · motion`, prompt: quote.prompt, model, who: [], requestId: msg.requestId, ceilingMicroUsd: msg.quote.estimatedMicroUsd, signal: control.signal, motion: { params: quote.params, startFrame: quote.sourceFile, sourceHash: quote.sourceHash } });
+          if (!made.ok) throw new Error(made.reason);
+          const record = await saveAudiobookMotionCandidate(store, msg.productionId, chapter.file, msg.block, quote, made.artifact.id);
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...recordIds, record });
+          this.refreshIfStillOpen(store);
+          emit("review");
+        } catch (error) { emit("failed", { reason: control.signal.aborted ? "stopped · any completed clip remains in Library" : describeCoordinatorError(error) }); }
+        finally { store.closingSignal.removeEventListener("abort", onClose); if (this.makingMotion.get(key) === control) this.makingMotion.delete(key); }
+        return;
+      }
+      case "audiobook-word-timing": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const key = `${store.worldId}/${msg.productionId}`;
+        if (msg.action === "stop") { this.preparingWordTiming.get(key)?.abort(); return; }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const failures = new Map<string, string>();
+        let done = 0;
+        let cached: AudiobookWordTimingState["blocks"] = [];
+        const included = (block: { chapterId: string; key: string }) => (msg.chapters === undefined || msg.chapters.includes(block.chapterId)) && (msg.blocks === undefined || msg.blocks.some((pick) => pick.chapterId === block.chapterId && pick.key === block.key));
+        let availability: { ready: boolean; reason?: string } | null | undefined;
+        const report = async (refresh = true) => {
+          if (refresh) {
+          availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
+          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
+          cached = listening.chapters.flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
+          }
+          const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
+          const selected = blocks.filter(included);
+          const progress = this.wordTimingProgress.get(key) ?? { done, total: selected.length, chapters: [...new Set(selected.map((block) => block.chapterId))] };
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), ...progress, blocks } });
+          return blocks;
+        };
+        try {
+          if (msg.action === "read" || this.preparingWordTiming.has(key)) { await report(); return; }
+          const availability = await this.voiceService?.wordTimingAvailability();
+          if (availability?.ready !== true) { await report(); return; }
+          this.preparingWordTiming.set(key, control);
+          this.wordTimingRequests.set(key, msg.requestId);
+          const blocks = (await report()).filter(included);
+          this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((block) => block.chapterId))] });
+          for (const block of blocks) {
+            if (control.signal.aborted) break;
+            if (!block.ready) {
+              try {
+                const plan = await planAudiobook(store, msg.productionId, block.chapterId, { narrator: await anyNarrator(store, msg.productionId) });
+                await prepareAudiobookWordTiming(store, msg.productionId, plan, block.key, (audio, signal) => this.voiceService!.transcribeWords(audio, signal), control.signal, this.opts.ffmpeg);
+              } catch (error) { failures.set(`${block.chapterId}/${block.key}`, control.signal.aborted ? "stopped" : describeCoordinatorError(error)); }
+            }
+            done += 1;
+            this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((entry) => entry.chapterId))] });
+            await report(false);
+          }
+        } catch (error) { void this.appLog?.append({ kind: "audiobook.word-timing-failed", message: describeCoordinatorError(error) }); }
+        finally {
+          if (this.preparingWordTiming.get(key) === control) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); this.wordTimingProgress.delete(key); }
+          store.closingSignal.removeEventListener("abort", onClose);
+          if (!store.closingSignal.aborted) await report().catch(() => {});
+        }
+        return;
+      }
       case "make-audiobook-picture": {
         // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
         // price the press showed, and filed on the block as its picture — one that keeps the
@@ -19570,11 +19674,13 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string } },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
+    if (input.signal?.aborted) return { ok: false, reason: "stopped" };
     const worldId = store.worldId;
-    const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
-    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
+    const mode = input.motion === undefined ? "image" : "video";
+    const params = input.motion?.params ?? { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
+    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
     const fail = async (reason: string) => {
@@ -19582,7 +19688,13 @@ export class Coordinator {
       this.transport.broadcastSnapshot();
       return { ok: false as const, reason, sessionId };
     };
-    await opened.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    await opened.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    if (input.motion !== undefined) {
+      const bench = await this.benchFor(worldId, sessionId);
+      if (bench === null) return fail("the Bench session is gone");
+      const start = await addBenchReference(bench, store.getBundle(), input.model, { source: { source: "world-file", path: input.motion.startFrame }, worldFile: { read: (file) => quotedMotionSource(store, file, input.motion!.sourceHash) }, lane: "keyframe", requestId: `motion-frame:${input.requestId}`, at: this.nowIso() });
+      if (start.outcome === "refused") return fail(start.reason);
+    }
     // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
     // off and the take is made without it — the refusal is the Bench's own and is logged.
     const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
@@ -19598,10 +19710,11 @@ export class Coordinator {
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
-    const brief = pictureBench(input.prompt, cited, input.mood, input.detailed ?? []);
+    if (input.signal?.aborted) return fail("stopped");
+    const brief = input.motion === undefined ? pictureBench(input.prompt, cited, input.mood, input.detailed ?? []) : input.prompt;
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
-    await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
+    await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
     const bench = await this.benchFor(worldId, sessionId);
     if (bench === null) return fail("the Bench session is gone");
     const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
@@ -19620,6 +19733,10 @@ export class Coordinator {
     // The reservation is durable before any job exists, as the Bench's press makes it.
     const reservation = await bench.store.append({ type: "takes-reserved", takes: plan.reserved }, { at: this.nowIso(), requestId: `pic:${input.requestId}` });
     if (reservation.deduplicated) return fail("that picture was already asked for");
+    if (input.signal?.aborted) {
+      for (const take of plan.reserved) await bench.store.append({ type: "take-status", takeId: take.id, status: "cancelled", error: "stopped" }, { at: this.nowIso() });
+      return fail("stopped");
+    }
     const outcome = await enqueueInputs(plan.inputs, async (job) => {
       if (!this.jobQueue) throw new Error("the job queue is unavailable");
       return this.enqueueWithSpeechChecks(job, new Map());
@@ -19635,7 +19752,7 @@ export class Coordinator {
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
     // The take lands through the job's own finalisation; this waits for it to be written to the log.
-    const deadline = Date.now() + PICTURE_WAIT_MS;
+    const deadline = Date.now() + (input.motion === undefined ? PICTURE_WAIT_MS : 45 * 60_000);
     for (;;) {
       if (input.signal?.aborted) {
         // Stop costs nothing more: the job is cancelled where it stands, and what was made stays.
@@ -21353,6 +21470,8 @@ export class Coordinator {
       for (const run of this.groupingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
+      for (const control of this.makingMotion.values()) control.abort();
+      for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.illustrating.values()) run.control.abort();
       for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();

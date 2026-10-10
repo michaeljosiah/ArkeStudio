@@ -19,8 +19,9 @@ import {
 import { useMediaQuery } from "../lib/media-query.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
+import { WordTimingControl } from "./audiobook-word-timing.js";
 import { Button } from "./ui.js";
-import { Folder, Seg, SHAPES, Toggle, VideoFiles, VideoOptionRows, VideoPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
+import { Folder, Seg, SHAPES, SUBTITLES, VideoFiles, VideoOptionRows, VideoPreview, VideoExportPreview, megabytes, useVideoState, videoQuote, wholeChapters, withShape } from "./audiobook-video.js";
 
 /**
  * Export audiobook (design turns 186e and 197, SPEC-047 R-72): the book as the player — a web
@@ -78,6 +79,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const [video, setVideo] = useState<AudiobookVideoResult | null>(null);
   const [again, setAgain] = useState(0);
   const [preview, setPreview] = useState(false);
+  const [wordTimingReady, setWordTimingReady] = useState(false);
+  const highlights = options.captionStyle === "word" && (options.subtitles === "burn-in" || options.subtitles === "burn-in+sidecar");
   const state = useVideoState(worldId, production.meta.id, options, connection === "open" && kind === "video", again);
   const quote = videoQuote(state, options);
   useEffect(() => {
@@ -177,7 +180,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const length = whole.reduce((sum, chapter) => sum + chapter.seconds, 0);
   const finished = kind === "video" && video?.ok === true ? video : null;
   const progress = held?.status === "running" ? Math.round(held.percent) : null;
-  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null && !incomplete && plan !== null && planRefused === null && (state?.blockers?.length ?? 0) === 0;
+  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null && !incomplete && plan !== null && planRefused === null && (state?.blockers?.length ?? 0) === 0 && (!highlights || wordTimingReady);
   const sub = finished !== null ? `video · ${finished.made === 0 ? "nothing changed · " : ""}rendered ${stamp(finished.renderedAt)}` : plan === null ? "…" : `${whole.length} of ${plan.chapters.length} chapter${plan.chapters.length === 1 ? "" : "s"} read · ${clockTime(length)}`;
   const blockers = kind === "video" ? (video?.ok === false ? video.blockers : state?.blockers ?? []) : [];
   const selectScope = (kind: AudiobookScope["kind"]) => {
@@ -294,16 +297,17 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     </div>
   );
 
+  const timingControl = <WordTimingControl worldId={worldId} productionId={production.meta.id} chapters={scope.kind === "chapter" ? [scope.chapterId] : undefined} enabled={highlights} onReady={(ready) => { setWordTimingReady(ready); if (ready) { setAgain((n) => n + 1); asked.current = openAudiobookListening(worldId, production.meta.id, scope); } }} usePhrases={() => choose({ ...options, captionStyle: "phrases" })} />;
+  const framePreview = <VideoExportPreview plan={plan} options={options} ready={wordTimingReady} onPreview={() => setPreview(true)} />;
   // The native sheet reserves its head and foot. Only the options scroll, including when a
   // scoped recovery quote covers this sheet; the author returns to the same format and settings.
   const videoFoot = (
     <div className="fy-abv-export-foot">
-      {!incomplete && estimate(!phone)}
+      {phone && !incomplete && estimate(false)}
       <div className="fy-abv-foot">
-        {!phone && !incomplete && <button type="button" className="fy-abv-btn" disabled={plan === null || whole.length === 0} onClick={() => setPreview(true)} data-testid="audiobook-video-preview-open">Preview</button>}
         <span className="grow" />
-        <button type="button" className="fy-abv-btn" onClick={onClose}>Cancel</button>
-        <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">{quote?.press ?? "Render video"}</button>
+        <button type="button" className="fy-abv-btn" onClick={phone && highlights && !wordTimingReady ? () => choose({ ...options, captionStyle: "phrases" }) : onClose}>{phone && highlights && !wordTimingReady ? "Use phrases" : "Cancel"}</button>
+        <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">{highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render video"}</button>
       </div>
     </div>
   );
@@ -313,7 +317,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     // One column, from the foot, 44-high presses (197f). The kind is a row of its own here: the
     // phone frame draws Video alone, and the player package must stay reachable from a phone.
     return (
-      <PageSheet open onClose={onClose} title="Export audiobook" footer={footer} className="fy-abv-modal fy-abv-modal--phone">
+      <>
+      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className="fy-abv-modal fy-abv-modal--phone">
         <div className="fy-abv-psheet" data-testid="audiobook-export">
           <div className="fy-abv-grab" />
           {finished !== null ? (
@@ -326,32 +331,14 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
                   <b>Export</b>
                   <Seg label="Export" value={kind} options={[["player", "Player"], ["video", "Video"]] as const} onChange={setKind} />
                 </div>
-                {kind === "video" && !incomplete && (
-                  <>
-                    {scope.kind === "book" && <div className="fy-abv-opt">
-                      <b>Files</b>
-                      <Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "Book"]] as const} onChange={(files) => choose({ ...options, files })} />
-                    </div>}
-                    <div className="fy-abv-opt">
-                      <b>Shape</b>
-                      <Seg label="Shape" value={options.shape} options={SHAPES.map(([key, , short]) => [key, short] as const)} onChange={shape} />
-                    </div>
-                    <div className="fy-abv-opt">
-                      <b>Subtitles</b>
-                      <Seg label="Subtitles" value={options.subtitles} options={[["sidecar", "Sidecar"], ["burn-in+sidecar", "Both"], ["none", "None"]] as const} onChange={(subtitles) => choose({ ...options, subtitles })} />
-                    </div>
-                    <div className="fy-abv-opt">
-                      <b>Size</b>
-                      <Seg label="Size" value={options.captionSize} options={[["s", "S"], ["m", "M"], ["l", "L"]] as const} disabled={options.subtitles === "sidecar" || options.subtitles === "none"} onChange={(captionSize) => choose({ ...options, captionSize })} />
-                    </div>
-                    <div className="fy-abv-opt">
-                      <b>Pictures</b>
-                      <Toggle on={options.slowPush} onChange={(slowPush) => choose({ ...options, slowPush })}>
-                        Slow push
-                      </Toggle>
-                    </div>
-                  </>
-                )}
+                {kind === "video" && !incomplete && <>
+                  {framePreview}
+                  {scope.kind === "book" && <div className="fy-abv-opt"><b>Files</b><Seg label="Files" value={options.files} options={[["chapter", "One a chapter"], ["book", "Book"]] as const} onChange={(files) => choose({ ...options, files })} /></div>}
+                  <div className="fy-abv-opt"><b>Subtitles</b><Seg label="Subtitles" value={options.subtitles} options={SUBTITLES} onChange={(subtitles) => choose({ ...options, subtitles })} /></div>
+                  {(options.subtitles === "burn-in" || options.subtitles === "burn-in+sidecar") && <><div className="fy-abv-opt"><b>Style</b><Seg label="Caption style" value={options.captionStyle ?? "phrases"} options={[["phrases", "Phrases"], ["word", "Highlight current word"]] as const} onChange={(captionStyle) => choose({ ...options, captionStyle })} /></div>{timingControl}</>}
+                  <div className="fy-abv-opt"><b>Shape</b><select aria-label="Shape" value={options.shape} onChange={(event) => shape(event.target.value as VideoShape)}>{SHAPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div>
+                  {(options.subtitles === "burn-in" || options.subtitles === "burn-in+sidecar") && <div className="fy-abv-opt"><b>Size</b><Seg label="Size" value={options.captionSize} options={[["s", "S"], ["m", "M"], ["l", "L"]] as const} onChange={(captionSize) => choose({ ...options, captionSize })} /></div>}
+                </>}
                 {kind === "player" && playerRows}
               </div>
               {scopeReadiness}
@@ -369,13 +356,15 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
           )}
         </div>
       </PageSheet>
+      {preview && plan !== null && <VideoPreview worldId={worldId} productionId={production.meta.id} plan={plan} options={options} onClose={() => setPreview(false)} />}
+      </>
     );
   }
 
   return (
     <>
       {/* The preview stands in the sheet's place (197b), and Done comes back to it. */}
-      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className="fy-abv-modal">
+      <PageSheet open={!preview} onClose={onClose} title="Export audiobook" footer={footer} className={kind === "video" ? "fy-abv-modal fy-abv-modal--video" : "fy-abv-modal"}>
         <div className="fy-abv-sheet">
         <div className="fy-abv-sub">{sub}</div>
         {finished !== null ? (
@@ -417,11 +406,11 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
               </>
             ) : (
               <>
-                {!incomplete && <div className="fy-abv-opts">
+                {!incomplete && <div className="fy-abv-exportcols"><div className="fy-abv-opts">
                   <VideoOptionRows options={options} setOptions={choose} plan={plan} split={quote?.split ?? "…"} onShape={shape} />
-                </div>}
+                  {timingControl}<p className="fy-abv-note">Sidecar captions remain plain text.</p>
+                </div><aside>{framePreview}{estimate(true)}</aside></div>}
                 {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
-
               </>
             )}
           </div>

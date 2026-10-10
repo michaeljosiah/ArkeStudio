@@ -91,6 +91,12 @@ const press = async (el: Element | null) => {
   assert.ok(el, "the thing to press exists");
   await act(async () => void el.dispatchEvent(new dom.Event("click", { bubbles: true }) as unknown as Event));
 };
+async function chooseShape(value: string) {
+  const select = dom.document.querySelector('select[aria-label="Shape"]');
+  assert.ok(select);
+  Object.defineProperty(select, "value", { value, configurable: true });
+  await act(async () => { select.dispatchEvent(new dom.Event("change", { bubbles: true })); });
+}
 const lastAsk = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind).at(-1);
 
 describe("Export audiobook (turn 186e)", () => {
@@ -137,7 +143,7 @@ describe("Export audiobook (turn 186e)", () => {
     const m = await mount(<AudiobookExportSheet worldId={FIXTURE_WORLD_ID} production={production} chapterId="neap" onClose={() => {}} />);
     const before = lastAsk(m, "open-audiobook-listening")!;
     await press(q(m, '[data-testid="audiobook-export-video"]'));
-    await press([...dom.document.querySelectorAll('[aria-label="Shape"] button')].find((button) => text(button) === "1280 × 720")!);
+    await chooseShape("1280x720");
     await press([...dom.document.querySelectorAll('[aria-label="Subtitles"] button')].find((button) => text(button) === "None")!);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId: before.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: { ...PLAN, scope, chapters: [PLAN.chapters[1]!] } }));
     const completed = { ...production, chapters: production.chapters.map((chapter) => chapter.id === "neap" ? { ...chapter, audiobook: { ...chapter.audiobook!, takes: 3 } } : chapter) };
@@ -246,16 +252,16 @@ describe("Export audiobook · Video (turn 197)", () => {
     const ask = await answerState(m, [{ chapterId: "slack-water", seconds: 1900, rendered: false }]);
     assert.deepEqual(ask.options, { files: "chapter", shape: "1920x1080", slowPush: true, subtitles: "sidecar", captionPosition: "bottom", captionSize: "m", titleCards: true, scope: { kind: "book" } }, "the owner's defaults");
     const sheet = text(q(m, '[data-testid="audiobook-export"]'));
-    for (const row of [/Files\s*One a chapterOne for the book\s*1 file/, /Shape\s*1920 × 10801280 × 7201080 × 1920 · vertical/, /Pictures\s*Slow push\s*1 picture · cover before the first/, /Subtitles\s*SidecarBurned inBothNone\s*BottomMiddle\s*SML/, /Openings\s*Chapter title cards\s*chapter markers in the file/, /Chapters\s*1 of 2 · read whole\s*Slack water/, /Audio\s*The chapter mix, as Timing sets it\s*−18 LUFS · AAC 128 kbps · 48 kHz/]) assert.match(sheet, row);
+    for (const row of [/Files\s*One a chapterOne for the book\s*1 file/, /Shape\s*1920 × 10801280 × 7201080 × 1920 · vertical/, /Slow push on stills/, /Subtitles\s*SidecarBurned inBothNone/, /Chapter title cards/, /1 stills · 0 clips · clip sound muted/]) assert.match(sheet, row);
     assert.match(text(q(m, '[data-testid="audiobook-video-estimate"]')), /^~\d+ MB · ~\d+ min on this machine31:40 of video · 1 to render$/);
     assert.equal(text(q(m, '[data-testid="audiobook-video-render"]')), "Render 1 chapter");
-    assert.equal(radio("Position", "Bottom")?.hasAttribute("disabled"), true, "position and size wait for burned-in words");
+    assert.equal(radio("Position", "Bottom"), null, "position and size are offered for burned-in words");
 
     // Vertical: the subtitles move to Both until the author has chosen them.
-    await press(radio("Shape", "1080 × 1920 · vertical"));
+    await chooseShape("1080x1920");
     assert.deepEqual([lastAsk(m, "read-audiobook-video")!.options.shape, lastAsk(m, "read-audiobook-video")!.options.subtitles], ["1080x1920", "burn-in+sidecar"]);
     await press(radio("Subtitles", "None"));
-    await press(radio("Shape", "1280 × 720"));
+    await chooseShape("1280x720");
     assert.equal(lastAsk(m, "read-audiobook-video")!.options.subtitles, "none", "a choice made stays");
 
     // One for the book: a book past twelve hours in parts, said on the row and on the press.

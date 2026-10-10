@@ -12,6 +12,7 @@ import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingS
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
 import { AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
+import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
 import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
@@ -3384,6 +3385,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
   z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, scope: AudiobookScopeSchema.optional() }).strict(),
+  z.object({ kind: z.literal("quote-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), model: z.string().min(1), params: AudiobookMotionQuoteSchema.shape.params, prompt: AudiobookMotionQuoteSchema.shape.prompt, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("make-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), quote: AudiobookMotionQuoteSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("stop-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("choose-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), choice: z.enum(["candidate", "still", "behavior"]), behavior: z.enum(["repeat", "hold"]), artifactId: z.string().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("audiobook-word-timing"), worldId: UlidSchema, productionId: SlugSchema, action: z.enum(["read", "prepare", "stop"]), chapters: z.array(SlugSchema).optional(), blocks: z.array(z.object({ chapterId: SlugSchema, key: z.string().min(1) }).strict()).min(1).optional(), requestId: UlidSchema }).strict(),
   /**
    * A picture set on a block, or taken off it with null (design turn 186c, R-69): a picture the
    * world holds, by its world-relative path, and the tab it was chosen on. Answered as

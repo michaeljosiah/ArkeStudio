@@ -43,6 +43,9 @@ class MediaMetadata {
 }
 // An <audio> as far as the player asks of one: play and pause, said the way a browser says them.
 Object.assign(dom.HTMLElement.prototype, {
+  paused: true,
+  currentTime: 0,
+  readyState: 2,
   play(this: HTMLMediaElement & { paused: boolean; ended: boolean }) {
     started.push(this.getAttribute("src") ?? "");
     this.paused = false;
@@ -131,6 +134,35 @@ afterEach(() => {
 });
 
 describe("the book, not a chapter (186a, R-67)", () => {
+  it("keeps a muted clip on the narration clock through repeats, seeking, pause and destruction", () => {
+    const motion: AudiobookPlayerChapter = { ...CH1, pictures: [{ at: 4, src: "pics/stair.png", motion: { src: "clips/stair.mp4", seconds: 5, behavior: "repeat" } }] };
+    const p = mount({ chapters: [motion], startAt: 4 });
+    const clip = p.all("video").find((v) => v.getAttribute("src") === "clips/stair.mp4") as unknown as HTMLVideoElement;
+    assert.ok(clip);
+    Object.assign(clip, { readyState: 2, currentTime: 0 });
+    p.at(7);
+    assert.equal(clip.currentTime, 2);
+    assert.equal(clip.muted, true);
+    p.press("Pause");
+    assert.equal(clip.paused, true);
+    p.handle.update([{ ...motion, pictures: [{ ...motion.pictures[0]!, motion: { src: "clips/stair.mp4", seconds: 5, behavior: "hold" } }] }]);
+    p.press("Play");
+    p.at(9);
+    const held = p.all("video").find((v) => v.classList.contains("on")) as unknown as HTMLVideoElement;
+    Object.assign(held, { readyState: 2, currentTime: 0 });
+    p.at(10);
+    assert.ok(held.currentTime > 4.98 && held.currentTime < 5);
+    assert.equal(held.paused, true);
+    p.handle.destroy();
+    assert.equal(held.getAttribute("src"), null);
+  });
+
+  it("reports a missing clip while retaining its still", () => {
+    const p = mount({ chapters: [{ ...CH1, pictures: [{ at: 4, src: "pics/stair.png", motionProblem: "clip unavailable · showing the still", motion: { src: "clips/missing.mp4", seconds: 5, behavior: "repeat" } }] }], startAt: 4 });
+    assert.match(p.text(".abp-clipnote"), /showing the still/);
+    assert.equal(p.q("img.on")?.getAttribute("src"), "pics/stair.png");
+    assert.equal(p.all("video.on").length, 0);
+  });
   it("plays a chapter's takes back to back: the next is waiting in the other element when one ends", () => {
     const p = mount();
     assert.equal(p.root.getAttribute("data-mode"), "playing");
@@ -189,7 +221,7 @@ describe("the book, not a chapter (186a, R-67)", () => {
     p.end();
     p.at(0.5);
     assert.deepEqual(shown(), ["pics/stair.png"]);
-    assert.equal(p.all(".abp-pic").length, 2, "two layers, so one fades into the other");
+    assert.equal(p.all("img.abp-pic").length, 2, "two still layers, so one fades into the other");
   });
 });
 

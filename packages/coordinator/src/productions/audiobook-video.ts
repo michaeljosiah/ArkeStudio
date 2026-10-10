@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   assertSlateLabelSupported,
   AudiobookVideoOptionsSchema,
@@ -9,6 +9,7 @@ import {
   BOOK_OPENING_SEC,
   bookParts,
   burnedCues,
+  highlightedCaptionAss,
   CAPTION_BOTTOM_SHARE,
   CARD_TITLE_SHARE,
   captionFontPx,
@@ -69,8 +70,9 @@ import { containedWorldFile } from "./interactive.js";
 /**
  * Moves when what a render makes from the same inputs changes, so an older render is never reused.
  * 2: pictures fill the frame, and the words are cut into short cues (2026-10-04).
+ * 3: chosen motion and validated highlighted words share the preview clock (2026-10-10).
  */
-export const VIDEO_RENDER_VERSION = 2;
+export const VIDEO_RENDER_VERSION = 3;
 
 const EXPORT_ID = /^vb_[0-9A-HJKMNP-TV-Z]{26}$/;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -138,21 +140,26 @@ async function planBook(store: WorldStore, productionId: string, options: Audiob
       continue;
     }
     const segments = videoSegments(chapter, listening.cover, options.titleCards);
+    const broken = chapter.pictures.find((p) => p.motionProblem !== undefined);
+    if (broken !== undefined) { blockers.push(`${chapter.title}: ${broken.motionProblem} · choose Use still before exporting`); continue; }
+    if (wantsBurnIn(options) && options.captionStyle === "word" && chapter.blocks.some((b) => b.words === undefined)) {
+      blockers.push(`${chapter.title}: prepare and check word timing before exporting highlighted captions`); continue;
+    }
     // No words over a card: the title is what is being read, and a caption over the title (or
     // over it fading) reads as two lines fighting. A sentence begun under the card shows from
     // the moment the card has given way, to its own end.
     const after = options.titleCards ? titleCardSeconds(chapter) + (segmentFades(segments)[1] ?? 0) : 0;
     const burned = wantsBurnIn(options) ? burnedCues(chapter, options.shape, options.captionSize, after) : [];
     const cues = wantsSidecar(options) ? chapterCues(chapter) : [];
-    const stamps = await Promise.all(segments.map((segment) => fileStamp(store, segment.file)));
+    const stamps = await Promise.all(segments.map((segment) => fileStamp(store, segment.motion?.file ?? segment.file)));
     const digest = sha(
       JSON.stringify({
         version: VIDEO_RENDER_VERSION,
         mix: [chapter.mix.file, chapter.seconds],
-        segments: segments.map((segment, index) => [segment.kind, stamps[index], segment.from, segment.to, segment.focus ?? null, segment.title ?? null]),
+        segments: segments.map((segment, index) => [segment.kind, stamps[index], segment.from, segment.to, segment.focus ?? null, segment.title ?? null, segment.motion ?? null]),
         burned,
         cues,
-        options: { shape: options.shape, slowPush: options.slowPush, subtitles: options.subtitles, position: options.captionPosition, size: options.captionSize, titleCards: options.titleCards },
+        options: { shape: options.shape, slowPush: options.slowPush, subtitles: options.subtitles, position: options.captionPosition, size: options.captionSize, style: options.captionStyle ?? "phrases", titleCards: options.titleCards },
       }),
     ).slice(0, 24);
     chapters.push({ chapter, segments, burned, cues, mix: chapter.mix.file, digest });
@@ -293,7 +300,7 @@ function chapterGraph(
   planned: PlannedChapter,
   options: AudiobookVideoOptions,
   font: string,
-  inputs: { file: (index: number) => number | null; size: (index: number) => PictureSize | null },
+  inputs: { file: (index: number) => number | null; size: (index: number) => PictureSize | null; captions?: string },
 ): string {
   const { width: W, height: H } = shapeSize(options.shape);
   const fades = segmentFades(planned.segments);
@@ -330,11 +337,17 @@ function chapterGraph(
     const focus = segment.focus ?? { x: 0.5, y: 0.5 };
     const size = inputs.size(index);
     const crop = size === null ? null : coverCrop(size.width, size.height, W, H, focus);
-    const scale = options.slowPush ? 2 : 1;
+    const scale = options.slowPush && segment.motion === undefined ? 2 : 1;
     const fit =
       crop !== null
         ? `crop=w='min(iw,${crop.width})':h='min(ih,${crop.height})':x='min(iw-ow,${crop.x})':y='min(ih-oh,${crop.y})',scale=${W * scale}:${H * scale}`
         : `crop=w='min(iw,ih*${W}/${H})':h='min(ih,iw*${H}/${W})':x='max(0,min(iw-ow,iw*${focus.x}-ow/2))':y='max(0,min(ih-oh,ih*${focus.y}-oh/2))',scale=${W * scale}:${H * scale}`;
+    if (segment.motion !== undefined) {
+      const offset = Math.max(0, segment.from - (segment.motionAt ?? segment.from));
+      const tail = segment.motion.behavior === "hold" ? `tpad=stop_mode=clone:stop_duration=${length + offset},` : "";
+      filters.push(`[${input}:v]setpts=PTS-STARTPTS,${tail}trim=start=${offset}:duration=${length + 1 / VIDEO_FPS},setpts=PTS-STARTPTS,${fit},setsar=1,format=yuv420p,fps=${VIDEO_FPS},settb=1/${VIDEO_FPS}${out}`);
+      return;
+    }
     if (!options.slowPush) {
       filters.push(`[${input}:v]${fit},setsar=1,format=yuv420p,${hold}${out}`);
       return;
@@ -363,7 +376,10 @@ function chapterGraph(
     last = "scrimmed";
     const size = captionFontPx(options.shape, options.captionSize);
     const y = options.captionPosition === "middle" ? "(h-th)/2" : `h-th-${Math.round(H * CAPTION_BOTTOM_SHARE)}`;
-    planned.burned.forEach((cue, index) => {
+    if (inputs.captions !== undefined) {
+      filters.push(`[${last}]ass=filename=${ffmpegFilterPath(inputs.captions)}:fontsdir=${ffmpegFilterPath(dirname(font))}[highlighted]`);
+      last = "highlighted";
+    } else planned.burned.forEach((cue, index) => {
       const next = `c${index}`;
       // Half-open, as the cues are: `between` holds both ends, so a frame landing on the instant
       // one cue gives way to the next drew both over each other.
@@ -414,16 +430,18 @@ async function renderChapter(
   await mkdir(toExtendedLength(join(target, "..")), { recursive: true });
   await mkdir(toExtendedLength(work), { recursive: true });
   const args: string[] = ["-y", ...QUIET];
-  const indexOf = new Map<string, number>();
-  const sizes = new Map<string, PictureSize | null>();
+  const indexOf = new Map<number, number>();
+  const sizes = new Map<number, PictureSize | null>();
   let count = 0;
-  for (const segment of planned.segments) {
-    if (segment.file === null || indexOf.has(segment.file)) continue;
-    const real = await containedWorldFile(store.dir, segment.file);
-    if (real === null) throw new Error(`${segment.file.split("/").pop()} is not a file inside this world`);
+  for (const [index, segment] of planned.segments.entries()) {
+    const file = segment.motion?.file ?? segment.file;
+    if (file === null) continue;
+    const real = await containedWorldFile(store.dir, file);
+    if (real === null) throw new Error(`${file.split("/").pop()} is not a file inside this world`);
+    if (segment.motion?.behavior === "repeat") args.push("-stream_loop", "-1");
     args.push("-i", real);
-    indexOf.set(segment.file, count++);
-    sizes.set(segment.file, await readPictureSize(real));
+    indexOf.set(index, count++);
+    sizes.set(index, segment.motion ?? await readPictureSize(real));
   }
   const mix = await containedWorldFile(store.dir, planned.mix);
   if (mix === null) throw new Error(`${planned.chapter.title}: its mix is not on this machine`);
@@ -441,12 +459,14 @@ async function renderChapter(
   args.push("-i", meta);
   const metaIndex = count++;
   const graph = join(work, `${planned.chapter.chapterId}.graph`);
-  const fileAt = (index: number) => planned.segments[index]!.file;
+  const captions = options.captionStyle === "word" && wantsBurnIn(options) ? join(work, `${planned.chapter.chapterId}.ass`) : undefined;
+  if (captions !== undefined) await writeFile(toExtendedLength(captions), highlightedCaptionAss(planned.burned, options), "utf8");
   await writeFile(
     toExtendedLength(graph),
     chapterGraph(planned, options, ffmpeg.slateFont, {
-      file: (index) => { const file = fileAt(index); return file === null ? null : (indexOf.get(file) ?? null); },
-      size: (index) => { const file = fileAt(index); return file === null ? null : (sizes.get(file) ?? null); },
+      file: (index) => indexOf.get(index) ?? null,
+      size: (index) => sizes.get(index) ?? null,
+      ...(captions !== undefined ? { captions } : {}),
     }),
     "utf8",
   );

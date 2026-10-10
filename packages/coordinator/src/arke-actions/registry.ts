@@ -567,6 +567,11 @@ const CLIENT_COMMAND_METADATA = {
   "open-audiobook": readOnly(QUERY),
   // The book as a listener hears it, and a picture on a block (turn 186): a read, and a command on the record.
   "open-audiobook-listening": readOnly(QUERY),
+  "quote-audiobook-motion": readOnly(QUERY),
+  "make-audiobook-motion": action("production", "generation", "bench", "spend-and-compute", ["chapters", "references", "artifacts", "bench"]),
+  "stop-audiobook-motion": action("production", "command", "bench", "spend-and-compute", ["chapters"]),
+  "choose-audiobook-motion": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
+  "audiobook-word-timing": action("production", "command", "voice", "spend-and-compute", ["chapters", "artifacts"]),
   "set-audiobook-picture": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "set-audiobook-picture-focus": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // The chapter's look (turn 191c): read by the writing service (no picture provider, nothing spent), then the author's lines.
