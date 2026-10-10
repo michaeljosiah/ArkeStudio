@@ -130,7 +130,8 @@
 .fy-abv-rendering progress { width: 100%; height: 6px; accent-color: var(--foreground); }
 .fy-abv-rendering p { color: var(--muted-foreground); }
 @media (max-width: 599px) {
-  .fy-page-sheet.fy-abv-modal--phone { inset: 44px 0 0; width: 100%; height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); border: 0; border-radius: 0; }
+  .fy-page-sheet.fy-abv-modal.fy-abv-modal--phone { inset: 44px 0 0; width: 100%; height: calc(100dvh - 44px); max-height: calc(100dvh - 44px); border: 0; border-radius: 0; }
+  .fy-abv-modal--phone .fy-abv-opt select { min-height: 44px; }
   .fy-abv-modal--phone > .fy-page-sheet__head h2 { font: var(--type-h3); }
   .fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { padding-inline: 8px; }
 }
