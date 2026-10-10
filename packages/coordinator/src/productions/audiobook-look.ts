@@ -157,7 +157,11 @@ export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<A
       if (person !== undefined) people.set(line.sheet, { ...person, first: Math.min(person.first, first) });
       continue;
     }
-    if (resolveChapterPerson([...people.values()], line.speaker) !== undefined) continue;
+    const speaker = resolveChapterPerson([...people.values()], line.speaker);
+    if (speaker !== undefined) {
+      people.set(speaker.key, { ...speaker, first: Math.min(speaker.first, first) });
+      continue;
+    }
     const key = lookKey({ name: line.speaker });
     if (!people.has(key)) people.set(key, { key, name: line.speaker, identity: "Unlinked cast name: resolve against the character sheets where the context establishes who this is.", neverDepicted: false, first });
   }
