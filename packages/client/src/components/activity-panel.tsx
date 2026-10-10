@@ -119,7 +119,6 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const [scope, setScope] = useState<"active" | "all">("active");
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
-  const timing = useWordTimingActivity(state, scope, activeWorldId);
   const update = useUpdateStatus();
   const waiting = waitingUpdate(update);
 
@@ -307,6 +306,7 @@ function Inbox({
 }) {
   const navigate = useNavigate();
   const exportsState = useExports();
+  const timing = useWordTimingActivity(state, scope, activeWorldId);
   // The audiobook's videos finished while this window was open (design turn 197f): each file
   // with its shape and size, to open here or download on a phone.
   const videos = Object.entries(exportsState).flatMap(([id, entry]) =>

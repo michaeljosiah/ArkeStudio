@@ -224,8 +224,8 @@ export function WordTimingControl({
         open={confirm !== null}
         onClose={() => setConfirm(null)}
         labelledBy="word-timing-prepare-title"
-        width={620}
-        panelClassName="fy-abmotion"
+        width={780}
+        panelClassName="fy-abmotion fy-wordtiming-prepare"
       >
         <div className="fy-abmotion-head">
           <div>
