@@ -123,7 +123,7 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.match(html, /Image 1/);
     assert.match(html, /data-testid="strip-take"/);
     assert.match(html, /TAKE 1/); // the wall names the selected take by its number
-    assert.match(html, /Keep · file as artifact/);
+    assert.match(html.replaceAll("<!-- -->", ""), /Keep take 1 · artifact/);
     // A take has no name but its number, and that is the name it saves under (issue 478). The
     // save is a sibling of the picture, and nothing about it files, discards or selects the take.
     assert.match(html, /aria-label="Download Take 1\.png"/, "the selected take offers a copy under its number");
