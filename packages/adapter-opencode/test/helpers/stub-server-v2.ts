@@ -43,7 +43,11 @@ export class StubOpenCodeV2 {
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
   models: WireModel[] = [];
-  defaultModel: { id: string; providerID: string } | null = null;
+  /** Per-location catalogue settlement, separate from the global discovery rows (#1696). */
+  modelResponse?: (directory: string | undefined) => {
+    models?: WireModel[]; status?: number; directory?: string | null; hold?: boolean;
+  };
+  defaultModel: (WireModel & { id: string; providerID: string }) | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];
   /** Live OAuth attempts by id; each status is what the poll route answers next. */
@@ -233,7 +237,10 @@ export class StubOpenCodeV2 {
         }
 
         if (url.pathname === "/api/model" && req.method === "GET") {
-          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(this.models, locationDir));
+          const reply = this.modelResponse?.(locationDir);
+          if (reply?.hold) return;
+          const directory = reply?.directory === null ? undefined : reply?.directory ?? locationDir;
+          res.writeHead(reply?.status ?? 200, { "Content-Type": "application/json" }).end(envelope(reply?.models ?? this.models, directory));
           return;
         }
         if (url.pathname === "/api/model/default" && req.method === "GET") {
