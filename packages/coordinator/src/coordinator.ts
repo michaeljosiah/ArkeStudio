@@ -6751,6 +6751,7 @@ export class Coordinator {
     benchTakeActionHeld = false,
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
+    browserImportStore?: WorldStore,
   ): Promise<void> {
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
@@ -17066,6 +17067,10 @@ export class Coordinator {
       case "upload-artifacts": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
+        if (browserImportStore && store !== browserImportStore) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The world changed during import. Choose the files again.");
+          return;
+        }
         if (msg.browserFiles !== undefined) {
           if (!store || store.worldId !== msg.worldId) {
             this.rejectEnqueue(msg.requestId, msg.kind, "Open this world's editor before importing media.");
@@ -17083,7 +17088,7 @@ export class Coordinator {
           if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
           try {
             await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
-              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }));
+              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store));
           } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
           return;
         }
@@ -17150,7 +17155,9 @@ export class Coordinator {
              * it the renderer never learns the path — the picker deliberately withholds it — and
              * a large video simply cannot be filed from either shelf.
              */
-            this.emit({
+            // Browser failures already have a correlated result. Their temporary source cannot
+            // be retried after cleanup and must not become a renderer-visible host path.
+            if (!browserImportStore) this.emit({
               at: new Date().toISOString(),
               type: "artifact.notice",
               worldId: msg.worldId,

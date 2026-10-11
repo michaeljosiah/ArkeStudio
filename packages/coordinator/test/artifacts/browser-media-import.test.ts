@@ -76,3 +76,24 @@ it("refuses browser filing in a read-only world before copying bytes", async t =
   await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({ kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, browserFiles: [file] });
   assert.match(JSON.stringify(events), /read-only/); assert.deepEqual(store.getBundle().artifacts, before);
 });
+
+it("keeps browser failure paths private and refuses a replaced open-store identity", async t => {
+  const first = await makeTempRoot(), second = await makeTempRoot();
+  const provider = new FsWorldProvider(first.root); await provider.loadWorld(WORLD_ID); t.after(() => provider.close());
+  const store = provider.openStore()!;
+  const previousStore = await WorldStore.open(second.worldDir); t.after(() => previousStore.close());
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(first.root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => events.push(event) });
+  const send = (msg: ClientMessage, captured: WorldStore) => (coordinator as unknown as {
+    handleClientMessage(msg: ClientMessage, takeHeld: boolean, dispatchHeld: boolean, genesisHeld: boolean, browserImportStore: WorldStore): Promise<void>;
+  }).handleClientMessage(msg, false, false, false, captured);
+  const request: ClientMessage = { kind: "upload-artifacts", worldId: WORLD_ID, requestId: REQUEST, sourcePaths: [join(first.root, "missing.png")] };
+  await send(request, store);
+  assert.equal(events.some(event => event.type === "artifact.notice"), false, "temporary browser paths have no consent/retry notice");
+  const result = events.find(event => event.type === "queue.enqueue-result");
+  assert.ok(result?.type === "queue.enqueue-result"); assert.match(result.failures[0]!.reason, /missing.png.*not readable/);
+  assert.equal(JSON.stringify(events).includes(first.root.replaceAll("\\", "\\\\")), false);
+  events.length = 0;
+  await send(request, previousStore);
+  assert.match(JSON.stringify(events), /world changed during import/);
+});
