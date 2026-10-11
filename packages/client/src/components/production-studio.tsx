@@ -59,7 +59,8 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const key = `${world?.meta.worldId ?? ""}:${productionId ?? ""}:${JSON.stringify(entry)}:${workspace?.conversationId ?? ""}`;
   useEffect(() => { setFocus(studioEntry(entry)); setPinned(false); setFullCardId(null); }, [key]);
   useEffect(() => {
-    if (!pinned && latest) { setFocus(latestFocus); setFullCardId(null); }
+    // An effects proposal arrives as a chat card. Only its explicit Review action opens Suggested.
+    if (!pinned && latest && latest.actionKind !== "world-chat-effect-proposal") { setFocus(latestFocus); setFullCardId(null); }
   }, [latest?.actionId, run?.run.id, pinned, key]);
   // The decision is the newest thing a wrap-up leaves, and the canvas follows the newest thing
   // unless pinned (§2.5). Declared after the two above so that, on arrival, it is the one that holds.

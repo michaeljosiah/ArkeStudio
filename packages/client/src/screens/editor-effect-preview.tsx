@@ -11,12 +11,11 @@ import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 import { EffectTargetArea } from "./editor-effect-target-area.js";
 
 /** Effects extend the existing viewer; its soundtrack continues to belong to usePlanAudio. */
-export function EffectCutPreview({ slug, plan, projection, transport, restartToken, totalSec, compact = false, analysisContext, effectControls }: {
+export function EffectCutPreview({ slug, plan, projection, transport, totalSec, compact = false, analysisContext, effectControls }: {
   slug: string | undefined;
   plan: RenderPlan;
   projection: EffectRenderProjection;
   transport: Transport;
-  restartToken: number;
   totalSec: number;
   compact?: boolean;
   analysisContext?: EffectAnalysisContext;
@@ -32,10 +31,6 @@ export function EffectCutPreview({ slug, plan, projection, transport, restartTok
   live.current = { plan, transport, projection, areaActive };
   useEffect(() => { setEditingArea(null); }, [effectControls?.effect.id]);
   const urlFor = useCallback((path: string) => slug ? mediaUrl(slug, path) : null, [slug]);
-  useEffect(() => {
-    if (restartToken === 0) return;
-    transport.seek(0); transport.setPlaying(true);
-  }, [restartToken]);
   useEffect(() => {
     let animation = 0;
     const sync = () => {

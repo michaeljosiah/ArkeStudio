@@ -15,6 +15,7 @@ export const EffectReviewOperationSchema = z.discriminatedUnion("kind", [
 export const EffectReviewCommandSchema = z.object({ kind: z.literal("editor-effect-proposal"), worldId: UlidSchema,
   productionId: SlugSchema, requestId: z.string().min(1).max(128), operation: EffectReviewOperationSchema }).strict();
 export type EffectReviewCommand = z.infer<typeof EffectReviewCommandSchema>;
+export type EffectReviewOperation = z.infer<typeof EffectReviewOperationSchema>;
 export const EffectReviewResultSchema = z.object({ type: z.literal("editor-effect.proposal-result"), at: z.string(),
   worldId: UlidSchema, productionId: SlugSchema, requestId: z.string().min(1).max(128),
   outcome: z.enum(["reviewed", "updated", "applied", "discarded", "refused"]), ref: EffectVersionRefSchema.optional(),

@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { activeEffectLayersAtFrame, resolveEffectAudioSource, TimelineClipIdSchema, ulid, type ArtifactSidecar, type EffectAnalysisState, type EffectClip,
-  type EffectFeatureManifest, type ProductionBundle, type ProductionTimeline, type RenderPlan } from "@arke-studio/contracts";
+import { activeEffectLayersAtFrame, TimelineClipIdSchema, ulid, type EffectAnalysisState,
+  type EffectFeatureManifest, type RenderPlan } from "@arke-studio/contracts";
 import { EffectManifestCache } from "../lib/editor-effect-analysis.js";
+import { effectAnalysisRow, effectManifestContextProblem, type EffectAnalysisContext } from "../lib/editor-effect-analysis-context.js";
+export { effectPreviewAnalysisState, type EffectAnalysisContext } from "../lib/editor-effect-analysis-context.js";
 import { mediaUrl } from "../lib/media.js";
 import { send, useStore } from "../lib/store.js";
 import type { PreviewReactionSources } from "../lib/editor-preview-frame.js";
 
-export interface EffectAnalysisContext {
-  worldId: string;
-  production: ProductionBundle;
-  artifacts: readonly ArtifactSidecar[];
-  timeline: ProductionTimeline;
-}
 export interface EffectPreviewReadiness {
   effectId: string;
   state: EffectAnalysisState;
@@ -21,16 +17,6 @@ export interface EffectPreviewReadiness {
   cancel: (() => void) | null;
 }
 const EMPTY_SOURCES: PreviewReactionSources = { manifestsByKey: {}, manifestKeyByEffectId: {} };
-
-/** A late Ready row cannot react to the sound from before a current mute/move/source edit. */
-export function effectPreviewAnalysisState(effect: EffectClip, requestFingerprint: string | null,
-  state: EffectAnalysisState | undefined, missingReason?: string): EffectAnalysisState {
-  if (!effect.reaction.enabled) return { status: "off" };
-  if (!effect.audioInput) return { status: "no-source", reason: "Choose an audio source." };
-  if (missingReason) return { status: "missing-source", reason: missingReason };
-  if (!state || state.status === "off" || state.requestFingerprint !== requestFingerprint) return { status: "source-changed", reason: "The audio source needs analysis." };
-  return state;
-}
 
 /** Derived work has its own channel; this hook never sends a timeline command or plays sound. */
 export function useEffectAnalyses(context: EffectAnalysisContext | undefined, plan: RenderPlan, absoluteFrame: number): {
@@ -44,17 +30,10 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
   const cache = useRef<EffectManifestCache | null>(null);
   const retainedSources = useRef({ key: "", sources: EMPTY_SOURCES });
   const worldId = context?.worldId, productionId = context?.production.meta.id, slug = studio?.world?.meta.slug;
-  const canPrepare = connection === "open" && projection?.canPrepare === true;
+  const canPrepare = !context?.frozen && connection === "open" && projection?.canPrepare === true;
   const effects = plan.effectRender?.effectLayers;
-  const sources = useMemo(() => (effects ?? []).map(({ effect }) => {
-    const source = context && effect.audioInput ? resolveEffectAudioSource({ ...context, plan, input: effect.audioInput }) : null;
-    const saved = context?.timeline.tracks.flatMap(track => track.effects ?? []).find(row => row.id === effect.id);
-    const canRequest = saved?.reaction.enabled === true && JSON.stringify(saved.audioInput) === JSON.stringify(effect.audioInput);
-    return { effect, source, canRequest, requestFingerprint: source?.requestFingerprint ?? null };
-  }), [effects, context?.production, context?.artifacts, context?.timeline, plan]);
-  const current = useMemo(() => sources.map(row => ({ ...row,
-    state: effectPreviewAnalysisState(row.effect, row.requestFingerprint, projection?.byEffectId[row.effect.id], row.source?.ok === false ? row.source.reason : undefined),
-  })), [sources, projection]);
+  const current = useMemo(() => (effects ?? []).map(({ effect }) => effectAnalysisRow(effect, context, plan, projection?.byEffectId[effect.id])),
+    [effects, context?.production, context?.artifacts, context?.timeline, context?.frozen, plan, projection]);
 
   useEffect(() => {
     requested.current.clear();
@@ -111,19 +90,21 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
     for (const row of current) {
       if (row.state.status !== "ready" || !visibleIds.has(row.effect.id)) continue;
       const manifest = loaded[row.state.manifestKey]?.manifest;
-      if (!manifest || manifest.sourceFingerprint !== row.state.sourceFingerprint) continue;
+      if (!manifest || manifest.sourceFingerprint !== row.state.sourceFingerprint ||
+        (context?.frozen && effectManifestContextProblem(manifest, row.effect, context, plan))) continue;
       manifestsByKey[manifest.manifestKey] = manifest; manifestKeyByEffectId[row.effect.id] = manifest.manifestKey;
     }
     const key = JSON.stringify(manifestKeyByEffectId);
     if (retainedSources.current.key !== key) retainedSources.current = { key,
       sources: Object.keys(manifestsByKey).length ? { manifestsByKey, manifestKeyByEffectId } : EMPTY_SOURCES };
     return retainedSources.current.sources;
-  }, [current, loaded, visibleKey]);
+  }, [current, loaded, visibleKey, context?.frozen, plan]);
   const readiness: EffectPreviewReadiness[] = visible.map(row => {
     const local = row.state.status === "ready" ? loaded[row.state.manifestKey] : undefined;
-    return { effectId: row.effect.id, state: row.state,
-      preview: row.state.status === "off" || local?.manifest ? "ready" : local?.error ? "failed" : row.state.status === "ready" ? "loading" : "base",
-      ...(local?.error ? { reason: local.error } : {}),
+    const invalid = local?.manifest && context?.frozen ? effectManifestContextProblem(local.manifest, row.effect, context, plan) : null;
+    return { effectId: row.effect.id, state: row.state.status === "ready" && local?.manifest && !invalid ? { ...row.state, silent: local.manifest.silent } : row.state,
+      preview: invalid ? "failed" : row.state.status === "off" || local?.manifest ? "ready" : local?.error ? "failed" : row.state.status === "ready" ? "loading" : "base",
+      ...(invalid || local?.error ? { reason: invalid ?? local!.error } : {}),
       retry: local?.error ? () => { if (row.state.status === "ready") cache.current?.retry(row.state.manifestKey); setAttempt(value => value + 1); }
         : canPrepare && row.canRequest && (["failed", "source-changed"].includes(row.state.status) || (row.state.status === "missing-source" && row.source?.ok)) ? () => command(row.effect.id, "retry") : null,
       cancel: canPrepare && row.canRequest && row.state.status === "analysing" ? () => command(row.effect.id, "cancel") : null };

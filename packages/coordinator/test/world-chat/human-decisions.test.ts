@@ -10,13 +10,45 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { discardStageReview, retainStageReview } from "../../src/productions/stage-review.js";
-import { stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { requestBase, stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { stageEffectProposals, type EffectRequestDependencies } from "../../src/productions/editor-effect-requests.js";
+import { projectHumanDecisions } from "../../src/world-chat/human-decisions.js";
 import { storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
 import { setOwner } from "../../src/artifacts/filing.js";
 import { assembleStory } from "../productions/assemble.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-10-04T12:00:00.000Z";
+
+it("an effects proposal against an unopened derived base is pending, while changed or invalid Current is blocked", async t => {
+  const made = await makeTempRoot(), provider = new FsWorldProvider(made.root); t.after(() => provider.close());
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!, service = new WorldChatService(store.dir);
+  const conversation = await service.create({ title: "Unopened effects review", entryContext: { kind: "production", productionId: "saltlight" } });
+  const production = store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  assert.notEqual(production.timeline?.status, "ready");
+  const base = requestBase(store, production).timeline;
+  assert.equal(base.revision, 0);
+  const dependencies: EffectRequestDependencies = {
+    async captureDependencies(input) {
+      return { schemaVersion: 1, base: { revision: input.candidate.revision, timelineHash: input.baseTimelineHash }, resolutionHash: "a".repeat(64),
+        profiles: { rendererVersion: "test", catalogueHash: "b".repeat(64), analysisProfileId: "test" }, sources: [], protection: [], reactions: [], issues: [] };
+    },
+    async validateDependencies() {},
+  };
+  await stageEffectProposals(store, { productionId: "saltlight", conversationId: conversation.id, now: AT,
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" }, direction: "Quiet atmosphere", palette: [{ id: "dust", version: 1 }] },
+    proposals: [{ summary: "An atmosphere lane", identities: [], commands: [{ kind: "add-track", trackKind: "effect", trackId: "tr_atmosphere", name: "Atmosphere" }] }],
+  }, dependencies);
+  const loaded = (await service.load(conversation.id))!;
+  const bundle = structuredClone(store.getBundle()), current = bundle.productions.find(row => row.meta.id === "saltlight")!;
+  const cards = async () => (await projectHumanDecisions(store, loaded, bundle, [])).cards.filter(card => card.body.control.kind === "effect-proposal");
+  assert.equal((await cards())[0]?.status, "pending"); assert.equal((await cards())[0]?.detail, undefined);
+  current.timeline = { status: "ready", timeline: { ...base, revision: 1 } };
+  assert.equal((await cards())[0]?.status, "blocked"); assert.match((await cards())[0]?.detail ?? "", /Current changed/);
+  current.timeline = { status: "invalid", message: "Unreadable timeline" };
+  assert.equal((await cards())[0]?.status, "blocked");
+});
 
 it("projects existing authorities and settles screen and thread decisions through their ordinary commands", async t => {
   const made = await makeTempRoot(), provider = new FsWorldProvider(made.root);

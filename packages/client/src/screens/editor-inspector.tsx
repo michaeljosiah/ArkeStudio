@@ -219,6 +219,7 @@ export function CutInspector({
             figures={`${takeLabel} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
             trim={trim}
             ceiling={ceiling}
+            disabled={commandsDisabled}
           />
         )}
         {selectedClip && clipShotId !== null && !compact && (

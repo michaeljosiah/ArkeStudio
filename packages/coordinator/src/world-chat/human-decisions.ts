@@ -46,7 +46,9 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
     for (const family of (production.effectFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
       for (const version of family.versions) {
         const action = version.actionId ? actionById.get(version.actionId) : family.actionId ? actionById.get(family.actionId) : undefined;
-        const stale = production.timeline?.status !== "ready" || production.timeline.timeline.revision !== version.dependencies.base.revision;
+        // An unopened story or measured spine has the same derived revision-zero base as requestBase.
+        const currentRevision = production.timeline?.status === "invalid" ? null : production.timeline?.status === "ready" ? production.timeline.timeline.revision : 0;
+        const stale = currentRevision === null || currentRevision !== version.dependencies.base.revision;
         const detail = version.conflicts[0]?.reason ?? version.dependencies.issues[0]?.reason ??
           (stale ? "Current changed · Update proposal" : undefined);
         add(`effects:${family.id}:${version.id}`, `Effects · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",

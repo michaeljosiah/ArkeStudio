@@ -177,6 +177,20 @@ Native analysis tests require FFmpeg/FFprobe; use `ARKE_EFFECT_NATIVE_REQUIRED=1
 native support fail. The precommit validator must not prepare analysis, and tests must exercise
 an external metadata change while the write gate suppresses watcher adoption.
 
+Editor effects T-6 adds client `editor-effect-arrangement-request.test.ts`,
+`editor-effect-arrangement.test.tsx`, `editor-effect-proposal-card.test.tsx`, and the
+`editor-effect-review-*` tests for exact controller/transport joining, navigation, position,
+readonly legacy trims, source freshness, pending projection and shared playback. Include
+`editor-effect-frozen-analysis.test.tsx`, `editor-effect-integration.test.ts`,
+`human-decisions.test.tsx` and `production-studio.test.tsx`; coordinator
+`test/world-chat/human-decisions.test.ts` checks unsaved revision-zero proposal projection.
+Run the real authenticated editor and configured Arke harness for the two acceptance exports.
+Capture Current before preparation/arrival, the exact reviewed version after a human Review,
+pending adjustment/Undo, sticky revision arrival, explicit Release/review, stale Update and
+one-revision Apply. Check desktop, Fold and 390/320px sheets in both themes, one soundtrack and
+unchanged playhead across comparison. Component fixtures are not evidence of a real model run
+or a delivered video. Verify full-song exports and actual preview captures with FFprobe/FFmpeg.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

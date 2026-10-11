@@ -14,6 +14,7 @@ export interface EffectLibraryProps {
   disabled: boolean;
   onCommands: (commands: TimelineCommand[], label?: string) => void;
   onCreated: (id: string) => void;
+  onSuggest?: () => void;
 }
 
 const descriptions: Record<EffectClip["preset"]["id"], string> = {
@@ -39,6 +40,7 @@ export function EffectLibrary(props: EffectLibraryProps) {
   const definition = EFFECT_PRESET_CATALOGUE.find(value => value.id === preset)!;
   return <section className="fy-effect-library" aria-label="Effects library">
     <p>Atmosphere over any picture. Audio reaction is optional.</p>
+    {props.onSuggest && <button type="button" disabled={props.disabled} onClick={props.onSuggest}>Suggest arrangement</button>}
     <div className="fy-effect-library__presets" role="group" aria-label="Effect presets">
       {EFFECT_PRESET_CATALOGUE.map(choice => <button type="button" key={choice.id} aria-pressed={preset === choice.id}
         aria-label={choice.label} onClick={() => setPreset(choice.id)}>

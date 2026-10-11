@@ -76,7 +76,7 @@ describe("preview emitting area target placement", () => {
       revision: 0, range: { startSec: 0, endSec: 10 }, scope: { kind: "production" }, effectRender: value.projection };
     const canvasPrototype = Object.getPrototypeOf(document.createElement("canvas")); canvasPrototype.getContext = () => null;
     const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); roots.push(root);
-    const render = () => root.render(<EffectCutPreview slug={undefined} plan={plan} projection={value.projection} transport={transport} restartToken={0} totalSec={10} effectControls={controls(value)} />);
+    const render = () => root.render(<EffectCutPreview slug={undefined} plan={plan} projection={value.projection} transport={transport} totalSec={10} effectControls={controls(value)} />);
     await act(async () => render()); assert.equal(container.querySelector(".fx-target-area"), null);
     const toggle = container.querySelector(".fx-target-area__toggle") as HTMLButtonElement;
     await act(async () => toggle.click()); assert.ok(container.querySelector(".fx-target-area")); assert.equal(toggle.getAttribute("aria-expanded"), "true");

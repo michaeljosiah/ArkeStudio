@@ -89,7 +89,7 @@ passages. Client `editor-effect-draft.ts` keeps gestures transient and reproject
 without rebuilding the canonical monitor mix. The preview retains its worker/decoders and sends
 only mapping metadata for response changes against already loaded analysis. `editor-effect-export.ts`
 checks scoped delivery readiness against full-production sound identity. Inspector/Arke are the
-permanent panel choices; reviewed Arke effect cards remain a subsequent implementation slice.
+permanent panel choices.
 
 Effects proposal authority (T-5) is contracts `editor-effect-proposal.ts` plus its identity,
 sticky, scope, compile and lifecycle modules. `timeline.ts` reduces trusted segments separately
@@ -102,7 +102,20 @@ world floor to 75; reads never migrate. `world-chat/effect-proposals.ts` links n
 actions while refusing generic approval, and `effect-proposal-scope.ts` fences sibling result
 channels. `effect-proposal-reads.ts` pages complete effect/decision records. The authenticated
 `editor-effect-proposal` route delegates to `productions/editor-effect-review.ts`; model tools
-cannot call it. Composite card presentation and explicit Suggested entry are the T-6 UI slice.
+cannot call it.
+
+Composite effects review (T-6) uses client `editor-effect-arrangement.tsx` and its request helper
+for independent target/range/audio scope. `editor-effect-proposal-card.tsx`, its connected wrapper
+and presentation helpers draw native Arke cards, retained adjustments and named Release actions.
+`editor-effect-review-state.ts` owns explicit version selection and exact response/snapshot joining;
+`screens/editor-effect-review.ts` connects it to narrow store ports and explicit Cut navigation.
+`editor-effect-review-authoring.ts`, `editor-effect-review-projection.ts` and
+`editor-effect-review-position.ts` keep pending commands, effects-only preview and resumed UI
+position separate from Current. `editor-effect-review-freshness.ts` checks observable source/plan
+dependencies, while `editor-effect-analysis-context.ts` loads only the candidate's frozen reaction
+manifests. Current/Suggested share canonical picture/audio and transport. The temporary review bar
+returns to the exact composite card; ordinary Inspector controls send pending adjustments through
+the authenticated editor route. Passive card arrival never chooses Suggested or another panel.
 
 The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
 transport and delegates initialization/draining to the application. Desktop and dev use
