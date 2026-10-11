@@ -646,13 +646,13 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   for (const [number, picture] of projection.pictureLayers.entries()) {
     const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
     if (from >= to) continue;
-    const count = to - from, shift = (from - startFrame) / fps, seconds = count / fps;
+    const count = to - from, shiftFrames = from - startFrame, seconds = count / fps;
     let source = `ep${number}`;
     let rect = { x: 0, y: 0, width, height };
     if (picture.kind === "slate") {
       assertSlateLabelSupported(picture.label);
       args.push("-f", "lavfi", "-t", String(seconds), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
-      filters.push(`[${inputIndex++}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${ffmpegDrawtextText(picture.label)}':fontcolor=${EFFECT_SLATE_STYLE.colour}:fontsize=${EFFECT_SLATE_STYLE.fontSize}:x=(w-tw)/2:y=(h-th)/2,format=gbrap,setpts=PTS-STARTPTS+${shift}/TB[${source}]`);
+      filters.push(`[${inputIndex++}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${ffmpegDrawtextText(picture.label)}':fontcolor=${EFFECT_SLATE_STYLE.colour}:fontsize=${EFFECT_SLATE_STYLE.fontSize}:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
     } else {
       if (!picture.path || !picture.sourceSize) throw new Error(`Picture ${picture.clipId} needs measured dimensions before effect export`);
       rect = containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, width, height);
@@ -666,7 +666,7 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       args.push("-i", `${worldDir}/${picture.path}`);
       // Keep the last source frame at or before the production sample, including a non-aligned
       // in-point. Input seeking would discard that predecessor and pick the following frame.
-      filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},setpts=PTS-STARTPTS+${shift}/TB[${source}]`);
+      filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
       const overlay = alpha.find(value => value.pictureClipId === picture.clipId);
       if (overlay) {
         args.push("-i", overlay.path);
@@ -680,14 +680,16 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       }
     }
     const next = `ec${number}`;
-    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(t,${shift})*lt(t,${(to - startFrame) / fps})'[${next}]`);
+    // Keep placement and half-open coverage in frames. Decimal seconds can round on opposite
+    // sides of the same boundary in setpts and overlay, dropping the first or final picture.
+    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${shiftFrames})*lt(n,${to - startFrame})'[${next}]`);
     last = next;
   }
   const composition = alpha.find(value => value.pictureClipId === undefined);
   if (composition) {
     args.push("-i", composition.path);
     filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${composition.startFrame - startFrame}[compositionAlpha]`);
-    filters.push(`[${last}][compositionAlpha]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(t,${(composition.startFrame - startFrame) / fps})*lt(t,${(composition.endFrame - startFrame) / fps})'[effectComposition]`);
+    filters.push(`[${last}][compositionAlpha]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${composition.startFrame - startFrame})*lt(n,${composition.endFrame - startFrame})'[effectComposition]`);
     last = "effectComposition";
   }
   return { last, inputIndex };
