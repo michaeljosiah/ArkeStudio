@@ -312,7 +312,7 @@ For an OpenCode v2 pin change, stage the exact runtime and qualify the actual bi
 ```powershell
 npm run prepare:opencode2 --workspace @arke-studio/desktop
 $env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
-node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
 $env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
 $env:ARKE_LIVE_HARNESS = '1'
 node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
@@ -323,7 +323,8 @@ npm run smoke:main --workspace @arke-studio/desktop
 
 The tests use disposable profiles, a scripted localhost provider and synthetic credentials.
 They verify authenticated launch, the exact server version, native Ollama discovery with an endpoint-only configuration, pinned
-agent/model configuration, a file-tool loop, outside-directory denial, final text/usage, approval
+agent/model configuration, Copilot discovery held pending with no early inference and a native
+Claude Messages response after the route settles, a file-tool loop, outside-directory denial, final text/usage, approval
 confirmation, and durable key add/restart/removal. They make no paid requests and do not qualify
 live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
 fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify

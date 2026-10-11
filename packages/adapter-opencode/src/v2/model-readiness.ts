@@ -5,7 +5,9 @@ import { OpenCodeV2Http, sameDirectory, type V2Envelope } from "./http.js";
 
 /**
  * OpenCode forks Copilot's first model sync per location. Until it settles, the catalogue
- * can return a bare @ai-sdk/github-copilot package that its own runner cannot resolve (#1696).
+ * in 2.0.26 can already return aisdk:@ai-sdk/github-copilot before remote routing is known.
+ * That fallback sends Claude to /v1/chat/completions (404). Require the resolved endpoint
+ * and native Anthropic package rather than the older runtime's SDK spelling (#1709).
  * Global discovery is not evidence for a new scratch directory. Wait only before publishing
  * the session; no prompt, model substitution or credential operation belongs in this retry.
  */
@@ -54,8 +56,11 @@ export async function waitForSessionModel(
           if (model.providerID !== "github-copilot") return null;
         }
         const row = rows.find(row => row.providerID === model!.providerID && row.id === model!.id);
-        if (row && modelEnabled(row) &&
-          (row.package === "aisdk:@ai-sdk/anthropic" || row.package === "aisdk:@ai-sdk/github-copilot")) {
+        if (row && modelEnabled(row) && (
+          (row.package === "@opencode/ai/providers/anthropic" && row.settings?.endpoint === "messages") ||
+          (row.package === "aisdk:@ai-sdk/github-copilot" &&
+            (row.settings?.endpoint === "chat" || row.settings?.endpoint === "responses"))
+        )) {
           signal.throwIfAborted();
           return row;
         }
