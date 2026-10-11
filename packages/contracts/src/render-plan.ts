@@ -440,6 +440,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
+  // T-1 persists authored effects before T-2 supplies their shared raster executor. Silently
+  // exporting the pictures without the saved effects would publish the wrong film (R-19).
+  if (timeline?.status === "ready" && timeline.timeline.tracks.some(track => track.effects?.length)) {
+    return { ok: false, reason: "Effect rendering is not available in this build. The authored effects are retained." };
+  }
   const legacyRefusal = scope.kind === "episode" ? null : legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
   if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised

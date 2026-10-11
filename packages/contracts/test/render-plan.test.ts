@@ -7,6 +7,7 @@ import {
   buildFfmpegArgs,
   buildRenderPlan,
   defaultExportPreset,
+  defaultEffectClip,
   deriveCut,
   exportAudioClips,
   exportOverlays,
@@ -60,6 +61,17 @@ const artifacts: RenderArtifact[] = [
   { id: BELLS, file: "bells.wav", kind: "audio" },
   { id: NOTES, file: "notes.md", kind: "document" },
 ];
+
+it("refuses to omit persisted effects before the raster executor is available (SPEC-053 R-19)", () => {
+  const value = production();
+  const timeline = seedEmptyPictureTimeline(value);
+  timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [
+    defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 120, seed: 3 }),
+  ] });
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /Effect rendering.*retained/);
+});
 
 describe("production-owned media in render plans and migration (#895)", () => {
   it("does not resolve legacy media omitted from episode and song-clock delivery", () => {

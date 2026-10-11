@@ -18,6 +18,7 @@ import {
   sourceLengthFramesFor,
   spineTimelineFingerprint,
   storyTimelineFingerprint,
+  timelineCarriesEffects,
   undoTimelineHistory,
   type ProductionBundle,
   type ProductionTimeline,
@@ -31,6 +32,7 @@ import {
   type TimelineSelectionChange,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
+import { refuseUnknownEffectAudioBindings } from "./effect-bindings.js";
 import { readRequestFile, requestFileInput } from "./editor-request-file.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -185,10 +187,32 @@ export async function assembleTimelineScene(store: WorldStore, productionId: str
  * Returns what the legacy `cut.json` migration could not carry, when this write was the one that
  * folded it in (SPEC-037 R-30): named placements, never a count, so the caller can say them.
  */
-export async function applyTimelineCommand(
+export function applyTimelineCommand(
   store: WorldStore,
   productionId: string,
   write: TimelineWrite,
+  validate?: (production: ProductionBundle) => Promise<void>,
+): Promise<{ dropped: string[] }> {
+  return writeTimeline(store, productionId, write, "suggestion", validate);
+}
+
+/**
+ * Called only from the authenticated editor command route. This authority is chosen by the
+ * transport owner, never from a command label, request id or model-provided flag (SPEC-053 R-26).
+ */
+export function applyHumanTimelineCommand(
+  store: WorldStore,
+  productionId: string,
+  write: TimelineWrite,
+): Promise<{ dropped: string[] }> {
+  return writeTimeline(store, productionId, write, "human");
+}
+
+async function writeTimeline(
+  store: WorldStore,
+  productionId: string,
+  write: TimelineWrite,
+  effectAuthority: "human" | "suggestion",
   validate?: (production: ProductionBundle) => Promise<void>,
 ): Promise<{ dropped: string[] }> {
   const timelinePath = `productions/${productionId}/timeline.json`;
@@ -322,6 +346,7 @@ export async function applyTimelineCommand(
         refuseUnrenderablePlacements(clipCommands, current, boundedBy, store.getBundle().artifacts);
         refuseUnknownLibraryItems(clipCommands, boundedBy, store.getBundle().artifacts);
         next = applyTimelineCommands(current, clipCommands, {
+          effectAuthority,
           label,
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
@@ -329,10 +354,16 @@ export async function applyTimelineCommand(
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
           ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
+        refuseUnknownEffectAudioBindings(current, next, boundedBy, store.getBundle().artifacts);
       } else {
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);
         next = command.kind === "undo" ? undoTimelineHistory(current) : redoTimelineHistory(current);
+        // Generic approval cannot inverse an effects transaction or release its rules. The
+        // dedicated reviewed-candidate authority owns suggested effect history (SPEC-053 R-36).
+        if (effectAuthority !== "human" && (timelineCarriesEffects(current) || timelineCarriesEffects(next))) {
+          throw new TimelineCommandRefused("Use the editor's Undo or Redo for an effects timeline.");
+        }
         /*
          * An accepted request whose revision is undone stays accepted and says so (SPEC-039
          * R-36), durably: the redo stack is transient — the next edit clears it — so the mark

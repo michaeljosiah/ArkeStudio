@@ -368,7 +368,7 @@ import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
-import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { assembleTimelineScene, applyHumanTimelineCommand, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
@@ -11750,7 +11750,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         try {
-          const { dropped } = await applyTimelineCommand(
+          const { dropped } = await applyHumanTimelineCommand(
             store,
             msg.productionId,
             msg.kind === "timeline-move-picture"

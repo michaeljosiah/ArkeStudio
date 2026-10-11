@@ -1,6 +1,7 @@
 import {
   EDITOR_REQUEST_BOUNDS,
   editorRequestStaleness,
+  genericEditorRequestRefusal,
   previewEditorRequest,
   migrateLegacyCut,
   resolveProductionArtifact,
@@ -367,6 +368,13 @@ export async function decideEditorRequest(
   if (request.status !== "pending") throw new EditorRequestRefused(`request ${requestId} is already ${request.status}`);
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
+
+  // All generic Accept entry points meet here. A card never acquires the separate effect
+  // review/release authority simply because its commands happen to validate (SPEC-053 R-36).
+  if (production.timeline?.status === "ready") {
+    const refusal = genericEditorRequestRefusal(production.timeline.timeline, request.commands);
+    if (refusal !== null) throw new EditorRequestRefused(refusal);
+  }
 
   const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
   // Two Accepts can race past the status check above; the second must not mark the first's
