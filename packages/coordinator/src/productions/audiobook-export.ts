@@ -135,7 +135,7 @@ export async function exportAudiobookPlayer(
         pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, seconds: entry.seconds, src: pictureName.get(entry.file)!, ...(entry.focus !== undefined ? { focus: entry.focus } : {}), ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
         opening: picture(chapter.opening),
       };
-      const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
+      const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences, ...(block.words !== undefined ? { words: block.words } : {}) }));
       // A chapter with timing ships its one mix (design turn 187, R-85): the same render the
       // chapter's Play and the player in the app hear — overlaps, reactions, beds, one loudness —
       // encoded where this machine can, else the render itself. Never its takes joined anew.

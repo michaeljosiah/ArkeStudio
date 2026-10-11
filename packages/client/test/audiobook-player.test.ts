@@ -155,6 +155,51 @@ afterEach(() => {
   frames.clear();
 });
 
+describe("bounded captions in the shared player (issue 1711, SPEC-047 R-70)", () => {
+  const captionBook = (block: AudiobookPlayerChapter["blocks"][number]): AudiobookPlayerChapter => ({
+    id: "captions", order: 1, title: "The harbour", state: "read", seconds: block.seconds,
+    blocks: [block], gaps: [], pictures: [], opening: null,
+  });
+  it("advances through every word of an individually read long passage, without showing the next sentence", () => {
+    const prose = "Maren watched the boats moving beyond the breakwater while the lamps slowly came on along the harbour wall and the last light went out over the sea. She stayed until the bell sounded again.";
+    const p = mount({ chapters: [captionBook(take("long", 0, 100, prose))] });p.press("Text");
+    assert.doesNotMatch(p.text(".abp-follow"), /She stayed/);
+    const seen: string[] = [];
+    for (let at = 0; at < 100; at += 0.1) {
+      p.at(at);
+      const text = p.text(".abp-follow .now");
+      assert.ok(text.length <= 84, "the DOM-less fallback still bounds the cue");
+      if (text && text !== seen.at(-1)) seen.push(text);
+    }
+    assert.equal(seen.join(" "), prose, "no sentence, word or punctuation is omitted");
+    assert.equal(p.q(".abp-follow .rest"), null);
+    p.at(85);p.press("Pause");const kept = p.text(".abp-follow");
+    p.press("Back 15 seconds");assert.notEqual(p.text(".abp-follow"), kept, "a paused seek chooses its cue immediately");
+    p.press("Text");assert.equal(p.q(".abp-follow")?.hidden, true);
+  });
+  it("uses supplied acoustic intervals, clears during silence, and keeps the same cue after speed changes", () => {
+    const block = { ...take("timed", 0, 12, "First. Last."), words: [{ text: "First.", startSec: 2, endSec: 3 }, { text: "Last.", startSec: 8, endSec: 9 }] };
+    const p = mount({ chapters: [captionBook(block)] });p.press("Text");
+    assert.equal(p.text(".abp-follow"), "");p.at(2.5);assert.equal(p.text(".abp-follow"), "First.");
+    p.press("Speed");assert.equal(p.text(".abp-follow"), "First.");
+    p.at(4);assert.equal(p.text(".abp-follow"), "");
+    p.at(8.5);assert.equal(p.text(".abp-follow"), "Last.");
+    p.press("Pause");p.key("ArrowLeft");assert.equal(p.text(".abp-follow"), "");
+    p.handle.update([captionBook({ ...block, words: undefined })]);
+    assert.equal(p.text(".abp-follow"), "First.", "a newer plan without measured intervals uses the estimate");
+  });
+  it("preserves an unbroken token across bounded cues without inserting spaces inside it", () => {
+    const token = "abcdefghij".repeat(30);
+    const p = mount({ chapters: [captionBook(take("token", 0, 60, token))] });p.press("Text");
+    const seen: string[] = [];
+    for (let at = 0; at < 60; at += 0.1) {
+      p.at(at);const text = p.text(".abp-follow");
+      if (text && text !== seen.at(-1)) seen.push(text);
+    }
+    assert.equal(seen.join(""), token);
+  });
+});
+
 describe("Slow push in the shared player (turn 211, R-75)", () => {
   const pictureBook = (pictures: AudiobookPlayerChapter["pictures"] = [{ at: 0, seconds: 40, src: "still.png", focus: { x: 0.7, y: 0.4 } }]): AudiobookPlayerChapter => ({
     id: "push", order: 1, title: "The harbour", state: "read", seconds: 40,
@@ -380,7 +425,7 @@ describe("the book, not a chapter (186a, R-67)", () => {
     assert.equal(p.all(".abp-line u").length, 1, "the gap marked on the scrubber");
     assert.equal(p.q(".abp-follow")?.hidden, true, "Text is off by default");
     p.press("Text");
-    assert.match(p.text(".abp-follow"), /Chapter 2 · The Same Ink\s*2 blocks not read/, "the gap is the next thing said");
+    assert.equal(p.text(".abp-follow"), "Chapter 2 · The Same Ink", "only the current caption is shown");
     p.end();
     p.at(1);
     assert.match(p.text(".abp-follow"), /^2 blocks not read\s*c2\.p2 words\./, "said just after the clock crosses it");

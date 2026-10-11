@@ -167,6 +167,9 @@ async function withHarness(run: (h: Harness) => Promise<void>, options: { ffmpeg
       hostedReaders: [],
     },
   });
+  // Coordinator exports and direct exporter calls must share the fixture date, rather than
+  // make the expected output folder depend on the day this integration test is run.
+  (coordinator as unknown as { nowIso(): string }).nowIso = () => CLOCK;
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   coordinator.serverApplication.attachTransport({ broadcast() {}, broadcastSnapshot() {} });

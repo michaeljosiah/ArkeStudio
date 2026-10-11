@@ -28,6 +28,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN TURN 212
+  { group: "Listen captions · approved", screen: "Listen · short captions leave the picture visible", frame: "212a", route: "Audiobook / Listen", status: "drawn", checked: "2026-10-11", controls: ["Text"], notes: ["Owner-approved two-line caption layout for issue 1711; full words advance on the existing narration clock."] },
+  { group: "Listen captions · approved", screen: "Phone · the current phrase above the transport", frame: "212b", route: "Audiobook / Listen", status: "drawn", checked: "2026-10-11", controls: ["Text"], notes: ["Owner-approved two-line caption layout for issue 1711; full words advance on the existing narration clock."] },
+  // END TURN 212
+
   // BEGIN TURN 211
   { group: "Listen Slow push · approved", screen: "Listen · Slow push starts on", frame: "211a", route: "Audiobook / Listen", status: "drawn", checked: "2026-10-10", controls: ["Slow push"], notes: ["One labelled toggle joins the existing top controls. The picture and transport keep their present geometry. The switch is on before playback begins. Approved by the owner on 2026-10-10." ] },
   { group: "Listen Slow push · approved", screen: "Phone · a labelled control with room to touch", frame: "211b", route: "Audiobook / Listen", status: "drawn", checked: "2026-10-10", controls: ["Slow push"], notes: ["The same control sits below the chapter title. It never competes with Speed, Sleep or Text at the foot, even when the sleep label is End of chapter. Approved by the owner on 2026-10-10." ] },

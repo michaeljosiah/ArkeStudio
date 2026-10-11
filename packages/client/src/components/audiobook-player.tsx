@@ -39,7 +39,7 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
     seconds: chapter.seconds,
     // A chapter with timing plays its one mix (design turn 187, R-85): overlaps and beds as set.
     ...(chapter.mix !== undefined ? { audio: [{ src: src(chapter.mix.file), at: 0, seconds: chapter.mix.seconds }] } : {}),
-    blocks: chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, src: src(block.file), sentences: block.sentences })),
+    blocks: chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, src: src(block.file), sentences: block.sentences, ...(block.words !== undefined ? { words: block.words } : {}) })),
     gaps: chapter.gaps,
     pictures: chapter.pictures.map((picture) => ({ at: picture.at, seconds: picture.seconds, src: src(picture.file), ...(picture.focus !== undefined ? { focus: picture.focus } : {}), ...(picture.motion !== undefined ? { motion: { src: src(picture.motion.file), seconds: picture.motion.seconds, behavior: picture.motion.behavior } } : {}), ...(picture.motionProblem !== undefined ? { motionProblem: picture.motionProblem } : {}) })),
     opening: chapter.opening === null ? null : src(chapter.opening),
