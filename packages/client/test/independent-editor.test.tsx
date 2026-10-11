@@ -27,7 +27,9 @@ function stateWithVideo(placed: boolean): ClientState {
 }
 async function mount(state: ClientState) {
   const sent: ClientMessage[] = [];
-  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } });
+  const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } };
+  Object.assign(window, { arke: bridge });
+  __setBridgeForTest(bridge);
   __setStateForTest(state);
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${state.world!.productions[0]!.meta.id}/cut`]}>
@@ -37,7 +39,7 @@ async function mount(state: ClientState) {
     const found = [...container.querySelectorAll<HTMLButtonElement>("button"), ...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
-  return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
+  return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); Reflect.deleteProperty(window, "arke"); __setBridgeForTest(null); } };
 }
 it("distinguishes unavailable ownership from missing media and keeps the clip removable (#895)", async () => {
   const state = stateWithVideo(true);
