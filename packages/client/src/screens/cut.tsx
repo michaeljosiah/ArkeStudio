@@ -1814,7 +1814,7 @@ function CutEditorScreen() {
         onClose={() => setArrangementOpen(false)} onPrepare={request => {
           setArrangementOpen(false); setEffectAsk({ line: "Suggest an effects arrangement", text: request.text,
             subject: { kind: "effect-arrangement", scope: request.scope }, press: ulid() });
-          setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true);
+          // The mounted conversation drains its queue while hidden; preparation leaves the panel alone (SPEC-053 R-30).
         }} />}
       <PageSheet open={addLaneOpen} title="Add lane" onClose={() => setAddLaneOpen(false)} className="fy-cut-sheet fy-cut-lane-sheet">
         <button type="button" disabled={commandsDisabled} onClick={() => { if (editableTimeline) sendCommands([newAudioTrack(editableTimeline)], "Add audio track"); setAddLaneOpen(false); }}>Audio</button>
