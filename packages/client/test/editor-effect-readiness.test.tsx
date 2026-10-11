@@ -9,7 +9,7 @@ import { __applyForTest, __setBridgeForTest, __setStateForTest, useStore } from 
 import { effectPreviewAnalysisState, useEffectAnalyses, type EffectAnalysisContext } from "../src/screens/editor-effect-analysis.js";
 import { useRenderPlan } from "../src/screens/editor-plan.js";
 import { EditorPicturePreview } from "../src/screens/editor-picture-preview.js";
-import { PreviewReactionBank, type PreviewAnalysisInstall, type PreviewFrameRequest, type PreviewReactionSources } from "../src/lib/editor-preview-frame.js";
+import { PreviewReactionBank, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewFrameRequest, type PreviewReactionSources } from "../src/lib/editor-preview-frame.js";
 import type { Transport } from "../src/screens/editor-transport.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { analysisManifest } from "./effect-analysis-fixture.js";
@@ -170,9 +170,10 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
 
   it("installs analysis once and redraws a paused frame without replacing the source worker", async () => {
     const workers: FakeWorker[] = [];
+    const painted: Uint8ClampedArray[] = [];
     class FakeWorker {
       listeners = new Set<(event: { data: unknown }) => void>(); requests: Array<PreviewFrameRequest | PreviewAnalysisInstall> = []; bank = new PreviewReactionBank();
-      delay = false; held: unknown[] = [];
+      delay = false; held: unknown[] = []; terminated = false;
       constructor() { workers.push(this); }
       addEventListener(type: string, callback: (event: { data: unknown }) => void) { if (type === "message") this.listeners.add(callback); }
       removeEventListener(_type: string, callback: (event: { data: unknown }) => void) { this.listeners.delete(callback); }
@@ -185,11 +186,11 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
         else queueMicrotask(() => this.deliver(data));
       }
       deliver(data: unknown) { for (const listener of this.listeners) listener({ data }); }
-      terminate() {}
+      terminate() { this.terminated = true; }
     }
     Object.assign(globalThis, { Worker: FakeWorker });
     const canvasPrototype = Object.getPrototypeOf(document.createElement("canvas"));
-    canvasPrototype.getContext = () => ({ createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }), putImageData() {} });
+    canvasPrototype.getContext = () => ({ createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }), putImageData(image: { data: Uint8ClampedArray }) { painted.push(image.data.slice()); } });
     const { effect } = fixture();
     const projection = { rendererVersion: "software-rgba-v1" as const, frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
       pictureLayers: [], effectLayers: [{ trackId: "tr_effects", trackOrder: 0, effect }], issues: [] };
@@ -203,10 +204,43 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
     const sources: PreviewReactionSources = { manifestsByKey: { [manifest.manifestKey]: manifest }, manifestKeyByEffectId: { [effect.id]: manifest.manifestKey } };
     await act(async () => root.render(<EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} reactions={sources} />));
     assert.equal(workers.length, 1); assert.equal(canvas.dataset.frame, "48"); assert.notEqual(canvas.dataset.analysisEpoch, oldEpoch);
-    const installs = workers[0]!.requests.filter(row => "kind" in row).length;
+    let installs = workers[0]!.requests.filter(row => "kind" in row).length;
     await act(async () => root.render(<EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} reactions={sources} />));
     assert.equal(workers[0]!.requests.filter(row => "kind" in row).length, installs, "ordinary component renders never resend long-song arrays");
+    const appearance = structuredClone(projection); appearance.effectLayers[0]!.effect.appearance.opacity = 0;
+    const beforeAppearance = painted.length, readyEpoch = canvas.dataset.analysisEpoch;
+    await act(async () => root.render(<EditorPicturePreview projection={appearance} transport={transport} urlFor={urlFor} reactions={sources} />));
+    assert.equal(workers.length, 1); assert.equal(painted.length, beforeAppearance + 1); assert.equal(canvas.dataset.frame, "48"); assert.equal(canvas.dataset.analysisEpoch, readyEpoch);
+    assert.equal(workers[0]!.requests.filter(row => "kind" in row).length, installs, "appearance redraws the paused frame without preparing response again");
+    const response = structuredClone(appearance); response.effectLayers[0]!.effect.reaction.strength = 0.8;
+    await act(async () => root.render(<EditorPicturePreview projection={response} transport={transport} urlFor={urlFor} reactions={sources} />));
+    const responseInstall = workers[0]!.requests.filter((row): row is PreviewAnalysisInstall => "kind" in row).at(-1)!;
+    assert.equal(responseInstall.manifestsByKey, undefined, "response edits retain the worker's long-song arrays");
+    assert.equal(responseInstall.effects[0]!.reaction.strength, 0.8); assert.equal(canvas.dataset.frame, "48"); assert.equal(workers.length, 1);
+    installs++;
     const worker = workers[0]!; worker.delay = true;
+    const olderAppearance = structuredClone(response); olderAppearance.effectLayers[0]!.effect.appearance.opacity = 0.2;
+    await act(async () => root.render(<EditorPicturePreview projection={olderAppearance} transport={transport} urlFor={urlFor} reactions={sources} />));
+    const olderFrame = worker.held.shift(); assert.ok(olderFrame); const oldPaintCount = painted.length;
+    const newestAppearance = structuredClone(response); newestAppearance.effectLayers[0]!.effect.appearance.opacity = 0.9;
+    await act(async () => root.render(<EditorPicturePreview projection={newestAppearance} transport={transport} urlFor={urlFor} reactions={sources} />));
+    await act(async () => worker.deliver(olderFrame));
+    assert.equal(painted.length, oldPaintCount, "an in-flight image cannot overwrite the newer projection");
+    assert.equal(canvas.dataset.frame, undefined);
+    const newestRequest = worker.requests.at(-1)!; assert.ok(!("kind" in newestRequest)); assert.equal(newestRequest.composition[0]!.appearance.opacity, 0.9);
+    await act(async () => worker.deliver(worker.held.shift())); assert.equal(painted.length, oldPaintCount + 1); assert.equal(canvas.dataset.frame, "48");
+    assert.equal(worker.requests.filter(row => "kind" in row).length, installs);
+    for (const strength of [0.2, 0.3, 0.4]) {
+      const changing = structuredClone(newestAppearance); changing.effectLayers[0]!.effect.reaction.strength = strength;
+      await act(async () => root.render(<EditorPicturePreview projection={changing} transport={transport} urlFor={urlFor} reactions={sources} />));
+    }
+    assert.equal(worker.requests.filter(row => "kind" in row).length, installs + 1, "rapid response edits have only one preparation in flight");
+    await act(async () => worker.deliver(worker.held.shift()));
+    const latestMapping = worker.requests.at(-1)!; assert.ok("kind" in latestMapping);
+    assert.equal(latestMapping.effects[0]!.reaction.strength, 0.4); assert.equal(latestMapping.manifestsByKey, undefined);
+    worker.delay = false; await act(async () => worker.deliver(worker.held.shift()));
+    assert.equal(canvas.dataset.frame, "48"); assert.equal(worker.requests.filter(row => "kind" in row).length, installs + 2);
+    installs += 2; worker.delay = true;
     for (let index = 0; index < 3; index++) await act(async () => root.render(<EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor}
       reactions={{ manifestsByKey: {}, manifestKeyByEffectId: {} }} />));
     assert.equal(worker.requests.filter(row => "kind" in row).length, installs + 1, "only one install can be in flight");
@@ -216,5 +250,66 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
     worker.delay = false;
     await act(async () => worker.deliver(worker.held.shift()));
     assert.equal(canvas.dataset.frame, "48");
+    await act(async () => root.render(null)); assert.equal(worker.terminated, true); assert.equal(worker.listeners.size, 0);
+    const finalPaintCount = painted.length; worker.deliver(newestRequest); assert.equal(painted.length, finalPaintCount, "closed views cannot receive a late result");
+  });
+
+  it("retains media decoders through appearance edits and refreshes a changed URL at the same paused frame", async () => {
+    const workers: FakeWorker[] = [];
+    class FakeWorker {
+      listeners = new Set<(event: { data: unknown }) => void>(); bank = new PreviewReactionBank(); terminated = false;
+      constructor() { workers.push(this); }
+      addEventListener(type: string, callback: (event: { data: unknown }) => void) { if (type === "message") this.listeners.add(callback); }
+      removeEventListener(_type: string, callback: (event: { data: unknown }) => void) { this.listeners.delete(callback); }
+      postMessage(message: PreviewFrameRequest | PreviewAnalysisInstall) {
+        let data: unknown;
+        if ("kind" in message) { this.bank.install(message); data = { kind: "analysis-ready", analysisEpoch: message.analysisEpoch }; }
+        else data = { ...message, pixels: this.bank.render(message) };
+        queueMicrotask(() => { for (const listener of this.listeners) listener({ data }); });
+      }
+      terminate() { this.terminated = true; }
+    }
+    Object.assign(globalThis, { Worker: FakeWorker });
+    const images: HTMLImageElement[] = [], captured: HTMLImageElement[] = [];
+    const canvasPrototype = Object.getPrototypeOf(document.createElement("canvas"));
+    canvasPrototype.getContext = () => ({
+      createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }), putImageData() {}, clearRect() {},
+      drawImage(image: HTMLImageElement) { captured.push(image); },
+      getImageData: (_x: number, _y: number, width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+    });
+    const create = document.createElement.bind(document);
+    document.createElement = ((name: string, options?: ElementCreationOptions) => {
+      const element = create(name, options);
+      if (name === "img") { Object.assign(element, { complete: true, naturalWidth: 64, naturalHeight: 36 }); images.push(element as HTMLImageElement); }
+      return element;
+    }) as typeof document.createElement;
+    try {
+      const { effect } = fixture(); effect.reaction.enabled = false;
+      const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v1", frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
+        pictureLayers: [{ clipId: "cl_picture", trackId: "tr_picture", order: 0, kind: "media", label: "Cover", path: "cover.png", still: true,
+          startFrame: 0, endFrame: 240, sourceInSec: 0, fit: "contain", matte: "source-alpha" }], effectLayers: [{ trackId: "tr_effects", trackOrder: 0, effect }], issues: [] };
+      const transport = { time: 2, timeRef: { current: 2 }, playing: false, seek() {}, setPlaying() {} } as unknown as Transport;
+      const urlFor = (path: string) => `https://example.test/one/${path}`, newUrlFor = (path: string) => `https://example.test/two/${path}`;
+      const { root, container } = mount();
+      await act(async () => root.render(<EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} />));
+      assert.equal(images.length, 1); assert.equal(container.querySelector("canvas")!.dataset.frame, "48");
+      const changed = structuredClone(projection); changed.effectLayers[0]!.effect.appearance.amount = 0.9;
+      await act(async () => root.render(<EditorPicturePreview projection={changed} transport={transport} urlFor={urlFor} />));
+      assert.equal(images.length, 1); assert.equal(captured.at(-1), images[0]); assert.equal(workers.length, 1);
+      await act(async () => root.render(<EditorPicturePreview projection={changed} transport={transport} urlFor={newUrlFor} />));
+      assert.equal(images.length, 2, "the resolver can change without changing the immutable render projection");
+      assert.equal(images[0]!.getAttribute("src"), null, "the obsolete decoder releases its URL");
+      assert.equal(captured.at(-1), images[1]); assert.equal(container.querySelector("canvas")!.dataset.frame, "48"); assert.equal(workers.length, 1);
+      await act(async () => root.render(null)); assert.equal(images[1]!.getAttribute("src"), null); assert.equal(workers[0]!.terminated, true);
+    } finally { document.createElement = create; }
+  });
+
+  it("cannot reuse a prepared response after the audio binding changes before replacement metadata arrives", () => {
+    const { effect } = fixture(), manifest = analysisManifest(), range = { startFrame: 0, endFrame: 240 };
+    const sources = { manifestsByKey: { [manifest.manifestKey]: manifest }, manifestKeyByEffectId: { [effect.id]: manifest.manifestKey } };
+    const bank = new PreviewReactionBank(); bank.install({ kind: "analysis", analysisEpoch: 1, effects: [effect], ...range, ...sources });
+    const changed = structuredClone(effect); changed.audioInput = { kind: "audio-track", trackId: "tr_another" };
+    assert.notEqual(previewReactionMappingKey([effect], sources, range), previewReactionMappingKey([changed], sources, range));
+    assert.throws(() => bank.install({ kind: "analysis", analysisEpoch: 2, effects: [changed], ...range, manifestKeyByEffectId: sources.manifestKeyByEffectId }), /different audio binding/);
   });
 });

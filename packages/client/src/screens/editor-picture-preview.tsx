@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { effectsForPicture, pictureStackAtFrame, type EffectRenderProjection } from "@arke-studio/contracts";
 import { PreviewMediaPool } from "../lib/editor-preview-media.js";
-import { PreviewFrameQueue, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
+import { PreviewFrameQueue, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
 import type { Transport } from "./editor-transport.js";
 
 /** Exposed as a pure clock conversion so episode offsets and end-frame holds stay explicit. */
@@ -29,6 +29,10 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
   const install = useRef<(() => void) | null>(null);
   const reactionSources = useRef(reactions);
   reactionSources.current = reactions;
+  const currentProjection = useRef(projection);
+  currentProjection.current = projection;
+  const currentUrlFor = useRef(urlFor);
+  currentUrlFor.current = urlFor;
 
   useEffect(() => {
     const viewport = host.current, element = stage.current;
@@ -60,20 +64,23 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
     catch { setError("The effects renderer could not start on this device."); return; }
     let destroyed = false, animation = 0, lastRequested = -1, previousFrame = -1, previousTick = 0, analysisEpoch = 0;
     let installedEpoch = 0, installingEpoch: number | null = null, pendingAnalysis: PreviewAnalysisInstall | null = null;
-    let installedSources: PreviewReactionSources | null = null;
+    let mappingKey: string | null = null, renderedProjection: EffectRenderProjection | null = null;
+    let renderedUrlFor: typeof urlFor | null = null;
+    let sentManifests: PreviewReactionSources["manifestsByKey"] | undefined;
     let pool: PreviewMediaPool;
     const queue = new PreviewFrameQueue(request => {
       try { worker.postMessage(request, request.pictures.map(picture => picture.pixels.buffer as ArrayBuffer)); }
       catch { queue.destroy(); setError("The effect frame could not be sent to the renderer."); }
     }, result => {
-      if (result.analysisEpoch !== analysisEpoch) return;
+      // A new React commit can precede its install effect. Never paint the prior input in that gap.
+      if (result.analysisEpoch !== analysisEpoch || renderedProjection !== currentProjection.current || renderedUrlFor !== currentUrlFor.current) return;
       if (result.error !== undefined) { setError(result.error); return; }
       const image = context.createImageData(result.width, result.height);
       image.data.set(result.pixels);
       context.putImageData(image, 0, 0);
       output.dataset.frame = String(result.absoluteFrame);
       output.dataset.generation = String(result.generation);
-      output.dataset.renderer = projection.rendererVersion;
+      output.dataset.renderer = currentProjection.current.rendererVersion;
       output.dataset.analysisEpoch = String(analysisEpoch);
       setError(null);
     });
@@ -93,6 +100,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
 
     const render = (nowMs: number) => {
       if (destroyed || installedEpoch !== analysisEpoch) return;
+      const projection = currentProjection.current;
       const { timeRef } = live.current;
       const absoluteFrame = previewProductionFrame(projection, timeRef.current);
       // Playback can skip a display frame. A discontinuous seek invalidates an in-flight image.
@@ -102,6 +110,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
       if (lastRequested === absoluteFrame) return;
       queue.request(() => {
         if (destroyed) return null;
+        const projection = currentProjection.current;
         const at = previewProductionFrame(projection, live.current.timeRef.current);
         const layers = pictureStackAtFrame(projection, at);
         pool.retain(new Set(layers.filter(layer => layer.kind === "media").map(layer => layer.clipId)));
@@ -133,14 +142,26 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
       if (destroyed || installingEpoch !== null || !pendingAnalysis) return;
       const input = pendingAnalysis;
       pendingAnalysis = null; installingEpoch = input.analysisEpoch;
-      try { worker.postMessage(input, []); }
+      // A slider changes mapping metadata, not the long-song arrays already in this worker.
+      const { manifestsByKey, ...mapping } = input;
+      try {
+        worker.postMessage(manifestsByKey === sentManifests ? mapping : input, []);
+        sentManifests = manifestsByKey;
+      }
       catch { installingEpoch = null; setError("The reaction could not be sent to the renderer."); }
     };
-    pool = new PreviewMediaPool(output.ownerDocument, urlFor, () => { if (!destroyed) { lastRequested = -1; render(performance.now()); } });
+    pool = new PreviewMediaPool(output.ownerDocument, path => currentUrlFor.current(path), () => { if (!destroyed) { lastRequested = -1; render(performance.now()); } });
     install.current = () => {
       const sources = reactionSources.current;
-      if (sources === installedSources) return;
-      installedSources = sources;
+      const projection = currentProjection.current;
+      const nextKey = previewReactionMappingKey(projection.effectLayers.map(row => row.effect), sources, projection);
+      if (renderedProjection !== projection || renderedUrlFor !== currentUrlFor.current) {
+        renderedProjection = projection;
+        renderedUrlFor = currentUrlFor.current;
+        queue.invalidate(); lastRequested = -1; delete output.dataset.frame;
+      }
+      if (nextKey === mappingKey && sources.manifestsByKey === sentManifests) { render(performance.now()); return; }
+      mappingKey = nextKey;
       analysisEpoch++; queue.invalidate(); lastRequested = -1; delete output.dataset.frame;
       pendingAnalysis = { kind: "analysis", analysisEpoch, effects: projection.effectLayers.map(row => row.effect),
         startFrame: projection.startFrame, endFrame: projection.endFrame, ...sources };
@@ -160,10 +181,10 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
     install.current();
     if (live.current.playing) animation = requestAnimationFrame(tick);
     return () => { destroyed = true; refresh.current = null; install.current = null; cancelAnimationFrame(animation); queue.destroy(); worker.removeEventListener("message", onMessage); worker.removeEventListener("error", onError); worker.terminate(); pool.destroy(); };
-  }, [projection, urlFor, resolution]);
+  }, [projection.width, projection.height, resolution]);
 
   useEffect(() => { refresh.current?.(); }, [transport.time, transport.playing]);
-  useEffect(() => { install.current?.(); }, [reactions]);
+  useEffect(() => { install.current?.(); }, [projection, reactions, urlFor]);
 
   return <div ref={host} className="fy-effectpreview">
     <div ref={stage} className="fy-effectpreview__stage">

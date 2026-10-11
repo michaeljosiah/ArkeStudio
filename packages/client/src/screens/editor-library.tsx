@@ -153,6 +153,7 @@ export function ArtifactPanel({
   onClose,
   panelRef,
   foot,
+  effects,
 }: {
   worldId: string | undefined;
   artifacts: readonly ArtifactSidecar[];
@@ -195,7 +196,9 @@ export function ArtifactPanel({
   onClose: () => void;
   panelRef: RefObject<HTMLElement | null>;
   foot?: React.ReactNode;
+  effects?: React.ReactNode;
 }) {
+  const [section, setSection] = useState<"media" | "effects">("media");
   const navigate = useNavigate();
   const { phone } = useCutLayout();
   const touch = useMediaQuery("(pointer: coarse)");
@@ -495,7 +498,7 @@ export function ArtifactPanel({
 
   return (
     <EditorSheetSlot sheet={phone} open={open} onClose={onClose} title="Library" className="fy-cut-library-sheet"
-      footer={<><span>{shown} items</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
+      footer={<><span>{section === "effects" ? "Effect presets" : `${shown} items`}</span><button type="button" className="ui-btn" onClick={onClose}>Done</button></>}>
     <aside ref={panelRef} className={cx("fy-artpanel", filesOver && "fy-artpanel--dropping")} id="cut-library" data-open={open} aria-label="Library"
       onDragOver={event => {
         if (remote && Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "none"; return; }
@@ -517,7 +520,7 @@ export function ArtifactPanel({
       )}
       <div className="fy-artpanel__head">
         <span className="fy-artpanel__title">Library</span>
-        <span className="fy-mono fy-artpanel__count">{shown} item{shown === 1 ? "" : "s"}</span>
+        {section === "media" && <span className="fy-mono fy-artpanel__count">{shown} item{shown === 1 ? "" : "s"}</span>}
         <span className="fy-h1row__push" />
         <button
           type="button"
@@ -539,6 +542,11 @@ export function ArtifactPanel({
           &times;
         </button>
       </div>
+      {effects && <div className="fx-library-tabs" role="group" aria-label="Library section">
+        <button type="button" aria-pressed={section === "media"} onClick={() => setSection("media")}>Media</button>
+        <button type="button" aria-pressed={section === "effects"} onClick={() => setSection("effects")}>Effects</button>
+      </div>}
+      {section === "effects" && effects ? effects : <>
       <div className="fy-artpanel__find" data-find-open={!phone || findOpen || undefined}>
         <label className="fy-artpanel__search" hidden={phone && !findOpen}>
           <Search size={12} />
@@ -740,8 +748,9 @@ export function ArtifactPanel({
         <span className="fy-mono">{touch ? "pick a row, then place" : "drag onto a lane to place"}</span>
         {foot}
       </div>
+      </>}
     </aside>
-    {phone && <>
+    {phone && section === "media" && <>
       <button type="button" className="fy-cut-library-import" disabled={onImport === null || remote} onClick={() => onImport?.()}><Upload size={20} /><span>Import media{remote && <small>on the desktop app</small>}</span></button>
       <div className="fy-cut-library-more"><button type="button" aria-expanded={findOpen} onClick={() => setFindOpen(!findOpen)}><Search size={16} />Find media</button>{hasShots && <button type="button" className="fy-artpanel__add" disabled={onOpenPicker === null} onClick={() => onOpenPicker?.()}><Plus size={16} />Add shots</button>}</div>
     </>}

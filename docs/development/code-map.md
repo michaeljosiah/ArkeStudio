@@ -79,7 +79,17 @@ Only the authenticated exact manifest namespace can serve these JSON files. Clie
 `lib/editor-effect-analysis.ts` bounds and validates manifest loading; `screens/editor-effect-analysis.ts`
 keeps asynchronous readiness separate from the timeline and transport. Worker installations are
 coalesced, with one prepared response per effect and no feature arrays in per-frame messages.
-Manual Inspector authoring and reviewed Arke cards are subsequent implementation slices.
+Manual authoring lives in client `screens/editor-effect-library.tsx` (independent Add dialog),
+`editor-effect-tracks.tsx` (overlap lanes, gestures and ordering), and `editor-effect-panel.tsx`
+(appearance, normalized area, two curves, optional audio and granular protection controls).
+`editor-effect-fields.tsx` shares typed frame/value validation; `editor-effect-selected-analysis.ts`
+loads one selected source independently of the active preview set. Contracts
+`editor-effect-authoring.ts` supplies response-protection conflicts, cue corrections and uncovered
+passages. Client `editor-effect-draft.ts` keeps gestures transient and reprojects procedural layers
+without rebuilding the canonical monitor mix. The preview retains its worker/decoders and sends
+only mapping metadata for response changes against already loaded analysis. `editor-effect-export.ts`
+checks scoped delivery readiness against full-production sound identity. Inspector/Arke are the
+permanent panel choices; reviewed Arke effect cards remain a subsequent implementation slice.
 
 The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
 transport and delegates initialization/draining to the application. Desktop and dev use
