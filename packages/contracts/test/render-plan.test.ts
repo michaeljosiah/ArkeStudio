@@ -13,6 +13,8 @@ import {
   exportOverlays,
   pictureAtSec,
   pictureEdges,
+  pictureStackAtFrame,
+  effectsForPicture,
   migrateLegacyCut,
   legacyArtifactScopeRefusal,
   seedEmptyPictureTimeline,
@@ -62,15 +64,71 @@ const artifacts: RenderArtifact[] = [
   { id: NOTES, file: "notes.md", kind: "document" },
 ];
 
-it("refuses to omit persisted effects before the raster executor is available (SPEC-053 R-19)", () => {
-  const value = production();
+it("effects alone do not create a delivery range (SPEC-053 R-19)", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
   const timeline = seedEmptyPictureTimeline(value);
   timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [
     defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 120, seed: 3 }),
   ] });
   const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /Effect rendering.*retained/);
+  assert.ok(result.ok);
+  assert.equal(result.plan.totalSec, 0);
+  assert.equal(result.plan.effectRender?.endFrame, 0);
+  assert.deepEqual(effectsForPicture(result.plan.effectRender!, null, 12), []);
+});
+
+it("freezes the entire picture stack and independent effect clock across delivery windows", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const timeline = applyTimelineCommands(seedEmptyPictureTimeline(value), [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_base", startFrame: 0, durationFrames: 100, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } },
+    { kind: "add-track", trackId: "tr_insert", trackKind: "picture", name: "Insert" },
+    { kind: "place", trackId: "tr_insert", clip: { id: "cl_insert", startFrame: 25, durationFrames: 50, sourceInFrames: 25, source: { kind: "artifact", artifactId: INSERT, label: "Insert" } } },
+    { kind: "add-track", trackId: "tr_effects", trackKind: "effect", name: "Effects" },
+    { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_whole", lineageId: "ef_whole", startFrame: 0, durationFrames: 500, seed: 71 }) },
+    { kind: "effect-create", trackId: "tr_effects", effect: { ...defaultEffectClip({ id: "cl_local", lineageId: "ef_local", startFrame: 0, durationFrames: 500, seed: 72 }), target: { kind: "visual-clip", clipId: "cl_base" } } },
+  ]);
+  const before = JSON.stringify(timeline);
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok);
+  assert.equal(result.plan.totalSec, 4);
+  const projection = result.plan.effectRender!;
+  assert.deepEqual(pictureStackAtFrame(projection, 40).map(layer => layer.clipId), ["cl_base", "cl_insert"]);
+  assert.equal(projection.pictureLayers[1]!.sourceInSec, 1);
+  assert.equal(projection.pictureLayers[1]!.sourceOutSec, 9);
+  assert.equal(projection.pictureLayers[0]!.matte, "source-alpha");
+  assert.deepEqual(effectsForPicture(projection, projection.pictureLayers[0]!, 40).map(layer => layer.effect.id), ["cl_local"]);
+  assert.deepEqual(effectsForPicture(projection, projection.pictureLayers[1]!, 40), []);
+  assert.deepEqual(effectsForPicture(projection, null, 40).map(layer => layer.effect.id), ["cl_whole"]);
+  const scoped = windowPlan(result.plan, 1, 3, { kind: "production" });
+  assert.equal(scoped.effectRender!.startFrame, 25);
+  assert.equal(scoped.effectRender!.endFrame, 75);
+  assert.deepEqual(scoped.effectRender!.effectLayers, projection.effectLayers);
+  assert.deepEqual(scoped.effectRender!.pictureLayers, projection.pictureLayers);
+  assert.equal(JSON.stringify(timeline), before, "projection never edits authored state");
+  timeline.tracks.find(track => track.id === "tr_effects")!.effects![0]!.seed = 99;
+  assert.equal(projection.effectLayers.find(layer => layer.effect.id === "cl_whole")!.effect.seed, 71, "later authoring cannot change frozen inputs");
+});
+
+it("retains missing-target diagnostics and omits hidden targets without retargeting", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const timeline = seedEmptyPictureTimeline(value);
+  timeline.tracks[0]!.clips.push({ id: "cl_plate", startFrame: 25, durationFrames: 25, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: PLATE, label: "Plate" } });
+  timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 10, muted: false, clips: [], effects: [
+    { ...defaultEffectClip({ id: "cl_missing", lineageId: "ef_missing", startFrame: 0, durationFrames: 500, seed: 1 }), target: { kind: "visual-clip", clipId: "cl_gone" } },
+    { ...defaultEffectClip({ id: "cl_track", lineageId: "ef_track", startFrame: 0, durationFrames: 500, seed: 2 }), target: { kind: "picture-track", trackId: "tr_picture" } },
+  ] });
+  const build = () => {
+    const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "vertical-master" });
+    assert.ok(result.ok); return result.plan.effectRender!;
+  };
+  const projection = build();
+  assert.equal(projection.width, 1080); assert.equal(projection.height, 1920);
+  assert.deepEqual(projection.issues.map(issue => issue.effectId), ["cl_missing"]);
+  assert.deepEqual(pictureStackAtFrame(projection, 10), [], "a picture gap has no scoped matte");
+  assert.deepEqual(effectsForPicture(projection, null, 30), [], "missing target never becomes whole composition");
+  timeline.tracks[0]!.muted = true;
+  assert.deepEqual(build().pictureLayers, []);
 });
 
 describe("production-owned media in render plans and migration (#895)", () => {

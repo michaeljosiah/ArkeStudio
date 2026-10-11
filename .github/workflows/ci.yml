@@ -141,6 +141,26 @@ jobs:
         env:
           ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
         run: node --import tsx --test --test-timeout=240000 test/world-chat/production-acceptance.test.ts
+      - name: Measure shared procedural effects
+        run: node --import tsx scripts/benchmark-editor-effects.ts --output "${{ runner.temp }}/arke-editor-effects/benchmark.json" --expect-pixels-sha256 c75a584579c4673d2fe48c54dff560c3357bcc580622898b9dea7a73d54bfb0d
+      - name: Verify native effect composition
+        env:
+          ARKE_EFFECT_NATIVE_REQUIRED: 1
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/native
+        run: node --import tsx --test --test-timeout=180000 packages/coordinator/test/media/editor-effect-native.test.ts
+      - name: Verify browser effect pixels
+        if: runner.os == 'Linux'
+        env:
+          ARKE_CHROME: /usr/bin/google-chrome
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/browser
+        run: node --import tsx scripts/smoke-editor-effects-preview.mjs
+      - name: Retain effect parity and performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-effects-${{ runner.os }}
+          path: ${{ runner.temp }}/arke-editor-effects
+          if-no-files-found: warn
       - name: Retain cards, spend and exported media
         if: always()
         uses: actions/upload-artifact@v4

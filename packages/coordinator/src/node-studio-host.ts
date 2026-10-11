@@ -1,4 +1,7 @@
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { createNodeMediaHost } from "./media/node-media-host.js";
 import { agentForPurpose, effectiveHarnessEngine, ROSTER, skillFor, type HarnessAdapter } from "@arke-studio/contracts";
 import { createProviderClients, cloudVoiceSources, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createStudioHost } from "./application/studio-host.js";
@@ -15,6 +18,8 @@ import type { TransportAuth } from "./transport.js";
 import { FsWorldProvider } from "./world/provider.js";
 
 export interface NodeStudioHostOptions {
+  /** Explicit native tools/worker locations for an embedded host. */
+  media?: { ffmpeg: string; ffprobe: string; slateFont: string; workerPath: string };
   appRoot: string;
   appVersion: string;
   transportAuth?: TransportAuth;
@@ -59,6 +64,7 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
       } });
     const clients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: calls, codexImage });
     const host = createStudioHost({
+      ...createNodeMediaHost(options.media ?? defaultMediaPaths()),
       provider, appRoot: options.appRoot, appVersion: options.appVersion,
       adapter: options.adapter === undefined ? wiring!.adapter : options.adapter,
       transportAuth: options.transportAuth,
@@ -81,4 +87,11 @@ export async function createNodeStudioHost(options: NodeStudioHostOptions) {
     await Promise.allSettled([provider.close(), wiring?.supervisor?.stop(), wiring?.adapter?.dispose?.(), codexImage?.dispose()]);
     throw error;
   }
+}
+
+function defaultMediaPaths() {
+  const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, "../../..");
+  return { ffmpeg: process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe: process.env["ARKE_FFPROBE"] ?? "ffprobe",
+    workerPath: process.env["ARKE_EFFECT_WORKER"] ?? (existsSync(join(here, "effect-raster-worker.cjs")) ? join(here, "effect-raster-worker.cjs") : join(root, ".dev/effect-raster-worker.cjs")),
+    slateFont: process.env["ARKE_SLATE_FONT"] ?? (existsSync(join(here, "Geist-Regular.ttf")) ? join(here, "Geist-Regular.ttf") : join(root, "apps/desktop/assets/Geist-Regular.ttf")) };
 }

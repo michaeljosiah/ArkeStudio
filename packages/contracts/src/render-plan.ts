@@ -9,6 +9,7 @@ import {
   episodeExportRefusals,
   exportAudioClips,
   exportOverlays,
+  PRESETS,
   type CutFile,
   type ExportAudioClip,
   type ExportItem,
@@ -35,6 +36,8 @@ import {
 } from "./timeline.js";
 import { productionFrameRate, type FrameRate } from "./world.js";
 import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleOutputMode, type SubtitleStyle } from "./subtitles.js";
+import type { EffectRenderProjection, RenderPictureLayer } from "./editor-effect-render-plan.js";
+import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -144,7 +147,7 @@ export interface RenderArtifact {
   file: string;
   kind: string;
   production?: string | null;
-  mediaInfo?: { hasAudio: boolean; durationSec?: number };
+  mediaInfo?: { hasAudio: boolean; durationSec?: number; width?: number; height?: number };
 }
 
 export interface RenderPlanInput {
@@ -268,9 +271,10 @@ function overlaysFromTimeline(
   production: ProductionBundle,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
-): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
+): { ok: true; overlays: ExportOverlay[]; pictures: RenderPictureLayer[]; sound: RenderAudioItem[]; unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> } | { ok: false; reason: string } {
   const base = basePictureTrack(timeline);
   const overlays: ExportOverlay[] = [];
+  const pictures: RenderPictureLayer[] = [];
   const sound: RenderAudioItem[] = [];
   const unmeasuredAudio: NonNullable<RenderPlan["unmeasuredAudio"]> = [];
   const audible = new Set(audibleTracks(timeline).map((track) => track.id));
@@ -292,6 +296,8 @@ function overlaysFromTimeline(
           unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
+        pictures.push(pictureLayer(clip, track, resolved.path, false, sourceInSec, resolved.outSec,
+          production.takeMediaInfo[resolved.measuredId]?.mediaInfo));
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
           sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
@@ -313,6 +319,7 @@ function overlaysFromTimeline(
         unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec });
       }
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
+      pictures.push(pictureLayer(clip, track, `artifacts/${artifact.file}`, still, sourceInSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
       if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
         sound.push({
@@ -327,7 +334,39 @@ function overlaysFromTimeline(
       }
     }
   }
-  return { ok: true, overlays, sound, unmeasuredAudio };
+  return { ok: true, overlays, pictures, sound, unmeasuredAudio };
+}
+
+function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, still: boolean, sourceInSec: number,
+  sourceOutSec?: number, size?: { width?: number; height?: number }): RenderPictureLayer {
+  return { clipId: clip.id, trackId: track.id, order: track.order, kind: "media", label: clip.source.label,
+    path, still, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, sourceInSec,
+    ...(!still && sourceOutSec !== undefined ? { sourceOutSec } : {}),
+    ...(size?.width && size.height ? { sourceSize: { width: size.width, height: size.height } } : {}),
+    fit: "contain", matte: "source-alpha" };
+}
+
+/** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
+function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
+  frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
+  if (!record.tracks.some(track => track.effects?.length)) return undefined;
+  const effectLayers = record.tracks.filter(track => track.kind === "effect" && !track.muted)
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .flatMap(track => [...(track.effects ?? [])].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+      .map(effect => ({ trackId: track.id, trackOrder: track.order, effect: structuredClone(effect) })));
+  const issues: EffectRenderProjection["issues"] = [];
+  for (const { effect } of effectLayers) {
+    const target = effect.target;
+    const present = target.kind === "composition" || (target.kind === "picture-track"
+      ? record.tracks.some(track => track.kind === "picture" && track.id === target.trackId)
+      : record.tracks.some(track => track.kind === "picture" && track.clips.some(clip => clip.id === target.clipId)));
+    if (!present) issues.push({ kind: "missing-target", effectId: effect.id, reason: "Visual target missing" });
+    if (effect.reaction.enabled) issues.push({ kind: "analysis-required", effectId: effect.id, reason: "Audio analysis required" });
+  }
+  const dimensions = PRESETS[preset];
+  return { rendererVersion: "software-rgba-v1", width: dimensions.width, height: dimensions.height, frameRate,
+    startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: pictures.map((picture, order) => ({ ...picture, order })),
+    effectLayers, issues };
 }
 
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
@@ -440,11 +479,6 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
-  // T-1 persists authored effects before T-2 supplies their shared raster executor. Silently
-  // exporting the pictures without the saved effects would publish the wrong film (R-19).
-  if (timeline?.status === "ready" && timeline.timeline.tracks.some(track => track.effects?.length)) {
-    return { ok: false, reason: "Effect rendering is not available in this build. The authored effects are retained." };
-  }
   const legacyRefusal = scope.kind === "episode" ? null : legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
   if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
@@ -534,6 +568,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const baseAudible = base !== null && !base.muted && !record.tracks.some((track) => track.solo === true);
   const items: ExportItem[] = [];
   const stillOverlays: ExportOverlay[] = [];
+  const basePictures: RenderPictureLayer[] = [];
   const baseSound: RenderAudioItem[] = [];
   const unmeasuredAudio = [...upper.unmeasuredAudio];
   let cursorSec = 0;
@@ -553,6 +588,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
+      if (base !== null) basePictures.push(pictureLayer(clip, base, `artifacts/${artifact.file}`, STILL_KINDS.has(artifact.kind), inSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });
         stillOverlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec: startSec + entry.durationSec, still: true });
@@ -595,6 +631,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));
       }
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
+      if (base !== null) basePictures.push(pictureLayer(clip, base, path, false, inSec, segment?.outSec ?? production.takeMediaInfo[pass.id]?.mediaInfo.durationSec, production.takeMediaInfo[pass.id]?.mediaInfo));
       items.push({
         type: "clip",
         path,
@@ -609,6 +646,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       continue;
     }
     if (entry.media) {
+      if (clip !== undefined && base !== null) {
+        const take = production.takes.find(candidate => candidate.id === entry.takeId);
+        const measured = production.takeMediaInfo[take?.segment?.passTakeId ?? entry.takeId ?? ""]?.mediaInfo;
+        basePictures.push(pictureLayer(clip, base, entry.media.path, false, entry.media.inSec ?? 0, entry.media.outSec ?? measured?.durationSec, measured));
+      }
       items.push({
         type: "clip",
         path: entry.media.path,
@@ -640,7 +682,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       }
       continue;
     }
-    items.push({ type: "slate", label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec });
+    const slateLabel = `${entry.label} · ${entry.durationSec.toFixed(1)}s`;
+    items.push({ type: "slate", label: slateLabel, durationSec: entry.durationSec });
+    if (clip !== undefined && base !== null) basePictures.push({ clipId: clip.id, trackId: base.id, order: base.order,
+      kind: "slate", label: slateLabel, still: true, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames,
+      sourceInSec: 0, fit: "contain", matte: "source-alpha" });
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];
@@ -664,6 +710,16 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const subtitles = subtitlesFromTimeline(record, subtitleChoice, frameRate, totalSec);
   if (!subtitles.ok) return subtitles;
   const burnIn = subtitles.subtitles !== null && (subtitles.subtitles.mode === "burn-in" || subtitles.subtitles.mode === "burn-in+sidecar");
+  const legacyPictures: RenderPictureLayer[] = legacyOverlays.map((overlay, index) => ({
+    clipId: `legacy-overlay-${index}`, trackId: "legacy-overlays", order: index, kind: "media", label: overlay.path,
+    path: overlay.path, still: overlay.still, startFrame: secondsToFrames(overlay.startSec, frameRate), endFrame: secondsToFrames(overlay.endSec, frameRate),
+    sourceInSec: overlay.sourceInSec ?? 0, fit: "contain", matte: "source-alpha",
+  }));
+  const effectRender = effectProjection(record, [...basePictures, ...legacyPictures, ...upper.pictures], preset, frameRate, totalSec);
+  if (effectRender !== undefined) {
+    const problem = effectRenderCapabilityProblem(effectRender);
+    if (problem !== null) return { ok: false, reason: problem };
+  }
   const plan: RenderPlan = {
     preset,
     frameRate,
@@ -671,6 +727,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     overlays,
     audio,
     totalSec,
+    ...(effectRender === undefined ? {} : { effectRender }),
     ...(unmeasuredAudio.length ? { unmeasuredAudio } : {}),
     revision: record.revision,
     range: { startSec: 0, endSec: totalSec },
@@ -756,6 +813,9 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     speech,
     subtitles,
     ...(burnIn !== undefined ? { burnIn } : {}),
+    ...(plan.effectRender === undefined ? {} : { effectRender: { ...plan.effectRender,
+      startFrame: plan.effectRender.startFrame + secondsToFrames(startSec, plan.frameRate),
+      endFrame: plan.effectRender.startFrame + secondsToFrames(endSec, plan.frameRate) } }),
     totalSec: endSec - startSec,
     range: { startSec, endSec },
     scope,

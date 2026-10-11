@@ -108,6 +108,23 @@ legacy compatibility. They do not establish renderer or real-UI acceptance; that
 recorded with the subsequent implementation slices. Run the root lint/typecheck/build gates
 after the final test edit and run client tests from `packages/client`.
 
+Editor effects T-2 adds contracts `test/editor-effect-renderer.test.ts`, client
+`test/editor-effect-preview.test.ts` and coordinator `test/media/editor-effect-native.test.ts`.
+The native tests use real FFmpeg/FFprobe (`ARKE_FFMPEG`/`ARKE_FFPROBE` or PATH); set
+`ARKE_EFFECT_EVIDENCE_DIR` to retain measured parity evidence. Run
+`node --import tsx scripts/smoke-editor-effects-preview.mjs` for real Chrome decoding, source
+alpha, contained targets, multiple picture layers, all six presets and seek/worker checks.
+`node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
+runtime, hardware, capability profile, frame digests, near/far seek times, worst overlap raster
+times and process memory. The native production acceptance CI job repeats these measurements
+on Windows and Linux and retains the reports. These fixtures establish renderer behaviour;
+the two real scratch-world manual/Arke music-video passes remain distinct acceptance evidence.
+Host changes also require desktop `smoke:main` and a real sandboxed Electron file-page smoke.
+Run `node --import tsx apps/desktop/scripts/smoke-editor-effects.mjs` after the build to check
+the emitted worker under the built page's CSP and Electron sandbox; `ARKE_EFFECT_SMOKE_REPORT`
+optionally retains its report. This complements `node apps/desktop/scripts/smoke-editor-import.mjs`
+for the private transport/native file bridge.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

@@ -2041,6 +2041,14 @@ select.fy-sheetselect { padding-right: 24px; }
   animation: fy-fade-up 0.7s var(--ease-out) 0.1s both;
 }
 .fy-cutviewer__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--neutral-950); transition: opacity 0.15s var(--ease-out); }
+.fy-effectpreview { position: absolute; inset: 0; overflow: hidden; }
+.fy-effectpreview__stage { position: absolute; container-type: size; overflow: hidden; }
+.fy-effectpreview__picture { display: block; width: 100%; height: 100%; }
+.fy-effectpreview__quality { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 4px; color: var(--neutral-50); background: var(--neutral-950); font: 11px var(--font-sans); }
+.fy-effectpreview__quality select { color: inherit; background: inherit; font: inherit; border: 1px solid var(--neutral-600); border-radius: 3px; }
+.fy-effectpreview__notice { position: absolute; top: 40px; left: 8px; right: 8px; width: fit-content; max-width: calc(100% - 16px); padding: 5px 8px; color: var(--neutral-50); background: var(--neutral-950); font: 11px/1.4 var(--font-sans); }
+.fy-effectpreview__notice > span { display: block; }
+.fy-effectpreview__error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--neutral-50); background: var(--neutral-950); font: 12px/1.5 var(--font-sans); }
 /* A span with nothing to show says so, rather than holding the previous shot's last frame. */
 .fy-cutviewer__empty {
   position: absolute;

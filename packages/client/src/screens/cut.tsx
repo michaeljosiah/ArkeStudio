@@ -1180,6 +1180,7 @@ function CutEditorScreen() {
             transport={transport}
             cueAt={cueAt}
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
+            plan={renderPlan?.ok ? renderPlan.plan : null}
           />
         </div>
         {compact && <div className="fy-cut-clock">

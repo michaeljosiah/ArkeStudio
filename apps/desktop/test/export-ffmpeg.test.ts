@@ -46,11 +46,11 @@ describe("the desktop export ffmpeg runner", () => {
       calls[0]!.args.join(" ").includes(`drawtext=expansion=none:fontfile=${escaped}:text=probe`),
       `expected escaped probe font path in ${calls[0]!.args.join(" ")}`,
     );
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await waitForImmediate();
     assert.deepEqual(calls[1], { file: "C:\\ffmpeg.exe", args: ["-hide_banner", ...DRAW_ARGS] });
     children[1]!.stderr.emit("data", Buffer.from("frame=1 time=00:00:12.00"));
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await pending;
     assert.deepEqual(progress, [12]);
   });
@@ -67,10 +67,10 @@ describe("the desktop export ffmpeg runner", () => {
     );
     await waitForImmediate();
     assert.ok(calls[0]!.args.join(" ").includes("text=probe"), "a graph in a file may draw: the font is proved first");
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await waitForImmediate();
     children[1]!.stderr.emit("data", Buffer.from("out_time=00:02:05.500000\n"));
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await pending;
     assert.deepEqual(progress, [99]);
     assert.deepEqual(seconds, [125.5]);
@@ -81,15 +81,15 @@ describe("the desktop export ffmpeg runner", () => {
     const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
     const first = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
     await waitForImmediate();
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await waitForImmediate();
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await first;
 
     const second = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
     await waitForImmediate();
     assert.equal(calls.length, 3, "the second encode starts without another probe");
-    children[2]!.emit("exit", 0);
+    children[2]!.emit("close", 0);
     await second;
   });
 
@@ -101,7 +101,7 @@ describe("the desktop export ffmpeg runner", () => {
       new AbortController().signal,
     );
     await waitForImmediate();
-    children[0]!.emit("exit", 3221225477);
+    children[0]!.emit("close", 3221225477);
     await assert.rejects(pending, /could not draw an export slate with the bundled font/);
     assert.equal(calls.length, 1, "the real encode never starts after a failed probe");
   });
@@ -111,9 +111,9 @@ describe("the desktop export ffmpeg runner", () => {
     const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
     const warm = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
     await waitForImmediate();
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await waitForImmediate();
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await warm;
     const paths = [
       "option fontfile-reference-missing.mp4",
@@ -126,7 +126,7 @@ describe("the desktop export ffmpeg runner", () => {
       await waitForImmediate();
       const encode = children.at(-1)!;
       encode.stderr.emit("data", Buffer.from(`Error opening input file ${path}`));
-      encode.emit("exit", 2);
+      encode.emit("close", 2);
       await assert.rejects(pending, /ffmpeg exited 2/);
     }
   });
@@ -165,7 +165,7 @@ describe("the desktop export ffmpeg runner", () => {
       new AbortController().signal,
     );
     assert.equal(calls.length, 1);
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await pending;
   });
 
@@ -181,7 +181,7 @@ describe("the desktop export ffmpeg runner", () => {
         new AbortController().signal,
       );
       assert.equal(calls.length, 1, "a no-slate export starts without a font probe");
-      children[0]!.emit("exit", 0);
+      children[0]!.emit("close", 0);
       await pending;
     }
   });
@@ -198,7 +198,7 @@ describe("the desktop export ffmpeg runner", () => {
     await waitForImmediate();
     controller.abort();
     assert.equal(children[0]!.killed, "SIGKILL");
-    children[0]!.emit("exit", null);
+    children[0]!.emit("close", null);
     await rejected;
   });
 
@@ -211,8 +211,8 @@ describe("the desktop export ffmpeg runner", () => {
       controller.signal,
     );
     await waitForImmediate();
-    children[0]!.on("exit", () => controller.abort());
-    children[0]!.emit("exit", 0);
+    children[0]!.on("close", () => controller.abort());
+    children[0]!.emit("close", 0);
     await assert.rejects(pending, /cancelled before start/);
     assert.equal(calls.length, 1, "the encode never starts from an already-cancelled signal");
   });
@@ -231,10 +231,10 @@ describe("the desktop export ffmpeg runner", () => {
     await assert.rejects(first, /cancelled before start/);
     assert.equal(children[0]!.killed, null, "one cancelled waiter does not kill another's probe");
 
-    children[0]!.emit("exit", 0);
+    children[0]!.emit("close", 0);
     await waitForImmediate();
     assert.equal(calls.length, 2, "only the surviving caller starts an encode");
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await second;
   });
 
@@ -251,12 +251,12 @@ describe("the desktop export ffmpeg runner", () => {
     const retry = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
     await waitForImmediate();
     assert.equal(calls.length, 2, "retry starts a new probe before the killed child exits");
-    children[1]!.emit("exit", 0);
+    children[1]!.emit("close", 0);
     await waitForImmediate();
-    children[2]!.emit("exit", 0);
+    children[2]!.emit("close", 0);
     await retry;
 
-    children[0]!.emit("exit", null);
+    children[0]!.emit("close", null);
     await cancelledResult;
   });
 });

@@ -29,6 +29,7 @@ import {
   ComfyUiEngineService,
   Coordinator,
   createStudioHost,
+  createNodeEffectRasterHost,
   type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
@@ -1294,6 +1295,9 @@ async function initialize(): Promise<{ port: number }> {
     ...(ffmpegPath() !== null
       ? {
           ffmpeg: createExportFfmpegRunner(ffmpegPath()!, slateFontPath()),
+          ...(ffprobeResolution().path ? { effectRasterHost: createNodeEffectRasterHost({ ffmpeg: ffmpegPath()!,
+            workerPath: join(__dirname, "effect-raster-worker.cjs"),
+            mediaProcess: createMediaProcessRunner({ ffmpeg: ffmpegPath()!, ffprobe: ffprobeResolution().path! }) }) } : {}),
           // The same binary, a different job (#248): arrival-time motion QC reads frame hashes
           // and writes no media. The bounded runner lives in take-qc.ts so it can be tested
           // without a real ffmpeg on the machine running the tests.
