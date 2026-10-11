@@ -480,6 +480,7 @@ const CLIENT_COMMAND_METADATA = {
   "timeline-move-picture": action("production", "command", "timeline", "authored-change", ["timeline", "shots"], { reads: COMPLETE_TIMELINE_READ }),
   "timeline-command": action("production", "command", "timeline", "authored-change", ["timeline", "shots", "takes", "artifacts", "subtitles", "audio"], { reads: COMPLETE_TIMELINE_READ }),
   "editor-request-decide": humanOnly("Only the person may accept or reject an existing Arke editor request.", "editor-request"),
+  "editor-effect-analysis": humanOnly("The editor prepares local audio analysis; this does not apply an arrangement or release protection."),
   "timeline-history": action("production", "command", "timeline", "authored-change", ["timeline"], { reads: COMPLETE_TIMELINE_READ }),
   "save-audio-tracks": action("production", "command", "audio-cut", "authored-change", ["audio", "timeline"], {
     preparation: blocked(["typed-audio-command"], "Audio tracks are still submitted as unknown cut JSON; semantic audio commands are required."),

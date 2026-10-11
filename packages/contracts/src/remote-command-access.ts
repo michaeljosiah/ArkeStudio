@@ -115,6 +115,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "record-review": "studio", "accept-take": "studio", "clear-shot-frame": "studio",
   "reject-take": "studio", "set-trim": "studio", "timeline-move-picture": "studio",
   "timeline-command": "studio", "editor-request-decide": "studio", "timeline-history": "studio",
+  "editor-effect-analysis": "studio",
   "save-audio-tracks": "studio", "browse-world-artifacts": "studio", "borrow-artifacts": "studio",
   "place-overlay": "studio", "move-overlay": "studio", "split-overlay-audio": "studio",
   "rejoin-overlay-audio": "studio", "remove-overlay": "studio", "export-cut": "studio",

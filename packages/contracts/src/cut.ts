@@ -693,6 +693,61 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   return { last, inputIndex };
 }
 
+/** The canonical audible graph shared by export and SPEC-053 analysis. Paths are resolved by the host.
+ * Optional contribution taps preserve the complete mix; callers must consume every tap.
+ * `preLimiter` replaces the final filter only when reconstructing a source's contribution. */
+export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" | "speech" | "totalSec">,
+  paths: readonly string[], inputIndex = 0, tapContributions = false): {
+    args: string[]; filters: string[]; hasAudio: boolean; preLimiter: string; limiter: string;
+  } {
+  if (paths.length !== plan.audio.length) throw new Error("Every canonical audio input needs a resolved path");
+  const args: string[] = [], filters: string[] = [], audioLabels: string[] = [];
+  /*
+   * Speech-first mixing (SPEC-038 R-14, R-15). A Music or Ambience clip under expected speech is
+   * lowered by the production's ducking figure along the same look-ahead and release envelope the
+   * browser applies, as a per-frame volume expression in film seconds. A plan with no speech, or
+   * no mix at all, emits the plain `volume=<gain>dB` it always did.
+   */
+  const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
+  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
+  plan.audio.forEach((clip, i) => {
+    const index = inputIndex + i;
+    // Windowed at the input so the source starts where the clip's own in-point says (R-19).
+    if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
+    args.push("-i", paths[i]!);
+    const d = Math.max(clip.endSec - clip.startSec, 0);
+    const delayMs = Math.round(clip.startSec * 1000);
+    const volume = ducked(clip)
+      ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
+      : `volume=${clip.gainDb}dB`;
+    filters.push(
+      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
+    );
+    if (tapContributions) filters.push(`[ac${i}]asplit[am${i}][at${i}]`);
+    audioLabels.push(tapContributions ? `[am${i}]` : `[ac${i}]`);
+  });
+  let preLimiter = "", limiter = "";
+  if (audioLabels.length > 0) {
+    // One clip needs no mixer; asking amix for a single input is a filter that does nothing.
+    const mixed = audioLabels.length === 1 ? audioLabels[0]! : "[amix]";
+    if (audioLabels.length > 1) {
+      filters.push(
+        `${audioLabels.join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest[amix]`,
+      );
+    }
+    // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
+    // early does not shorten it. Peak protection last (R-17): the same ceiling the browser's
+    // limiter holds, applied after every gain and duck, and transparent when nothing reaches it.
+    const ceilingDb = plan.mix?.limiterCeilingDb ?? -1;
+    const ceiling = Math.pow(10, ceilingDb / 20).toFixed(6);
+    preLimiter = `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS`;
+    limiter = `alimiter=limit=${ceiling}:level=false`;
+    filters.push(`${preLimiter},${limiter}[aout]`);
+  }
+
+  return { args, filters, hasAudio: audioLabels.length > 0, preLimiter, limiter };
+}
+
 export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string, effectAlpha?: readonly EffectAlphaInput[]): string[] {
   const p = PRESETS[plan.preset];
   const fps = plan.frameRate;
@@ -824,50 +879,10 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
    * length whether the file runs long or short, so a bed that is thirty seconds of a four-minute
    * track occupies thirty seconds rather than the rest of the film.
    */
-  const audioLabels: string[] = [];
-  /*
-   * Speech-first mixing (SPEC-038 R-14, R-15). A Music or Ambience clip under expected speech is
-   * lowered by the production's ducking figure along the same look-ahead and release envelope the
-   * browser applies, as a per-frame volume expression in film seconds. A plan with no speech, or
-   * no mix at all, emits the plain `volume=<gain>dB` it always did.
-   */
-  const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
-  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
-  plan.audio.forEach((clip, i) => {
-    const index = inputIndex + i;
-    // Windowed at the input so the source starts where the clip's own in-point says (R-19).
-    if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
-    args.push("-i", `${worldDir}/${clip.path}`);
-    const d = Math.max(clip.endSec - clip.startSec, 0);
-    const delayMs = Math.round(clip.startSec * 1000);
-    const volume = ducked(clip)
-      ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
-      : `volume=${clip.gainDb}dB`;
-    filters.push(
-      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
-    );
-    audioLabels.push(`[ac${i}]`);
-  });
-  if (audioLabels.length > 0) {
-    // One clip needs no mixer; asking amix for a single input is a filter that does nothing.
-    const mixed = audioLabels.length === 1 ? audioLabels[0]! : "[amix]";
-    if (audioLabels.length > 1) {
-      filters.push(
-        `${audioLabels.join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest[amix]`,
-      );
-    }
-    // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
-    // early does not shorten it. Peak protection last (R-17): the same ceiling the browser's
-    // limiter holds, applied after every gain and duck, and transparent when nothing reaches it.
-    const ceilingDb = plan.mix?.limiterCeilingDb ?? -1;
-    const ceiling = Math.pow(10, ceilingDb / 20).toFixed(6);
-    filters.push(
-      `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS,alimiter=limit=${ceiling}:level=false[aout]`,
-    );
-  }
-
+  const audioGraph = buildCanonicalAudioGraph(plan, plan.audio.map(clip => `${worldDir}/${clip.path}`), inputIndex);
+  args.push(...audioGraph.args); filters.push(...audioGraph.filters);
   args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`);
-  if (audioLabels.length > 0) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  if (audioGraph.hasAudio) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
   if (plan.effectRender) args.push("-frames:v", String(plan.effectRender.endFrame - plan.effectRender.startFrame), "-pix_fmt", "yuv420p");
   args.push("-crf", String(PRESETS[plan.preset].crf), outFile);
   return args;

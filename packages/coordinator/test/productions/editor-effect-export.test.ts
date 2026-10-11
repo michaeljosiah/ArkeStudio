@@ -76,3 +76,28 @@ test("a redirected cache is refused without deleting the other directory's match
   assert.equal(result.status, "failed");
   assert.equal(await readFile(marker, "utf8"), "belongs-to-another-job");
 });
+
+
+test("ready reaction freezes its manifest and fences muted descriptor sources omitted from the export sound graph", async () => {
+  const { analysisFixture } = await import("../media/effect-analysis-fixture.js");
+  const { hashMediaFile } = await import("../../src/media/node-media-host.js");
+  const store = await world(), authored = plan(), source = "artifacts/muted-source.wav";
+  await writeFile(join(store.dir, source), "audio-v1");
+  const manifest = analysisFixture({ sources: [{ path: source, sha256: await hashMediaFile(join(store.dir, source), new AbortController().signal) }] });
+  authored.effectRender!.effectLayers[0]!.effect = { ...effect, audioInput: { kind: "composition-mix" }, reaction: { ...effect.reaction, enabled: true } };
+  let checked = false;
+  const reactive: EffectRasterHost = { ...host, renderAlpha: async request => {
+    assert.equal(request.manifestsByKey?.[manifest.manifestKey]?.features.energy[0], .7);
+    checked = true; await host.renderAlpha(request);
+  } };
+  const job = runEffectExport(store, authored, "ready.mp4", runner, reactive, () => {}, undefined, undefined, new Map([[effect.id, manifest]]));
+  manifest.features.energy[0] = 0;
+  assert.equal((await job.done).status, "done"); assert.ok(checked);
+  const ready = analysisFixture({ sources: [{ path: source, sha256: await hashMediaFile(join(store.dir, source), new AbortController().signal) }] });
+  const changed: FfmpegRunner = { ...runner, run: async args => { await runner.run(args, () => {}, new AbortController().signal); await writeFile(join(store.dir, source), "audio-v2"); } };
+  const refused = await runEffectExport(store, authored, "changed-audio.mp4", changed, host, () => {}, undefined, undefined, new Map([[effect.id, ready]])).done;
+  assert.equal(refused.status, "failed"); if (refused.status === "failed") assert.match(refused.error, /source changed/);
+  const stale = await runEffectExport(store, authored, "stale-audio.mp4", runner, host, () => {}, undefined, undefined, new Map([[effect.id, ready]])).done;
+  assert.equal(stale.status, "failed"); if (stale.status === "failed") assert.match(stale.error, /source changed before export/);
+  assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
+});

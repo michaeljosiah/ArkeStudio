@@ -278,6 +278,17 @@ export class WorldStore {
     });
   }
 
+  /** Disposable caches use ownership and serialization, but never rescan authored state. */
+  async derivedWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
+    return this.serialise(async () => { await this.verifyOwnership(); return fn(); });
+  }
+
+  /** UI capability only; every actual write still verifies the lock on disk. */
+  canWrite(): boolean {
+    try { this.assertWritable(); return true; } catch { return false; }
+  }
+
   /** The committer's clock — gate records share the world's notion of now. */
   now(): string {
     return this.clockFn();

@@ -30,6 +30,7 @@ import {
   Coordinator,
   createStudioHost,
   createNodeEffectRasterHost,
+  createNodeEffectAudioAnalysisHost,
   type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
@@ -1295,6 +1296,7 @@ async function initialize(): Promise<{ port: number }> {
     ...(ffmpegPath() !== null
       ? {
           ffmpeg: createExportFfmpegRunner(ffmpegPath()!, slateFontPath()),
+          effectAudioAnalysisHost: createNodeEffectAudioAnalysisHost({ ffmpeg: ffmpegPath()! }),
           ...(ffprobeResolution().path ? { effectRasterHost: createNodeEffectRasterHost({ ffmpeg: ffmpegPath()!,
             workerPath: join(__dirname, "effect-raster-worker.cjs"),
             mediaProcess: createMediaProcessRunner({ ffmpeg: ffmpegPath()!, ffprobe: ffprobeResolution().path! }) }) } : {}),

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import { createNodeMediaProcessRunner } from "../../src/media/node-media-host.js";
 
@@ -90,6 +91,20 @@ test("real native worker alpha is byte-identical to shared raster, probes images
     assert.ok(!(await readdir(dir)).includes("budget.mkv"));
     await assert.rejects(host.renderAlpha({ effects: [{ ...effect, reaction: { ...effect.reaction, enabled: true } }], width: 64, height: 64,
       frameRate: 24, startFrame: 48, frameCount: 3, output: join(dir, "unready.mkv"), signal: signal() }), /analysis/);
+    const first = analysisFixture(), second = analysisFixture({ energy: .2, binding: { kind: "audio-track", trackId: "tr_second" } });
+    const manifestsByKey = { [first.manifestKey]: first, [second.manifestKey]: second };
+    const reactiveLayers = [first, second].map((manifest, i) => ({ ...effect, id: `cl_reactive_${i}`, seed: i + 42,
+      audioInput: manifest.descriptor.binding, reaction: { ...effect.reaction, enabled: true, strength: .9, property: "speed" as const } }));
+    const manifestKeyByEffectId = { [reactiveLayers[0]!.id]: first.manifestKey, [reactiveLayers[1]!.id]: second.manifestKey };
+    const prepared = prepareEffectReactions(reactiveLayers, manifestsByKey, manifestKeyByEffectId, { startFrame: 48, endFrame: 51 });
+    const reactiveOutput = join(dir, "reactive.mkv");
+    await host.renderAlpha({ effects: reactiveLayers, width: 64, height: 64, frameRate: 24, startFrame: 48, frameCount: 3,
+      manifestsByKey, manifestKeyByEffectId, output: reactiveOutput, signal: signal() });
+    const reactivePixels = await processBytes(["-i", reactiveOutput, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    assert.notDeepEqual(reactivePixels.subarray(0, 64 * 64 * 4), Buffer.from(renderEffectLayersRgba(reactiveLayers, 48, 24, 64, 64)), "ready reaction must change rendered pixels");
+    for (let frame = 0; frame < 3; frame++) assert.deepEqual(reactivePixels.subarray(frame * 64 * 64 * 4, (frame + 1) * 64 * 64 * 4),
+      Buffer.from(renderEffectLayersRgba(reactiveLayers, 48 + frame, 24, 64, 64, prepared)));
+    report.reactiveWorker = { alphaByteError: 0, independentlyBoundEffects: 2, frames: 3, absoluteStartFrame: 48, property: "speed" };
     const parity: Array<Record<string, unknown>> = [];
     for (const preset of EFFECT_PRESET_CATALOGUE) for (const fps of [24, 25, 30]) for (const [width, height] of [[128, 72], [72, 128]]) {
       const layer = defaultEffectClip({ id: `cl_${preset.id}`, lineageId: `ef_${preset.id}`, seed: 42, startFrame: 0, durationFrames: 240, preset: preset.id });

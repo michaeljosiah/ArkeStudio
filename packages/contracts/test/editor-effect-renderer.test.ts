@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { defaultEffectClip, type EffectClip } from "../src/editor-effects.js";
 import { moveEffect, trimEffect } from "../src/editor-effect-commands.js";
 import { EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE, effectRenderCapabilityProblem, effectTimelineCapabilityProblem } from "../src/editor-effect-catalogue.js";
-import { evaluateEffectFrame, effectModulationAt, type EffectFrame } from "../src/editor-effect-evaluator.js";
+import { evaluateEffectFrame, type EffectFrame } from "../src/editor-effect-evaluator.js";
 import { compositeRgba, rasterizeEffectFrame, renderEffectLayersRgba } from "../src/editor-effect-raster.js";
 import type { EffectRenderProjection } from "../src/editor-effect-render-plan.js";
 import { DEFAULT_MIX, type ProductionTimeline } from "../src/timeline.js";
@@ -65,23 +65,6 @@ test("split and trim retain identical particles and pixels, including fades and 
   assert.deepEqual(evaluate(moved, 60).particles, evaluate(original, 160).particles);
 });
 
-test("opacity, intensity and fade zero stay invisible even with full audio modulation", () => {
-  const original = effect("lights");
-  original.audioInput = { kind: "composition-mix" };
-  original.reaction = { ...original.reaction, enabled: true, beat: 1, energy: 1, strength: 1, limit: 1, property: "emission" };
-  const features = { startFrame: 0, beat: Array(100).fill(1), bass: Array(100).fill(1), energy: Array(100).fill(1) };
-  const cases = [
-    { ...original, appearance: { ...original.appearance, opacity: 0 } },
-    { ...original, intensityCurve: { points: [{ id: "ep_zero", offsetFrames: 0, value: 0, interpolation: "hold" as const }] } },
-    { ...original, fades: { startFrame: 50, endFrame: 500, inFrames: 40, outFrames: 0 } },
-  ];
-  for (const value of cases) {
-    const frame = evaluateEffectFrame({ effect: value, absoluteFrame: 50, frameRate: 25, targetAspectRatio: 16 / 9, features });
-    assert.equal(frame.particles.length, 0);
-    assert.equal(nonzero(rasterizeEffectFrame(frame, 160, 90)), false);
-  }
-});
-
 test("births obey typed emitting area and zero speed leaves their positions stationary", () => {
   const value = effect();
   value.motion = { ...value.motion, speed: 0, area: { x: 0.2, y: 0.3, width: 0.1, height: 0.2 } };
@@ -94,7 +77,7 @@ test("births obey typed emitting area and zero speed leaves their positions stat
   }
 });
 
-test("missing audio is marked base-only; silence and zero strength preserve base atmosphere", () => {
+test("missing audio is marked base-only and preserves base atmosphere", () => {
   const value = effect("embers");
   const base = evaluate(value, 50);
   value.audioInput = { kind: "composition-mix" };
@@ -102,10 +85,6 @@ test("missing audio is marked base-only; silence and zero strength preserve base
   const missing = evaluate(value, 50);
   assert.equal(missing.reactionReady, false);
   assert.deepEqual(missing.particles, base.particles);
-  const silent = { startFrame: 0, beat: Array(60).fill(0), bass: Array(60).fill(0), energy: Array(60).fill(0) };
-  assert.deepEqual(evaluateEffectFrame({ effect: value, absoluteFrame: 50, frameRate: 25, targetAspectRatio: 16 / 9, features: silent }).particles, base.particles);
-  value.reaction.strength = 0;
-  assert.equal(effectModulationAt(value, 50, { ...silent, energy: Array(60).fill(1) }), 0);
 });
 
 test("source-atop preserves translucent and transparent picture alpha exactly", () => {

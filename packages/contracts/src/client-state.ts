@@ -9,6 +9,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
@@ -583,6 +584,8 @@ export const ClientStateSchema = valueSchema(z
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),
+    /** Disposable audio readiness; feature arrays travel only through authenticated media. */
+    effectAnalyses: z.array(EffectAnalysisProjectionSchema).optional(),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
     /**

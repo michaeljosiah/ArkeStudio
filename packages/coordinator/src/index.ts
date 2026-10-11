@@ -397,3 +397,5 @@ export { publishPublication, publishVideoPublication, type PublicationDeliveryRe
 export { openPublication, type PinnedPublication } from "./publications/playback.js";
 export { parseByteRange } from "./transport.js";
 export { createImageRenditionMaker, type ImageRenditionMaker } from "./world-chat/image-rendition.js";
+
+export { createNodeEffectAudioAnalysisHost, type EffectAudioAnalysisHost, type FrozenAudioInput } from "./media/node-effect-audio.js";

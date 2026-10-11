@@ -1324,6 +1324,11 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       if (event.state !== null) frameRuns.push(event.state);
       return { ...state, frameRuns };
     }
+    case "editor-effect.analysis": {
+      const effectAnalyses = (state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
+      if (event.analysis !== null) effectAnalyses.push(event.analysis);
+      return { ...state, effectAnalyses };
+    }
     case "ledger.appended":
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
     case "provider.status":
