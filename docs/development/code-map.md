@@ -460,6 +460,13 @@ The dispatcher verifies returned artifacts through `queue/verify.ts`; Coordinato
 
 Follow client timeline UI and store commands into contracts `timeline.ts`/`frames.ts`. Coordinator routes `timeline-command`, `timeline-move-picture` and `timeline-history` to `applyTimelineCommand` in `productions/timeline.ts`. That module validates and persists the operation; the handler refreshes world state. Playback reads the resulting data through shared render planning and client `lib/plan-playback.ts`/`playback-engine.ts`.
 
+Whole-delivery Loop is local preview state in `screens/editor-transport.tsx`, exposed by
+`screens/editor-loop.tsx` in the desktop toolbar and compact clock. The shared transport's
+discontinuity ref re-seeks retained video/audio and invalidates pending effect frames on seeks
+and wraps; `lib/plan-audio.ts` remains the sole canonical soundtrack owner during
+Current/Suggested comparison. See `test/editor-loop.test.tsx`, `editor-loop-media.test.ts`,
+`plan-audio.test.tsx` and `cut-layout.test.tsx`; Loop does not author a command or export setting.
+
 Editor imports route `upload-artifacts` with a destination and timeline revision into coordinator `productions/editor-import.ts`. World filing owns the copied media; contracts `editor-media.ts` builds Library and placement commands. The coordinator resolves semantic detachment under its write gate through contracts `timeline.ts`. Its `assembleTimelineScene` service plans scene assembly after reserving migrated legacy tracks. Audio track identity is separate from optional clip roles and future-only defaults (SPEC-043). Start with coordinator `test/productions/editor-import.test.ts`, client `test/independent-editor.test.tsx` and the desktop `smoke-editor-import.mjs` file-page check.
 
 Browser development uses client `lib/browser-media-import.ts` for native File selection and bounded bytes on the existing authenticated `upload-artifacts` command. Contracts `browser-media-import.ts` caps a batch at 16 files / 48 MiB and validates leaf names; coordinator `artifacts/browser-media-import.ts` confines temporary files, admits one batch and removes its spool after the ordinary filing/measurement service returns. Desktop keeps its preload courier and native picker. Remembered remote sessions still refuse this host command; conversation actions cannot supply browser bytes.

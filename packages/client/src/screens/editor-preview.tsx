@@ -80,7 +80,7 @@ function LegacyCutPreview({
   compact?: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const { playing, time, timeRef, setPlaying, seek } = transport;
+  const { playing, time, timeRef, setPlaying, seek, discontinuityRef } = transport;
   /*
    * Subtitles change on the same frame loop as the picture: `time` reaches React four times a
    * second, which would open and close every cue up to a quarter second late against the sound
@@ -120,10 +120,10 @@ function LegacyCutPreview({
       const el = overlayVideo.current;
       if (el === null) return;
       const src = overlayVideoSrcFor(span);
-      syncMediaElement(el, { src, targetSec: span ? mediaTimeFor(span, at) : 0, playing: playingNow, nowMs });
+      syncMediaElement(el, { src, targetSec: span ? mediaTimeFor(span, at) : 0, playing: playingNow, nowMs, discontinuity: discontinuityRef?.current });
       el.style.opacity = src === null ? "0" : "1";
     },
-    [slug],
+    [slug, discontinuityRef],
   );
 
   /*
@@ -179,6 +179,7 @@ function LegacyCutPreview({
         targetSec: span ? videoTimeFor(span, at) : 0,
         playing: true,
         nowMs: ts,
+        discontinuity: discontinuityRef?.current,
       });
       paintStill(span);
       syncOverlayVideo(span, at, true, ts);
@@ -187,7 +188,7 @@ function LegacyCutPreview({
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, spans, slug, paintStill, syncCue, syncOverlayVideo]);
+  }, [playing, spans, slug, paintStill, syncCue, syncOverlayVideo, discontinuityRef]);
 
   // Paused: one sync, so a seek lands on the right frame without a loop running. A source that
   // was not ready when it was asked calls back through onMediaReady, since nothing else will.
@@ -202,6 +203,7 @@ function LegacyCutPreview({
         targetSec: span ? videoTimeFor(span, at) : 0,
         playing: false,
         nowMs: 0,
+        discontinuity: discontinuityRef?.current,
       });
       paintStill(span);
       syncOverlayVideo(span, at, false, 0);
@@ -210,7 +212,7 @@ function LegacyCutPreview({
     onMediaReady(el, push);
     if (overlayVideo.current !== null) onMediaReady(overlayVideo.current, push);
     push();
-  }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo]);
+  }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo, discontinuityRef]);
 
   const current = spanAt(spans, time);
   const showingVideo = videoSrcFor(current);

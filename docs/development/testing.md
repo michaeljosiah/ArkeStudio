@@ -256,6 +256,16 @@ Windows shard 3 likewise runs `test/harness/owned-child.test.ts` first to verify
 
 Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage model override through image-read receipts, canonical provenance, Keep, reopen and cancellation. It uses scripted model responses and PNG fixtures with the real coordinator and world persistence; renderer output and generation quality are separate checks.
 
+Whole-delivery Loop changes need client `test/editor-loop.test.tsx`, `editor-loop-media.test.ts`,
+`playback-engine.test.ts`, `plan-audio.test.tsx`, `cut-layout.test.tsx`,
+`editor-effect-review-transport.test.tsx` and `editor-effect-preview.test.ts`. Run them from
+`packages/client`. The cases cover overshoot, short wraps below media drift tolerances, immediate
+resume of ended sources, stale worker results, absolute effect frames and local-only controls.
+Also exercise the actual Loop button at desktop and 320px width with real short video/audio and
+the long-song effect arrangement, retaining paused frames after wrap and switching
+Current/Suggested without starting another soundtrack. Unit fixtures do not establish real-time
+decoding or visual/audio continuity.
+
 ## Fixtures and cleanup
 
 Codex image changes run adapter-codex `test/adapter.test.ts`, providers
