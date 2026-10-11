@@ -117,6 +117,28 @@ it("understanding and proposal tabs preserve their mounted controls", async () =
   await click("Close Studio"); assert.equal(dom.document.querySelector('[aria-label="Proposal draft"]'), proposal);
 });
 
+it("an incoming effects arrangement leaves the unpinned canvas, full card and unsent text where the person put them", async () => {
+  const made = await setup(); await click("Studio"); await click("What it understood");
+  const note = dom.document.querySelector('[aria-label="Understanding note"]');
+  const input = dom.document.querySelector('[aria-label="Unsent words"]') as unknown as HTMLTextAreaElement;
+  await act(async () => { input.value = "Leave this passage quiet"; input.dispatchEvent(new dom.window.Event("input", { bubbles: true })); });
+  const next: ConversationActionCard = { ...card(), conversationId: made.action.conversationId, actionKind: "world-chat-effect-proposal",
+    shown: { ...made.action.shown, productionPreview: undefined, title: "Atmosphere arrangement" }, targets: [{ kind: "production", id: production.meta.id }] };
+  await made.update([made.action, next]);
+  const selected = [...dom.document.querySelectorAll('[aria-label="Canvas views"] button')].find(button => button.getAttribute("aria-pressed") === "true");
+  assert.equal(selected?.textContent, "What it understood", "arrival cannot steal an unpinned canvas");
+  assert.equal(dom.document.querySelector('[aria-label="Understanding note"]'), note);
+  assert.equal(dom.document.querySelector('[aria-label="Unsent words"]'), input); assert.equal(input.value, "Leave this passage quiet");
+  assert.equal(made.sent.length, 0, "arrival grants no editor review or transport authority");
+  await click("Open full size");
+  const fullCard = dom.document.querySelector('.fy-production-studio__full-card article');
+  await made.update([made.action, next, { ...next, actionId: newId("act"), shown: { ...next.shown, title: "Atmosphere revision" } }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio__full-card article'), fullCard);
+  await click("Close Studio");
+  await made.update([made.action, next, { ...next, actionId: newId("act") }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio'), null, "arrival cannot open a closed Studio");
+});
+
 it("the proposal canvas opens the existing human card and returns to live state after settlement", async () => {
   __setStateForTest(state);
   const container = dom.document.createElement("div"); dom.document.body.append(container);

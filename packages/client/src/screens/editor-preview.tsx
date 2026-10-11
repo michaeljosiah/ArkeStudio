@@ -43,16 +43,27 @@ interface CutPreviewProps {
 }
 
 export function CutPreview(props: CutPreviewProps) {
-  return props.plan?.effectRender
-    ? <EffectCutPreview {...props} plan={props.plan} projection={props.plan.effectRender} />
-    : <LegacyCutPreview {...props} />;
+  const { restartToken, ...preview } = props;
+  const observedRestart = useRef(restartToken);
+  const { seek, setPlaying } = props.transport;
+  // Watch belongs to this stable owner. Changing the renderer for Current/Suggested must not
+  // replay an earlier Watch command, and an initially nonzero token is not a new command.
+  useEffect(() => {
+    if (observedRestart.current === restartToken) return;
+    observedRestart.current = restartToken;
+    if (restartToken === 0) return;
+    seek(0);
+    setPlaying(true);
+  }, [restartToken, seek, setPlaying]);
+  return preview.plan?.effectRender
+    ? <EffectCutPreview {...preview} plan={preview.plan} projection={preview.plan.effectRender} />
+    : <LegacyCutPreview {...preview} />;
 }
 
 function LegacyCutPreview({
   slug,
   spans,
   totalSec,
-  restartToken,
   transport,
   cueStyle = null,
   cueAt = null,
@@ -61,7 +72,6 @@ function LegacyCutPreview({
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
-  restartToken: number;
   transport: Transport;
   /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
   cueStyle?: SubtitleStyle | null;
@@ -87,13 +97,6 @@ function LegacyCutPreview({
   useEffect(() => {
     syncCue(timeRef.current);
   }, [cueAt, syncCue, timeRef]);
-
-  // "Watch from top" (24a): rewind and run, without remounting the element and refetching media.
-  useEffect(() => {
-    if (restartToken === 0) return;
-    seek(0);
-    setPlaying(true);
-  }, [restartToken]);
 
   const srcFor = (span: PlaybackSpan | null) => (span?.path && slug ? mediaUrl(slug, span.path) : null);
   /*
@@ -296,6 +299,7 @@ export function TrimStrip({
   figures,
   trim,
   ceiling,
+  disabled = false,
 }: {
   worldId: string;
   prodId: string;
@@ -305,14 +309,24 @@ export function TrimStrip({
   figures: string;
   trim: number;
   ceiling: ReturnType<typeof trimCeilingSec> | null;
+  disabled?: boolean;
 }) {
+  // A pointer may still be held when Suggested opens. Its old callback must not write Current,
+  // including after the person closes review before releasing that same pointer.
+  const authority = useRef({ worldId, prodId, shotId, trim, disabled, epoch: 0 });
+  if (authority.current.worldId !== worldId || authority.current.prodId !== prodId || authority.current.shotId !== shotId ||
+    authority.current.trim !== trim || authority.current.disabled !== disabled) {
+    authority.current = { worldId, prodId, shotId, trim, disabled, epoch: authority.current.epoch + 1 };
+  }
+  const epoch = authority.current.epoch;
   // Something must survive the trim, so the last whole step before the ceiling is the ceiling here.
   const maxTrim =
     ceiling?.ok && ceiling.ceilingSec !== undefined
       ? Math.max(0, ceiling.ceilingSec - TRIM_STEP_SEC)
       : undefined;
-  const trimmable = ceiling?.ok === true;
+  const trimmable = ceiling?.ok === true && !disabled;
   const commit = (next: number) => {
+    if (!trimmable || authority.current.disabled || authority.current.epoch !== epoch) return;
     if (next !== trim) setShotTrim(worldId, prodId, shotId, next);
   };
   const stepTrim = (delta: number) => {
@@ -357,6 +371,7 @@ export function TrimStrip({
           onPointerDown={trimmable ? drag.onPointerDown : undefined}
           role={trimmable ? "slider" : undefined}
           aria-label={trimmable ? "trim in" : undefined}
+          aria-disabled={!trimmable}
           aria-valuenow={drag.display}
           aria-valuemin={0}
           {...(maxTrim !== undefined ? { "aria-valuemax": maxTrim } : {})}

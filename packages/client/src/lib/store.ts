@@ -686,6 +686,10 @@ export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignme
 export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
 const dialogueListeners = new Set<(result: DialogueResult) => void>();
 export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
+const effectProposalListeners = new Set<(result: import("@arke-studio/contracts").EffectReviewResult) => void>();
+export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void {
+  effectProposalListeners.add(listener); return () => { effectProposalListeners.delete(listener); };
+}
 export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
 const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
 export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
@@ -1668,6 +1672,7 @@ function handleFrame(json: string): void {
       }
     }
     if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
+    if (event.type === "editor-effect.proposal-result") for (const listener of effectProposalListeners) listener(event);
     if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
     if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
@@ -2865,6 +2870,12 @@ export function send(msg: ClientMessage): boolean {
   if (!bridge || current.connection !== "open") return false;
   bridge.send(JSON.stringify(msg));
   return true;
+}
+
+/** Exact authenticated editor operations; review state and request retries belong to their domain controller. */
+export function sendEffectProposalCommand(worldId: string, productionId: string, requestId: string,
+  operation: import("@arke-studio/contracts").EffectReviewOperation): boolean {
+  return send({ kind: "editor-effect-proposal", worldId, productionId, requestId, operation });
 }
 
 export function openWorld(worldId: string): void {

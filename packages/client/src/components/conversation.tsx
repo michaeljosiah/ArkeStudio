@@ -11,6 +11,8 @@ import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
+import { effectCompositeReplacesAction } from "../lib/editor-effect-proposal-presentation.js";
+import { useEffectReviewNavigation } from "../screens/editor-effect-review.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
@@ -123,9 +125,10 @@ export function ConversationTranscript({
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
+  const transcriptActions = (workspace?.actions ?? []).filter(action => !effectCompositeReplacesAction(action, humanDecisions));
   const olderHumanDecisions = humanDecisions.filter(card => !card.turnId || !visibleTurns.has(card.turnId));
   // The message window is bounded; outstanding decisions and running work must stay reachable.
-  const olderActions = (workspace?.actions ?? []).filter((action) =>
+  const olderActions = transcriptActions.filter((action) =>
     !visibleTurns.has(action.turnId) &&
     ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
   );
@@ -151,7 +154,7 @@ export function ConversationTranscript({
       {messages.map((m) => {
         const actions = m.role !== "studio" || m.turnId === undefined
           ? []
-          : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
+          : transcriptActions.filter((action) => action.turnId === m.turnId);
         return (
         <div
           key={m.id}
@@ -781,6 +784,7 @@ export function ProductionConversation({
 }) {
   const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
+  useEffectReviewNavigation(worldId, productionId);
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */

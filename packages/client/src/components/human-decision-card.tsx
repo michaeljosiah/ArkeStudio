@@ -7,6 +7,7 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { EditorRequestCards } from "../screens/editor-requests.js";
+import { ConnectedEffectProposalCard } from "./editor-effect-proposal-connected.js";
 import { exportViewFor } from "../screens/editor-export.js";
 import { PlanGateControls } from "../screens/scene-workspace/plans.js";
 import { SceneStage } from "../screens/scene-workspace/stage.js";
@@ -36,6 +37,11 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
     case "editor-request": {
       const production = world.productions.find(value => value.meta.id === control.productionId);
       if (production) content = <ThreadEditorRequest world={world} production={production} requestId={control.requestId} blocked={card.status === "blocked"} />;
+      break;
+    }
+    case "effect-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <ConnectedEffectProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
       break;
     }
     case "extraction": {
@@ -69,7 +75,7 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
   return <StudioCard id={card.id}><article className="fy-actioncard" data-family="human-decision" data-status={card.status} data-decision={card.id} aria-label={card.title}>
     <header className="fy-actioncard__head"><div><span className="fy-actioncard__reason">{card.body.reason}</span><h3>{card.title}</h3></div></header>
     {studio && <button type="button" className="fy-studio-toggle" onClick={() => studio.showDecision(card)}>Show</button>}
-    {card.detail && <p role="status">{card.detail}</p>}
+    {card.detail && control.kind !== "effect-proposal" && <p role="status">{card.detail}</p>}
     <div className="fy-actioncard__body">{content}</div>
   </article></StudioCard>;
 }

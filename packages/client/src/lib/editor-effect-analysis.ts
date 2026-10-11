@@ -7,7 +7,7 @@ import {
 } from "@arke-studio/contracts";
 
 const cancelled = () => new DOMException("The effect analysis is no longer needed.", "AbortError");
-const hash = async (value: string): Promise<string> => {
+export const effectAnalysisDigest = async (value: string): Promise<string> => {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
 };
@@ -45,7 +45,7 @@ export async function readEffectManifest(url: string, manifestKey: string, sourc
   const manifest = EffectFeatureManifestSchema.parse(JSON.parse(await boundedText(response, signal)));
   if (manifest.manifestKey !== manifestKey || manifest.sourceFingerprint !== sourceFingerprint) throw new Error("The reaction manifest belongs to another source.");
   const [contentHash, sourceHash] = await Promise.all([
-    hash(effectManifestFingerprintMaterial(manifest)), hash(effectAudioSourceFingerprintMaterial(manifest.descriptor)),
+    effectAnalysisDigest(effectManifestFingerprintMaterial(manifest)), effectAnalysisDigest(effectAudioSourceFingerprintMaterial(manifest.descriptor)),
   ]);
   if (signal.aborted) throw cancelled();
   if (contentHash !== manifestKey || sourceHash !== sourceFingerprint) throw new Error("The reaction manifest failed its content check.");

@@ -22,6 +22,20 @@ function fixture() {
 }
 
 describe("manual effect integration (SPEC-053 R-8, R-16, R-25)", () => {
+  it("previews the first proposed effect without changing Current or replacing canonical sound and picture timing", () => {
+    const { timeline, production, artifacts } = fixture();
+    const current = { ...timeline, tracks: timeline.tracks.filter(track => track.kind !== "effect") };
+    const built = buildRenderPlan({ production, artifacts, timeline: { status: "ready", timeline: current }, scope: { kind: "production" }, preset: "review-cut" });
+    assert.ok(built.ok); assert.equal(built.plan.effectRender, undefined);
+    const before = JSON.stringify(current);
+    const projected = effectDraftPlan(built.plan, timeline, { production, artifacts }); assert.ok(projected.ok);
+    assert.equal(projected.plan.audio, built.plan.audio); assert.equal(projected.plan.items, built.plan.items);
+    assert.equal(projected.plan.subtitles, built.plan.subtitles); assert.equal(projected.plan.mix, built.plan.mix);
+    assert.equal(projected.plan.range, built.plan.range); assert.equal(projected.plan.totalSec, built.plan.totalSec);
+    assert.equal(projected.plan.effectRender!.effectLayers.length, 1); assert.ok(projected.plan.effectRender!.pictureLayers.length);
+    assert.equal(JSON.stringify(current), before);
+    const empty = effectDraftPlan(built.plan, current); assert.ok(empty.ok); assert.equal(empty.plan, built.plan);
+  });
   it("previews a protected human edit without changing its saved baseline or the canonical sound plan", () => {
     const { timeline, canonical, effect } = fixture();
     const protectedTimeline = applyTimelineCommands(timeline, [{ kind: "effect-protect", rule: { id: "pr_amount", kind: "property",
