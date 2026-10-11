@@ -164,9 +164,9 @@ function bedPlan(): RenderPlan {
 const timeRef = { current: 0 };
 const urlFor = (path: string) => `http://x/${path}`;
 
-function Harness({ plan, playing, at }: { plan: RenderPlan; playing: boolean; at: number }) {
+function Harness({ plan, playing, at, discontinuityRef }: { plan: RenderPlan; playing: boolean; at: number; discontinuityRef?: { current: number } }) {
   timeRef.current = at;
-  usePlanAudio({ plan, playing, timeRef, urlFor });
+  usePlanAudio({ plan, playing, timeRef, urlFor, discontinuityRef });
   return null;
 }
 
@@ -176,6 +176,32 @@ describe("the monitor mix survives a re-render", () => {
     frames = [];
     timeRef.current = 0;
     contexts.length = 0;
+  });
+
+  it("re-seeks a short loop exactly without creating a second soundtrack", async () => {
+    const container = dom.document.createElement("div"), root = createRoot(container as unknown as HTMLElement);
+    const plan = bedPlan(), discontinuityRef = { current: 0 };
+    plan.totalSec = .2; plan.range.endSec = .2;
+    plan.audio[0]!.endSec = .2;
+    plan.audio.push({ clipId: "cl_tail", path: "artifacts/tail.wav", startSec: .1, endSec: .2, gainDb: 0, role: "music", sourceInSec: 0 });
+    try {
+      await act(async () => root.render(<Harness plan={plan} playing at={.18} discontinuityRef={discontinuityRef} />));
+      await act(async () => runFrame(180));
+      const bed = made[0]!, tail = made[1]!, plays = bed.plays;
+      assert.equal(bed.currentTime, .18); assert.equal(tail.paused, false);
+      discontinuityRef.current++;
+      await act(async () => root.render(<Harness plan={plan} playing at={.02} discontinuityRef={discontinuityRef} />));
+      await act(async () => runFrame(220));
+      assert.equal(bed.currentTime, .02, "a 160ms wrap bypasses the 500ms drift tolerance");
+      assert.equal(made.length, 2); assert.equal(contexts.length, 1); assert.equal(bed.plays, plays, "the same canonical voice continues");
+      assert.equal(tail.paused, true, "a voice outside the new loop frame cannot linger through its release ramp");
+      bed.currentTime = .2; bed.paused = true; discontinuityRef.current++;
+      await act(async () => root.render(<Harness plan={plan} playing at={.01} discontinuityRef={discontinuityRef} />));
+      await act(async () => runFrame(240));
+      assert.equal(bed.currentTime, .01); assert.equal(bed.paused, false);
+      assert.equal(bed.plays, plays + 1, "a short source that naturally ended resumes immediately");
+      assert.equal(contexts.length, 1); assert.equal(made.length, 2);
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("re-seeks a retained element to the window it was moved to", async () => {

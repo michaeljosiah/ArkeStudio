@@ -61,6 +61,21 @@ function props(element: HTMLElement): Record<string, (event: never) => void> { c
 function pointer(target: EventTarget, type: string, x: number, y = 20) { const event = new dom.Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, pointerType: "touch", clientX: x, clientY: y }); target.dispatchEvent(event); }
 const timelineCommands = () => sent.filter((m): m is Extract<ClientMessage, { kind: "timeline-command" }> => m.kind === "timeline-command").flatMap(m => m.commands);
 
+for (const viewport of [320, 390, 900, 1360]) it(`Loop is reachable at ${viewport}px without moving the playhead or authoring edits`, async () => {
+  await mount(viewport);
+  const controls = document.querySelectorAll<HTMLButtonElement>('[aria-label="Loop whole video"]');
+  assert.equal(controls.length, 1);
+  const control = controls[0]!, clock = find('[aria-label="Seek"]');
+  assert.ok(control.closest(viewport < 1100 ? ".fy-cut-clock" : ".fy-timeline__toolbar"));
+  const at = clock.getAttribute("aria-valuenow");
+  assert.equal(control.getAttribute("aria-pressed"), "false");
+  await click(control);
+  assert.equal(control.getAttribute("aria-pressed"), "true");
+  assert.equal(clock.getAttribute("aria-valuenow"), at);
+  assert.ok(find('[aria-label="Play"]'), "enabling Loop does not start playback");
+  assert.deepEqual(timelineCommands(), []);
+});
+
 it("an effect lane click keeps its selection, Inspector and explicit preview area control", async () => {
   await mount(1360, false, undefined, true);
   const effect = find('[data-effect="cl_dust"]'), seek = find('[aria-label="Seek"]');

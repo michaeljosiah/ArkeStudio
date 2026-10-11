@@ -25,6 +25,7 @@ interface Decoder {
   failed: boolean;
   wanted: number | null;
   playedAt: number;
+  discontinuous: boolean;
   cleanup: () => void;
 }
 
@@ -70,7 +71,7 @@ export class PreviewMediaPool {
         video.playsInline = true;
         video.preload = "auto";
       }
-      decoder = { element, still: source.still, url, failed: false, wanted: null, playedAt: -Infinity, cleanup: () => {
+      decoder = { element, still: source.still, url, failed: false, wanted: null, playedAt: -Infinity, discontinuous: false, cleanup: () => {
         for (const event of events) element.removeEventListener(event, changed);
         element.removeEventListener("error", error);
         if (!source.still) (element as HTMLVideoElement).pause();
@@ -97,6 +98,10 @@ export class PreviewMediaPool {
       const lastSample = end === Infinity ? Infinity : Math.max(0, end - 0.0001);
       const target = Math.max(0, Math.min(source.sourceSec + 0.0001, lastSample));
       const hold = source.sourceSec >= lastSample;
+      if (decoder.discontinuous) {
+        decoder.discontinuous = false; decoder.wanted = target;
+        if (Math.abs(video.currentTime - target) > 0.0001) { video.currentTime = target; return null; }
+      }
       if (!playing || hold) {
         if (!video.paused) video.pause();
         // Unlike the free-running monitor, paused frame steps cannot use a 120 ms tolerance.
@@ -155,6 +160,15 @@ export class PreviewMediaPool {
 
   pause(): void {
     for (const decoder of this.decoders.values()) if (!decoder.still) (decoder.element as HTMLVideoElement).pause();
+  }
+
+  /** A seek/wrap is an explicit clock jump, including loops shorter than playback tolerance. */
+  discontinue(): void {
+    for (const decoder of this.decoders.values()) if (!decoder.still) {
+      decoder.discontinuous = true;
+      // A retained source may have naturally ended; the new position is a new play request.
+      decoder.playedAt = -Infinity;
+    }
   }
 
   destroy(): void {

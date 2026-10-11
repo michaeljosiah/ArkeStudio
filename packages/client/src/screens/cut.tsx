@@ -88,6 +88,7 @@ import { fileKindsFromTransfer, snapCandidates, type DroppedKind } from "../lib/
 import { SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
+import { CutLoopControl } from "./editor-loop.js";
 import {
   moveTimelineHistory,
   moveTimelinePictureClip,
@@ -812,7 +813,7 @@ function CutEditorScreen() {
   void inFlight?.since;
   // The monitor mix reads the same plan the export does (SPEC-038 R-13, R-17).
   const urlFor = useCallback((path: string) => (slug ? mediaUrl(slug, path) : null), [slug]);
-  usePlanAudio({ plan: effectProjection.canonicalPlan, playing: transport.playing, timeRef: transport.timeRef, urlFor });
+  usePlanAudio({ plan: effectProjection.canonicalPlan, playing: transport.playing, timeRef: transport.timeRef, discontinuityRef: transport.discontinuityRef, urlFor });
   const cuePlan = effectProjection.canonicalPlan;
   const cueAt = useMemo(() => (cuePlan === null ? null : (sec: number) => cueAtSec(cuePlan, sec)), [cuePlan]);
   const playheadInsideSelected =
@@ -1292,6 +1293,7 @@ function CutEditorScreen() {
             <button type="button" className="fy-cut-clock__play" aria-label={transport.playing ? "Pause" : "Play"} onClick={() => { if (!transport.playing && transport.timeRef.current >= filmSec) transport.seek(0); transport.setPlaying(value => !value); }}>{transport.playing ? <Pause size={22} /> : <Play size={22} />}</button>
             <button type="button" aria-label="Next frame" onClick={() => transport.seek(transport.timeRef.current + 1 / frameRate)}><FrameNext size={20} /></button></span>
           <code>{cutTime(secondsToFrames(filmSec, frameRate), frameRate)}</code>
+          <CutLoopControl transport={transport} />
         </div>}
         <section className="fy-timeline" aria-label="Timeline" data-ghost={ghostTimeline !== null ? "true" : undefined}>
           <div className="fy-timeline__toolbar">
@@ -1323,6 +1325,7 @@ function CutEditorScreen() {
               </span>
             )}
             <span className="fy-h1row__push" />
+            {!compact && <CutLoopControl transport={transport} />}
             <span className="fy-timeline__group" role="group" aria-label="History">
               <button type="button" className="fy-tlbtn fy-tip" data-tip="Undo · Ctrl+Z" aria-label="Undo" disabled={!canUndo} onClick={() => sendHistory("undo")}>
                 <RotateCcw size={12} />

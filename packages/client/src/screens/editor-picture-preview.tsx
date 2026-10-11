@@ -65,6 +65,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
     let destroyed = false, animation = 0, lastRequested = -1, previousFrame = -1, previousTick = 0, analysisEpoch = 0;
     let installedEpoch = 0, installingEpoch: number | null = null, pendingAnalysis: PreviewAnalysisInstall | null = null;
     let mappingKey: string | null = null, renderedProjection: EffectRenderProjection | null = null;
+    let renderedDiscontinuity: number | undefined;
     let renderedUrlFor: typeof urlFor | null = null;
     let sentManifests: PreviewReactionSources["manifestsByKey"] | undefined;
     let pool: PreviewMediaPool;
@@ -73,7 +74,8 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
       catch { queue.destroy(); setError("The effect frame could not be sent to the renderer."); }
     }, result => {
       // A new React commit can precede its install effect. Never paint the prior input in that gap.
-      if (result.analysisEpoch !== analysisEpoch || renderedProjection !== currentProjection.current || renderedUrlFor !== currentUrlFor.current) return;
+      if (result.analysisEpoch !== analysisEpoch || renderedProjection !== currentProjection.current || renderedUrlFor !== currentUrlFor.current ||
+        renderedDiscontinuity !== live.current.discontinuityRef?.current) return;
       if (result.error !== undefined) { setError(result.error); return; }
       const image = context.createImageData(result.width, result.height);
       image.data.set(result.pixels);
@@ -102,6 +104,12 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
       if (destroyed || installedEpoch !== analysisEpoch) return;
       const projection = currentProjection.current;
       const { timeRef } = live.current;
+      const discontinuity = live.current.discontinuityRef?.current;
+      if (renderedDiscontinuity !== discontinuity) {
+        renderedDiscontinuity = discontinuity;
+        queue.invalidate(); lastRequested = -1; delete output.dataset.frame;
+        pool.discontinue();
+      }
       const absoluteFrame = previewProductionFrame(projection, timeRef.current);
       // Playback can skip a display frame. A discontinuous seek invalidates an in-flight image.
       const expectedStep = Math.ceil(Math.max(0, nowMs - previousTick) * projection.frameRate / 1000) + 2;
