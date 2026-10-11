@@ -1,4 +1,5 @@
 import { valueSchema } from "./value-schema.js";
+import { BrowserMediaFilesSchema } from "./browser-media-import.js";
 import { SamplingSettingSchema } from "./local-sampling.js";
 import { ReviewCitationSchema } from "./take.js";
 import { VoiceDesignDraftSchema } from "./designed-voice.js";
@@ -2853,6 +2854,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
     // Null preserves the original position of a dropped File without a native path.
     sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
+    /** Authenticated local-browser selection; no host path or native picker is required. */
+    browserFiles: BrowserMediaFilesSchema.optional(),
     production: SlugSchema.nullable().optional(),
     editor: EditorImportSchema.optional(),
   }).strict(),

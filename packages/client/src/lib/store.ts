@@ -2,6 +2,7 @@ import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteComm
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
+import { pickBrowserMedia, readBrowserMedia } from "./browser-media-import.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
@@ -5285,12 +5286,42 @@ export function importEditorMedia(
   files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
-  if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
+  if (!bridge || current.connection !== "open") return { requestId: null, reason: "The studio is disconnected. Reconnect before importing files." };
+  const browserImport = typeof window !== "undefined" && !window.arke;
+  if (browserImport && [...pendingQueueRequests.values()].some(request => request.command === "upload-artifacts"))
+    return { requestId: null, reason: "Another import is running. Wait for it to finish." };
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
   const scope = production !== undefined ? { production } : {};
+  if (browserImport) {
+    const currentBridge = bridge;
+    let worldChanged = false;
+    const unsubscribe = onWorldChange(id => { if (id !== worldId) worldChanged = true; });
+    const stillCurrent = () => !worldChanged && bridge === currentBridge && current.connection === "open" && current.state?.world?.meta.worldId === worldId && pendingQueueRequests.has(requestId);
+    // Picker/read failures are local refusals, delivered to the same requesting controls.
+    const finish = (reason?: string) => {
+      pendingQueueRequests.delete(requestId);
+      const result: QueueEnqueueResult = { type: "queue.enqueue-result", at: new Date().toISOString(), requestId,
+        command: "upload-artifacts", disposition: reason ? "rejected" : "not-queued", requestedCount: reason ? 1 : 0,
+        acceptedJobIds: [], failures: reason ? [{ index: 0, reason }] : [] };
+      for (const listener of queueResultListeners) listener(result);
+    };
+    // Start the input synchronously while the click still has browser user activation.
+    const selection = files === undefined ? pickBrowserMedia() : Promise.resolve([...files]);
+    void selection.then(async selected => {
+      if (selected.length === 0) { finish(); return; }
+      const browserFiles = await readBrowserMedia(selected, stillCurrent);
+      if (!send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope, browserFiles }))
+        throw new Error("The files could not be imported. Check the connection and use Import media.");
+    }).catch(error => finish(error instanceof Error ? error.message : "The files could not be read.")).finally(unsubscribe);
+    return { requestId };
+  }
+  if (files && !bridge.importDroppedMedia) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "File drops are unavailable. Use Import media instead." };
+  }
   const submitted = files
     ? bridge!.importDroppedMedia!({ worldId, requestId, editor, ...scope }, files).submitted
     : send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope });

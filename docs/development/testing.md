@@ -98,6 +98,15 @@ Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` wit
 
 ## Select the checks
 
+Browser media import uses contracts/client `test/browser-media-import.test.ts` and coordinator
+`test/artifacts/browser-media-import.test.ts`, `upload-artifacts.test.ts`, `test/productions/editor-import.test.ts`,
+`test/transport.test.ts` and `test/remote-access.test.ts`. These cover selection/cancel, byte/name
+bounds, confined spool cleanup, read-only refusal, the editor fence, unchanged desktop paths and
+remote/model refusal. Run the client dev-session tests from `packages/client`, plus desktop
+`test/transport-auth.test.ts`, `test/preload-auth.test.ts`, `npm run smoke:main --workspace @arke-studio/desktop`
+and `node apps/desktop/scripts/smoke-editor-import.mjs` after building. The latter opens a real
+sandboxed Electron file page and verifies the native File courier and private session capability.
+
 For editor effects T-1 (SPEC-053 accepted), run contracts `test/editor-effects.test.ts`,
 `test/editor-effect-protection.test.ts`, `test/editor-request.test.ts`, `test/timeline.test.ts`
 and `test/render-plan.test.ts`, together with coordinator `test/productions/timeline-effects.test.ts`,
