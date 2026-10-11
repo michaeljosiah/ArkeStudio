@@ -3,6 +3,7 @@ import {
   trimCeilingSec,
   cueAtSec,
   type SubtitleStyle,
+  type RenderPlan,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -18,13 +19,32 @@ import {
   setShotTrim,
 } from "../lib/store.js";
 import { type Transport } from "./editor-transport.js";
+import { EffectCutPreview } from "./editor-effect-preview.js";
 
 // ---- Cut (24a) -------------------------------------------------------------
 
 /** A tenth of a second: editorial rather than per-frame, and it lands on a frame at 10/20/30fps. */
 const TRIM_STEP_SEC = 0.1;
 
-export function CutPreview({
+interface CutPreviewProps {
+  slug: string | undefined;
+  spans: PlaybackSpan[];
+  totalSec: number;
+  restartToken: number;
+  transport: Transport;
+  cueStyle?: SubtitleStyle | null;
+  cueAt?: ((sec: number) => ReturnType<typeof cueAtSec>) | null;
+  compact?: boolean;
+  plan?: RenderPlan | null;
+}
+
+export function CutPreview(props: CutPreviewProps) {
+  return props.plan?.effectRender
+    ? <EffectCutPreview {...props} plan={props.plan} projection={props.plan.effectRender} />
+    : <LegacyCutPreview {...props} />;
+}
+
+function LegacyCutPreview({
   slug,
   spans,
   totalSec,

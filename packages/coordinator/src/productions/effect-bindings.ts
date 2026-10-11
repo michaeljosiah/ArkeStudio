@@ -1,4 +1,12 @@
-import { resolveProductionArtifact, TimelineOperationRefused, type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TimelineClip } from "@arke-studio/contracts";
+import { buildRenderPlan, defaultExportPreset, resolveProductionArtifact, TimelineOperationRefused, type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TimelineClip } from "@arke-studio/contracts";
+
+/** The same finite renderer profile fences direct authoring, prepared review and delivery. */
+export function refuseUnsupportedEffectRender(timeline: ProductionTimeline, production: ProductionBundle, artifacts: readonly ArtifactSidecar[]): void {
+  if (!timeline.tracks.some(track => track.effects?.length)) return;
+  const planned = buildRenderPlan({ production, artifacts, timeline: { status: "ready", timeline },
+    scope: { kind: "production" }, preset: defaultExportPreset(production.meta) });
+  if (!planned.ok) throw new TimelineOperationRefused(planned.reason);
+}
 
 /**
  * Binding chooses a placed source, not an arbitrary file or another production's take. Existing

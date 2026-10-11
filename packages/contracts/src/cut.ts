@@ -9,6 +9,7 @@ import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 import type { FrameRate } from "./world.js";
+import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection } from "./editor-effect-render-plan.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -391,6 +392,7 @@ export interface ExportOverlay {
 }
 
 export interface ExportPlan {
+  effectRender?: EffectRenderProjection;
   preset: ExportPreset;
   /** The production clock, which may differ from the preset's legacy default. */
   frameRate: FrameRate;
@@ -625,12 +627,83 @@ export function buildExportPlan(
  * One ffmpeg invocation for the whole plan (D11): slates from the lavfi color source with a
  * drawtext label; clips trimmed by their ranges; everything concatenated in a single encode.
  */
-export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
+export interface EffectAlphaInput {
+  /** Absent for the final composition layer; a clip id for a source-atop picture layer. */
+  pictureClipId?: string;
+  path: string;
+  startFrame: number;
+  endFrame: number;
+}
+
+/** Alpha files are derived, bounded job intermediates, never authored timeline sources. */
+function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: string, alpha: readonly EffectAlphaInput[], args: string[], filters: string[]): { last: string; inputIndex: number } {
+  const projection = plan.effectRender!;
+  const { width, height, frameRate: fps, startFrame, endFrame } = projection;
+  const duration = (endFrame - startFrame) / fps;
+  let inputIndex = 0, last = "effectGround";
+  args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
+  filters.push(`[${inputIndex++}:v]format=gbrap[${last}]`);
+  for (const [number, picture] of projection.pictureLayers.entries()) {
+    const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
+    if (from >= to) continue;
+    const count = to - from, shift = (from - startFrame) / fps, seconds = count / fps;
+    let source = `ep${number}`;
+    let rect = { x: 0, y: 0, width, height };
+    if (picture.kind === "slate") {
+      assertSlateLabelSupported(picture.label);
+      args.push("-f", "lavfi", "-t", String(seconds), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
+      filters.push(`[${inputIndex++}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${ffmpegDrawtextText(picture.label)}':fontcolor=${EFFECT_SLATE_STYLE.colour}:fontsize=${EFFECT_SLATE_STYLE.fontSize}:x=(w-tw)/2:y=(h-th)/2,format=gbrap,setpts=PTS-STARTPTS+${shift}/TB[${source}]`);
+    } else {
+      if (!picture.path || !picture.sourceSize) throw new Error(`Picture ${picture.clipId} needs measured dimensions before effect export`);
+      rect = containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, width, height);
+      let sourceAt = 0;
+      if (picture.still) args.push("-loop", "1", "-framerate", String(fps), "-t", String(seconds));
+      else {
+        sourceAt = picture.sourceInSec + (from - picture.startFrame) / fps;
+        sourceAt = Math.max(0, picture.sourceOutSec === undefined ? sourceAt : Math.min(sourceAt, picture.sourceOutSec - 0.0001));
+        if (picture.sourceOutSec !== undefined) args.push("-to", String(picture.sourceOutSec));
+      }
+      args.push("-i", `${worldDir}/${picture.path}`);
+      // Keep the last source frame at or before the production sample, including a non-aligned
+      // in-point. Input seeking would discard that predecessor and pick the following frame.
+      filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},setpts=PTS-STARTPTS+${shift}/TB[${source}]`);
+      const overlay = alpha.find(value => value.pictureClipId === picture.clipId);
+      if (overlay) {
+        args.push("-i", overlay.path);
+        const effect = `ea${number}`, mask = `em${number}`, next = `es${number}`;
+        filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${overlay.startFrame - startFrame},split[${effect}][${mask}Source]`);
+        filters.push(`[${mask}Source]alphaextract,format=gbrap[${mask}]`);
+        // Source-atop preserves the picture's alpha. Multiplying both alphas and then using
+        // ordinary overlay would wrongly increase coverage at transparent edges (R-18).
+        filters.push(`[${source}][${effect}][${mask}]maskedmerge=planes=7[${next}]`);
+        source = next;
+      }
+    }
+    const next = `ec${number}`;
+    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(t,${shift})*lt(t,${(to - startFrame) / fps})'[${next}]`);
+    last = next;
+  }
+  const composition = alpha.find(value => value.pictureClipId === undefined);
+  if (composition) {
+    args.push("-i", composition.path);
+    filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${composition.startFrame - startFrame}[compositionAlpha]`);
+    filters.push(`[${last}][compositionAlpha]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(t,${(composition.startFrame - startFrame) / fps})*lt(t,${(composition.endFrame - startFrame) / fps})'[effectComposition]`);
+    last = "effectComposition";
+  }
+  return { last, inputIndex };
+}
+
+export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string, effectAlpha?: readonly EffectAlphaInput[]): string[] {
   const p = PRESETS[plan.preset];
   const fps = plan.frameRate;
   const args: string[] = ["-y"];
   const filters: string[] = [];
   let inputIndex = 0;
+  let last = "out";
+  if (plan.effectRender) {
+    if (effectAlpha === undefined) throw new Error("Effects require the prepared deterministic renderer before export");
+    ({ last, inputIndex } = effectPictureGraph(plan, worldDir, slateFont, effectAlpha, args, filters));
+  } else {
   for (const item of plan.items) {
     if (item.type === "clip") {
       if (item.inSec !== undefined) args.push("-ss", String(item.inSec));
@@ -682,7 +755,6 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
    * ending the whole film when it runs out. Untouched when there are none, so an export with no
    * overlays emits exactly the arguments it always did.
    */
-  let last = "out";
   plan.overlays.forEach((overlay, i) => {
     const index = plan.items.length + i;
     // A still has one frame: held for the film's length, so its window has something to show.
@@ -700,6 +772,8 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     );
     last = next;
   });
+  inputIndex = plan.items.length + plan.overlays.length;
+  }
 
   /*
    * Burned-in subtitles (SPEC-038 R-27, §2.3). Each cue is one drawtext confined to its window,
@@ -760,7 +834,7 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
   const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
   const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
   plan.audio.forEach((clip, i) => {
-    const index = plan.items.length + plan.overlays.length + i;
+    const index = inputIndex + i;
     // Windowed at the input so the source starts where the clip's own in-point says (R-19).
     if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
     args.push("-i", `${worldDir}/${clip.path}`);
@@ -794,6 +868,7 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
 
   args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`);
   if (audioLabels.length > 0) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  if (plan.effectRender) args.push("-frames:v", String(plan.effectRender.endFrame - plan.effectRender.startFrame), "-pix_fmt", "yuv420p");
   args.push("-crf", String(PRESETS[plan.preset].crf), outFile);
   return args;
 }

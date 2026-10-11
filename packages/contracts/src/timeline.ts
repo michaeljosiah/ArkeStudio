@@ -1,5 +1,6 @@
 import type { ArtifactSidecar } from "./artifact.js";
 import { EffectClipSchema, EFFECT_CLIP_LIMIT, type EffectClip } from "./editor-effects.js";
+import { effectTimelineCapabilityProblem } from "./editor-effect-catalogue.js";
 import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffect, duplicateEffect, type EffectCommand } from "./editor-effect-commands.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
@@ -1892,7 +1893,7 @@ export function applyTimelineCommands(
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     ...(options.notes !== undefined && options.notes.length > 0 ? { notes: options.notes.map((note) => note.slice(0, 200)).slice(0, 8) } : {}),
   };
-  return {
+  const next: ProductionTimeline = {
     ...timeline,
     revision: nextRevision(timeline),
     tracks: working.tracks,
@@ -1901,6 +1902,9 @@ export function applyTimelineCommands(
     ...(timeline.effectProtection !== undefined || working.effectProtection.length ? { effectProtection: working.effectProtection } : {}),
     history: { undo: bounded([...timeline.history.undo, entry]), redo: [] },
   };
+  const capabilityProblem = effectTimelineCapabilityProblem(next);
+  if (capabilityProblem !== null) throw new TimelineOperationRefused(capabilityProblem);
+  return next;
 }
 
 /** Move one Picture clip exactly one temporal position; a successful move is one revision and one undo entry. */

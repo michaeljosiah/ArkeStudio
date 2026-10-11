@@ -35,6 +35,17 @@ export interface ExportSidecar {
   text: string;
 }
 
+/** Host lifecycle for derived rendering that must revalidate sources before publication. */
+export interface ExportLifecycle {
+  signal: AbortSignal;
+  prepare?(): Promise<void>;
+  render(stage: string, signal: AbortSignal): Promise<void>;
+  publish(write: () => Promise<void>, signal: AbortSignal): Promise<void>;
+  cleanup(): Promise<void>;
+  cleanupStaging(): Promise<void>;
+  rollbackOutput(path: string): Promise<void>;
+}
+
 /**
  * Render an export plan to `<world>/exports/` via a staging path (R-21): the output appears
  * whole or not at all, and cancellation deletes the stage.
@@ -58,24 +69,31 @@ export function runExport(
    */
   sidecar?: ExportSidecar,
   exportId?: string,
+  lifecycle?: ExportLifecycle,
 ): ExportHandle {
   const id = exportId ?? `ex_${ulid()}`;
   if (!/^ex_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) throw new Error("invalid export id");
   const controller = new AbortController();
+  const close = () => controller.abort();
+  lifecycle?.signal.addEventListener("abort", close, { once: true });
+  if (lifecycle?.signal.aborted) close();
   const stage = join(worldDir, ".cache", "exports", `${id}.mp4`);
   const output = join(worldDir, "exports", outName);
   const sidecarStage = sidecar === undefined ? null : join(worldDir, ".cache", "exports", `${id}-${sidecar.name}`);
   const sidecarOutput = sidecar === undefined ? null : join(worldDir, "exports", sidecar.name);
   const done = (async () => {
     try {
+      await lifecycle?.prepare?.();
       await mkdir(toExtendedLength(join(worldDir, ".cache", "exports")), { recursive: true });
       await mkdir(toExtendedLength(join(worldDir, "exports")), { recursive: true });
       // A cancel that lands before the encoder starts must still cancel: an already-aborted
       // signal never invokes listeners added later, so the check happens here.
       if (controller.signal.aborted) throw new Error("cancelled before start");
       if (sidecar !== undefined && sidecarStage !== null) await writeFile(toExtendedLength(sidecarStage), sidecar.text, "utf8");
-      await runner.run(buildArgs(stage), onProgress, controller.signal);
+      if (lifecycle) await lifecycle.render(stage, controller.signal);
+      else await runner.run(buildArgs(stage), onProgress, controller.signal);
       if (controller.signal.aborted) throw new Error("cancelled");
+      const publish = async () => {
       await rename(toExtendedLength(stage), toExtendedLength(output));
       if (sidecar !== undefined && sidecarStage !== null && sidecarOutput !== null) {
         try {
@@ -83,17 +101,26 @@ export function runExport(
         } catch (error) {
           // The video is already in exports/. Both or neither: a film without the subtitles it
           // promised is not the export that was asked for, so the video goes too (round three).
-          await rm(toExtendedLength(output), { force: true }).catch(() => {});
+          if (lifecycle) await lifecycle.rollbackOutput(output).catch(() => {});
+          else await rm(toExtendedLength(output), { force: true }).catch(() => {});
           throw error;
         }
-        return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
       }
+      };
+      if (lifecycle) await lifecycle.publish(publish, controller.signal); else await publish();
+      if (sidecar) return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
       return { status: "done" as const, output: `exports/${outName}` };
     } catch (err) {
-      await rm(toExtendedLength(stage), { force: true }).catch(() => {});
-      if (sidecarStage !== null) await rm(toExtendedLength(sidecarStage), { force: true }).catch(() => {});
+      if (lifecycle) await lifecycle.cleanupStaging().catch(() => {});
+      else {
+        await rm(toExtendedLength(stage), { force: true }).catch(() => {});
+        if (sidecarStage !== null) await rm(toExtendedLength(sidecarStage), { force: true }).catch(() => {});
+      }
       if (controller.signal.aborted) return { status: "cancelled" as const };
       return { status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      lifecycle?.signal.removeEventListener("abort", close);
+      await lifecycle?.cleanup().catch(() => {});
     }
   })();
   return { id, cancel: () => controller.abort(), done };

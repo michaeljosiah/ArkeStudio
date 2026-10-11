@@ -55,8 +55,17 @@ Coordinator `src/productions/timeline.ts` distinguishes authenticated direct edi
 suggestions; `effect-bindings.ts` validates new audio choices against placed sound capability;
 `timeline-record.ts` detects effect use in both live records and retained history
 for the world schema floor. Generic editor requests cannot edit effects or release protection.
-Rendering refuses effects until the shared executor lands; T-1 alone does not expose the approved
-library, Inspector or review UI.
+The shared renderer lives in contracts `editor-effect-catalogue.ts`, `editor-effect-evaluator.ts`
+and `editor-effect-raster.ts`: six finite procedural presets, deterministic random access and
+straight RGBA composition. `editor-effect-render-plan.ts` and `render-plan.ts` retain the complete
+picture stack, source mattes and absolute delivery clock. Client `editor-picture-preview.tsx`,
+`editor-preview-media.ts`, `editor-preview-frame.ts` and `editor-effect-preview.worker.ts` own
+browser decoding and bounded worker presentation. Coordinator `productions/editor-effect-export.ts`
+freezes file identities, prepares alpha intermediates, and revalidates ownership before publication;
+`media/node-effect-renderer.ts` supplies its cancellable native worker/FFmpeg host. Desktop, dev
+and the standalone Node host inject the same media ports. `cut.ts` builds source-atop scoped
+composition before upper pictures, composition effects and subtitle burn-in. Audio analysis,
+manual Inspector authoring and reviewed Arke cards are separate implementation slices.
 
 The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
 transport and delegates initialization/draining to the application. Desktop and dev use

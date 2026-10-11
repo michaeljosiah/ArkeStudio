@@ -32,7 +32,7 @@ import {
   type TimelineSelectionChange,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
-import { refuseUnknownEffectAudioBindings } from "./effect-bindings.js";
+import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
 import { readRequestFile, requestFileInput } from "./editor-request-file.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -355,6 +355,7 @@ async function writeTimeline(
           ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
         refuseUnknownEffectAudioBindings(current, next, boundedBy, store.getBundle().artifacts);
+        refuseUnsupportedEffectRender(next, boundedBy, store.getBundle().artifacts);
       } else {
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);

@@ -408,6 +408,8 @@ function mediaSessionId(candidateId: string, revision: number): SessionId {
   return `sess_${body}` as SessionId;
 }
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
+import { runEffectExport } from "./productions/editor-effect-export.js";
+import type { EffectRasterHost } from "./media/node-effect-renderer.js";
 import { measureDurationSec, measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
   acceptTake,
@@ -989,6 +991,7 @@ export interface CoordinatorOptions {
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
+  effectRasterHost?: EffectRasterHost;
   /**
    * Measuring media on this machine (#253). Wired by the desktop host when it can resolve
    * ffprobe. Absent means nothing can be measured — a master track cannot be assigned and take
@@ -11989,7 +11992,9 @@ export class Coordinator {
             const attemptSuffix = requestedExportId ?? stamp;
             const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
             const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${attemptSuffix}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${attemptSuffix}`;
-            const handle = runExport(
+            const handle = plan.effectRender ? runEffectExport(store, plan, `${stem}.mp4`, runner, this.opts.effectRasterHost,
+              (percent) => emitProgress(handle.id, "running", percent, null, null),
+              sidecar === null ? undefined : sidecar(stem), requestedExportId) : runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               `${stem}.mp4`,

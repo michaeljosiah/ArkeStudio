@@ -17,6 +17,7 @@ import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { harnessTrace } from "./harness/trace.js";
 import { assembleHarness, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
+import { createNodeMediaHost } from "./media/node-media-host.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
@@ -142,6 +143,8 @@ const devOrigins = process.env["ARKE_DEV_ORIGIN"]
   ? [new URL(process.env["ARKE_DEV_ORIGIN"]).origin]
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
 const { coordinator, server } = createStudioHost({
+  ...createNodeMediaHost({ ffmpeg: process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe: process.env["ARKE_FFPROBE"] ?? "ffprobe",
+    slateFont: join(repoRoot, "apps/desktop/assets/Geist-Regular.ttf"), workerPath: join(repoRoot, ".dev/effect-raster-worker.cjs") }),
   transportAuth: { token: transportToken, allowedOrigins: devOrigins },
   provider,
   adapter,
