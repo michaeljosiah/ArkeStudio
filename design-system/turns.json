@@ -208,7 +208,10 @@
     "t209": 13,
     "t210": 6,
     "t211": 9,
-    "t212": 5
+    "t212": 5,
+    "t213": 8,
+    "t214": 8,
+    "t215": 11
   },
   "pending": {
     "t195": "dropped by commit 2701d470 (turn 194 slice 2); being restored by PR 1576. Remove this entry when it lands."
