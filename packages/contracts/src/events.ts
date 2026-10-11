@@ -19,6 +19,7 @@ import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
+import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
@@ -1891,6 +1892,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  z.object({ ...base, type: z.literal("editor-effect.analysis"), worldId: UlidSchema, productionId: SlugSchema,
+    analysis: EffectAnalysisProjectionSchema.nullable() }).strict(),
   /** First-run environment verification (SPEC-016 R-2, D4): checked once, reported plainly. */
   z
     .object({

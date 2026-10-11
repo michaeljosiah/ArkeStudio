@@ -9,11 +9,43 @@ import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { defaultEffectClip } from "../packages/contracts/src/editor-effects.ts";
 import { compositeRgba, renderEffectLayersRgba } from "../packages/contracts/src/editor-effect-raster.ts";
+import { EffectFeatureManifestSchema, effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial } from "../packages/contracts/src/editor-effect-analysis.ts";
+import { prepareEffectReactions } from "../packages/contracts/src/editor-effect-reaction.ts";
 
 // Real Chromium decoders + the production component + its actual module worker. These small
 // synthetic raster fixtures verify composition; they do not replace the real-world UI passes.
 // Run: node --import tsx scripts/smoke-editor-effects-preview.mjs
 const root = fileURLToPath(new URL("../", import.meta.url));
+const sha = value => createHash("sha256").update(value).digest("hex");
+function reactionFixture() {
+  const manifestsByKey = {}, manifestKeyByEffectId = {}, effects = [];
+  for (const [index, preset] of ["dust", "embers"].entries()) {
+    const binding = index === 0 ? { kind: "audio-track", trackId: "tr_song" } : { kind: "video-sound", clipId: "cl_video" };
+    const descriptor = { profileId: "audible-pcm-v1", binding, frameRate: 24, startFrame: 0, endFrame: 480,
+      selectedClipIds: [index === 0 ? "cl_song" : "cl_video"], placedWindows: [{ startSec: 0, endSec: 20 }], audibleWindows: [{ startSec: 0, endSec: 20 }],
+      contributions: [], sources: [], mix: { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 }, speech: [],
+      native: { profileId: "audible-pcm-v1", decoder: { versionConfigHash: sha("version"), executableHash: sha("decoder") },
+        canonical: { sampleRate: 48000, channels: 2, channelLayout: "stereo", sampleFormat: "dbl", limiterDelaySamples: 239,
+          limiter: { attackMs: 5, releaseMs: 50, level: false, asc: false, latency: false, levelIn: 1, levelOut: 1, ceiling: 0.9 } },
+        analysis: { sampleRate: 48000, channels: 2, sampleFormat: "f32le", monoPolicy: "duplicate-unity", resamplerProfile: "swr-v1" } } };
+    const signal = Array.from({ length: 480 }, (_, frame) => index === 0 ? Math.round((0.5 + 0.4 * Math.sin(frame / 17)) * 10000) / 10000 : frame % 43 < 17 ? 0.85 : 0.15);
+    const payload = { schemaVersion: 1, profileId: "audible-pcm-v1", descriptor, sourceFingerprint: sha(effectAudioSourceFingerprintMaterial(descriptor)), pcmHash: sha(`signal-${index}`),
+      features: { startFrame: 0, endFrame: 480, beat: signal.map((value, frame) => frame % 24 === 0 ? value : 0), bass: signal, energy: signal }, likelyBeats: [], silent: false };
+    const manifest = EffectFeatureManifestSchema.parse({ ...payload, manifestKey: sha(effectManifestFingerprintMaterial(payload)) });
+    const effect = defaultEffectClip({ id: `cl_reaction_${index}`, lineageId: `ef_reaction_${index}`, seed: 42 + index, startFrame: 48, durationFrames: 360, preset });
+    effect.simulationOriginFrame = -24; effect.audioInput = binding; effect.motion.speed = 0.1 + index * 0.1;
+    effect.appearance = { amount: 0.9, size: 0.65, opacity: 0.9, colour: index === 0 ? "#ff8040" : "#4080ff" };
+    effect.reaction = { ...effect.reaction, enabled: true, preset: "custom", strength: 0.9, beat: 0, bass: index, energy: 1 - index, property: "speed", limit: 0.7, smoothingFrames: 11 - index * 6 };
+    manifestsByKey[manifest.manifestKey] = manifest; manifestKeyByEffectId[effect.id] = manifest.manifestKey; effects.push(effect);
+  }
+  return { effects, sources: { manifestsByKey, manifestKeyByEffectId }, startFrame: 120, endFrame: 360 };
+}
+const reactive = reactionFixture();
+const prepared = prepareEffectReactions(reactive.effects, reactive.sources.manifestsByKey, reactive.sources.manifestKeyByEffectId, reactive);
+const reactivePixels = (frame, preparedMap = prepared) => {
+  const pixels = new Uint8ClampedArray(320 * 180 * 4); for (let at = 3; at < pixels.length; at += 4) pixels[at] = 255;
+  return compositeRgba(pixels, renderEffectLayersRgba(reactive.effects, frame, 24, 320, 180, preparedMap));
+};
 const directory = await mkdtemp(join(tmpdir(), "arke-effect-preview-"));
 for (const fps of [24, 30]) execFileSync(process.env.ARKE_FFMPEG ?? "ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=320x180:rate=${fps}:duration=2`, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "0", "-pix_fmt", "yuv420p", "-y", join(directory, `sample${fps}.mp4`)], { windowsHide: true });
 const labels = Buffer.alloc(32 * 32 * 4 * 30);
@@ -30,19 +62,33 @@ import { EditorPicturePreview } from "./screens/editor-picture-preview";
 const root = createRoot(document.getElementById("root"));
 const timeRef = { current: 5 };
 const urlFor = path => new URL(path, location.href).href;
-let projection, time = 5;
+let projection, time = 5, reactions;
+const reactive = ${JSON.stringify(reactive)};
 const layer = (clipId,path,order) => ({clipId,trackId:'tr_'+clipId,order,kind:'media',label:clipId,path,still:true,startFrame:0,endFrame:240,sourceInSec:0,fit:'contain',matte:'source-alpha'});
 const effect = preset => {const e=defaultEffectClip({id:'cl_fx',lineageId:'ef_fx',seed:42,startFrame:0,durationFrames:240,preset});e.appearance={amount:1,size:1,opacity:1,colour:'#ff0000'};return e;};
-function paint(){flushSync(()=>root.render(<EditorPicturePreview projection={projection} urlFor={urlFor} transport={{playing:false,time,timeRef,setPlaying(){},seek(){}}}/>));}
+function paint(){flushSync(()=>root.render(<EditorPicturePreview projection={projection} urlFor={urlFor} reactions={reactions} transport={{playing:false,time,timeRef,setPlaying(){},seek(){}}}/>));}
 window.preview={
  mount(preset='smoke',mode='matte'){
   time=timeRef.current=5;
+  reactions=undefined;
   const e=effect(preset);if(mode==='matte')e.target={kind:'visual-clip',clipId:'cl_middle'};if(mode.startsWith('video')||mode.startsWith('labels'))e.appearance.opacity=0;
   projection={rendererVersion:'software-rgba-v1',width:320,height:180,frameRate:24,startFrame:0,endFrame:240,issues:[],pictureLayers:mode==='matte'?[layer('cl_base','base.svg',0),layer('cl_middle','portrait.svg',1),layer('cl_top','top.svg',2)]:mode.startsWith('video')?[{...layer('cl_video','sample'+mode.slice(5)+'.mp4',0),still:false,sourceOutSec:0.5}]:[],effectLayers:[{trackId:'tr_fx',trackOrder:0,effect:e}]};
   if(mode.startsWith('labels'))projection.pictureLayers=[{...layer('cl_labels','labels30.mp4',0),still:false,sourceInSec:mode==='labels-in'?0.05:0.9,sourceOutSec:1}];
   paint();
  },
- seek(frame){time=timeRef.current=frame/24;paint();},
+ reactive(){reactions=reactive.sources;time=timeRef.current=5;projection={rendererVersion:'software-rgba-v1',width:320,height:180,frameRate:24,startFrame:reactive.startFrame,endFrame:reactive.endFrame,issues:[],pictureLayers:[],effectLayers:reactive.effects.map((effect,index)=>({trackId:'tr_reactive',trackOrder:index,effect}))};paint();},
+ seek(frame){time=timeRef.current=(frame-projection.startFrame)/24;paint();},
+ async epochs(){
+  const worker=new Worker(new URL('/effect-worker.js',location.href),{type:'module'});
+  const ask=message=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{cleanup();reject(new Error('Epoch worker timed out'));},10000);const cleanup=()=>{clearTimeout(timer);worker.removeEventListener('message',answer);worker.removeEventListener('error',failure);};const answer=event=>{cleanup();resolve(event.data);};const failure=event=>{cleanup();reject(new Error(event.message));};worker.addEventListener('message',answer);worker.addEventListener('error',failure);worker.postMessage(message,[]);});
+  try{const install={kind:'analysis',analysisEpoch:7,effects:reactive.effects,startFrame:reactive.startFrame,endFrame:reactive.endFrame,...reactive.sources};const installed=await ask(install);if(installed.error)throw new Error(installed.error);
+   const request={id:1,generation:4,absoluteFrame:240,frameRate:24,width:320,height:180,pictures:[],composition:reactive.effects,analysisEpoch:7};
+   const ready=await ask(request);if(ready.error)throw new Error(ready.error);
+   const replaced=await ask({...install,analysisEpoch:8,manifestsByKey:{},manifestKeyByEffectId:{}});if(replaced.error)throw new Error(replaced.error);
+   const stale=await ask({...request,id:2});const base=await ask({...request,id:3,analysisEpoch:8});if(base.error)throw new Error(base.error);
+   return {ready:Array.from(ready.pixels),base:Array.from(base.pixels),staleError:stale.error,staleEpoch:stale.analysisEpoch,readyEpoch:ready.analysisEpoch,baseEpoch:base.analysisEpoch};
+  }finally{worker.terminate();}
+ },
  pixels(){const c=document.querySelector('canvas');return [...c.getContext('2d').getImageData(0,0,c.width,c.height).data];},
  frame(){return document.querySelector('canvas')?.dataset.frame;},
  error(){return document.querySelector('[role=alert]')?.textContent;},
@@ -113,6 +159,24 @@ try {
     assert.deepEqual(Uint8ClampedArray.from(await js("window.preview.pixels()")), expected, `${preset}: seek race keeps latest frame`);
     records.push({ preset, frame: 120, sha256: createHash("sha256").update(pixels).digest("hex"), differingBytes: 0 });
   }
+  await js("window.preview.reactive()");
+  const reactionRecords = [];
+  for (const frame of [240, 241, 173, 240, 359]) {
+    await js(`window.preview.seek(${frame})`);
+    await until(() => js(`window.preview.frame()==='${frame}'`));
+    assert.equal(await js("window.preview.error()"), undefined);
+    const actual = Uint8ClampedArray.from(await js("window.preview.pixels()")), expected = reactivePixels(frame);
+    assert.deepEqual(actual, expected, `absolute frame ${frame}: two bound speed reactions match Node after random seeks`);
+    assert.notDeepEqual(expected, reactivePixels(frame, {}), "reaction fixture must differ from its base atmosphere");
+    reactionRecords.push({ frame, sha256: sha(actual), differingBytes: 0 });
+  }
+  const epochs = await js("window.preview.epochs()");
+  assert.deepEqual(Uint8ClampedArray.from(epochs.ready), reactivePixels(240));
+  assert.deepEqual(Uint8ClampedArray.from(epochs.base), reactivePixels(240, {}));
+  assert.match(epochs.staleError, /obsolete analysis/);
+  assert.equal(epochs.readyEpoch, 7); assert.equal(epochs.staleEpoch, 7); assert.equal(epochs.baseEpoch, 8);
+  const reaction = { startFrame: reactive.startFrame, endFrame: reactive.endFrame, property: "speed", sources: Object.values(reactive.sources.manifestsByKey).map(row => ({ binding: row.descriptor.binding, manifestKey: row.manifestKey })),
+    records: reactionRecords, staleEpochRejected: true, baseEpoch: epochs.baseEpoch };
   for (const sourceRate of [24, 30]) {
   await js(`window.preview.mount('smoke','video${sourceRate}')`);
   try { assert.equal(await until(() => js("window.preview.frame() || window.preview.error()")), "120"); }
@@ -153,10 +217,10 @@ try {
   }
   const screenshot = await cdp("Page.captureScreenshot", { format: "png" });
   await writeFile(join(directory, "preview.png"), Buffer.from(screenshot.data, "base64"));
-  await writeFile(join(directory, "parity.json"), JSON.stringify({ platform: process.platform, browser: await cdp("Browser.getVersion"), width: 320, height: 180, frameRate: 24, records, sourceClock }, null, 2));
+  await writeFile(join(directory, "parity.json"), JSON.stringify({ platform: process.platform, browser: await cdp("Browser.getVersion"), width: 320, height: 180, frameRate: 24, records, reaction, sourceClock }, null, 2));
   if (process.env.ARKE_EFFECT_EVIDENCE_DIR) {
     await mkdir(process.env.ARKE_EFFECT_EVIDENCE_DIR, { recursive: true });
     for (const name of ["parity.json", "preview.png"]) await copyFile(join(directory, name), join(process.env.ARKE_EFFECT_EVIDENCE_DIR, name));
   }
-  console.log(JSON.stringify({ directory, checks: "source-alpha, contain, full stack, occlusion, all six presets, seek races, adjacent video frames, source-end hold", parity: "zero differing RGBA bytes" }));
+  console.log(JSON.stringify({ directory, checks: "source-alpha, contain, full stack, occlusion, all six presets, two bound speed reactions, absolute-frame seek races, stale analysis epoch, adjacent video frames, source-end hold", parity: "zero differing RGBA bytes" }));
 } finally { socket?.close(); child.kill(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }

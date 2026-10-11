@@ -148,6 +148,13 @@ jobs:
           ARKE_EFFECT_NATIVE_REQUIRED: 1
           ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/native
         run: node --import tsx --test --test-timeout=180000 packages/coordinator/test/media/editor-effect-native.test.ts
+      - name: Measure prepared audio reaction
+        run: node --expose-gc --import tsx scripts/benchmark-editor-effect-analysis.ts --output "${{ runner.temp }}/arke-editor-effects/analysis-benchmark.json" --expect-fixtures-sha256 fc4beac260caa99bf1763043cb2d620e191790c33c00b9ed347805bf57e654d1
+      - name: Verify canonical audible analysis
+        env:
+          ARKE_EFFECT_NATIVE_REQUIRED: 1
+          ARKE_EFFECT_EVIDENCE_DIR: ${{ runner.temp }}/arke-editor-effects/audio
+        run: node --import tsx --test --test-timeout=180000 packages/coordinator/test/media/editor-effect-audio-native.test.ts packages/coordinator/test/productions/editor-effect-analysis.test.ts
       - name: Verify browser effect pixels
         if: runner.os == 'Linux'
         env:

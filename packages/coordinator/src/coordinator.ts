@@ -409,6 +409,8 @@ function mediaSessionId(candidateId: string, revision: number): SessionId {
 }
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
+import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
+import type { EffectAudioAnalysisHost } from "./media/node-effect-audio.js";
 import type { EffectRasterHost } from "./media/node-effect-renderer.js";
 import { measureDurationSec, measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
@@ -992,6 +994,7 @@ export interface CoordinatorOptions {
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
   effectRasterHost?: EffectRasterHost;
+  effectAudioAnalysisHost?: EffectAudioAnalysisHost;
   /**
    * Measuring media on this machine (#253). Wired by the desktop host when it can resolve
    * ffprobe. Absent means nothing can be measured — a master track cannot be assigned and take
@@ -3278,6 +3281,7 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly effectAnalysis: EditorEffectAnalysisService;
   /**
    * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
    * manifest every consumer reads is the shipped one with these stamped on (`servedManifest`),
@@ -3288,6 +3292,9 @@ export class Coordinator {
   private plannedManifest: { base: ModelManifest; plans: ProviderPlans; manifest: ModelManifest } | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
+      at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
+    }));
     // `opts.manifest` is read in a hundred places and handed to services as they are built; a
     // getter makes each of them read the manifest as the author's plans price it, now, rather
     // than as it was when they were built — so a plan switched mid-session reaches every quote.
@@ -3816,6 +3823,7 @@ export class Coordinator {
           return this.opts.provider.serveGenesisMedia(genesis[1]!, genesis[2]!);
         }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
+        if (match?.[2]?.startsWith(".cache/editor-effects/analysis/")) return this.effectAnalysis.serve(this.opts.provider.openStore?.(), match[1]!, match[2]);
         if (!match || !this.opts.provider.serveMedia) return null;
         const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
         if (!file) return null;
@@ -4126,7 +4134,7 @@ export class Coordinator {
     // stored would be stale by the next rescan (issue 239). Allocation-free when nothing is
     // running, which is nearly always.
     const authoringRuns = this.authoring?.liveRuns() ?? [];
-    return authoringRuns.length === 0 ? state : { ...state, authoringRuns };
+    return { ...state, ...(authoringRuns.length ? { authoringRuns } : {}), effectAnalyses: this.effectAnalysis.project(this.opts.provider.openStore?.()) };
   }
 
   /**
@@ -4228,6 +4236,7 @@ export class Coordinator {
     }
     if (
       parsed.type !== "health.changed" &&
+      parsed.type !== "editor-effect.analysis" &&
       parsed.type !== "appearance.changed" &&
       // The plans live in app settings; the manifest it carries is derived, not a domain record.
       parsed.type !== "provider-plans.changed" &&
@@ -11747,6 +11756,12 @@ export class Coordinator {
         }
         return;
       }
+      case "editor-effect-analysis": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        this.trackBackground(this.effectAnalysis.request(store, msg.productionId, msg.effectId, msg.action, msg.expectedSourceFingerprint));
+        return;
+      }
       case "timeline-move-picture":
       case "timeline-command":
       case "timeline-history": {
@@ -11992,9 +12007,10 @@ export class Coordinator {
             const attemptSuffix = requestedExportId ?? stamp;
             const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
             const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${attemptSuffix}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${attemptSuffix}`;
+            const effectAnalysis = plan.effectRender ? await this.effectAnalysis.readyForExport(store, msg.productionId, plan.effectRender, plan.revision) : undefined;
             const handle = plan.effectRender ? runEffectExport(store, plan, `${stem}.mp4`, runner, this.opts.effectRasterHost,
               (percent) => emitProgress(handle.id, "running", percent, null, null),
-              sidecar === null ? undefined : sidecar(stem), requestedExportId) : runExport(
+              sidecar === null ? undefined : sidecar(stem), requestedExportId, effectAnalysis) : runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               `${stem}.mp4`,
@@ -21291,6 +21307,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await this.effectAnalysis.stop();
       const setupStopped = this.setup?.dispose();
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();

@@ -64,8 +64,22 @@ browser decoding and bounded worker presentation. Coordinator `productions/edito
 freezes file identities, prepares alpha intermediates, and revalidates ownership before publication;
 `media/node-effect-renderer.ts` supplies its cancellable native worker/FFmpeg host. Desktop, dev
 and the standalone Node host inject the same media ports. `cut.ts` builds source-atop scoped
-composition before upper pictures, composition effects and subtitle burn-in. Audio analysis,
-manual Inspector authoring and reviewed Arke cards are separate implementation slices.
+composition before upper pictures, composition effects and subtitle burn-in.
+
+Audio reaction uses contracts `editor-effect-audio-source.ts` (independent placed sound and
+freshness), `editor-effect-analysis.ts` (bounded versioned manifests), `editor-effect-audio-features.ts`
+(streaming local DSP), and `editor-effect-reaction.ts` (published responses, cue corrections and
+prepared random-access modulation). Coordinator `media/node-effect-audio.ts` observes the canonical
+FFmpeg mix and reconstructs a selected contribution under that mix's limiter; it never plays sound.
+`media/ffmpeg-graph-option.ts` and `ffmpeg-graph-probe.ts` keep analysis/export graphs in files
+using the installed encoder's supported syntax, including FFmpeg 6 and 7–9.
+`productions/editor-effect-analysis.ts` owns cancellable derived jobs, readiness and export fences;
+`editor-effect-analysis-cache.ts` confines content-addressed manifests and their bounded disk cache.
+Only the authenticated exact manifest namespace can serve these JSON files. Client
+`lib/editor-effect-analysis.ts` bounds and validates manifest loading; `screens/editor-effect-analysis.ts`
+keeps asynchronous readiness separate from the timeline and transport. Worker installations are
+coalesced, with one prepared response per effect and no feature arrays in per-frame messages.
+Manual Inspector authoring and reviewed Arke cards are subsequent implementation slices.
 
 The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
 transport and delegates initialization/draining to the application. Desktop and dev use

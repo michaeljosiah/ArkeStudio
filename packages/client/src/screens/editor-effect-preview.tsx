@@ -4,11 +4,12 @@ import { cx } from "../components/ui.js";
 import { PauseSolid, Play } from "../components/icons.js";
 import { clock } from "../components/player.js";
 import { mediaUrl } from "../lib/media.js";
-import { EditorPicturePreview } from "./editor-picture-preview.js";
+import { EditorPicturePreview, previewProductionFrame } from "./editor-picture-preview.js";
+import { useEffectAnalyses, type EffectAnalysisContext, type EffectPreviewReadiness } from "./editor-effect-analysis.js";
 import type { Transport } from "./editor-transport.js";
 
 /** Effects extend the existing viewer; its soundtrack continues to belong to usePlanAudio. */
-export function EffectCutPreview({ slug, plan, projection, transport, restartToken, totalSec, compact = false }: {
+export function EffectCutPreview({ slug, plan, projection, transport, restartToken, totalSec, compact = false, analysisContext }: {
   slug: string | undefined;
   plan: RenderPlan;
   projection: EffectRenderProjection;
@@ -16,7 +17,9 @@ export function EffectCutPreview({ slug, plan, projection, transport, restartTok
   restartToken: number;
   totalSec: number;
   compact?: boolean;
+  analysisContext?: EffectAnalysisContext;
 }) {
+  const analysis = useEffectAnalyses(analysisContext, plan, previewProductionFrame(projection, transport.time));
   const [resolution, setResolution] = useState<1 | 0.5>(1);
   const [cue, setCue] = useState(() => cueAtSec(plan, transport.timeRef.current));
   const live = useRef({ plan, transport });
@@ -38,17 +41,23 @@ export function EffectCutPreview({ slug, plan, projection, transport, restartTok
     return () => cancelAnimationFrame(animation);
   }, [plan, transport.playing, transport.time]);
   const style = plan.subtitles?.style;
-  const reactionPending = projection.issues.some(issue => issue.kind === "analysis-required");
   const otherIssues = projection.issues.filter(issue => issue.kind !== "analysis-required");
+  const reacting = analysis.readiness.filter(row => row.state.status !== "off");
   return <div className="fy-cutviewer fy-cutviewer--effects">
-    <EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} resolution={resolution}>
+    <EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} resolution={resolution} reactions={analysis.sources}>
       {cue && <span className={cx("fy-cutviewer__cue", style?.background === "box" && "fy-cutviewer__cue--box")} data-cue={cue.id} aria-live="off"
         style={style ? { color: style.color, fontSize: `${(style.relativeSize * 100).toFixed(2)}cqh`, bottom: `${(style.bottomMargin * 100).toFixed(2)}%`,
           textShadow: style.background === "outline" ? "0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950)" : "none" } : undefined}>{cue.text}</span>}
     </EditorPicturePreview>
     <label className="fy-effectpreview__quality">Preview resolution <select aria-label="Preview resolution" value={resolution} onChange={event => setResolution(event.target.value === "0.5" ? 0.5 : 1)}><option value="1">100%</option><option value="0.5">50%</option></select></label>
-    {(reactionPending || otherIssues.length > 0) && <span className="fy-effectpreview__notice" role="status">
-      {reactionPending && "Base atmosphere preview · Audio reaction needs analysis. Turn reaction Off to export."}
+    {(reacting.length > 0 || otherIssues.length > 0) && <span className="fy-effectpreview__notice" role="status">
+      {reacting.map(row => <span key={row.effectId} data-effect-analysis={row.state.status}>
+        {row.preview !== "ready" && "Base atmosphere · "}{effectAnalysisLabel(row)}
+        {row.reason && <> · {row.reason}</>}
+        {row.state.status === "ready" && row.state.cueConflicts.map(conflict => <span key={conflict.cueId}> · Cue {conflict.cueId}: {conflict.reason}</span>)}
+        {row.retry && <button type="button" onClick={row.retry}>Retry reaction</button>}
+        {row.cancel && <button type="button" onClick={row.cancel}>Cancel analysis</button>}
+      </span>)}
       {otherIssues.map(issue => <span key={issue.effectId}>{issue.reason}</span>)}
     </span>}
     <button type="button" className="fy-playbtn" aria-label={transport.playing ? "Pause" : "Play"} onClick={() => {
@@ -57,4 +66,18 @@ export function EffectCutPreview({ slug, plan, projection, transport, restartTok
     }}>{transport.playing ? <PauseSolid size={22} /> : <Play size={22} />}</button>
     <span className="fy-viewer__tag">{clock(transport.time)}{!compact && <> / {clock(totalSec)}</>}</span>
   </div>;
+}
+
+export function effectAnalysisLabel(row: Pick<EffectPreviewReadiness, "state" | "preview">): string {
+  const state = row.state;
+  switch (state.status) {
+    case "off": return "Reaction Off";
+    case "no-source": return "No audio source · Choose an audio source";
+    case "source-changed": return "Source changed · Analysis required";
+    case "missing-source": return `Missing audio source · ${state.reason}`;
+    case "analysing": return `Analysing audio${state.progress === undefined ? "" : ` · ${Math.round(state.progress * 100)}%`}`;
+    case "failed": return `Analysis failed · ${state.reason}`;
+    case "ready": return row.preview === "loading" ? "Loading reaction preview" : row.preview === "failed" ? "Reaction preview unavailable"
+      : state.silent ? "Reaction ready · Source currently silent" : "Reaction ready";
+  }
 }

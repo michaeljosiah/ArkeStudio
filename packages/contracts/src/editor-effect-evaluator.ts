@@ -1,13 +1,6 @@
-import { effectCurveAt, effectVisibilityAt, type EffectClip } from "./editor-effects.js";
+import { effectVisibilityAt, type EffectClip } from "./editor-effects.js";
 import { EDITOR_EFFECT_RENDERER_VERSION, EFFECT_RENDER_PROFILE, effectPresetDefinition, type EffectPresetDefinition } from "./editor-effect-catalogue.js";
-
-/** Frozen normalized features on the production frame grid; missing frames are silence. */
-export interface EffectFrameFeatures {
-  startFrame: number;
-  beat: readonly number[];
-  bass: readonly number[];
-  energy: readonly number[];
-}
+import { preparedEffectExtraSpeedSeconds, preparedEffectModulationAt, type PreparedEffectReaction } from "./editor-effect-reaction.js";
 
 export interface EffectParticle {
   /** Stable for this seed and birth slot; seeks never mint a fresh identity. */
@@ -39,7 +32,7 @@ export interface EvaluateEffectFrameInput {
   absoluteFrame: number;
   frameRate: number;
   targetAspectRatio: number;
-  features?: EffectFrameFeatures;
+  preparedReaction?: PreparedEffectReaction;
 }
 
 const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.max(low, value));
@@ -62,32 +55,6 @@ function sineDegrees(degrees: number): number {
   return sign * 4 * product / (40500 - product);
 }
 
-function featureAt(values: readonly number[], index: number): number {
-  if (index < 0 || index >= values.length) return 0;
-  const value = values[index]!;
-  if (!Number.isFinite(value) || value < 0 || value > 1) throw new RangeError("Effect features must be finite normalized values");
-  return value;
-}
-
-function reactionInput(effect: EffectClip, features: EffectFrameFeatures, absoluteFrame: number): number {
-  const index = absoluteFrame - features.startFrame;
-  const activeCues = effect.cueOverrides.filter(cue => absoluteFrame >= cue.frame && absoluteFrame < cue.frame + cue.durationFrames);
-  let beat = activeCues.some(cue => cue.kind === "suppress") ? 0 : featureAt(features.beat, index);
-  for (const cue of activeCues) {
-    if (cue.kind === "accent") beat = Math.max(beat, cue.strength * (1 - (absoluteFrame - cue.frame) / cue.durationFrames));
-  }
-  return clamp(effect.reaction.beat * beat + effect.reaction.bass * featureAt(features.bass, index) + effect.reaction.energy * featureAt(features.energy, index));
-}
-
-export function effectModulationAt(effect: EffectClip, absoluteFrame: number, features?: EffectFrameFeatures): number {
-  if (!effect.reaction.enabled || !features || effect.reaction.strength === 0) return 0;
-  if (!Number.isSafeInteger(features.startFrame) || features.beat.length !== features.bass.length || features.beat.length !== features.energy.length) throw new RangeError("Effect feature arrays must share one whole-frame window");
-  const count = Math.max(1, effect.reaction.smoothingFrames);
-  let input = 0;
-  for (let index = 0; index < count; index++) input += reactionInput(effect, features, absoluteFrame - index);
-  return effect.reaction.limit * effect.reaction.strength * effectCurveAt(effect.reactionCurve, absoluteFrame - effect.simulationOriginFrame) * (input / count);
-}
-
 function colourBytes(effect: EffectClip, tint: readonly number[], brightness: number): readonly [number, number, number] {
   const colour = effect.appearance.colour;
   return [0, 1, 2].map(index => Math.round(clamp(Number.parseInt(colour.slice(1 + index * 2, 3 + index * 2), 16) * tint[index]! * brightness, 0, 255))) as [number, number, number];
@@ -99,20 +66,23 @@ function colourBytes(effect: EffectClip, tint: readonly number[], brightness: nu
  * A fixed pre-roll supplies continuous atmosphere at the first authored frame (SPEC-053 R-18).
  */
 export function evaluateEffectFrame(input: EvaluateEffectFrameInput): EffectFrame {
-  const { effect, absoluteFrame, frameRate, targetAspectRatio, features } = input;
+  const { effect, absoluteFrame, frameRate, targetAspectRatio } = input;
+  const prepared = effect.reaction.enabled ? input.preparedReaction : undefined;
   if (!Number.isSafeInteger(absoluteFrame) || absoluteFrame < 0 || ![24, 25, 30].includes(frameRate)) throw new RangeError("Effect evaluation requires a whole production frame at 24, 25 or 30 fps");
   if (!Number.isFinite(targetAspectRatio) || targetAspectRatio > EFFECT_RENDER_PROFILE.maxWidth || targetAspectRatio < 1 / EFFECT_RENDER_PROFILE.maxHeight) throw new RangeError("Effect target aspect ratio is outside the supported range");
   const preset = effectPresetDefinition(effect.preset);
   const frame: EffectFrame = { rendererVersion: EDITOR_EFFECT_RENDERER_VERSION, effectId: effect.id, absoluteFrame, targetAspectRatio,
-    reactionReady: !effect.reaction.enabled || features !== undefined, particles: [] };
+    reactionReady: !effect.reaction.enabled || prepared !== undefined, particles: [] };
   const visibility = effectVisibilityAt(effect, absoluteFrame);
   if (visibility === 0) return frame;
+  if (prepared && (prepared.effectId !== effect.id || prepared.frameRate !== frameRate || absoluteFrame < prepared.evaluationStartFrame || absoluteFrame >= prepared.evaluationEndFrame)) throw new RangeError("Prepared reaction does not cover this effect and frame");
   const phaseSec = (absoluteFrame - effect.simulationOriginFrame) / frameRate;
   const lastBirth = Math.floor(phaseSec * preset.birthsPerSecond);
   const firstBirth = Math.ceil((phaseSec - preset.maximumLifetimeSec) * preset.birthsPerSecond);
   if (!Number.isSafeInteger(firstBirth) || !Number.isSafeInteger(lastBirth) || lastBirth - firstBirth + 1 > EFFECT_RENDER_PROFILE.maxCandidateBirths) throw new RangeError("Effect birth window exceeds the supported frame budget");
-  const modulation = effectModulationAt(effect, absoluteFrame, features);
-  const amountAt = (at: number): number => clamp(effect.appearance.amount + (effect.reaction.property === "emission" ? effectModulationAt(effect, at, features) : 0));
+  const modulationAt = (at: number) => prepared ? preparedEffectModulationAt(prepared, at) : 0;
+  const modulation = modulationAt(absoluteFrame);
+  const amountAt = (at: number): number => clamp(effect.appearance.amount + (effect.reaction.property === "emission" ? modulationAt(at) : 0));
   const size = clamp(effect.appearance.size + (effect.reaction.property === "size" ? modulation : 0));
   const speed = clamp(effect.motion.speed + (effect.reaction.property === "speed" ? modulation : 0));
   const brightness = 1 + (effect.reaction.property === "brightness" ? modulation : 0);
@@ -132,8 +102,12 @@ export function evaluateEffectFrame(input: EvaluateEffectFrameInput): EffectFram
     const age = ageSec / lifetime;
     const area = effect.motion.area;
     const originX = area.x + random(2) * area.width, originY = area.y + random(3) * area.height;
-    const travel = preset.speedPerSecond * 2 * speed * ageSec * (0.7 + random(4) * 0.6);
-    const drift = preset.drift * speed * 2 * (sineDegrees(random(5) * 360 + ageSec * 60) - sineDegrees(random(5) * 360));
+    const speedReaction = prepared && effect.reaction.property === "speed";
+    const baseSpeed = speedReaction ? effect.motion.speed : speed;
+    const extraSeconds = speedReaction ? preparedEffectExtraSpeedSeconds(prepared, effect.simulationOriginFrame + birthSec * frameRate, absoluteFrame) : 0;
+    const travel = preset.speedPerSecond * 2 * baseSpeed * ageSec * (0.7 + random(4) * 0.6) + preset.speedPerSecond * 2 * extraSeconds * (0.7 + random(4) * 0.6);
+    const drift = preset.drift * baseSpeed * 2 * (sineDegrees(random(5) * 360 + ageSec * 60) - sineDegrees(random(5) * 360)) +
+      preset.drift * 2 * (sineDegrees(random(5) * 360 + extraSeconds * 60) - sineDegrees(random(5) * 360));
     const x = originX + (dx * travel - dy * drift) * xUnit;
     const y = originY + (dy * travel + dx * drift) * yUnit;
     const baseRadius = preset.minimumRadius + random(6) * (preset.maximumRadius - preset.minimumRadius);

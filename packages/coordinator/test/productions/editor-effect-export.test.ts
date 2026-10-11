@@ -20,7 +20,30 @@ async function world() { const store = await WorldStore.open(await makeTempWorld
   await writeFile(join(store.dir, "artifacts/effect-picture.png"), "source-v1"); return store; }
 const host: EffectRasterHost = { probePicture: async () => ({ width: 128, height: 64 }),
   renderAlpha: async request => { assert.equal(request.startFrame, 0); await writeFile(request.output, "alpha", { flag: "wx" }); } };
-const runner: FfmpegRunner = { slateFont: "font.ttf", run: async args => { await writeFile(args.at(-1)!, "video"); } };
+const runner: FfmpegRunner = { slateFont: "font.ttf", graphFileOption: async () => "-/filter_complex", run: async args => { await writeFile(args.at(-1)!, "video"); } };
+
+test("effect export uses the host's graph-file option and refuses unknown support before rasterizing", async () => {
+  const store = await world();
+  for (const option of ["-/filter_complex", "-filter_complex_script"] as const) {
+    let checked = false;
+    const selected: FfmpegRunner = { ...runner, graphFileOption: async () => option, run: async (args, progress, signal) => {
+      const at = args.indexOf(option);
+      assert.ok(at >= 0); assert.ok(!args.includes("-filter_complex"));
+      assert.match(await readFile(args[at + 1]!, "utf8"), /overlay=/);
+      checked = true; await runner.run(args, progress, signal);
+    } };
+    const result = await runEffectExport(store, plan(), "graph-option.mp4", selected, host, () => {}).done;
+    assert.equal(result.status, "done", result.status === "failed" ? result.error : undefined); assert.ok(checked);
+  }
+  let rasterized = false;
+  const missing: FfmpegRunner = { slateFont: runner.slateFont, run: runner.run };
+  const refused = await runEffectExport(store, plan(), "unsupported.mp4", missing,
+    { ...host, renderAlpha: async () => { rasterized = true; } }, () => {}).done;
+  assert.equal(refused.status, "failed");
+  if (refused.status === "failed") assert.match(refused.error, /graph-file support/);
+  assert.equal(rasterized, false);
+  assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
+});
 
 test("effect export freezes plan, measures source geometry, publishes under ownership and removes derived files", async () => {
   const store = await world(), authored = plan();
@@ -75,4 +98,29 @@ test("a redirected cache is refused without deleting the other directory's match
   const result = await runEffectExport(store, plan(), "refused.mp4", runner, host, () => {}, undefined, id).done;
   assert.equal(result.status, "failed");
   assert.equal(await readFile(marker, "utf8"), "belongs-to-another-job");
+});
+
+
+test("ready reaction freezes its manifest and fences muted descriptor sources omitted from the export sound graph", async () => {
+  const { analysisFixture } = await import("../media/effect-analysis-fixture.js");
+  const { hashMediaFile } = await import("../../src/media/node-media-host.js");
+  const store = await world(), authored = plan(), source = "artifacts/muted-source.wav";
+  await writeFile(join(store.dir, source), "audio-v1");
+  const manifest = analysisFixture({ sources: [{ path: source, sha256: await hashMediaFile(join(store.dir, source), new AbortController().signal) }] });
+  authored.effectRender!.effectLayers[0]!.effect = { ...effect, audioInput: { kind: "composition-mix" }, reaction: { ...effect.reaction, enabled: true } };
+  let checked = false;
+  const reactive: EffectRasterHost = { ...host, renderAlpha: async request => {
+    assert.equal(request.manifestsByKey?.[manifest.manifestKey]?.features.energy[0], .7);
+    checked = true; await host.renderAlpha(request);
+  } };
+  const job = runEffectExport(store, authored, "ready.mp4", runner, reactive, () => {}, undefined, undefined, new Map([[effect.id, manifest]]));
+  manifest.features.energy[0] = 0;
+  assert.equal((await job.done).status, "done"); assert.ok(checked);
+  const ready = analysisFixture({ sources: [{ path: source, sha256: await hashMediaFile(join(store.dir, source), new AbortController().signal) }] });
+  const changed: FfmpegRunner = { ...runner, run: async args => { await runner.run(args, () => {}, new AbortController().signal); await writeFile(join(store.dir, source), "audio-v2"); } };
+  const refused = await runEffectExport(store, authored, "changed-audio.mp4", changed, host, () => {}, undefined, undefined, new Map([[effect.id, ready]])).done;
+  assert.equal(refused.status, "failed"); if (refused.status === "failed") assert.match(refused.error, /source changed/);
+  const stale = await runEffectExport(store, authored, "stale-audio.mp4", runner, host, () => {}, undefined, undefined, new Map([[effect.id, ready]])).done;
+  assert.equal(stale.status, "failed"); if (stale.status === "failed") assert.match(stale.error, /source changed before export/);
+  assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
 });

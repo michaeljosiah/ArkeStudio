@@ -1,4 +1,4 @@
-import { buildRenderPlan, defaultExportPreset, resolveProductionArtifact, TimelineOperationRefused, type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TimelineClip } from "@arke-studio/contracts";
+import { AUDIO_TRACK_KINDS, buildRenderPlan, defaultExportPreset, resolveProductionArtifact, TimelineOperationRefused, type ArtifactSidecar, type ProductionBundle, type ProductionTimeline, type TimelineClip } from "@arke-studio/contracts";
 
 /** The same finite renderer profile fences direct authoring, prepared review and delivery. */
 export function refuseUnsupportedEffectRender(timeline: ProductionTimeline, production: ProductionBundle, artifacts: readonly ArtifactSidecar[]): void {
@@ -47,7 +47,7 @@ export function refuseUnknownEffectAudioBindings(before: ProductionTimeline, aft
     if (input.kind === "composition-mix") continue;
     if (input.kind === "audio-track") {
       const track = after.tracks.find(value => value.id === input.trackId);
-      if (!track) throw new TimelineOperationRefused(`Audio track ${input.trackId} is not on this timeline`);
+      if (!track || !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`Audio track ${input.trackId} is not on this timeline`);
       for (const clip of track.clips) requireSound(clip, false);
     } else {
       const clip = placed.get(input.clipId);

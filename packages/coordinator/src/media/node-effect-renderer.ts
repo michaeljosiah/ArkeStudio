@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { lstat, open, realpath, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Worker } from "node:worker_threads";
-import { assertEffectRasterSize, EFFECT_RENDER_PROFILE, type EffectClip } from "@arke-studio/contracts";
+import { assertEffectRasterSize, EFFECT_RENDER_PROFILE, prepareEffectReactions, type EffectFeatureManifest, type EffectClip } from "@arke-studio/contracts";
 import type { MediaProcessRunner } from "../audio/media-tools.js";
 
 export const EFFECT_INTERMEDIATE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
@@ -18,6 +18,8 @@ export interface EffectAlphaRequest {
   signal: AbortSignal;
   maxBytes?: number;
   onProgress?: (frame: number) => void;
+  manifestsByKey?: Readonly<Record<string, EffectFeatureManifest>>;
+  manifestKeyByEffectId?: Readonly<Record<string, string>>;
 }
 export interface EffectRasterHost {
   renderAlpha(request: EffectAlphaRequest): Promise<void>;
@@ -47,7 +49,12 @@ export function createNodeEffectRasterHost(options: { ffmpeg: string; workerPath
       assertEffectRasterSize(width, height);
       if (![frameCount, request.startFrame].every(Number.isSafeInteger) || frameCount < 1 || frameCount > frameRate * EFFECT_RENDER_PROFILE.maxDurationSeconds || request.startFrame < 0 ||
         ![24, 25, 30].includes(frameRate)) throw new Error("effect render exceeds the supported frame profile");
-      if (request.effects.some(effect => effect.reaction.enabled)) throw new Error("enabled audio reaction needs a ready analysis before export");
+      const prepared = prepareEffectReactions(request.effects, request.manifestsByKey ?? {}, request.manifestKeyByEffectId ?? {}, { startFrame: request.startFrame, endFrame: request.startFrame + frameCount });
+      for (const effect of request.effects) if (effect.reaction.enabled && effect.startFrame < request.startFrame + frameCount && effect.startFrame + effect.durationFrames > request.startFrame) {
+        const response = prepared[effect.id], manifest = request.manifestsByKey?.[request.manifestKeyByEffectId?.[effect.id] ?? ""];
+        if (!response || !manifest || response.frameRate !== frameRate || manifest.features.startFrame > Math.max(effect.startFrame, request.startFrame) ||
+          manifest.features.endFrame < Math.min(effect.startFrame + effect.durationFrames, request.startFrame + frameCount)) throw new Error("enabled audio reaction needs a ready analysis covering its production clock before export");
+      }
       const maxBytes = Math.min(EFFECT_INTERMEDIATE_LIMIT_BYTES, request.maxBytes ?? EFFECT_INTERMEDIATE_LIMIT_BYTES);
       if (!Number.isSafeInteger(maxBytes) || maxBytes < 1024) throw new Error("Effect intermediate disk budget is exhausted");
       const parent = await realpath(dirname(output));
@@ -59,7 +66,7 @@ export function createNodeEffectRasterHost(options: { ffmpeg: string; workerPath
         } catch { /* A removed or redirected output is no longer this renderer's file. */ }
       };
       let worker: Worker;
-      try { worker = new Worker(options.workerPath, { workerData: { effects: request.effects, width, height, frameRate } }); }
+      try { worker = new Worker(options.workerPath, { workerData: { effects: request.effects, width, height, frameRate, prepared } }); }
       catch (error) { await removeReserved(); throw error; }
       let child: ReturnType<typeof spawn> & { stdin: import("node:stream").Writable; stderr: import("node:stream").Readable };
       try { child = spawn(options.ffmpeg, ["-hide_banner", "-loglevel", "error", "-nostdin", "-y",

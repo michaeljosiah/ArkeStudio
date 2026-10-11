@@ -12,6 +12,8 @@ import { toExtendedLength } from "../world/paths.js";
 export interface FfmpegRunner {
   /** Host path to the redistributed font every generated slate uses. */
   slateFont: string;
+  /** Resolve the installed encoder's supported graph-file option before preparing effects. */
+  graphFileOption?(signal: AbortSignal): Promise<"-/filter_complex" | "-filter_complex_script">;
   /**
    * Run one encode; resolve on success, reject on failure, honour the signal for cancel.
    * `onProgress` has only ever had ffmpeg's elapsed seconds, capped at 99; `onSeconds`, where a

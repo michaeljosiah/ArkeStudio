@@ -125,6 +125,25 @@ the emitted worker under the built page's CSP and Electron sandbox; `ARKE_EFFECT
 optionally retains its report. This complements `node apps/desktop/scripts/smoke-editor-import.mjs`
 for the private transport/native file bridge.
 
+Editor effects T-3 adds contracts `test/editor-effect-analysis.test.ts`, coordinator
+`test/productions/editor-effect-analysis.test.ts`, `editor-effect-analysis-cache.test.ts`,
+`test/editor-effect-analysis-transport.test.ts` and `test/media/editor-effect-audio-native.test.ts`,
+plus client `test/editor-effect-analysis.test.ts` and `test/editor-effect-readiness.test.tsx`.
+The native tests use real FFmpeg PCM: ordered mixed sample rates/layouts, shared limiting,
+ducking, source windows, muted silence, cancellation and file/executable replacement. The
+`test/media/ffmpeg-graph-probe.test.ts` checks host capability refusals; the native audio fixture
+also runs a graph larger than Windows' argument limit from a file with a spaced path. Exercise
+both FFmpeg 6's legacy graph option and FFmpeg 7–9's option-file syntax in platform checks. Set
+`ARKE_EFFECT_NATIVE_REQUIRED=1` to require FFmpeg, and `ARKE_EFFECT_EVIDENCE_DIR` to retain the
+native report. `node --expose-gc --import tsx scripts/benchmark-editor-effect-analysis.ts
+--output <report.json>` measures streaming DSP, bounded cue/curve preparation, reactive seeking
+and the eight-layer Smoke profile; its `--expect-fixtures-sha256` option gates cross-platform
+feature/pixel identity. CI retains this report alongside native and browser evidence.
+Analysis must leave timeline bytes, revision, Undo and production object identity unchanged.
+Ready metadata and fetched manifests are separate; test stale arrivals and same-fingerprint file
+replacement as well as authored edits. Changes to the manifest route also require the actual
+sandboxed Electron file-page transport smoke and `smoke:main`.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

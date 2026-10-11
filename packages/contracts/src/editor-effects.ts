@@ -88,15 +88,19 @@ export type EffectPatch = z.infer<typeof EffectPatchSchema>;
 export function effectCurveAt(curve: EffectCurve, offsetFrames: number): number {
   if (!curve.points.length) return 1;
   if (offsetFrames <= curve.points[0]!.offsetFrames) return curve.points[0]!.value;
-  for (let index = 1; index < curve.points.length; index++) {
-    const left = curve.points[index - 1]!, right = curve.points[index]!;
-    if (offsetFrames >= right.offsetFrames) continue;
-    let t = (offsetFrames - left.offsetFrames) / (right.offsetFrames - left.offsetFrames);
-    if (left.interpolation === "hold") return left.value;
-    if (left.interpolation === "smooth") t = t * t * (3 - 2 * t);
-    return left.value + (right.value - left.value) * t;
+  if (offsetFrames >= curve.points.at(-1)!.offsetFrames) return curve.points.at(-1)!.value;
+  // A 2,000-point curve remains cheap during random-access particle evaluation.
+  let low = 1, high = curve.points.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (curve.points[middle]!.offsetFrames <= offsetFrames) low = middle + 1;
+    else high = middle;
   }
-  return curve.points.at(-1)!.value;
+  const left = curve.points[low - 1]!, right = curve.points[low]!;
+  let t = (offsetFrames - left.offsetFrames) / (right.offsetFrames - left.offsetFrames);
+  if (left.interpolation === "hold") return left.value;
+  if (left.interpolation === "smooth") t = t * t * (3 - 2 * t);
+  return left.value + (right.value - left.value) * t;
 }
 
 export function effectVisibilityAt(effect: EffectClip, productionFrame: number): number {

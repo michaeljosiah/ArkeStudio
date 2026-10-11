@@ -2800,6 +2800,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       label: z.string().min(1).max(160).optional(),
     })
     .strict(),
+  /** Local derived work; neither preparation nor cancellation is an editor mutation. */
+  z.object({ kind: z.literal("editor-effect-analysis"), worldId: UlidSchema, productionId: SlugSchema,
+    effectId: TimelineClipIdSchema, action: z.enum(["prepare", "retry", "cancel"]), requestId: z.string().min(1).max(128),
+    expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict(),
   /**
    * SPEC-039 R-29: the only Accept/Reject boundary for one of Arke's editor requests. The
    * coordinator checks the request exists, is pending and still applies before anything lands;

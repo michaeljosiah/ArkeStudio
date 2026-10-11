@@ -1,49 +1,19 @@
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { createHash } from "node:crypto";
-import { createAudioMediaTools, type MediaProcessRunner } from "../audio/media-tools.js";
+import { createNodeMediaProcessRunner } from "./node-media-process.js";
+export { createNodeMediaProcessRunner } from "./node-media-process.js";
+import { hashMediaFile } from "./media-file-hash.js";
+export { hashMediaFile } from "./media-file-hash.js";
+import { createNodeEffectAudioAnalysisHost } from "./node-effect-audio.js";
+import { createAudioMediaTools } from "../audio/media-tools.js";
 import { ffprobeArgs, parseFfprobeJson, type MediaProbe } from "./probe.js";
 import { createNodeEffectRasterHost } from "./node-effect-renderer.js";
 import type { FfmpegRunner } from "../takes/export.js";
-
-/** The portable Node host shares the desktop's external-process boundary, never FFmpeg linkage. */
-export function createNodeMediaProcessRunner(paths: { ffmpeg: string; ffprobe: string }): MediaProcessRunner {
-  return { run: (tool, args, limits) => new Promise(resolve => {
-    let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), timedOut = false, cancelled = limits.signal.aborted, outputLimitExceeded = false;
-    const result = (code: number | null) => ({ code, stdout, stderr: stderr.toString("utf8"), timedOut, cancelled, outputLimitExceeded });
-    if (cancelled) { resolve(result(null)); return; }
-    const child = spawn(paths[tool], [...args], { windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-    const abort = () => { cancelled = true; child.kill("SIGKILL"); };
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, limits.timeoutMs);
-    limits.signal.addEventListener("abort", abort, { once: true });
-    const capture = (out: boolean) => (chunk: Buffer) => {
-      const current = out ? stdout : stderr, ceiling = out ? limits.maxStdoutBytes : limits.maxStderrBytes;
-      if (current.length + chunk.length > ceiling || stdout.length + stderr.length + chunk.length > (limits.maxCombinedBytes ?? Infinity)) {
-        outputLimitExceeded = true; child.kill("SIGKILL"); return;
-      }
-      if (out) stdout = Buffer.concat([current, chunk]); else stderr = Buffer.concat([current, chunk]);
-    };
-    child.stdout.on("data", capture(true)); child.stderr.on("data", capture(false));
-    child.once("error", () => {});
-    child.once("close", code => { clearTimeout(timer); limits.signal.removeEventListener("abort", abort); resolve(result(timedOut || cancelled || outputLimitExceeded ? null : code)); });
-    if (limits.signal.aborted) abort();
-  }) };
-}
-
-export function hashMediaFile(path: string, signal: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(new Error("media hashing cancelled")); return; }
-    const hash = createHash("sha256"), stream = createReadStream(path);
-    const abort = () => stream.destroy(new Error("media hashing cancelled"));
-    signal.addEventListener("abort", abort, { once: true });
-    stream.on("data", bytes => hash.update(bytes)); stream.on("error", reject);
-    stream.on("end", () => resolve(hash.digest("hex"))); stream.on("close", () => signal.removeEventListener("abort", abort));
-  });
-}
+import { probeFfmpegGraphFileOption } from "./ffmpeg-graph-probe.js";
 
 export function createNodeFfmpegRunner(ffmpeg: string, slateFont: string): FfmpegRunner {
   let fontVerified = false;
-  return { slateFont, async run(args, onProgress, signal, onSeconds) {
+  const mediaProcess = createNodeMediaProcessRunner({ ffmpeg, ffprobe: "" });
+  return { slateFont, graphFileOption: signal => probeFfmpegGraphFileOption(mediaProcess, signal), async run(args, onProgress, signal, onSeconds) {
     if (signal.aborted) throw new Error("export cancelled");
     if (!fontVerified && (args.includes("-/filter_complex") || args.includes("-filter_complex_script") || args.some(arg => arg.includes("drawtext=")))) {
       const hash = await hashMediaFile(slateFont, signal);
@@ -80,5 +50,5 @@ export function createNodeMediaHost(options: { ffmpeg: string; ffprobe: string; 
     durationSec: async (path, opts) => (await probe(path, opts?.signal ?? new AbortController().signal))?.durationSec ?? null,
   };
   return { ffmpeg: createNodeFfmpegRunner(options.ffmpeg, options.slateFont), mediaProbe,
-    audioMediaTools: createAudioMediaTools(process), effectRasterHost: createNodeEffectRasterHost({ ...options, mediaProcess: process }) };
+    audioMediaTools: createAudioMediaTools(process), effectAudioAnalysisHost: createNodeEffectAudioAnalysisHost({ ffmpeg: options.ffmpeg }), effectRasterHost: createNodeEffectRasterHost({ ...options, mediaProcess: process }) };
 }

@@ -20,6 +20,7 @@ import {
 } from "../lib/store.js";
 import { type Transport } from "./editor-transport.js";
 import { EffectCutPreview } from "./editor-effect-preview.js";
+import type { EffectAnalysisContext } from "./editor-effect-analysis.js";
 
 // ---- Cut (24a) -------------------------------------------------------------
 
@@ -36,6 +37,7 @@ interface CutPreviewProps {
   cueAt?: ((sec: number) => ReturnType<typeof cueAtSec>) | null;
   compact?: boolean;
   plan?: RenderPlan | null;
+  analysisContext?: EffectAnalysisContext;
 }
 
 export function CutPreview(props: CutPreviewProps) {

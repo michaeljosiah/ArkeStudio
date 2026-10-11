@@ -1181,6 +1181,7 @@ function CutEditorScreen() {
             cueAt={cueAt}
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
             plan={renderPlan?.ok ? renderPlan.plan : null}
+            {...(worldId && production && editableTimeline && worldArtifacts ? { analysisContext: { worldId, production, artifacts: worldArtifacts, timeline: editableTimeline } } : {})}
           />
         </div>
         {compact && <div className="fy-cut-clock">

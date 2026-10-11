@@ -252,6 +252,11 @@ export class ReadModel {
   /** Fold one domain event. Unknown-to-this-fold events are deliberate no-ops. */
   apply(event: DomainEvent): void {
     switch (event.type) {
+      case "editor-effect.analysis": {
+        const previous = (this.state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
+        this.state = { ...this.state, effectAnalyses: event.analysis ? [...previous, event.analysis] : previous };
+        return;
+      }
       case "health.changed": {
         this.setHealth(event.component, {
           status: event.status,

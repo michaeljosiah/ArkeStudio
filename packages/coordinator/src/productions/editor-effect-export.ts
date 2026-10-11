@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { lstat, open, stat, unlink, writeFile } from "node:fs/promises";
 import { relative, sep } from "node:path";
-import { buildFfmpegArgs, containedPictureRect, effectCapabilityProblem, effectRenderCapabilityProblem, ulid, type EffectAlphaInput, type EffectClip, type ExportPlan } from "@arke-studio/contracts";
+import { buildFfmpegArgs, containedPictureRect, effectCapabilityProblem, effectRenderCapabilityProblem, ulid, EFFECT_ANALYSIS_PROFILE, EffectFeatureManifestSchema, effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, prepareEffectReactions, type EffectFeatureManifest, type EffectAlphaInput, type EffectClip, type ExportPlan } from "@arke-studio/contracts";
 import { runExport, type ExportHandle, type ExportSidecar, type FfmpegRunner } from "../takes/export.js";
 import type { EffectRasterHost } from "../media/node-effect-renderer.js";
 import { hashMediaFile } from "../media/node-media-host.js";
@@ -10,10 +11,27 @@ import type { WorldStore } from "../world/store.js";
 const MAX_INTERMEDIATE_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_GROUPS = 128;
 
-/** Frozen effects use production frames throughout. Only the delivery graph rebases its clock. */
+/** Frozen effects use production frames throughout. Only the delivery graph rebases its clock.
+ * The caller captures matching authored settings and ready analyses together. Subsequent edits
+ * do not change that export snapshot; source bytes remain mutable and are fenced at publication. */
 export function runEffectExport(store: WorldStore, authored: ExportPlan, outName: string, runner: FfmpegRunner,
-  host: EffectRasterHost | undefined, onProgress: (percent: number) => void, sidecar?: ExportSidecar, exportId?: string): ExportHandle {
+  host: EffectRasterHost | undefined, onProgress: (percent: number) => void, sidecar?: ExportSidecar, exportId?: string, analysis?: ReadonlyMap<string, EffectFeatureManifest>): ExportHandle {
   const plan = structuredClone(authored), id = exportId ?? `ex_${ulid()}`;
+  const manifests: Record<string, EffectFeatureManifest> = {}, manifestKeys: Record<string, string> = {};
+  let analysisError: Error | undefined, manifestBytes = 0;
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  try {
+    for (const [effectId, value] of analysis ?? []) {
+      if (!manifests[value.manifestKey]) {
+        manifestBytes += Buffer.byteLength(JSON.stringify(value));
+        if (manifestBytes > EFFECT_ANALYSIS_PROFILE.maxFrozenManifestBytes) throw new Error("Frozen effect analysis exceeds its 32 MiB budget");
+        const manifest = EffectFeatureManifestSchema.parse(value);
+        if (digest(effectAudioSourceFingerprintMaterial(manifest.descriptor)) !== manifest.sourceFingerprint || digest(effectManifestFingerprintMaterial(manifest)) !== manifest.manifestKey) throw new Error("Effect analysis manifest identity changed");
+        manifests[manifest.manifestKey] = manifest;
+      }
+      manifestKeys[effectId] = value.manifestKey;
+    }
+  } catch (error) { analysisError = error instanceof Error ? error : new Error(String(error)); }
   if (plan.effectRender) plan.effectRender.pictureLayers = plan.effectRender.pictureLayers.filter(layer => layer.startFrame < plan.effectRender!.endFrame && layer.endFrame > plan.effectRender!.startFrame);
   const derivedPaths: string[] = [], identities = new Map<string, string>();
   const ownedFiles = new Map<string, { dev: number; ino: number }>(), stages: string[] = [];
@@ -26,10 +44,11 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
       if (owned && current.dev === owned.dev && current.ino === owned.ino) await unlink(path);
     } catch { /* A disappeared or redirected cache path is no longer ours to remove. */ }
   };
-  const sources = [...new Set([...(plan.effectRender?.pictureLayers.flatMap(layer => layer.path ? [layer.path] : []) ?? []), ...plan.audio.map(clip => clip.path)])];
+  const sources = [...new Set([...(plan.effectRender?.pictureLayers.flatMap(layer => layer.path ? [layer.path] : []) ?? []), ...plan.audio.map(clip => clip.path), ...Object.values(manifests).flatMap(manifest => manifest.descriptor.sources.map(source => source.path))])];
   return runExport(store.dir, () => { throw new Error("effect export requires its renderer"); }, outName, runner, onProgress, sidecar, id, {
     signal: store.closingSignal,
     async prepare() {
+      if (analysisError) throw analysisError;
       if (!host) throw new Error("This host has no deterministic effect renderer. Configure its media worker to export effects.");
       if (!plan.effectRender) throw new Error("Effect export requires a frozen effect plan");
       if (!outName || /[\\/]/.test(outName) || (sidecar && /[\\/]/.test(sidecar.name))) throw new Error("Invalid effect export filename");
@@ -45,17 +64,28 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
     },
     async render(stage, signal) {
       const projection = plan.effectRender!;
+      if (!runner.graphFileOption) throw new Error("This encoder host cannot determine effect graph-file support");
+      const graphOption = await runner.graphFileOption(signal);
       if (projection.rendererVersion !== "software-rgba-v1") throw new Error("Unsupported effect renderer version");
-      const activeReaction = projection.effectLayers.some(({ effect }) => effect.reaction.enabled && effect.startFrame < projection.endFrame && effect.startFrame + effect.durationFrames > projection.startFrame &&
+      const activeReaction = projection.effectLayers.filter(({ effect }) => effect.reaction.enabled && effect.startFrame < projection.endFrame && effect.startFrame + effect.durationFrames > projection.startFrame &&
         (effect.target.kind === "composition" || projection.pictureLayers.some(picture => picture.kind === "media" &&
           (effect.target.kind === "picture-track" ? effect.target.trackId === picture.trackId : effect.target.kind === "visual-clip" && effect.target.clipId === picture.clipId) &&
           Math.max(projection.startFrame, picture.startFrame, effect.startFrame) < Math.min(projection.endFrame, picture.endFrame, effect.startFrame + effect.durationFrames))));
-      if (activeReaction) throw new Error("Audio reaction analysis is required before exporting enabled reaction.");
+      for (const { effect } of activeReaction) {
+        const manifest = manifests[manifestKeys[effect.id] ?? ""];
+        if (!manifest) throw new Error("Audio reaction analysis is required before exporting enabled reaction.");
+        if (manifest.descriptor.frameRate !== projection.frameRate || manifest.features.startFrame > Math.max(projection.startFrame, effect.startFrame) ||
+          manifest.features.endFrame < Math.min(projection.endFrame, effect.startFrame + effect.durationFrames)) throw new Error("Audio reaction analysis does not cover this export's production clock.");
+      }
+      prepareEffectReactions(activeReaction.map(layer => layer.effect), manifests, manifestKeys, projection);
       const frames = projection.endFrame - projection.startFrame;
       if (!Number.isSafeInteger(frames) || frames < 1 || frames > 108_000) throw new Error("Effect export supports at most 108,000 frames per delivery");
       const problem = effectRenderCapabilityProblem(projection);
       if (problem) throw new Error(problem);
       for (const source of sources) identities.set(source, await hashMediaFile(await ownedPath(source), signal));
+      for (const manifest of Object.values(manifests)) for (const source of manifest.descriptor.sources) {
+        if (identities.get(source.path) !== source.sha256) throw new Error(`Audio reaction source changed before export: ${source.path}`);
+      }
       for (const picture of projection.pictureLayers) if (picture.kind === "media" && picture.path) {
         const measured = await host!.probePicture(await ownedPath(picture.path), signal);
         picture.sourceSize = { width: measured.width, height: measured.height };
@@ -86,6 +116,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
         }
         const path = await ownedPath(`.cache/exports/${id}-effects-${index}.mkv`, true);
         await host!.renderAlpha({ ...group, output: path, frameRate: projection.frameRate, frameCount: group.endFrame - group.startFrame, signal,
+          manifestsByKey: manifests, manifestKeyByEffectId: manifestKeys,
           maxBytes: MAX_INTERMEDIATE_BYTES - diskBytes,
           onProgress: frame => onProgress(Math.floor(60 * (completedFrames + frame) / Math.max(1, totalFrames))) });
         derivedPaths.push(path);
@@ -101,7 +132,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
       if (graphIndex >= 0) {
         const graph = await ownedPath(`.cache/exports/${id}-effects.ffgraph`, true);
         await writeFile(graph, args[graphIndex + 1]!, { flag: "wx" }); derivedPaths.push(graph); await remember(graph);
-        args.splice(graphIndex, 2, "-filter_complex_script", graph);
+        args.splice(graphIndex, 2, graphOption, graph);
       }
       await runner.run(args, percent => onProgress(60 + Math.floor(percent * 0.39)), signal,
         seconds => onProgress(Math.min(99, 60 + Math.floor(39 * seconds / plan.totalSec))));

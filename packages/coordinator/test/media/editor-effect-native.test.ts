@@ -6,9 +6,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
-import { createNodeMediaProcessRunner } from "../../src/media/node-media-host.js";
+import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
 
 const ffmpeg = process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe = process.env["ARKE_FFPROBE"] ?? "ffprobe";
 const signal = () => new AbortController().signal;
@@ -55,6 +56,10 @@ test("real FFmpeg source-atop alpha, picture order, composition order and absolu
       { path: join(dir, "atmosphere.mkv"), startFrame: 48, endFrame: 52 }]);
     const pixelFormat = args.indexOf("-pix_fmt"); args[pixelFormat + 1] = "bgra";
     args.splice(args.length - 1, 0, "-c:v", "ffv1");
+    const graphOption = await createNodeFfmpegRunner(ffmpeg, "unused.ttf").graphFileOption!(signal());
+    const graphIndex = args.indexOf("-filter_complex"), graph = join(dir, "effect composition.ffgraph");
+    await writeFile(graph, args[graphIndex + 1]!);
+    args.splice(graphIndex, 2, graphOption, graph);
     await processBytes(args);
     const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     const expected = new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
@@ -63,7 +68,7 @@ test("real FFmpeg source-atop alpha, picture order, composition order and absolu
     const differences = [...pixels.subarray(0, 16)].map((value, index) => Math.abs(value - expected[index]!));
     assert.ok(Math.max(...differences) <= 2, `native/source compositor difference ${Math.max(...differences)}; actual=${[...pixels.subarray(0, 16)]}, expected=${[...expected]}`);
     for (let frame = 1; frame < 4; frame++) assert.deepEqual(pixels.subarray(frame * 16, (frame + 1) * 16), pixels.subarray(0, 16));
-    report.sourceAtop = { maxChannelError: Math.max(...differences), frames: 4, alpha: [0, 32, 128, 255], absoluteStartFrame: 48, durationMs: performance.now() - start };
+    report.sourceAtop = { graphFileOption: graphOption, maxChannelError: Math.max(...differences), frames: 4, alpha: [0, 32, 128, 255], absoluteStartFrame: 48, durationMs: performance.now() - start };
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });
 
@@ -90,6 +95,20 @@ test("real native worker alpha is byte-identical to shared raster, probes images
     assert.ok(!(await readdir(dir)).includes("budget.mkv"));
     await assert.rejects(host.renderAlpha({ effects: [{ ...effect, reaction: { ...effect.reaction, enabled: true } }], width: 64, height: 64,
       frameRate: 24, startFrame: 48, frameCount: 3, output: join(dir, "unready.mkv"), signal: signal() }), /analysis/);
+    const first = analysisFixture(), second = analysisFixture({ energy: .2, binding: { kind: "audio-track", trackId: "tr_second" } });
+    const manifestsByKey = { [first.manifestKey]: first, [second.manifestKey]: second };
+    const reactiveLayers = [first, second].map((manifest, i) => ({ ...effect, id: `cl_reactive_${i}`, seed: i + 42,
+      audioInput: manifest.descriptor.binding, reaction: { ...effect.reaction, enabled: true, strength: .9, property: "speed" as const } }));
+    const manifestKeyByEffectId = { [reactiveLayers[0]!.id]: first.manifestKey, [reactiveLayers[1]!.id]: second.manifestKey };
+    const prepared = prepareEffectReactions(reactiveLayers, manifestsByKey, manifestKeyByEffectId, { startFrame: 48, endFrame: 51 });
+    const reactiveOutput = join(dir, "reactive.mkv");
+    await host.renderAlpha({ effects: reactiveLayers, width: 64, height: 64, frameRate: 24, startFrame: 48, frameCount: 3,
+      manifestsByKey, manifestKeyByEffectId, output: reactiveOutput, signal: signal() });
+    const reactivePixels = await processBytes(["-i", reactiveOutput, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+    assert.notDeepEqual(reactivePixels.subarray(0, 64 * 64 * 4), Buffer.from(renderEffectLayersRgba(reactiveLayers, 48, 24, 64, 64)), "ready reaction must change rendered pixels");
+    for (let frame = 0; frame < 3; frame++) assert.deepEqual(reactivePixels.subarray(frame * 64 * 64 * 4, (frame + 1) * 64 * 64 * 4),
+      Buffer.from(renderEffectLayersRgba(reactiveLayers, 48 + frame, 24, 64, 64, prepared)));
+    report.reactiveWorker = { alphaByteError: 0, independentlyBoundEffects: 2, frames: 3, absoluteStartFrame: 48, property: "speed" };
     const parity: Array<Record<string, unknown>> = [];
     for (const preset of EFFECT_PRESET_CATALOGUE) for (const fps of [24, 25, 30]) for (const [width, height] of [[128, 72], [72, 128]]) {
       const layer = defaultEffectClip({ id: `cl_${preset.id}`, lineageId: `ef_${preset.id}`, seed: 42, startFrame: 0, durationFrames: 240, preset: preset.id });

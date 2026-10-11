@@ -1,6 +1,7 @@
 import type { EffectClip } from "./editor-effects.js";
 import { assertEffectRasterSize, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_RENDER_PROFILE } from "./editor-effect-catalogue.js";
-import { evaluateEffectFrame, type EffectFrame, type EffectFrameFeatures, type EffectParticle } from "./editor-effect-evaluator.js";
+import { evaluateEffectFrame, type EffectFrame, type EffectParticle } from "./editor-effect-evaluator.js";
+import type { PreparedEffectReactions } from "./editor-effect-reaction.js";
 
 function overPixel(destination: Uint8ClampedArray, offset: number, red: number, green: number, blue: number, alpha: number): void {
   if (alpha === 0) return;
@@ -87,9 +88,10 @@ export function compositeEffectFrames(frames: readonly EffectFrame[], width: num
 }
 
 /** One target group, in the frozen plan's compositing order. Geometry/matte are host-owned. */
-export function renderEffectLayersRgba(effects: readonly EffectClip[], absoluteFrame: number, frameRate: number, width: number, height: number, features?: EffectFrameFeatures): Uint8ClampedArray {
+export function renderEffectLayersRgba(effects: readonly EffectClip[], absoluteFrame: number, frameRate: number, width: number, height: number, preparedByEffectId?: PreparedEffectReactions): Uint8ClampedArray {
   assertEffectRasterSize(width, height);
   const active = effects.filter(effect => absoluteFrame >= effect.startFrame && absoluteFrame < effect.startFrame + effect.durationFrames);
   if (active.length > EFFECT_RENDER_PROFILE.maxEffects) throw new RangeError(`At most ${EFFECT_RENDER_PROFILE.maxEffects} simultaneous effects are supported`);
-  return compositeEffectFrames(active.map(effect => evaluateEffectFrame({ effect, absoluteFrame, frameRate, targetAspectRatio: width / height, features })), width, height);
+  return compositeEffectFrames(active.map(effect => evaluateEffectFrame({ effect, absoluteFrame, frameRate, targetAspectRatio: width / height,
+    preparedReaction: preparedByEffectId?.[effect.id] })), width, height);
 }
