@@ -1,0 +1,20 @@
+import { defaultEffectClip } from "./editor-effects.js";
+import { EFFECT_PRESET_CATALOGUE } from "./editor-effect-catalogue.js";
+
+const example = { summary: "A light atmosphere over the chosen passage", commands: [
+  { kind: "add-track", trackKind: "effect", trackId: "tr_atmosphere", name: "Atmosphere" },
+  { kind: "effect-create", trackId: "tr_atmosphere", effect: defaultEffectClip({ id: "cl_atmosphere", lineageId: "ef_atmosphere", seed: 1, startFrame: 0, durationFrames: 240 }) },
+], identities: [{ kind: "new-effect", alias: "cl_atmosphere", slotId: "opening-atmosphere" }] };
+
+/** The model sees the same versioned controls as the editor; executable authority is absent. */
+export const EDITOR_EFFECT_MODEL_GUIDE = `
+### Reviewed effect arrangements
+Only prepare production-effects-propose when this turn carries the person's effect-arrangement subject. Its exact target, frame range, palette and optional audio are authoritative; music is never an implied required track. Complete get_timeline and list_editor_requests first and cite their final receipts. Everything stays in Current until the person chooses Review in timeline; only Apply reviewed version can commit.
+Large retained records arrive as effect-record-fragment rows. Concatenate jsonText in index order for each recordKey and parse the complete JSON; count states how many fragments are required. Continue paging to the final receipt; never infer that omitted pages contain no protection or human decisions.
+Bundled presets: ${JSON.stringify(EFFECT_PRESET_CATALOGUE.map(({ id, version, label, supportedReactionProperties }) => ({ id, version, label, supportedReactionProperties })))}.
+Creation example (replace the target, interval and settings with the exact requested scope): ${JSON.stringify(example)}
+Use effect-create, effect-patch, effect-move, effect-trim(head|tail), effect-split, effect-duplicate, effect-remove, effect-reorder and effect-only add-track/set-track/remove-track. Appearance amount/size/opacity, reaction weights/strength/limit and motion.area are normalized 0..1; direction is degrees, smoothing and all timing are production frames. intensityCurve and reactionCurve contain stable ep_ points {id,offsetFrames,value,interpolation}; offsets refer to retained simulationOriginFrame. cueOverrides contain stable ec_ records on the absolute production sound clock. Get exact fields from existing effect rows and the shared action schema.
+An initial new effect uses a new-effect identity claim naming its cl_ alias and a unique slotId. The coordinator allocates actual IDs, lineage and seed. New curve points/cues need explicit new-point/new-cue claims naming their ep_/ec_ alias and owning origin/alias. A split claim maps the new clip alias to parentSegmentId. A duplicate claim names sourceOriginId and an authorized unused slotId. Keep returned stable identities in later revisions; never hide a replacement under fresh IDs. The first proposal closes initial slot allocation. Later ungranted additions must be requestedActions new-slot and remain inert until the person grants them.
+To refine, proposal.family names the exact attached family id, parentVersionId and candidateHash. Read all retained human decisions. Adjusted by you fields/points, placement, Keep current and Exclude survive broad requests such as "less busy". Change unadjusted settings; do not mint human intent, revision permission, Review grants or Release. A permanent protection request belongs only in requestedActions: {kind:"protect",rule,reason} or {kind:"release",ruleId,reason}. It never becomes an executable effect-protect/effect-release command. Conflicts keep the retained result and offer a named human choice.
+Each model segment and the final coherent net result allow at most 50 operations; a created track counts too. All editorRequests and editor-proposal actions together allow at most two per turn. Do not split one arrangement into hidden Apply steps. No new media generation or spend is needed for procedural effects.
+`;

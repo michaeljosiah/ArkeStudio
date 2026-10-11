@@ -122,6 +122,12 @@ export interface CommitInput {
    * nothing here may rename it (SPEC-002's stable-identity rule applied to the world itself).
    */
   worldFields?: Record<string, unknown>;
+  /**
+   * Recheck a production read set after staging, while rollback is still legal (SPEC-053 R-36).
+   * This host-only callback is never serialized into the journal. Recovery after the committing
+   * marker must finish the recorded transaction even if a source has subsequently changed.
+   */
+  validateBeforeCommit?: () => Promise<void>;
 }
 
 export interface CommitResult {
@@ -464,6 +470,8 @@ export const LOOK_NAMES_SCHEMA_VERSION = 72;
  * so older readers refuse the world instead of discarding its editor state.
  */
 export const EDITOR_EFFECTS_SCHEMA_VERSION = 74;
+/** SPEC-053 R-26–38: immutable effect proposal families, scoped human decisions and receipts. */
+export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -471,6 +479,8 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
+      if (/^productions\/[^/]+\/editor-requests\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2)
+        boundary = Math.max(boundary, EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION);
       if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
         const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
         if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
@@ -1067,6 +1077,7 @@ export class Committer {
         moved.push({ path: "world.json", expected: journal.worldJsonBaseHash, found: worldFound });
       }
       if (moved.length > 0) throw new CommitStaleError(moved);
+      await input.validateBeforeCommit?.();
     } catch (err) {
       if (err instanceof CrashSignal) throw err; // a real kill leaves debris for recover()
       await this.assertOwned(); // a successor, not a deposed process, owns rollback too

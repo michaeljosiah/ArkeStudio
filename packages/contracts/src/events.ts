@@ -20,6 +20,7 @@ import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
+import { EffectReviewResultSchema } from "./editor-effect-review.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
@@ -379,6 +380,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 
   /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
+  EffectReviewResultSchema,
   z
     .object({
       ...base,

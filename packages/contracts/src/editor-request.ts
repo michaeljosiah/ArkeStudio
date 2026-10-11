@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema } from "./editor-request-vocabulary.js";
+import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
+export { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema, type EditorRequestId } from "./editor-request-vocabulary.js";
 import {
   PICTURE_TRACK_ID,
   TimelineClipIdSchema,
@@ -29,20 +32,6 @@ import {
  * Operational records, not SPEC-004 proposals (R-35): they live beside the timeline they are
  * about, in one strict JSON file per production, and never appear in global Approvals.
  */
-
-export const EDITOR_REQUEST_BOUNDS = {
-  /** Requests one turn may prepare; a conversation that wants more says so over more turns. */
-  perTurn: 2,
-  commands: 50,
-  summary: 500,
-  /** How many records the file keeps; the oldest decided ones fall off the front. */
-  kept: 200,
-} as const;
-
-export const EditorRequestIdSchema = z
-  .string()
-  .regex(/^req_[0-9A-HJKMNP-TV-Z]{26}$/, "an editor request id is req_ followed by a ULID");
-export type EditorRequestId = z.infer<typeof EditorRequestIdSchema>;
 
 export const EditorRequestStatusSchema = z.enum(["pending", "accepted", "rejected", "stale"]);
 export type EditorRequestStatus = z.infer<typeof EditorRequestStatusSchema>;
@@ -142,16 +131,27 @@ export const EditorRequestSchema = z
 export type EditorRequest = z.infer<typeof EditorRequestSchema>;
 
 /** `productions/<id>/editor-requests.json`. */
-export const EditorRequestFileSchema = z
+const EditorRequestFileV1Schema = z
   .object({
     schemaVersion: z.literal(1),
     requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept),
   })
   .strict();
+export const EditorRequestFileSchema = z.union([EditorRequestFileV1Schema, z.object({ schemaVersion: z.literal(2),
+  requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept), effectFamilies: z.array(EffectProposalFamilySchema).max(EDITOR_REQUEST_BOUNDS.kept),
+}).strict().superRefine((file, ctx) => {
+  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "legacy requests and effect versions exceed the combined 200-record limit" });
+  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id)];
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "request and effect family IDs must be unique" });
+})]);
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
 /** What the person has selected while they talk to Arke (R-26): the subject of "this". */
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
+  /** Explicit human request scope, separate from prose and model payloads (SPEC-053 R-28). */
+  z.object({ kind: z.literal("effect-arrangement"), scope: EffectArrangementScopeSchema,
+    reviewed: EffectVersionRefSchema.optional(), selectedEffectId: TimelineClipIdSchema.optional() }).strict(),
   z.object({ kind: z.literal("chapter"), chapterId: SlugSchema }).strict(),
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),

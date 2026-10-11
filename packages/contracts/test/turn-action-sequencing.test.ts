@@ -17,11 +17,11 @@ describe("turn-local action sequencing (SPEC-051 R-14/R-17)", () => {
     assert.throws(() => turnActionDependencyIndexes([{ ref: "a", after: ["b"] }, { ref: "b", after: ["a"] }]), /cycle/);
     assert.throws(() => turnActionDependencyIndexes([{ ref: "a" }, { after: ["a", "a"] }]), /repeats/);
   });
-  it("allows 24 actions and six editor requests only in the production transport schema", () => {
+  it("allows 24 independent actions and two editor requests in the production transport schema", () => {
     const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
     const request = { summary: "Bring the bell close-up forward", commands: [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }] };
     const result = { reply: "Ready to review.", candidateOperations: [], groupOperations: [],
-      actions: Array.from({ length: 24 }, () => action), editorRequests: Array.from({ length: 6 }, () => request) };
+      actions: Array.from({ length: 24 }, () => action), editorRequests: Array.from({ length: 2 }, () => request) };
     assert.equal(ProductionChatTurnResultSchema.safeParse(result).success, true);
     assert.equal(WorldChatTurnResultSchema.safeParse(result).success, false);
     assert.equal(ProductionChatTurnResultSchema.safeParse({ ...result, actions: [...result.actions, action] }).success, false);

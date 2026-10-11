@@ -43,6 +43,17 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
       add(`editor:${request.id}`, request.summary.slice(0, 200) || "Editor request", "Only you can accept this timeline edit",
         { kind: "editor-request", productionId, requestId: request.id }, action, blocked ? "blocked" : "pending", blocked ? action.blockedReason : undefined);
     }
+    for (const family of (production.effectFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      for (const version of family.versions) {
+        const action = version.actionId ? actionById.get(version.actionId) : family.actionId ? actionById.get(family.actionId) : undefined;
+        const stale = production.timeline?.status !== "ready" || production.timeline.timeline.revision !== version.dependencies.base.revision;
+        const detail = version.conflicts[0]?.reason ?? version.dependencies.issues[0]?.reason ??
+          (stale ? "Current changed · Update proposal" : undefined);
+        add(`effects:${family.id}:${version.id}`, `Effects · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",
+          { kind: "effect-proposal", productionId, familyId: family.id, versionId: version.id }, action,
+          family.status !== "pending" ? "settled" : detail ? "blocked" : "pending", detail?.slice(0, 1000));
+      }
+    }
   }
   for (const staged of bundle.proposals) {
     const action = loaded.actions.find(value => value.authority.kind === "proposal-manager" && value.authority.id === staged.proposal.id);

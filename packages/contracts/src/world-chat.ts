@@ -61,7 +61,7 @@ import {
 } from "./arke-actions.js";
 import { ArkeReadTargetSchema } from "./arke-reads.js";
 import { ProductionPlanRequestSchema, ProductionPlanCardSchema } from "./production-readiness.js";
-import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
+import { ModelWorldChatActionSchema, editorProposalActionCount, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -1745,7 +1745,7 @@ export const TURN_RESULT_BOUNDS = {
   groupOperations: 6,
   actions: 12,
   productionActions: 24,
-  productionEditorRequests: 6,
+  productionEditorRequests: 2,
 } as const;
 
 const WorldChatTurnResultObjectSchema = z
@@ -1782,11 +1782,16 @@ const WorldChatTurnResultObjectSchema = z
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
   .strict();
-export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema);
+const editorProposalLimit = (turn: { editorRequests: readonly unknown[]; actions: readonly ModelWorldChatAction[] }, ctx: z.RefinementCtx) => {
+  const count = turn.editorRequests.length + editorProposalActionCount(turn.actions);
+  if (count > EDITOR_REQUEST_BOUNDS.perTurn) ctx.addIssue({ code: z.ZodIssueCode.custom,
+    message: `${count} editor proposals exceed the ${EDITOR_REQUEST_BOUNDS.perTurn}-per-turn limit across actions and editorRequests` });
+};
+export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.superRefine(editorProposalLimit));
 export const ProductionChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.extend({
   actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.productionActions).default([]),
   editorRequests: z.array(ModelEditorRequestSchema).max(TURN_RESULT_BOUNDS.productionEditorRequests).default([]),
-}));
+}).superRefine(editorProposalLimit));
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -2752,6 +2757,8 @@ const exampleWorldActions = {
   "production-audio-generation": { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-performance-command": { kind: "production-performance-command", productionId: "saltlight", command: { operation: "clear-selection", lineKey: `sh_${EXAMPLE_ULID}` }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-edit": { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute the music track", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-effects-propose": { kind: "production-effects-propose", productionId: "saltlight", proposal: { summary: "Soften the atmosphere",
+    commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity: .35 } } }], identities: [] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-cue": { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "music", outputIndex: 0 }, after: ["music"], trackId: "tr_music", startFrame: 0, durationFrames: 240, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
@@ -2853,6 +2860,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-audio-generation": "Quote a shot voice line, a generated performance, a scene table read, a speaking character sample, or local sample preparation. Read the exact source, assigned voice and current production first. Audition, rights, performance review and purge remain human controls.",
   "production-performance-command": "Propose a kept performance's duration, place its selected audio with explicit timing, or clear a line's selection. Versions, review and source hashes are frozen by the coordinator.",
   "production-audio-edit": "Propose typed timeline audio changes: tracks, gains, mute, roles and mix ducking. The person reviews and applies the ordinary editor request atomically.",
+  "production-effects-propose": "Prepare an effects-only composite card within the exact effect-arrangement subject chosen by the person. Read complete get_timeline and list_editor_requests, preserve protected and Adjusted by you scopes, Keep current, Exclude and source bindings. Use family id, parentVersionId and candidateHash to revise the attached reviewed version. New effect aliases need new-effect identity claims; later additions reuse allocated slots or request explicit new-slot permission. Protect/release are inert requestedActions only. Never apply, activate Suggested or grant revision permission. Creative commands use the shared effect catalogue and 50-command bound; all editor proposal paths together allow two per turn.",
   "production-audio-cue": "Stage a cue on a named existing audio track at an explicit frame and duration. For a new result, name an earlier generation action ref and include it in after; approval waits for that result. Sound effects are unavailable.",
 } as const satisfies Record<ModelWorldChatAction["kind"], string>;
 
@@ -3202,6 +3210,7 @@ Only a thread held to a production: an editor request prepares exact timeline co
 ${JSON.stringify(exampleEditorRequest)}
 
 summary names concrete changes. Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Fields and choices are in the action guide. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
+
 
 ### Scene edits
 

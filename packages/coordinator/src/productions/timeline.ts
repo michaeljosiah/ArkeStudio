@@ -33,7 +33,7 @@ import {
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
 import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
-import { readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { markEditorRequestHistory, readRequestFile, requestFileInput } from "./editor-request-file.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -373,15 +373,8 @@ async function writeTimeline(
         if (entry.kind === "change" && entry.requestId !== undefined) {
           const requestId = entry.requestId;
           const { raw: requestsRaw, file } = await readRequestFile(store, productionId);
-          if (file.requests.some((request) => request.id === requestId)) {
-            const marked = file.requests.map((request) => {
-              if (request.id !== requestId) return request;
-              if (command.kind === "undo") return { ...request, undoneAt: store.now() };
-              const { undoneAt: _redone, ...rest } = request;
-              return rest;
-            });
-            files.push(requestFileInput(productionId, requestsRaw, { ...file, requests: marked }));
-          }
+          const marked = markEditorRequestHistory(file, requestId, sha256(canonical(entry)).slice("sha256:".length), command.kind, store.now());
+          if (marked !== file) files.push(requestFileInput(productionId, requestsRaw, marked));
         }
         // The selection half of a take switch travels with the entry; the review line it appended
         // stays exactly where it is (R-17), which is why nothing here reads reviews.jsonl.

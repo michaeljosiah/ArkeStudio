@@ -91,6 +91,19 @@ only mapping metadata for response changes against already loaded analysis. `edi
 checks scoped delivery readiness against full-production sound identity. Inspector/Arke are the
 permanent panel choices; reviewed Arke effect cards remain a subsequent implementation slice.
 
+Effects proposal authority (T-5) is contracts `editor-effect-proposal.ts` plus its identity,
+sticky, scope, compile and lifecycle modules. `timeline.ts` reduces trusted segments separately
+and finalizes their net result as one ordinary history entry. Coordinator
+`productions/editor-effect-requests.ts` extends the production's existing bounded request file;
+`editor-effect-dependencies.ts` freezes media/profile/analysis inputs outside Apply and rechecks
+them, including a fresh disk resolution scan before the committing marker. `world/commit.ts`
+owns that rollback-capable hook. Proposal v2 writes and durable effect request scopes raise the
+world floor to 75; reads never migrate. `world-chat/effect-proposals.ts` links native conversation
+actions while refusing generic approval, and `effect-proposal-scope.ts` fences sibling result
+channels. `effect-proposal-reads.ts` pages complete effect/decision records. The authenticated
+`editor-effect-proposal` route delegates to `productions/editor-effect-review.ts`; model tools
+cannot call it. Composite card presentation and explicit Suggested entry are the T-6 UI slice.
+
 The shared local host is coordinator `src/studio-server.ts`: it owns the authenticated
 transport and delegates initialization/draining to the application. Desktop and dev use
 `src/application/studio-host.ts` `createStudioHost`; standalone Node uses
