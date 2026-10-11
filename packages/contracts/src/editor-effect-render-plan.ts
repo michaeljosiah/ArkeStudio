@@ -56,6 +56,16 @@ export function effectsForPicture(plan: EffectRenderProjection, picture: RenderP
   });
 }
 
+/** Only effects whose target contributes now need reaction data in the frame worker. */
+export function activeEffectLayersAtFrame(plan: EffectRenderProjection, absoluteFrame: number): RenderEffectLayer[] {
+  if (absoluteFrame < plan.startFrame || absoluteFrame >= plan.endFrame) return [];
+  const active = new Set(effectsForPicture(plan, null, absoluteFrame).map(row => row.effect.id));
+  for (const picture of pictureStackAtFrame(plan, absoluteFrame)) {
+    for (const row of effectsForPicture(plan, picture, absoluteFrame)) active.add(row.effect.id);
+  }
+  return plan.effectLayers.filter(row => active.has(row.effect.id));
+}
+
 /** Picture and particles use the same contain rectangle; letterboxing is outside its matte. */
 export function containedPictureRect(sourceWidth: number, sourceHeight: number, width: number, height: number): { x: number; y: number; width: number; height: number } {
   if (![sourceWidth, sourceHeight, width, height].every(value => Number.isFinite(value) && value > 0)) throw new Error("Picture dimensions must be measured before composing effects.");

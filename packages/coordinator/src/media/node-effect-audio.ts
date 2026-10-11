@@ -8,6 +8,7 @@ import { buildCanonicalAudioGraph, EffectAudioNativeDescriptorSchema, EFFECT_ANA
   type EffectAudioNativeDescriptor, type ExportPlan } from "@arke-studio/contracts";
 import { hashMediaFile } from "./media-file-hash.js";
 import { createNodeMediaProcessRunner } from "./node-media-process.js";
+import { ffmpegGraphFileOption } from "./ffmpeg-graph-option.js";
 
 export interface FrozenAudioInput { audioIndex: number; absolutePath: string; sourceHash: string; clipId?: string }
 export interface EffectAudioDescribeRequest { plan: ExportPlan; inputs: readonly FrozenAudioInput[]; signal: AbortSignal }
@@ -96,7 +97,7 @@ export function createNodeEffectAudioAnalysisHost(options: { ffmpeg: string }): 
     const path = await executablePath(options.ffmpeg), executableHash = await hashMediaFile(path, signal);
     const result = await createNodeMediaProcessRunner({ ffmpeg: path, ffprobe: "" }).run("ffmpeg", ["-version"], { signal, timeoutMs: 10000, maxStdoutBytes: 65536, maxStderrBytes: 16384 });
     if (result.code !== 0) throw new Error("Audio analysis decoder identity is unavailable");
-    return { path, decoder: { executableHash, versionConfigHash: sha256(result.stdout) } };
+    return { path, graphFileOption: ffmpegGraphFileOption(result.stdout), decoder: { executableHash, versionConfigHash: sha256(result.stdout) } };
   };
   return {
     async describe(request) {
@@ -111,7 +112,7 @@ export function createNodeEffectAudioAnalysisHost(options: { ffmpeg: string }): 
         graph.filters[graph.filters.length - 1] = `${graph.preLimiter},${graph.limiter},ashowinfo@arke_limiter[aout]`;
         await withGraph(graph.filters.join(";"), async path => {
           const args = ["-hide_banner", "-nostdin", "-loglevel", "info", "-filter_complex_threads", "1", ...graph.args,
-            "-filter_complex_script", path, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-frames:a", "1", "-f", "null", "-"];
+            tool.graphFileOption, path, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k", "-frames:a", "1", "-f", "null", "-"];
           commandBudget(args);
           const result = await createNodeMediaProcessRunner({ ffmpeg: tool.path, ffprobe: "" }).run("ffmpeg", args, { signal, timeoutMs: EFFECT_AUDIO_NATIVE_LIMITS.describeMs, maxStdoutBytes: 1024, maxStderrBytes: 131072 });
           if (result.code !== 0) throw new Error(signal.aborted ? "Audio analysis cancelled" : `The canonical audio format could not be observed: ${result.stderr.slice(-1500)}`);
@@ -159,7 +160,7 @@ export function createNodeEffectAudioAnalysisHost(options: { ffmpeg: string }): 
         const graph = audibleGraph(plan, inputs, descriptor, selectedIndices);
         await withGraph(graph.filters.join(";"), async path => {
           const args = ["-hide_banner", "-nostdin", "-loglevel", "info", "-filter_complex_threads", "1", ...graph.args,
-            "-filter_complex_script", path, "-map", "[analysis]", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"];
+            tool.graphFileOption, path, "-map", "[analysis]", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"];
           commandBudget(args);
           await streamPcm(tool.path, args, signal, descriptor, Math.round(plan.totalSec * descriptor.canonical.sampleRate), consume);
         });

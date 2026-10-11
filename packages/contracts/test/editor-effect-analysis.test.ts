@@ -126,6 +126,9 @@ test("response presets retain independent controls and zero response matches rea
   const patch = effectReactionPresetPatch("gentle-shimmer");
   assert.equal("enabled" in patch, false); assert.equal("strength" in patch, false);
   assert.equal(patch.energy, 0.3); assert.equal(effectReactionPresetPatch("beat-pulse").beat, 1);
+  const build = effectReactionPresetPatch("build-with-energy");
+  assert.equal(build.property, "emission"); assert.equal(build.energy, 1);
+  assert.ok(build.smoothingFrames > effectReactionPresetPatch("beat-pulse").smoothingFrames);
   const value = effect(), data = manifest();
   value.reaction.strength = 0;
   const prepared = prepareEffectReaction(value, data);

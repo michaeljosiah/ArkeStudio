@@ -64,6 +64,8 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
     },
     async render(stage, signal) {
       const projection = plan.effectRender!;
+      if (!runner.graphFileOption) throw new Error("This encoder host cannot determine effect graph-file support");
+      const graphOption = await runner.graphFileOption(signal);
       if (projection.rendererVersion !== "software-rgba-v1") throw new Error("Unsupported effect renderer version");
       const activeReaction = projection.effectLayers.filter(({ effect }) => effect.reaction.enabled && effect.startFrame < projection.endFrame && effect.startFrame + effect.durationFrames > projection.startFrame &&
         (effect.target.kind === "composition" || projection.pictureLayers.some(picture => picture.kind === "media" &&
@@ -130,7 +132,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
       if (graphIndex >= 0) {
         const graph = await ownedPath(`.cache/exports/${id}-effects.ffgraph`, true);
         await writeFile(graph, args[graphIndex + 1]!, { flag: "wx" }); derivedPaths.push(graph); await remember(graph);
-        args.splice(graphIndex, 2, "-filter_complex_script", graph);
+        args.splice(graphIndex, 2, graphOption, graph);
       }
       await runner.run(args, percent => onProgress(60 + Math.floor(percent * 0.39)), signal,
         seconds => onProgress(Math.min(99, 60 + Math.floor(39 * seconds / plan.totalSec))));

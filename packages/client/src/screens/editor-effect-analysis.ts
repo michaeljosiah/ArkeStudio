@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { resolveEffectAudioSource, TimelineClipIdSchema, ulid, type ArtifactSidecar, type EffectAnalysisState, type EffectClip,
+import { activeEffectLayersAtFrame, resolveEffectAudioSource, TimelineClipIdSchema, ulid, type ArtifactSidecar, type EffectAnalysisState, type EffectClip,
   type EffectFeatureManifest, type ProductionBundle, type ProductionTimeline, type RenderPlan } from "@arke-studio/contracts";
 import { EffectManifestCache } from "../lib/editor-effect-analysis.js";
 import { mediaUrl } from "../lib/media.js";
@@ -81,8 +81,8 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
     }
   }, [current, canPrepare, worldId, productionId]);
 
-  const visible = current.filter(({ effect }) => absoluteFrame >= effect.startFrame && absoluteFrame < effect.startFrame + effect.durationFrames);
-  const visibleIds = new Set(visible.map(row => row.effect.id));
+  const visibleIds = new Set(plan.effectRender ? activeEffectLayersAtFrame(plan.effectRender, absoluteFrame).map(row => row.effect.id) : []);
+  const visible = current.filter(row => visibleIds.has(row.effect.id));
   const visibleKey = JSON.stringify([...visibleIds]);
   const wanted = [...new Map(visible.flatMap(row => row.state.status === "ready" ? [[row.state.manifestKey,
     { key: row.state.manifestKey, source: row.state.sourceFingerprint }] as const] : [])).values()];

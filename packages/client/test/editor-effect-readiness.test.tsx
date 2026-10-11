@@ -3,8 +3,8 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { defaultEffectClip, resolveEffectAudioSource, seedStoryPictureTimeline,
-  type ClientMessage, type ClientState, type EffectAnalysisState, type RenderPlan } from "@arke-studio/contracts";
+import { activeEffectLayersAtFrame, buildRenderPlan, defaultEffectClip, resolveEffectAudioSource, seedStoryPictureTimeline,
+  type ClientMessage, type ClientState, type EffectAnalysisState, type EffectRenderProjection, type RenderPlan } from "@arke-studio/contracts";
 import { __applyForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
 import { effectPreviewAnalysisState, useEffectAnalyses, type EffectAnalysisContext } from "../src/screens/editor-effect-analysis.js";
 import { useRenderPlan } from "../src/screens/editor-plan.js";
@@ -36,6 +36,60 @@ function fixture() {
 }
 
 describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
+  it("loads only the contributing target among nine independently analysed overlapping intervals", async () => {
+    const { state, context, effect } = fixture();
+    const picture = context.timeline.tracks.find(track => track.kind === "picture")!;
+    const sourceClip = picture.clips[0]!;
+    picture.clips = Array.from({ length: 9 }, (_, index) => ({ ...structuredClone(sourceClip), id: `cl_picture_${index}` as const,
+      startFrame: index * 24, durationFrames: 24, sourceInFrames: 0 }));
+    picture.endFrame = 216;
+    const effects = Array.from({ length: 9 }, (_, index) => ({ ...structuredClone(effect), id: `cl_effect_${index}`, lineageId: `ef_effect_${index}`,
+      target: { kind: "visual-clip" as const, clipId: `cl_picture_${index}` }, audioInput: { kind: "audio-track" as const, trackId: `tr_sound_${index}` } }));
+    context.timeline.tracks.find(track => track.kind === "effect")!.effects = effects;
+    context.timeline.tracks.push(...effects.map((_, index) => ({ id: `tr_sound_${index}` as const, kind: "audio" as const, name: `Sound ${index}`, order: 30 + index, muted: false, clips: [] })));
+    const built = buildRenderPlan({ production: context.production, timeline: context.production.timeline, artifacts: context.artifacts, scope: { kind: "production" }, preset: "review-cut" });
+    assert.ok(built.ok); const plan = built.plan;
+    assert.equal(plan.effectRender!.pictureLayers.filter(row => row.kind === "media").length, 9);
+    const manifests = effects.map(row => analysisManifest(0.5, row.audioInput));
+    state.effectAnalyses = [{ worldId: context.worldId, productionId: context.production.meta.id, canPrepare: false,
+      byEffectId: Object.fromEntries(effects.map((row, index) => [row.id, { status: "ready", requestFingerprint: resolveEffectAudioSource({ ...context, plan, input: row.audioInput }).requestFingerprint,
+        sourceFingerprint: manifests[index]!.sourceFingerprint, manifestKey: manifests[index]!.manifestKey, silent: false, cueConflicts: [] }])) }];
+    const fetched: string[] = [];
+    globalThis.fetch = async url => {
+      const value = manifests.find(row => String(url).includes(row.manifestKey)); assert.ok(value); fetched.push(value.manifestKey);
+      return new Response(JSON.stringify(value));
+    };
+    __setStateForTest(state);
+    let latest!: ReturnType<typeof useEffectAnalyses>;
+    function Probe() { latest = useEffectAnalyses(context, plan, 30); return null; }
+    const { root } = mount(); await act(async () => root.render(<Probe />));
+    for (let count = 0; count < 20 && latest.readiness[0]?.preview !== "ready"; count++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)));
+    assert.deepEqual(fetched, [manifests[1]!.manifestKey]);
+    assert.deepEqual(latest.readiness.map(row => row.effectId), [effects[1]!.id]);
+    assert.deepEqual(Object.keys(latest.sources.manifestKeyByEffectId), [effects[1]!.id]);
+  });
+
+  it("includes every contributing picture layer and composition, excluding missing, absent and slate targets", () => {
+    const { effect } = fixture();
+    const picture = (clipId: string, trackId: string, order: number): EffectRenderProjection["pictureLayers"][number] => ({ clipId, trackId, order,
+      kind: "media", label: clipId, still: true, startFrame: 0, endFrame: 100, sourceInSec: 0, fit: "contain", matte: "source-alpha" });
+    const layers: EffectRenderProjection["effectLayers"] = [
+      { ...effect, id: "cl_lower", target: { kind: "visual-clip", clipId: "cl_picture_lower" } },
+      { ...effect, id: "cl_upper", target: { kind: "picture-track", trackId: "tr_upper" } },
+      { ...effect, id: "cl_composition", target: { kind: "composition" } },
+      { ...effect, id: "cl_missing", target: { kind: "visual-clip", clipId: "cl_missing_picture" } },
+      { ...effect, id: "cl_absent", target: { kind: "visual-clip", clipId: "cl_picture_later" } },
+      { ...effect, id: "cl_slate", target: { kind: "visual-clip", clipId: "cl_picture_slate" } },
+    ].map((value, index) => ({ trackId: "tr_fx", trackOrder: index, effect: value as typeof effect }));
+    const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v1", width: 64, height: 36, frameRate: 24, startFrame: 0, endFrame: 240, issues: [], effectLayers: layers,
+      pictureLayers: [picture("cl_picture_lower", "tr_lower", 0), picture("cl_picture_upper", "tr_upper", 1),
+        { ...picture("cl_picture_later", "tr_later", 2), startFrame: 100, endFrame: 200 },
+        { ...picture("cl_picture_slate", "tr_slate", 3), kind: "slate" }] };
+    assert.deepEqual(activeEffectLayersAtFrame(projection, 30).map(row => row.effect.id), ["cl_lower", "cl_upper", "cl_composition"]);
+    assert.deepEqual(activeEffectLayersAtFrame(projection, 110).map(row => row.effect.id), ["cl_composition", "cl_absent"]);
+    assert.deepEqual(activeEffectLayersAtFrame(projection, 240), []);
+  });
+
   it("requires the current resolved source hint and treats missing/Off sources explicitly", () => {
     const { effect } = fixture(), manifest = analysisManifest();
     const ready: EffectAnalysisState = { status: "ready", requestFingerprint: "current", sourceFingerprint: manifest.sourceFingerprint,

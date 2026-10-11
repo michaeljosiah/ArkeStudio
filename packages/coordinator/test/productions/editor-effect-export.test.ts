@@ -20,7 +20,30 @@ async function world() { const store = await WorldStore.open(await makeTempWorld
   await writeFile(join(store.dir, "artifacts/effect-picture.png"), "source-v1"); return store; }
 const host: EffectRasterHost = { probePicture: async () => ({ width: 128, height: 64 }),
   renderAlpha: async request => { assert.equal(request.startFrame, 0); await writeFile(request.output, "alpha", { flag: "wx" }); } };
-const runner: FfmpegRunner = { slateFont: "font.ttf", run: async args => { await writeFile(args.at(-1)!, "video"); } };
+const runner: FfmpegRunner = { slateFont: "font.ttf", graphFileOption: async () => "-/filter_complex", run: async args => { await writeFile(args.at(-1)!, "video"); } };
+
+test("effect export uses the host's graph-file option and refuses unknown support before rasterizing", async () => {
+  const store = await world();
+  for (const option of ["-/filter_complex", "-filter_complex_script"] as const) {
+    let checked = false;
+    const selected: FfmpegRunner = { ...runner, graphFileOption: async () => option, run: async (args, progress, signal) => {
+      const at = args.indexOf(option);
+      assert.ok(at >= 0); assert.ok(!args.includes("-filter_complex"));
+      assert.match(await readFile(args[at + 1]!, "utf8"), /overlay=/);
+      checked = true; await runner.run(args, progress, signal);
+    } };
+    const result = await runEffectExport(store, plan(), "graph-option.mp4", selected, host, () => {}).done;
+    assert.equal(result.status, "done", result.status === "failed" ? result.error : undefined); assert.ok(checked);
+  }
+  let rasterized = false;
+  const missing: FfmpegRunner = { slateFont: runner.slateFont, run: runner.run };
+  const refused = await runEffectExport(store, plan(), "unsupported.mp4", missing,
+    { ...host, renderAlpha: async () => { rasterized = true; } }, () => {}).done;
+  assert.equal(refused.status, "failed");
+  if (refused.status === "failed") assert.match(refused.error, /graph-file support/);
+  assert.equal(rasterized, false);
+  assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
+});
 
 test("effect export freezes plan, measures source geometry, publishes under ownership and removes derived files", async () => {
   const store = await world(), authored = plan();

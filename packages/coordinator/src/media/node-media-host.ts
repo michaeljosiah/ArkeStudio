@@ -8,10 +8,12 @@ import { createAudioMediaTools } from "../audio/media-tools.js";
 import { ffprobeArgs, parseFfprobeJson, type MediaProbe } from "./probe.js";
 import { createNodeEffectRasterHost } from "./node-effect-renderer.js";
 import type { FfmpegRunner } from "../takes/export.js";
+import { probeFfmpegGraphFileOption } from "./ffmpeg-graph-probe.js";
 
 export function createNodeFfmpegRunner(ffmpeg: string, slateFont: string): FfmpegRunner {
   let fontVerified = false;
-  return { slateFont, async run(args, onProgress, signal, onSeconds) {
+  const mediaProcess = createNodeMediaProcessRunner({ ffmpeg, ffprobe: "" });
+  return { slateFont, graphFileOption: signal => probeFfmpegGraphFileOption(mediaProcess, signal), async run(args, onProgress, signal, onSeconds) {
     if (signal.aborted) throw new Error("export cancelled");
     if (!fontVerified && (args.includes("-/filter_complex") || args.includes("-filter_complex_script") || args.some(arg => arg.includes("drawtext=")))) {
       const hash = await hashMediaFile(slateFont, signal);

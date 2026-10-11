@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { buildCanonicalAudioGraph, type ExportPlan, type EffectAudioNativeDescriptor } from "@arke-studio/contracts";
 import { createNodeEffectAudioAnalysisHost, type FrozenAudioInput } from "../../src/media/node-effect-audio.js";
 import { createNodeMediaProcessRunner, hashMediaFile } from "../../src/media/node-media-host.js";
+import { ffmpegGraphFileOption } from "../../src/media/ffmpeg-graph-option.js";
 
 const ffmpeg = process.env["ARKE_FFMPEG"] ?? "ffmpeg";
 const media = createNodeMediaProcessRunner({ ffmpeg, ffprobe: process.env["ARKE_FFPROBE"] ?? "ffprobe" });
@@ -39,6 +40,38 @@ async function render(plan: ExportPlan, inputs: FrozenAudioInput[], descriptor: 
   assert.equal(result.sampleFrames, 96000);
   return floats(Buffer.concat(buffers));
 }
+
+test("file graph options retain FFmpeg 6 compatibility and use the supported FFmpeg 7–9 syntax", () => {
+  const cases = [
+    ["ffmpeg version 6.1.1-3ubuntu5 Copyright", "-filter_complex_script"],
+    ["ffmpeg version n6.1.2 Copyright", "-filter_complex_script"],
+    ["ffmpeg version 7.0.2-full_build-www.gyan.dev Copyright", "-/filter_complex"],
+    ["ffmpeg version 8.1.1-full_build-www.gyan.dev Copyright", "-/filter_complex"],
+    ["ffmpeg version 9.0.2-full_build-www.gyan.dev Copyright", "-/filter_complex"],
+    ["ffmpeg version N-112000-g01234567\nlibavutil      58. 29.100 / 58. 29.100", "-filter_complex_script"],
+    ["ffmpeg version N-117000-g01234567\nlibavutil      59. 39.100 / 59. 39.100", "-/filter_complex"],
+    ["ffmpeg version git-2026-10-11-01234567\nlibavutil      61.  1.100 / 61.  1.100", "-/filter_complex"],
+  ] as const;
+  for (const [text, expected] of cases) {
+    assert.equal(ffmpegGraphFileOption(text), expected);
+    assert.equal(ffmpegGraphFileOption(new TextEncoder().encode(text)), expected);
+  }
+  assert.throws(() => ffmpegGraphFileOption("unidentified encoder"), /could not be identified/);
+});
+
+test("the installed decoder loads a graph larger than Windows argv from a spaced file path", { skip: !available }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "arke audio graph compatibility "));
+  try {
+    const graphPath = join(dir, "large audio graph.ffgraph");
+    const graph = `${" ".repeat(32768)}anullsrc=r=48000:cl=stereo,atrim=end_sample=16[aout]`;
+    await writeFile(graphPath, graph, { flag: "wx" });
+    const option = ffmpegGraphFileOption(version.stdout);
+    const args = [option, graphPath, "-map", "[aout]", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"];
+    assert.ok(args.join(" ").length < 28000);
+    assert.equal((await run(args)).length, 16 * 2 * 4);
+    report["graphFile"] = { option, graphBytes: Buffer.byteLength(graph), spacedPath: true, sampleFrames: 16 };
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 
 test("native audible analysis preserves canonical mono/stereo, ordered mixed-rate negotiation and shared limiter contribution", { skip: !available }, async () => {
   const dir = await mkdtemp(join(evidence ? resolve(evidence) : tmpdir(), "arke-effect-audio-test-"));

@@ -2,7 +2,8 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { ffmpegFilterPath } from "@arke-studio/contracts";
-import type { FfmpegRunner } from "@arke-studio/coordinator";
+import { probeFfmpegGraphFileOption, type FfmpegRunner } from "@arke-studio/coordinator";
+import { createMediaProcessRunner } from "./media-tools.js";
 
 type SpawnLike = typeof nodeSpawn;
 type HashFile = (path: string) => Promise<string>;
@@ -201,6 +202,7 @@ export function createExportFfmpegRunner(
 
   return {
     slateFont,
+    graphFileOption: signal => probeFfmpegGraphFileOption(createMediaProcessRunner({ ffmpeg, ffprobe: "" }, spawn), signal),
     run: async (args, onProgress, signal, onSeconds) => {
       const drawsText = usesDrawtext(args);
       if (drawsText) {

@@ -130,7 +130,10 @@ Editor effects T-3 adds contracts `test/editor-effect-analysis.test.ts`, coordin
 `test/editor-effect-analysis-transport.test.ts` and `test/media/editor-effect-audio-native.test.ts`,
 plus client `test/editor-effect-analysis.test.ts` and `test/editor-effect-readiness.test.tsx`.
 The native tests use real FFmpeg PCM: ordered mixed sample rates/layouts, shared limiting,
-ducking, source windows, muted silence, cancellation and file/executable replacement. Set
+ducking, source windows, muted silence, cancellation and file/executable replacement. The
+`test/media/ffmpeg-graph-probe.test.ts` checks host capability refusals; the native audio fixture
+also runs a graph larger than Windows' argument limit from a file with a spaced path. Exercise
+both FFmpeg 6's legacy graph option and FFmpeg 7–9's option-file syntax in platform checks. Set
 `ARKE_EFFECT_NATIVE_REQUIRED=1` to require FFmpeg, and `ARKE_EFFECT_EVIDENCE_DIR` to retain the
 native report. `node --expose-gc --import tsx scripts/benchmark-editor-effect-analysis.ts
 --output <report.json>` measures streaming DSP, bounded cue/curve preparation, reactive seeking

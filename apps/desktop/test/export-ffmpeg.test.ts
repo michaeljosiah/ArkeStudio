@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { createExportFfmpegRunner } from "../src/export-ffmpeg.js";
 
 class FakeChild extends EventEmitter {
+  stdout = new EventEmitter();
   stderr = new EventEmitter();
   killed: string | null = null;
   kill(signal: string): boolean {
@@ -30,6 +31,27 @@ const VALID_HASH = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8
 const validHash = async () => VALID_HASH;
 
 describe("the desktop export ffmpeg runner", () => {
+  it("selects graph-file syntax from its bounded actual-encoder version probe", async () => {
+    for (const [version, option] of [["6.1.1", "-filter_complex_script"], ["9.0", "-/filter_complex"]]) {
+      const { children, calls, spawn } = fakeSpawn();
+      const runner = createExportFfmpegRunner("actual-ffmpeg", "font.ttf", spawn);
+      const pending = runner.graphFileOption!(new AbortController().signal);
+      assert.deepEqual(calls[0], { file: "actual-ffmpeg", args: ["-version"] });
+      children[0]!.stdout.emit("data", Buffer.from(`ffmpeg version ${version}\n`));
+      children[0]!.emit("close", 0);
+      assert.equal(await pending, option);
+    }
+  });
+
+  it("cancels the graph-file capability probe before encoding", async () => {
+    const { children, calls, spawn } = fakeSpawn(), controller = new AbortController();
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn).graphFileOption!(controller.signal);
+    const refused = assert.rejects(pending, /cancelled/);
+    controller.abort(); assert.equal(children[0]!.killed, "SIGKILL");
+    children[0]!.emit("close", null); await refused;
+    assert.equal(calls.length, 1);
+  });
+
   it("probes the exact escaped font before a slate encode, then reports encode progress", async () => {
     const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
     const { children, calls, spawn } = fakeSpawn();

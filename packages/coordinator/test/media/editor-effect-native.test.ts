@@ -9,7 +9,7 @@ import { build } from "esbuild";
 import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
-import { createNodeMediaProcessRunner } from "../../src/media/node-media-host.js";
+import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
 
 const ffmpeg = process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe = process.env["ARKE_FFPROBE"] ?? "ffprobe";
 const signal = () => new AbortController().signal;
@@ -56,6 +56,10 @@ test("real FFmpeg source-atop alpha, picture order, composition order and absolu
       { path: join(dir, "atmosphere.mkv"), startFrame: 48, endFrame: 52 }]);
     const pixelFormat = args.indexOf("-pix_fmt"); args[pixelFormat + 1] = "bgra";
     args.splice(args.length - 1, 0, "-c:v", "ffv1");
+    const graphOption = await createNodeFfmpegRunner(ffmpeg, "unused.ttf").graphFileOption!(signal());
+    const graphIndex = args.indexOf("-filter_complex"), graph = join(dir, "effect composition.ffgraph");
+    await writeFile(graph, args[graphIndex + 1]!);
+    args.splice(graphIndex, 2, graphOption, graph);
     await processBytes(args);
     const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
     const expected = new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
@@ -64,7 +68,7 @@ test("real FFmpeg source-atop alpha, picture order, composition order and absolu
     const differences = [...pixels.subarray(0, 16)].map((value, index) => Math.abs(value - expected[index]!));
     assert.ok(Math.max(...differences) <= 2, `native/source compositor difference ${Math.max(...differences)}; actual=${[...pixels.subarray(0, 16)]}, expected=${[...expected]}`);
     for (let frame = 1; frame < 4; frame++) assert.deepEqual(pixels.subarray(frame * 16, (frame + 1) * 16), pixels.subarray(0, 16));
-    report.sourceAtop = { maxChannelError: Math.max(...differences), frames: 4, alpha: [0, 32, 128, 255], absoluteStartFrame: 48, durationMs: performance.now() - start };
+    report.sourceAtop = { graphFileOption: graphOption, maxChannelError: Math.max(...differences), frames: 4, alpha: [0, 32, 128, 255], absoluteStartFrame: 48, durationMs: performance.now() - start };
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });
 

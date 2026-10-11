@@ -8,7 +8,7 @@ type Mapping = Pick<EffectReaction, "preset" | "version" | "beat" | "bass" | "en
 export const EFFECT_RESPONSE_PRESETS: Readonly<Record<SimpleResponse, Readonly<Mapping>>> = Object.freeze({
   "gentle-shimmer": Object.freeze({ preset: "gentle-shimmer", version: 1, beat: 0, bass: 0, energy: 0.3, property: "brightness", limit: 0.3, smoothingFrames: 10 }),
   "beat-pulse": Object.freeze({ preset: "beat-pulse", version: 1, beat: 1, bass: 0, energy: 0, property: "emission", limit: 0.6, smoothingFrames: 2 }),
-  "build-with-energy": Object.freeze({ preset: "build-with-energy", version: 1, beat: 0, bass: 0, energy: 1, property: "size", limit: 0.5, smoothingFrames: 12 }),
+  "build-with-energy": Object.freeze({ preset: "build-with-energy", version: 1, beat: 0, bass: 0, energy: 1, property: "emission", limit: 0.5, smoothingFrames: 12 }),
 });
 export function effectReactionPresetPatch(preset: SimpleResponse): Mapping { return { ...EFFECT_RESPONSE_PRESETS[preset] }; }
 

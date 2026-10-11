@@ -71,6 +71,8 @@ freshness), `editor-effect-analysis.ts` (bounded versioned manifests), `editor-e
 (streaming local DSP), and `editor-effect-reaction.ts` (published responses, cue corrections and
 prepared random-access modulation). Coordinator `media/node-effect-audio.ts` observes the canonical
 FFmpeg mix and reconstructs a selected contribution under that mix's limiter; it never plays sound.
+`media/ffmpeg-graph-option.ts` and `ffmpeg-graph-probe.ts` keep analysis/export graphs in files
+using the installed encoder's supported syntax, including FFmpeg 6 and 7–9.
 `productions/editor-effect-analysis.ts` owns cancellable derived jobs, readiness and export fences;
 `editor-effect-analysis-cache.ts` confines content-addressed manifests and their bounded disk cache.
 Only the authenticated exact manifest namespace can serve these JSON files. Client

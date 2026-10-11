@@ -9,6 +9,7 @@ export { StudioServer, type StudioServerApplication, type StudioEventSink } from
 export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
 export { createNodeEffectRasterHost, type EffectRasterHost, type EffectAlphaRequest } from "./media/node-effect-renderer.js";
 export { createNodeMediaHost, createNodeMediaProcessRunner, createNodeFfmpegRunner } from "./media/node-media-host.js";
+export { probeFfmpegGraphFileOption } from "./media/ffmpeg-graph-probe.js";
 export { runEffectExport } from "./productions/editor-effect-export.js";
 export { createStudioStorage } from "./application/studio-composition.js";
 export {
