@@ -1,4 +1,6 @@
-import { orderedShots, type WorldBundle, type WorldChatContext, type WorldChatSubject } from "@arke-studio/contracts";
+import { orderedShots, buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, effectAnalysisCanonicalJson,
+  type WorldBundle, type WorldChatContext, type WorldChatSubject } from "@arke-studio/contracts";
+import { requestBase } from "../productions/editor-requests.js";
 
 /** Resolve a conversation's semantic entry point against the world it claims to describe. */
 export function worldChatContextExists(bundle: WorldBundle, context: WorldChatContext): boolean {
@@ -59,12 +61,32 @@ export function worldChatSubjectExists(
   if (productionId === null) return false;
   const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
   if (production === undefined) return false;
+  if (subject.kind === "effect-arrangement") {
+    if (context.kind !== "production" && context.kind !== "cut") return false;
+    let timeline;
+    try { timeline = requestBase({ getBundle: () => bundle }, production).timeline; }
+    catch { return false; }
+    if (subject.reviewed) {
+      const family = production.effectFamilies?.find(value => value.id === subject.reviewed!.familyId && value.status === "pending");
+      return !!family && family.decisionRevision === subject.reviewed.decisionRevision &&
+        effectAnalysisCanonicalJson(family.scope) === effectAnalysisCanonicalJson(subject.scope) &&
+        family.versions.some(version => version.id === subject.reviewed!.versionId && version.candidateHash === subject.reviewed!.candidateHash &&
+          (!subject.selectedEffectId || version.state.tracks.some(track => track.effects.some(effect => effect.id === subject.selectedEffectId))));
+    }
+    const plan = buildRenderPlan({ production, artifacts: bundle.artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: defaultExportPreset(production.meta) });
+    if (!plan.ok || subject.scope.range.endFrame > Math.round(plan.plan.totalSec * timeline.frameRate)) return false;
+    const target = subject.scope.target;
+    if (target.kind === "picture-track" && !timeline.tracks.some(track => track.kind === "picture" && track.id === target.trackId)) return false;
+    if (target.kind === "visual-clip" && !timeline.tracks.some(track => track.kind === "picture" && track.clips.some(clip => clip.id === target.clipId))) return false;
+    return subject.scope.audio.kind === "off" || resolveEffectAudioSource({ timeline, production, artifacts: bundle.artifacts,
+      plan: plan.plan, input: subject.scope.audio.input }).ok;
+  }
   if (subject.kind === "timeline-track" || subject.kind === "timeline-clip") {
     const state = production.timeline;
     if (state?.status !== "ready") return false;
     return subject.kind === "timeline-track"
       ? state.timeline.tracks.some((track) => track.id === subject.trackId)
-      : state.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === subject.clipId));
+      : state.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === subject.clipId) || (track.effects ?? []).some(effect => effect.id === subject.clipId));
   }
   if (subject.kind === "take") return production.takes.some((take) => take.id === subject.takeId);
   // A passage names its chapter (turn 128); the words and the paragraph are held against the

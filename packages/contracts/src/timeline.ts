@@ -1790,43 +1790,67 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
   }
 }
 
-/**
- * Apply a batch as one action (R-24): every command succeeds or the input record is returned
- * unchanged by way of a refusal. The history entry records the net change per clip, so a clip
- * moved twice in one request undoes in one step.
- */
-export function applyTimelineCommands(
-  timeline: ProductionTimeline,
-  commands: readonly TimelineClipCommand[],
-  options: {
-    /** Trusted coordinator provenance, never accepted from a model command payload (SPEC-053 R-26). */
-    effectAuthority?: "human" | "suggestion";
-    label?: string;
-    requestId?: string;
-    selections?: readonly TimelineSelectionChange[];
-    /** Measured source lengths, so a tail trim cannot reach past what a source can supply. */
-    sourceLength?: SourceLengthFrames;
-    /** Live sources supplied by the coordinator while its write gate is held. */
-    sources?: Working["sources"];
-    /** What this action did, for the record that explains it (Arke's assembly). */
-    notes?: readonly string[];
-  } = {},
-): ProductionTimeline {
-  const working: Working = {
-    timeline,
-    sources: options.sources,
-    tracks: timeline.tracks,
-    mix: timeline.mix,
-    library: timeline.library,
-    sourceLength: options.sourceLength ?? (() => undefined),
-    touched: new Map(),
-    touchedTracks: new Map(),
-    touchedCues: new Map(),
-    effectProtection: [...(timeline.effectProtection ?? [])],
-    effectAuthority: options.effectAuthority ?? "suggestion",
-  };
-  for (const command of commands) applyClipCommand(working, command);
+/** Host-created segments, never a model or transport authority field (SPEC-053 R-26, R-34). */
+export interface TrustedTimelineStep {
+  id: string;
+  authority: "human" | "suggestion";
+  commands: readonly TimelineClipCommand[];
+}
 
+export interface TrustedTimelineCompileOptions {
+  /** Measured source lengths, so a tail trim cannot reach past what a source can supply. */
+  sourceLength?: SourceLengthFrames;
+  /** Live sources supplied by the coordinator while its write gate is held. */
+  sources?: Working["sources"];
+}
+
+export interface TrustedTimelineFinishOptions {
+  label?: string;
+  requestId?: string;
+  selections?: readonly TimelineSelectionChange[];
+  /** What this action did, for the record that explains it (Arke's assembly). */
+  notes?: readonly string[];
+}
+
+const trustedTimelineReductionBrand: unique symbol = Symbol("trusted timeline reduction");
+export interface TrustedTimelineReduction {
+  readonly [trustedTimelineReductionBrand]: true;
+  /** A frozen authored result at the original revision, with no intermediate history. */
+  readonly timeline: ProductionTimeline;
+}
+type TimelineNetChanges = Omit<TimelineChangeHistoryEntry, "kind" | "label" | "selections" | "requestId" | "notes">;
+const trustedTimelineReductions = new WeakMap<TrustedTimelineReduction, {
+  baseMaterial: string;
+  changes: TimelineNetChanges;
+  label: string;
+}>();
+
+function freezeTimelineValue<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) freezeTimelineValue(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Proposal bases deliberately omit Undo; Apply supplies the original live history separately. */
+function authoredTimelineMaterial(timeline: ProductionTimeline): string {
+  return canonical({ ...timeline, history: undefined });
+}
+
+function workingTimeline(working: Working): ProductionTimeline {
+  return {
+    ...working.timeline,
+    tracks: working.tracks,
+    mix: working.mix,
+    library: working.library,
+    ...(working.timeline.effectProtection !== undefined || working.effectProtection.length ? { effectProtection: working.effectProtection } : {}),
+    history: { undo: [], redo: [] },
+  };
+}
+
+/** Check the coherent segment, so an intermediate split or restored value grants no authority. */
+function finishTrustedTimelineSegment(working: Working, timeline: ProductionTimeline): void {
   const structureProblems = effectStructureProblems(allEffects(working.tracks));
   if (structureProblems.length) throw new TimelineOperationRefused(structureProblems[0]!);
   if (working.effectAuthority === "suggestion") {
@@ -1840,6 +1864,9 @@ export function applyTimelineCommands(
   const retainedLineages = new Set(allEffects(working.tracks).map(effect => effect.lineageId));
   const retired = working.effectAuthority === "human" ? [...new Set(allEffects(timeline.tracks).map(effect => effect.lineageId))].filter(lineage => !retainedLineages.has(lineage)) : [];
   working.effectProtection = refreshEffectProtectionRules(allEffects(working.tracks), working.effectProtection, nextRevision(timeline), { retireLineages: retired });
+}
+
+function timelineNetChanges(timeline: ProductionTimeline, working: Working): TimelineNetChanges {
   const effectClips: TimelineEffectChange[] = [];
   for (const trackId of new Set([...timeline.tracks, ...working.tracks].map(track => track.id))) {
     const before = timeline.tracks.find(track => track.id === trackId)?.effects ?? [];
@@ -1873,38 +1900,111 @@ export function applyTimelineCommands(
   }
   const mix = canonical(working.mix) === canonical(timeline.mix) ? undefined : { before: timeline.mix, after: working.mix };
   const library = canonical(working.library) === canonical(timeline.library) ? undefined : { before: timeline.library, after: working.library };
-  const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && cues.length === 0 && mix === undefined && library === undefined && effectClips.length === 0 && effectProtection === undefined) {
-    throw new TimelineOperationRefused("the command changes nothing");
-  }
-
-  const label = options.label ?? (commands.length === 1 ? describeTimelineCommand(commands[0]!) : `${commands.length} edits`);
-  const entry: TimelineChangeHistoryEntry = {
-    kind: "change",
-    label: label.slice(0, 160),
-    clips,
-    selections,
-    tracks,
-    cues,
+  return {
+    clips, tracks, cues,
     ...(effectClips.length ? { effectClips } : {}),
     ...(effectProtection ? { effectProtection } : {}),
     ...(mix !== undefined ? { mix } : {}),
     ...(library !== undefined ? { library } : {}),
+  };
+}
+
+/**
+ * Replay trusted authority boundaries without making a revision or an Undo entry per segment.
+ * Each segment checks protection against its own input. Human edits refresh only their actual
+ * changed baselines, all at the one prospective revision (SPEC-053 R-26, R-32, R-34).
+ */
+export function compileTrustedTimelineSteps(
+  timeline: ProductionTimeline,
+  steps: readonly TrustedTimelineStep[],
+  options: TrustedTimelineCompileOptions = {},
+): TrustedTimelineReduction {
+  const baseMaterial = authoredTimelineMaterial(timeline);
+  const working: Working = {
+    timeline: { ...timeline, history: { undo: [], redo: [] } },
+    sources: options.sources,
+    tracks: timeline.tracks,
+    mix: timeline.mix,
+    library: timeline.library,
+    sourceLength: options.sourceLength ?? (() => undefined),
+    touched: new Map(),
+    touchedTracks: new Map(),
+    touchedCues: new Map(),
+    effectProtection: [...(timeline.effectProtection ?? [])],
+    effectAuthority: "suggestion",
+  };
+  let commandCount = 0;
+  let onlyCommand: TimelineClipCommand | undefined;
+  for (const step of steps) {
+    if (step.authority !== "human" && step.authority !== "suggestion") throw new TimelineOperationRefused("timeline step needs trusted human or suggestion authority");
+    const before = workingTimeline(working);
+    working.timeline = before;
+    working.effectAuthority = step.authority;
+    for (const command of step.commands) {
+      applyClipCommand(working, command);
+      commandCount++;
+      onlyCommand = command;
+    }
+    finishTrustedTimelineSegment(working, before);
+  }
+  // A pending edit restored to Current must not manufacture a protection-only Undo entry.
+  // Segment checks above still see each human baseline; only equivalent final rules collapse.
+  working.effectProtection = working.effectProtection.map(rule => {
+    const original = timeline.effectProtection?.find(candidate => candidate.id === rule.id);
+    return original && canonical({ ...original, baselineRevision: undefined }) === canonical({ ...rule, baselineRevision: undefined }) ? original : rule;
+  });
+  // Clone before freezing: neither the caller's base nor its commands acquire frozen objects.
+  const saved = freezeTimelineValue(structuredClone({ timeline: workingTimeline(working), changes: timelineNetChanges(timeline, working) }));
+  const reduction: TrustedTimelineReduction = Object.freeze({ [trustedTimelineReductionBrand]: true as const, timeline: saved.timeline });
+  trustedTimelineReductions.set(reduction, { baseMaterial, changes: saved.changes, label: commandCount === 1 ? describeTimelineCommand(onlyCommand!) : `${commandCount} edits` });
+  return reduction;
+}
+
+/** Finalize only an in-memory proof against its exact authored base and the original live history. */
+export function finishTrustedTimelineSteps(
+  timeline: ProductionTimeline,
+  reduction: TrustedTimelineReduction,
+  options: TrustedTimelineFinishOptions = {},
+): { kind: "unchanged"; timeline: ProductionTimeline } | { kind: "changed"; timeline: ProductionTimeline; entry: TimelineChangeHistoryEntry } {
+  const proof = trustedTimelineReductions.get(reduction);
+  if (!proof) throw new TimelineOperationRefused("timeline reduction must be compiled from trusted steps");
+  if (proof.baseMaterial !== authoredTimelineMaterial(timeline)) throw new TimelineOperationRefused("timeline reduction was compiled against a different authored base");
+  const changes = structuredClone(proof.changes);
+  const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
+  if (changes.clips.length === 0 && selections.length === 0 && changes.tracks.length === 0 && changes.cues.length === 0 && changes.mix === undefined && changes.library === undefined && changes.effectClips === undefined && changes.effectProtection === undefined) {
+    return { kind: "unchanged", timeline };
+  }
+  const entry: TimelineChangeHistoryEntry = {
+    kind: "change",
+    label: (options.label ?? proof.label).slice(0, 160),
+    ...changes,
+    selections,
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     ...(options.notes !== undefined && options.notes.length > 0 ? { notes: options.notes.map((note) => note.slice(0, 200)).slice(0, 8) } : {}),
   };
   const next: ProductionTimeline = {
-    ...timeline,
+    ...structuredClone(reduction.timeline),
     revision: nextRevision(timeline),
-    tracks: working.tracks,
-    mix: working.mix,
-    library: working.library,
-    ...(timeline.effectProtection !== undefined || working.effectProtection.length ? { effectProtection: working.effectProtection } : {}),
     history: { undo: bounded([...timeline.history.undo, entry]), redo: [] },
   };
   const capabilityProblem = effectTimelineCapabilityProblem(next);
   if (capabilityProblem !== null) throw new TimelineOperationRefused(capabilityProblem);
-  return next;
+  return { kind: "changed", timeline: next, entry };
+}
+
+/** Apply an ordinary batch as one action, retaining the existing no-change refusal contract. */
+export function applyTimelineCommands(
+  timeline: ProductionTimeline,
+  commands: readonly TimelineClipCommand[],
+  options: TrustedTimelineCompileOptions & TrustedTimelineFinishOptions & {
+    /** Trusted coordinator provenance, never accepted from a model command payload (SPEC-053 R-26). */
+    effectAuthority?: "human" | "suggestion";
+  } = {},
+): ProductionTimeline {
+  const reduction = compileTrustedTimelineSteps(timeline, [{ id: "timeline-command", authority: options.effectAuthority ?? "suggestion", commands }], options);
+  const result = finishTrustedTimelineSteps(timeline, reduction, options);
+  if (result.kind === "unchanged") throw new TimelineOperationRefused("the command changes nothing");
+  return result.timeline;
 }
 
 /** Move one Picture clip exactly one temporal position; a successful move is one revision and one undo entry. */

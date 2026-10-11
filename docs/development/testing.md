@@ -165,6 +165,18 @@ Use the real authenticated editor at desktop, Fold and 390/320px phone sizes in 
 keep screenshots of keyboard focus, scrollable Inspector sections, target/source choices and
 export readiness. Real manual authoring evidence is separate from component fixtures.
 
+Editor effects T-5 adds contracts `test/editor-effect-proposal.test.ts`,
+`editor-effect-review.test.ts` and `timeline-trusted-steps.test.ts`; coordinator
+`test/productions/editor-effect-requests.test.ts`, `test/world-chat/effect-proposal-authority.test.ts`,
+`effect-proposal-scope.test.ts`, `effect-proposal-reads.test.ts` and the candidate cases in
+`test/productions/editor-effect-analysis.test.ts`. Run the existing timeline/request, world
+commit/recovery/schema, conversation lifecycle/action/retrieval and transport suites too.
+Check mixed human/model protection, old-parent sticky revisions, exact scoped Release, limits,
+read-only resume, stale media/profile/resolution, crash recovery, and receipt retries after Undo.
+Native analysis tests require FFmpeg/FFprobe; use `ARKE_EFFECT_NATIVE_REQUIRED=1` to make missing
+native support fail. The precommit validator must not prepare analysis, and tests must exercise
+an external metadata change while the write gate suppresses watcher adoption.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

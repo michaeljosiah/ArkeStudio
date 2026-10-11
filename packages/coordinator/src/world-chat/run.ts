@@ -38,6 +38,8 @@ import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
+import { EDITOR_EFFECT_MODEL_GUIDE } from "@arke-studio/contracts";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -744,9 +746,12 @@ export class WorldChatRunner {
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
     // A promotion carries its constraints in the same record as the turn, so it writes none here.
-    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
+    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter" || subject?.kind === "effect-arrangement");
     if (constrained) {
-      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
+      if (subject?.kind === "effect-arrangement" && !this.deps.raiseSchemaBoundary) {
+        return { status: "unavailable", reason: "This host cannot preserve effects request scope." };
+      }
+      await this.deps.raiseSchemaBoundary?.(subject?.kind === "effect-arrangement" ? 75 : subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
         { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
         { at },
@@ -1089,6 +1094,8 @@ export class WorldChatRunner {
     });
 
     if (!outcome.ok) return { ok: false, problems: outcome.problems };
+    const effectScopeProblem = effectOnlyTurnProblem(subject, outcome.turn);
+    if (effectScopeProblem) return { ok: false, problems: [{ code: "effects-scope", safeMessage: effectScopeProblem }] };
     let productionSetup: ProductionSetupState | undefined;
     if (folded.entryContext?.kind === "production-setup") {
       const state = folded.productionSetup;
@@ -1476,6 +1483,7 @@ const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each qu
 
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
+  if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.\n${EDITOR_EFFECT_MODEL_GUIDE}`;
   const named = subject.kind === "chapter"
     ? `chapter ${subject.chapterId}`
     : subject.kind === "timeline-clip"

@@ -7,6 +7,7 @@ import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@a
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { readTraversalFromDirectory } from "../productions/interactive.js";
+import { readEditorRequestFileAt } from "../productions/editor-request-file.js";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -43,7 +44,7 @@ import {
   SelectionsSchema,
   ProductionSpineSchema,
   ProductionTimelineSchema,
-  EditorRequestFileSchema,
+  effectProposalFamilyView,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
@@ -165,7 +166,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // audiobook motion and exact-audio word timing to the strict chapter record (turn 208).
 // Seventy-four adds procedural editor effects, independent audio reaction and granular
 // protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
-export const SUPPORTED_SCHEMA_VERSION = 74;
+// 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
+export const SUPPORTED_SCHEMA_VERSION = 75;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -863,12 +865,20 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
         )
       : { status: "absent" };
 
-    // editor-requests.json — Arke's staged edits and their audit (SPEC-039 R-35). An invalid file
-    // is a world problem and an empty list, never a reason the production fails to open.
-    const editorRequests =
-      (await exists(join(pdir, "editor-requests.json")))
-        ? ((await tryParse(`productions/${id}/editor-requests.json`, (raw) => EditorRequestFileSchema.parse(JSON.parse(raw))))?.requests ?? [])
-        : [];
+    // A damaged authority is not an absent one. Bounded reads preserve pending work instead of
+    // allowing a later writer to replace unreadable families with an empty v1 file.
+    let editorRequests: ProductionBundle["editorRequests"] = [], effectFamilies: NonNullable<ProductionBundle["effectFamilies"]> = [];
+    let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
+    try {
+      const { raw, file } = await readEditorRequestFileAt(dir, id);
+      if (raw !== null) { manifest[`productions/${id}/editor-requests.json`] = sha256(raw); editorRequestState = { status: "ready" }; }
+      editorRequests = file.requests;
+      if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Editor requests are unavailable").slice(0, 500);
+      editorRequestState = { status: "invalid", message };
+      problems.push({ path: `productions/${id}/editor-requests.json`, message });
+    }
 
     // season.json — the season beside its production (SPEC-023 R-10); null when none.
     const season = (await exists(join(pdir, "season.json")))
@@ -951,6 +961,8 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       cut,
       timeline,
       editorRequests,
+      effectFamilies,
+      editorRequestState,
       takeMediaInfo,
     });
   }

@@ -4,6 +4,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_MIX, defaultEffectClip, buildRenderPlan, resolveEffectAudioSource, type ProductionTimeline } from "@arke-studio/contracts";
 import { EditorEffectAnalysisService } from "../../src/productions/editor-effect-analysis.js";
+import { EditorEffectDependencies } from "../../src/productions/editor-effect-dependencies.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { readEffectManifest } from "../../src/productions/editor-effect-analysis-cache.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { createNodeEffectAudioAnalysisHost } from "../../src/media/node-effect-audio.js";
@@ -47,6 +49,62 @@ async function world() {
 }
 const service = () => { const value = new EditorEffectAnalysisService(native, () => {}); closeOnCleanup(() => value.stop()); return value; };
 const row = (analysis: EditorEffectAnalysisService, store: WorldStore) => analysis.project(store)[0]!.byEffectId["cl_dust"]!;
+
+test("candidate reaction freezes independently and Apply validation never prepares audio or writes Current", { skip: !available }, async () => {
+  const store = await world(); let rendered = 0;
+  const analysis = new EditorEffectAnalysisService({ ...native, renderAudiblePcm: async request => { rendered++; return native.renderAudiblePcm(request); } }, () => {});
+  closeOnCleanup(() => analysis.stop());
+  const dependencies = new EditorEffectDependencies(analysis), current = timeline(store), candidate = structuredClone(current);
+  candidate.tracks[2]!.effects![0]!.audioInput = { kind: "composition-mix" };
+  const path = join(store.dir, `productions/${PRODUCTION}/timeline.json`), raw = await readFile(path, "utf8");
+  const fence = await dependencies.captureDependencies({ store, productionId: PRODUCTION, baseTimelineHash: sha256(raw), candidate,
+    candidateBasisHash: sha256("candidate-composition") });
+  assert.equal(fence.issues.length, 0); assert.equal(fence.reactions[0]!.status, "ready");
+  assert.equal(row(analysis, store).status, "source-changed", "pending analysis never installs Current readiness");
+  assert.equal(await readFile(path, "utf8"), raw); assert.equal(timeline(store), current);
+  const prepared = rendered;
+  await dependencies.validateDependencies({ store, productionId: PRODUCTION, current, candidate, candidateHash: sha256("frozen"), expectedFence: fence, phase: "gate" });
+  assert.equal(rendered, prepared, "Apply checks source/decoder identities but never produces new features");
+  await writeFile(join(store.dir, "artifacts/harbour-bells.wav"), "source replaced after Review");
+  await assert.rejects(dependencies.validateDependencies({ store, productionId: PRODUCTION, current, candidate,
+    candidateHash: sha256("frozen"), expectedFence: fence, phase: "precommit" }), /Media changed|Audio source changed/);
+  assert.equal(rendered, prepared); assert.equal(await readFile(path, "utf8"), raw);
+});
+
+test("unavailable candidate analysis remains a named frozen fence and never becomes applicable", async () => {
+  const store = await world(), analysis = new EditorEffectAnalysisService(undefined, () => {});
+  closeOnCleanup(() => analysis.stop());
+  const dependencies = new EditorEffectDependencies(analysis), current = timeline(store), raw = await readFile(join(store.dir, `productions/${PRODUCTION}/timeline.json`), "utf8");
+  const fence = await dependencies.captureDependencies({ store, productionId: PRODUCTION, baseTimelineHash: sha256(raw),
+    candidate: current, candidateBasisHash: sha256("unavailable") });
+  assert.equal(fence.reactions[0]!.status, "unavailable");
+  await dependencies.validateDependencies({ store, productionId: PRODUCTION, current, candidate: current,
+    candidateHash: sha256("frozen"), expectedFence: fence, phase: "gate", requireReady: false });
+  await assert.rejects(dependencies.validateDependencies({ store, productionId: PRODUCTION, current, candidate: current,
+    candidateHash: sha256("frozen"), expectedFence: fence, phase: "gate" }), /not ready/);
+  assert.equal(timeline(store).revision, 0); assert.equal(timeline(store).history.undo.length, 0);
+});
+
+test("precommit re-reads resolution metadata while external watcher work is queued behind the gate", async () => {
+  const store = await world(), analysis = new EditorEffectAnalysisService(undefined, () => {});
+  closeOnCleanup(() => analysis.stop());
+  const dependencies = new EditorEffectDependencies(analysis), current = timeline(store), candidate = structuredClone(current);
+  candidate.tracks[2]!.effects![0]!.reaction.enabled = false;
+  const timelineFile = join(store.dir, `productions/${PRODUCTION}/timeline.json`), raw = await readFile(timelineFile, "utf8");
+  const fence = await dependencies.captureDependencies({ store, productionId: PRODUCTION, baseTimelineHash: sha256(raw),
+    candidate, candidateBasisHash: "a".repeat(64) });
+  const input = { store, productionId: PRODUCTION, current, candidate, candidateHash: "b".repeat(64), expectedFence: fence };
+  await store.gateOp(async () => {
+    await dependencies.validateDependencies({ ...input, phase: "gate" });
+    const file = join(store.dir, `productions/${PRODUCTION}/production.json`), before = await readFile(file, "utf8");
+    try {
+      const metadata = JSON.parse(before); metadata.aspect = metadata.aspect === "9:16" ? "16:9" : "9:16";
+      await writeFile(file, JSON.stringify(metadata));
+      await assert.rejects(dependencies.validateDependencies({ ...input, phase: "precommit" }), /resolution changed/);
+      assert.equal(await readFile(timelineFile, "utf8"), raw);
+    } finally { await writeFile(file, before); }
+  });
+});
 
 test("real analysis caches exact audible features without a revision, rescan or Undo; appearance changes reuse them", { skip: !available }, async () => {
   const store = await world(), analysis = service(), before = timeline(store), path = join(store.dir, `productions/${PRODUCTION}/timeline.json`);

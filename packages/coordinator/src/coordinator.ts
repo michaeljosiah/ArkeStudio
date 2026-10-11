@@ -411,6 +411,8 @@ function mediaSessionId(candidateId: string, revision: number): SessionId {
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
+import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
+import { handleEffectReview } from "./productions/editor-effect-review.js";
 import type { EffectAudioAnalysisHost } from "./media/node-effect-audio.js";
 import type { EffectRasterHost } from "./media/node-effect-renderer.js";
 import { measureDurationSec, measureMediaInfo, type MediaProbe } from "./media/probe.js";
@@ -3284,6 +3286,7 @@ export class Coordinator {
 
   private readonly localGpu: LocalGpu;
   private readonly effectAnalysis: EditorEffectAnalysisService;
+  private readonly effectDependencies: EditorEffectDependencies;
   /**
    * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
    * manifest every consumer reads is the shipped one with these stamped on (`servedManifest`),
@@ -3297,6 +3300,7 @@ export class Coordinator {
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
+    this.effectDependencies = new EditorEffectDependencies(this.effectAnalysis);
     // `opts.manifest` is read in a hundred places and handed to services as they are built; a
     // getter makes each of them read the manifest as the author's plans price it, now, rather
     // than as it was when they were built — so a plan switched mid-session reaches every quote.
@@ -11763,6 +11767,18 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         this.trackBackground(this.effectAnalysis.request(store, msg.productionId, msg.effectId, msg.action, msg.expectedSourceFingerprint));
+        return;
+      }
+      case "editor-effect-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handleEffectReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) {
+          await this.conversationActionLifecycle(store).recoverConversation(conversationId);
+          await this.refreshConversationOutcome(store, conversationId);
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "timeline-move-picture":
@@ -20660,6 +20676,7 @@ export class Coordinator {
     }, quotePorts);
     return {
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
+      effectDependencies: this.effectDependencies,
       benchGenerationQuotes: benchQuotes,
       benchControls: new BenchChatControls(store, {
         bench: sessionId => this.benchFor(store.worldId, sessionId),

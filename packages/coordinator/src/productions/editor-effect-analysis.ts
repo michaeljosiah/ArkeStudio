@@ -1,6 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { setImmediate as yieldToHost } from "node:timers/promises";
-import { buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, createEffectPcmAnalyzer,
+import { buildRenderPlan, defaultExportPreset, resolveEffectAudioSource, createEffectPcmAnalyzer, deliveredEffectLayers,
   effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, effectAnalysisCanonicalJson, effectCueConflicts,
   EffectAudioSourceDescriptorSchema, EffectFeatureManifestSchema, EFFECT_ANALYSIS_PROFILE,
   type EffectAnalysisProjection, type EffectAnalysisState, type EffectClip, type EffectFeatureManifest,
@@ -14,7 +14,10 @@ import { cachedEffectManifest, EFFECT_ANALYSIS_CACHE, effectAnalysisHash, readEf
 type Context = { production: ProductionBundle; timeline: ProductionTimeline; plan: RenderPlan; effect: EffectClip; source: ResolvedEffectAudioSource };
 type Row = { state: EffectAnalysisState; manifest?: EffectFeatureManifest };
 type Job = { control: AbortController; done: Promise<void>; requestFingerprint: string };
+export type CandidateEffectAnalysis = { manifest: EffectFeatureManifest; requestFingerprint: string } | { reason: string };
+type CandidateJob = { control: AbortController; done: Promise<ReadonlyMap<string, CandidateEffectAnalysis>> };
 type Session = { store: WorldStore; rows: Map<string, Row>; jobs: Map<string, Job>; tail: Promise<void>;
+  candidateJobs: Map<string, CandidateJob>;
   monitor: ReturnType<typeof setInterval>; checking: boolean; stats: Map<string, string>; lastWritable: boolean; dispose: () => void };
 const keyOf = (productionId: string, effectId: string) => `${productionId}/${effectId}`;
 
@@ -29,10 +32,10 @@ export class EditorEffectAnalysisService {
   private session(store: WorldStore): Session {
     const existing = this.sessions.get(store);
     if (existing) return existing;
-    const session: Session = { store, rows: new Map(), jobs: new Map(), tail: Promise.resolve(), stats: new Map(), checking: false, lastWritable: store.canWrite(),
+    const session: Session = { store, rows: new Map(), jobs: new Map(), candidateJobs: new Map(), tail: Promise.resolve(), stats: new Map(), checking: false, lastWritable: store.canWrite(),
       monitor: setInterval(() => { void this.checkSources(session); }, 2000), dispose: () => {} };
     session.monitor.unref();
-    session.dispose = () => { clearInterval(session.monitor); for (const job of session.jobs.values()) job.control.abort(); this.sessions.delete(store); };
+    session.dispose = () => { clearInterval(session.monitor); for (const job of [...session.jobs.values(), ...session.candidateJobs.values()]) job.control.abort(); this.sessions.delete(store); };
     store.closingSignal.addEventListener("abort", session.dispose, { once: true });
     this.sessions.set(store, session);
     return session;
@@ -126,7 +129,7 @@ export class EditorEffectAnalysisService {
       row.state = { status: "failed", requestFingerprint, reason: !this.host ? "Audio analysis is unavailable on this host" : "World is read-only" };
       this.notify(session, productionId); return;
     }
-    if (session.jobs.size >= 32) {
+    if (session.jobs.size + session.candidateJobs.size >= 32) {
       row.state = { status: "failed", requestFingerprint, reason: "Audio analysis queue is full. Retry after preparation finishes." };
       this.notify(session, productionId); return;
     }
@@ -159,7 +162,80 @@ export class EditorEffectAnalysisService {
     session.tail = job.done; this.notify(session, productionId); return job.done;
   }
 
-  private async analyse(session: Session, context: Context, signal: AbortSignal, progress: (value: number) => void): Promise<EffectFeatureManifest> {
+  /** Pending versions share the bounded decoder lane/cache, but never install Current readiness. */
+  async prepareCandidate(store: WorldStore, input: { production: ProductionBundle; timeline: ProductionTimeline; plan: RenderPlan; basisHash: string },
+    externalSignal?: AbortSignal): Promise<ReadonlyMap<string, CandidateEffectAnalysis>> {
+    if (this.stopped || store.isClosed() || !store.canWrite()) throw new Error("World is read-only or closing");
+    const session = this.session(store), key = `${input.production.meta.id}/${input.basisHash}`;
+    const existing = session.candidateJobs.get(key);
+    if (existing) return existing.done;
+    if (session.jobs.size + session.candidateJobs.size >= 32) throw new Error("Audio analysis queue is full. Retry after preparation finishes.");
+    const control = new AbortController(), signal = AbortSignal.any([control.signal, store.closingSignal, ...(externalSignal ? [externalSignal] : [])]);
+    const job: CandidateJob = { control, done: Promise.resolve(new Map()) };
+    session.candidateJobs.set(key, job);
+    job.done = session.tail.catch(() => {}).then(async () => {
+      const result = new Map<string, CandidateEffectAnalysis>(), retained = new Map<string, EffectFeatureManifest>();
+      try {
+        signal.throwIfAborted(); await store.assertOwnership();
+        const effects = input.plan.effectRender ? deliveredEffectLayers(input.plan.effectRender).map(row => row.effect) : [];
+        for (const effect of effects) {
+          if (!effect.reaction.enabled) continue;
+          signal.throwIfAborted();
+          if (!this.host || !effect.audioInput) {
+            result.set(effect.id, { reason: !this.host ? "Audio analysis is unavailable on this host" : "Choose an audio source" }); continue;
+          }
+          const source = resolveEffectAudioSource({ ...input, artifacts: store.getBundle().artifacts, input: effect.audioInput });
+          if (!source.ok) { result.set(effect.id, { reason: source.reason }); continue; }
+          try {
+            const prior = [...result.values()].find((value): value is Extract<CandidateEffectAnalysis, { manifest: EffectFeatureManifest }> =>
+              "manifest" in value && value.requestFingerprint === source.requestFingerprint);
+            const manifest = prior?.manifest ?? await this.analyse(session, { ...input, effect, source }, signal, () => {}, retained);
+            retained.set(manifest.manifestKey, manifest);
+            result.set(effect.id, { manifest, requestFingerprint: source.requestFingerprint });
+          } catch (error) {
+            signal.throwIfAborted();
+            result.set(effect.id, { reason: error instanceof Error ? error.message : "Audio analysis failed" });
+          }
+        }
+        await store.assertOwnership(); signal.throwIfAborted(); return result;
+      } finally { session.candidateJobs.delete(key); }
+    });
+    session.tail = job.done.then(() => {}, () => {});
+    return job.done;
+  }
+
+  /** Read/validate only: Apply is never allowed to repair or prepare its frozen candidate. */
+  async validateCandidateManifest(store: WorldStore, input: { production: ProductionBundle; timeline: ProductionTimeline; plan: RenderPlan;
+    effect: EffectClip; manifestKey: string; requestFingerprint: string; sourceFingerprint: string;
+    artifacts?: Parameters<typeof resolveEffectAudioSource>[0]["artifacts"] }, signal = store.closingSignal): Promise<EffectFeatureManifest> {
+    signal.throwIfAborted();
+    if (!this.host || !input.effect.audioInput) throw new Error("Audio reaction is unavailable");
+    const source = resolveEffectAudioSource({ ...input, artifacts: input.artifacts ?? store.getBundle().artifacts, input: input.effect.audioInput });
+    if (!source.ok || source.requestFingerprint !== input.requestFingerprint) throw new Error("Audio source changed; update the proposal");
+    const manifest = await readEffectManifest(store, input.manifestKey);
+    if (!manifest || manifest.sourceFingerprint !== input.sourceFingerprint ||
+      effectAnalysisCanonicalJson(manifest.descriptor.binding) !== effectAnalysisCanonicalJson(input.effect.audioInput)) throw new Error("Prepared audio is unavailable; prepare a new proposal version");
+    for (const file of manifest.descriptor.sources) {
+      if (await hashMediaFile(await containedWorldFilePath(store.dir, file.path), signal) !== file.sha256) throw new Error("Audio source changed; update the proposal");
+    }
+    const inputs = await Promise.all(input.plan.audio.map(async (item, audioIndex) => {
+      const file = manifest.descriptor.sources.find(source => source.path === item.path);
+      if (!file) throw new Error("Audio routing changed; update the proposal");
+      return { audioIndex, absolutePath: await containedWorldFilePath(store.dir, item.path), sourceHash: file.sha256, ...(item.clipId ? { clipId: item.clipId } : {}) };
+    }));
+    const native = await this.host.describe({ plan: input.plan, inputs, signal });
+    if (effectAnalysisCanonicalJson(native) !== effectAnalysisCanonicalJson(manifest.descriptor.native)) throw new Error("Audio decoder changed; update the proposal");
+    const descriptor = EffectAudioSourceDescriptorSchema.parse({ profileId: EFFECT_ANALYSIS_PROFILE.id, binding: input.effect.audioInput,
+      frameRate: input.timeline.frameRate, startFrame: Math.round(input.plan.range.startSec * input.timeline.frameRate),
+      endFrame: Math.round(input.plan.range.endSec * input.timeline.frameRate), selectedClipIds: source.selectedClipIds,
+      placedWindows: source.placedWindows, audibleWindows: source.audibleWindows, contributions: input.plan.audio,
+      sources: manifest.descriptor.sources, mix: input.plan.mix, speech: input.plan.speech, native });
+    if (effectAnalysisHash(effectAudioSourceFingerprintMaterial(descriptor)) !== manifest.sourceFingerprint) throw new Error("Audio analysis dependencies changed; update the proposal");
+    return manifest;
+  }
+
+  private async analyse(session: Session, context: Context, signal: AbortSignal, progress: (value: number) => void,
+    candidateManifests: ReadonlyMap<string, EffectFeatureManifest> = new Map()): Promise<EffectFeatureManifest> {
     const { store } = session, { source, plan, timeline, effect } = context;
     if (!source.ok || !effect.audioInput) throw new Error("Choose a placed audio source");
     const startFrame = Math.round(plan.range.startSec * timeline.frameRate), endFrame = Math.round(plan.range.endSec * timeline.frameRate);
@@ -205,6 +281,7 @@ export class EditorEffectAnalysisService {
     const retained = new Set([...session.rows.values()].flatMap(row => row.manifest ? [row.manifest.manifestKey, row.manifest.sourceFingerprint] : []));
     const retainedBytes = new Map([...session.rows.values()].flatMap(row => row.manifest ? [[row.manifest.manifestKey, Buffer.byteLength(JSON.stringify(row.manifest))] as const] : []));
     retainedBytes.set(manifest.manifestKey, Buffer.byteLength(JSON.stringify(manifest)));
+    for (const value of candidateManifests.values()) { retained.add(value.manifestKey); retained.add(value.sourceFingerprint); retainedBytes.set(value.manifestKey, Buffer.byteLength(JSON.stringify(value))); }
     if ([...retainedBytes.values()].reduce((sum, size) => sum + size, 0) > EFFECT_ANALYSIS_PROFILE.maxFrozenManifestBytes) throw new Error("Prepared audio exceeds the 32 MiB feature budget");
     await saveEffectManifest(store, manifest, retained); return manifest;
   }
@@ -219,7 +296,7 @@ export class EditorEffectAnalysisService {
       const writable = session.store.canWrite();
       if (writable !== session.lastWritable) {
         session.lastWritable = writable;
-        if (!writable) for (const job of session.jobs.values()) job.control.abort();
+        if (!writable) for (const job of [...session.jobs.values(), ...session.candidateJobs.values()]) job.control.abort();
         for (const productionId of new Set([...session.rows.keys()].map(key => key.split("/")[0]!))) this.notify(session, productionId);
       }
       for (const [path, stamp] of session.stats) {

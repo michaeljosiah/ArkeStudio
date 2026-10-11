@@ -202,10 +202,11 @@ export class WorldChatInputJournal {
     if (this.world.closingSignal.aborted) throw new WorldChatInputError("unavailable", "This world closed.");
     // A refused command must not upgrade the world, so the first preflight appends nothing. Its
     // read may repair an old torn tail, which is why it still runs under ownership.
-    await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
+    const first = await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
     // The boundary commits through the world's queue, and so does ownedWrite: raising it inside
     // ownedWrite would wait on itself. Ownership is checked again by the ownedWrite below.
-    await this.world.raiseSchemaBoundary(WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
+    const effectScope = first.event.type === "input.recorded" && first.event.input.constraints.subject?.kind === "effect-arrangement";
+    await this.world.raiseSchemaBoundary(effectScope ? 75 : WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
     return this.world.ownedWrite(async () => {
       for (;;) {
         // Repeated after the boundary: lifecycle, queue and context can all move while it commits.

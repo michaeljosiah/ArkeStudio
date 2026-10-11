@@ -31,6 +31,8 @@ import type { QueryLease } from "./lease.js";
 import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
 import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSampleReadRows, productionReadFence, type ProductionReadRow } from "./production-reads.js";
+import { effectReadRows } from "./effect-proposal-reads.js";
+import { sha256 } from "../world/text-files.js";
 import { productionTakeImageSources } from "./production-take-images.js";
 
 const DEFAULT_LIMIT = 8;
@@ -307,10 +309,13 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       { key: "01:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
-        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined } } },
+        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
         ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
         ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
+        ...(track.effects ?? []).flatMap(effect => effectReadRows(`41:effect:${track.id}:${effect.id}`, effect)),
       ]),
+      ...(timeline.effectProtection ?? []).map(rule => { const { baselineFingerprint, ...scope } = rule;
+        return { key: `42:protection:${rule.id}`, value: { kind: "effect-protection", rule: scope, baselineHash: sha256(baselineFingerprint) } }; }),
     );
   }
   if (production !== undefined) {

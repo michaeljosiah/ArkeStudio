@@ -5,6 +5,7 @@ import { effectiveAudioRights } from "../audio/rights.js";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { effectProposalReadRows } from "./effect-proposal-reads.js";
 
 export interface ProductionReadRow { readonly key: string; readonly value: unknown }
 const numbered = (index: number) => String(index).padStart(10, "0");
@@ -74,6 +75,7 @@ export function audioCutReadRows(production: ProductionBundle | undefined): Prod
 }
 
 export function editorRequestReadRows(production: ProductionBundle | undefined): ProductionReadRow[] {
-  return [...(production?.editorRequests ?? [])].sort((a, b) => a.id.localeCompare(b.id))
-    .map(request => ({ key: request.id, value: request }));
+  return [{ key: "00:state", value: { kind: "editor-request-state", state: production?.editorRequestState ?? { status: "absent" } } },
+    ...[...(production?.editorRequests ?? [])].sort((a, b) => a.id.localeCompare(b.id)).map(request => ({ key: request.id, value: request })),
+    ...(production?.effectFamilies ?? []).flatMap(effectProposalReadRows)];
 }

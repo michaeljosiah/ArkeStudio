@@ -23,6 +23,7 @@ import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { TimelineStateSchema } from "./timeline.js";
 import { EditorRequestSchema } from "./editor-request.js";
+import { EffectProposalFamilyViewSchema } from "./editor-effect-proposal.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
@@ -154,7 +155,7 @@ export const WorldSummarySchema = z
 export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 
 /** A production with everything its screens render. */
-export const ProductionBundleSchema = z
+export const ProductionBundleSchema = valueSchema(z
   .object({
     rehearsals: z.array(RehearsalSessionSchema).default([]),
     rehearsalHashes: z.record(z.string(), z.string()).optional(),
@@ -209,6 +210,9 @@ export const ProductionBundleSchema = z
     timeline: TimelineStateSchema.optional(),
     /** `editor-requests.json` — Arke's staged edits and their compact audit (SPEC-039 R-35, R-36). */
     editorRequests: z.array(EditorRequestSchema).default([]),
+    effectFamilies: z.array(EffectProposalFamilyViewSchema).optional(),
+    editorRequestState: z.discriminatedUnion("status", [z.object({ status: z.literal("absent") }).strict(),
+      z.object({ status: z.literal("ready") }).strict(), z.object({ status: z.literal("invalid"), message: z.string().max(500) }).strict()]).optional(),
     /**
      * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
      * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration
@@ -216,7 +220,7 @@ export const ProductionBundleSchema = z
      */
     takeMediaInfo: z.record(TakeIdSchema, TakeMediaInfoRecordSchema).default({}),
   })
-  .strict();
+  .strict());
 export type ProductionBundle = z.infer<typeof ProductionBundleSchema>;
 
 /** A staged proposal plus its advisory ripple preview, as the panel renders it. */

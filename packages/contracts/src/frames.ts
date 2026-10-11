@@ -45,6 +45,7 @@ import {
   TimelineTrackIdSchema,
 } from "./timeline.js";
 import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
+import { EffectReviewCommandSchema } from "./editor-effect-review.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
@@ -2805,6 +2806,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("editor-effect-analysis"), worldId: UlidSchema, productionId: SlugSchema,
     effectId: TimelineClipIdSchema, action: z.enum(["prepare", "retry", "cancel"]), requestId: z.string().min(1).max(128),
     expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict(),
+  EffectReviewCommandSchema,
   /**
    * SPEC-039 R-29: the only Accept/Reject boundary for one of Arke's editor requests. The
    * coordinator checks the request exists, is pending and still applies before anything lands;
