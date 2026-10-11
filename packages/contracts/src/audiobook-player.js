@@ -212,10 +212,9 @@ export function mountAudiobookPlayer(root, options) {
 .abp-push:disabled{cursor:default;opacity:.78}
 .abp-push:focus-visible{outline:2px solid var(--abp-fg);outline-offset:3px}
 .abp-pushnote{position:absolute;right:158px;top:76px;margin:0;font-size:var(--text-xs,12px);color:color-mix(in srgb,var(--abp-fg) 80%,transparent)}
-.abp-follow{position:absolute;left:50%;transform:translateX(-50%);bottom:170px;width:860px;max-width:calc(100% - 64px);text-align:center;font-size:var(--text-xl,22px);line-height:1.5;text-wrap:pretty}
+.abp-follow{position:absolute;left:50%;transform:translateX(-50%);bottom:170px;width:640px;max-width:calc(100% - 48px);text-align:center;font-size:var(--text-2xl,24px);line-height:1.45;text-wrap:pretty;overflow-wrap:anywhere;text-shadow:0 2px 5px #000,0 0 12px #000}
+.abp-measure{visibility:hidden;pointer-events:none;top:0!important;bottom:auto!important;left:0!important;transform:none!important;max-height:none!important}
 .abp-follow .now{color:var(--abp-fg)}
-.abp-follow .rest{color:color-mix(in srgb,var(--abp-fg) 55%,transparent)}
-.abp-follow .rest.gap,.abp-gapnote{font-style:italic}
 .abp-gapnote{display:block;margin-bottom:6px;font-size:var(--text-xs,12px);font-style:normal;font-family:var(--font-mono,ui-monospace,monospace);color:color-mix(in srgb,var(--abp-fg) 62%,transparent)}
 .abp-bar{position:absolute;left:32px;right:32px;bottom:28px}
 .abp-track{position:relative;height:14px;display:flex;align-items:center;cursor:pointer;border-radius:4px;touch-action:none}
@@ -267,7 +266,7 @@ export function mountAudiobookPlayer(root, options) {
 .abp-pushnote{top:139px;left:20px;right:20px}
 .abp-text-top,.abp-long{display:none!important}
 .abp-text-lab{display:inline-flex!important}
-.abp-follow{width:auto;left:20px;right:20px;transform:none;bottom:290px;max-height:max(0px,calc(100% - 470px));overflow:auto;overscroll-behavior:contain;font-size:var(--text-md,16px)}
+.abp-follow{width:auto;left:16px;right:16px;transform:none;bottom:290px;font-size:var(--text-lg,18px)}
 .abp-bar{left:20px;right:20px;bottom:40px}
 .abp-transport{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"now . len" "ctl ctl ctl" "labs labs labs";row-gap:18px}
 .abp-transport>.abp-grow{display:none}
@@ -296,6 +295,7 @@ export function mountAudiobookPlayer(root, options) {
     "</div>" +
     '<p class="abp-pushnote abp-chrome" data-ref="pushNote" id="' + pushNoteId + '" role="status" hidden></p>' +
     '<div class="abp-follow" data-ref="follow" aria-live="polite" hidden></div>' +
+    '<div class="abp-follow abp-measure" data-ref="measure" aria-hidden="true"></div>' +
     '<div class="abp-sheet" data-ref="sheet" role="dialog" aria-label="Chapters" hidden></div>' +
     '<div class="abp-poster" data-ref="poster" hidden></div>' +
     '<div class="abp-bar abp-chrome" data-ref="bar">' +
@@ -324,7 +324,7 @@ export function mountAudiobookPlayer(root, options) {
   const ref = (name) => root.querySelector('[data-ref="' + name + '"]');
   const el = {
     pics: [ref("picA"), ref("picB")], eyebrow: ref("eyebrow"), chap: ref("chap"), textTop: ref("textTop"), textLab: ref("textLab"),
-    chaptersBtn: ref("chaptersBtn"), follow: ref("follow"), sheet: ref("sheet"), poster: ref("poster"), track: ref("track"),
+    chaptersBtn: ref("chaptersBtn"), follow: ref("follow"), measure: ref("measure"), sheet: ref("sheet"), poster: ref("poster"), track: ref("track"),
     line: ref("line"), now: ref("now"), len: ref("len"), toggle: ref("toggle"), prevBtn: ref("prevBtn"), nextBtn: ref("nextBtn"),
     speedBtn: ref("speedBtn"), sleepBtn: ref("sleepBtn"), book: ref("book"), of: ref("of"), left: ref("left"),
     pushBtn: ref("pushBtn"), pushNote: ref("pushNote"),
@@ -375,18 +375,14 @@ export function mountAudiobookPlayer(root, options) {
       el.pushBtn.style.top = Math.max(70, title.getBoundingClientRect().bottom - top.getBoundingClientRect().top + 16) + "px";
       const pushBottom = el.pushBtn.getBoundingClientRect().bottom - bounds.top;
       el.pushNote.style.top = pushBottom + 7 + "px";
-      const textTop = Math.max(180, (el.pushNote.hidden ? pushBottom : el.pushNote.getBoundingClientRect().bottom - bounds.top) + 24);
-      // Enlarged Text stays between the new switch and the existing transport; its words scroll.
-      const bottom = Math.max(290, bounds.bottom - bar.getBoundingClientRect().top + 24);
-      el.follow.style.bottom = bottom + "px";
-      el.follow.style.maxHeight = Math.max(0, root.clientHeight - bottom - textTop) + "px";
-      el.follow.tabIndex = el.follow.scrollHeight > el.follow.clientHeight ? 0 : -1;
     } else {
-      el.follow.style.bottom = ""; el.follow.style.maxHeight = ""; el.follow.removeAttribute("tabindex");
       el.pushBtn.style.top = ""; el.pushNote.style.top = "";
     }
+    // Text is a short caption above the actual transport, including when its labels grow.
+    const bounds = root.getBoundingClientRect();
+    el.follow.style.bottom = Math.max(0, bounds.bottom - bar.getBoundingClientRect().top + 24) + "px";
   }
-  const fitStills = () => { for (const image of el.pics) fitStill(image); fitText(); };
+  const fitStills = () => { for (const image of el.pics) fitStill(image); fitText(); if (!destroyed) renderFollow(); };
   const onStillLoad = (event) => {
     stillFailures.delete(event.target.getAttribute("src"));
     fitStill(event.target); updateStillPush(pictureClock()); schedulePictureTick();
@@ -395,6 +391,9 @@ export function mountAudiobookPlayer(root, options) {
   for (const image of el.pics) { image.addEventListener("load", onStillLoad); image.addEventListener("error", onStillError); }
   const resizeObserver = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(fitStills) : null;
   resizeObserver?.observe(root);
+  resizeObserver?.observe(bar);
+  resizeObserver?.observe(top);
+  resizeObserver?.observe(el.follow);
   resizeObserver?.observe(bar);
   resizeObserver?.observe(title);
   resizeObserver?.observe(el.pushNote);
@@ -735,14 +734,88 @@ export function mountAudiobookPlayer(root, options) {
     updateStillPush(t);
     schedulePictureTick();
   }
-  function sentenceAt(c, at) {
-    const block = blockAt(c, at);
-    if (!block) return null;
-    let index = 0;
-    block.sentences.forEach((sentence, i) => {
-      if (sentence.at <= at + 1e-6) index = i;
+  const captionCache = new WeakMap();
+  let captionFontVersion = 0;
+  const onCaptionFonts = () => { captionFontVersion++; fitStills(); };
+  doc.fonts?.addEventListener?.("loadingdone", onCaptionFonts);
+  doc.fonts?.ready?.then(() => { if (!destroyed) onCaptionFonts(); });
+
+  // Use the export's word clock (R-138): validated acoustic intervals when supplied, otherwise
+  // each word's character-weighted share of its sentence. An individual take's one long entry
+  // is deliberately treated just like a grouped take, without making or changing any audio.
+  function captionWords(block) {
+    if (block.words && block.words.length) return block.words.map((word) => ({ text: word.text, from: word.startSec, to: word.endSec }));
+    const words = [];
+    block.sentences.forEach((sentence, index) => {
+      const from = Math.max(block.at, sentence.at);
+      const to = Math.min(block.at + block.seconds, block.sentences[index + 1]?.at ?? block.at + block.seconds);
+      const text = sentence.text.replace(/\s+/g, " ").trim();
+      if (!(to > from) || !text) return;
+      let count = 0;
+      const parts = text.split(" ");
+      parts.forEach((part, i) => {
+        const weight = part.length + (i < parts.length - 1 ? 1 : 0);
+        words.push({ text: part, from: from + (to - from) * count / text.length, to: from + (to - from) * (count + weight) / text.length });
+        count += weight;
+      });
     });
-    return { block, index };
+    return words;
+  }
+  function captionLayout() {
+    const style = win.getComputedStyle?.(el.follow);
+    const line = parseFloat(style?.lineHeight) || 35;
+    const bounds = root.getBoundingClientRect?.();
+    const transport = bar.getBoundingClientRect?.();
+    const header = top.getBoundingClientRect?.();
+    const push = el.pushBtn.getBoundingClientRect?.();
+    const note = el.pushNote.hidden ? null : el.pushNote.getBoundingClientRect?.();
+    const ceiling = Math.max(header?.bottom || 0, push?.bottom || 0, note?.bottom || 0) + 24;
+    const room = transport && bounds && bounds.height > 0 ? transport.top - 24 - ceiling : line * 2;
+    const rows = Math.max(0, Math.min(2, Math.floor((room - (gapNote ? 24 : 0)) / line)));
+    const width = el.follow.getBoundingClientRect?.().width || 640;
+    el.measure.style.width = width + "px";
+    const fits = (text) => {
+      el.measure.textContent = text;
+      const height = el.measure.getBoundingClientRect?.().height;
+      // DOM-less consumers/tests have no layout; real app/package pages always measure the font.
+      return height > 0 ? height <= line * rows + 0.5 : text.length <= rows * 42;
+    };
+    return { rows, fits, key: [width, style?.font, style?.letterSpacing, line, rows, captionFontVersion].join("|") };
+  }
+  function captionCues(block, layout) {
+    const cached = captionCache.get(block);
+    if (cached && cached.key === layout.key) return cached.cues;
+    const cues = [];
+    let held = null;
+    const flush = () => { if (held) cues.push(held); held = null; };
+    for (const word of captionWords(block)) {
+      const joined = held ? held.text + " " + word.text : word.text;
+      if (held && !layout.fits(joined)) flush();
+      if (!layout.fits(word.text)) {
+        flush();
+        // Even an unbroken word must not create a third line. Keep every code point and give
+        // its pieces their share of that word's interval, rather than clip or shrink the font.
+        const characters = Array.from(word.text);
+        for (let start = 0; start < characters.length;) {
+          let low = 1, high = characters.length - start;
+          while (low < high) {
+            const mid = Math.ceil((low + high) / 2);
+            if (layout.fits(characters.slice(start, start + mid).join(""))) low = mid;
+            else high = mid - 1;
+          }
+          const end = start + low;
+          cues.push({ text: characters.slice(start, end).join(""), from: word.from + (word.to - word.from) * start / characters.length, to: word.from + (word.to - word.from) * end / characters.length });
+          start = end;
+        }
+      } else {
+        held = held ? { text: held.text + " " + word.text, from: held.from, to: word.to } : { ...word };
+        // End naturally at a sentence, or at a substantial clause, before growing another cue.
+        if (/[.!?…]["'”’)\]]*$/.test(word.text) || (held.text.length >= 40 && /[,;:—]$/.test(word.text))) flush();
+      }
+    }
+    flush();
+    captionCache.set(block, { key: layout.key, cues });
+    return cues;
   }
   const gapWords = (gap) => {
     const n = gap.to - gap.from + 1;
@@ -752,23 +825,15 @@ export function mountAudiobookPlayer(root, options) {
     el.follow.hidden = !textOn || mode !== "playing";
     if (el.follow.hidden) return;
     const c = chapter();
-    const here = c ? sentenceAt(c, t) : null;
-    if (!here) {
+    const block = c ? blockAt(c, t) : null;
+    if (!block) {
       el.follow.innerHTML = "";
       return;
     }
-    const now = here.block.sentences[here.index].text;
-    let rest = here.block.sentences[here.index + 1];
-    let restHtml = "";
-    if (rest) restHtml = '<span class="rest">' + esc(rest.text) + "</span>";
-    else {
-      const end = here.block.at + here.block.seconds;
-      const gap = c.gaps.find((g) => Math.abs(g.at - end) < 1e-3);
-      const following = c.blocks.find((b) => b.at >= end - 1e-6 && b !== here.block);
-      if (gap) restHtml = '<span class="rest gap">' + esc(gapWords(gap)) + "</span>";
-      else if (following) restHtml = '<span class="rest">' + esc(following.sentences[0].text) + "</span>";
-    }
-    el.follow.innerHTML = (gapNote ? '<span class="abp-gapnote">' + esc(gapWords(gapNote)) + "</span>" : "") + '<span class="now">' + esc(now) + "</span> " + restHtml;
+    const layout = captionLayout();
+    const cue = layout.rows > 0 ? captionCues(block, layout).find((candidate) => candidate.from <= t + 1e-6 && candidate.to > t) : null;
+    const html = (gapNote && layout.rows > 0 ? '<span class="abp-gapnote">' + esc(gapWords(gapNote)) + "</span>" : "") + (cue ? '<span class="now">' + esc(cue.text) + "</span>" : "");
+    if (el.follow.innerHTML !== html) el.follow.innerHTML = html;
   }
   function renderTrack() {
     const c = chapter();
@@ -850,11 +915,11 @@ export function mountAudiobookPlayer(root, options) {
     el.of.textContent = "chapter " + (ci + 1) + " of " + chapters.length;
     el.left.textContent = left(book.left);
     renderTrack();
-    renderFollow();
     renderSheet();
     renderPoster();
     showPicture(c ? pictureAt(c, t) : { at: 0, src: options.cover || null });
     fitText();
+    renderFollow();
     syncSession();
     syncPosition();
   }
@@ -1126,6 +1191,7 @@ export function mountAudiobookPlayer(root, options) {
       pictureTick = null;
       reducedMotion?.removeEventListener?.("change", onReducedMotion);
       resizeObserver?.disconnect();
+      doc.fonts?.removeEventListener?.("loadingdone", onCaptionFonts);
       win.removeEventListener?.("resize", fitStills);
       for (const image of el.pics) { image.removeEventListener("load", onStillLoad); image.removeEventListener("error", onStillError); }
       for (const clip of clips) { clip.removeEventListener("error", onClipError); clip.pause?.(); clip.removeAttribute("src"); }

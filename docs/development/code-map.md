@@ -479,3 +479,12 @@ normalised offsets before a block sheet takes focus, for speaker assignment and 
 Speech choices: contracts `src/voice.ts`, coordinator `src/voice/service.ts`, client
 `src/screens/character-voice.tsx` and `src/screens/shell.tsx`. ComfyUI offers image/video
 recipes only. Saved recording libraries are independent of reader availability.
+
+Approved Listen captions (turn 212, SPEC-047 R-70/R-138, issue #1711): contracts
+`src/audiobook-player.js` measures the current phrase against two rendered lines and the safe
+area above the transport, using supplied acoustic intervals or the existing character-weighted
+estimate. Client `src/components/audiobook-player.tsx` and coordinator
+`src/productions/audiobook-export.ts` retain validated word intervals in both player plans.
+`scripts/interactive-player-source.mjs` keeps the offline player identical. Regressions are in
+client `test/audiobook-player.test.ts`; public design drawings and approval are in
+[turn 212's notes](../../design-system/listen-captions-212.notes.md).

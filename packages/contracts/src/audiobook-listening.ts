@@ -47,7 +47,7 @@ export const ListeningBlockSchema = z
     artifactId: z.string().min(1).optional(),
     at: z.number().min(0),
     seconds: z.number().positive(),
-    /** What Text shows: the sentences of a grouped take, or a block read alone whole (R-70). */
+    /** The source clock: grouped sentences or an individual block, subdivided into Text's bounded phrases (R-70). */
     sentences: z.array(ListeningSentenceSchema).min(1),
     /** Validated acoustic words on this chapter's mix clock; absent when unavailable or stale. */
     words: z.array(AcousticWordSchema).optional(),
@@ -196,9 +196,9 @@ export function sentencesOf(text: string): string[] {
 }
 
 /**
- * What Text shows for a block (R-70), from the block's start: a grouped take's sentences, each
+ * Text's source intervals (R-70), from the block's start: a grouped take's sentences, each
  * given its share of the take by its length — the split kept no word times past the cut — and a
- * block read alone whole, for its length, as the binding says.
+ * block read alone whole, for its length. The shared player divides either into bounded phrases.
  */
 export function blockSentences(text: string, seconds: number, grouped: boolean): ListeningSentence[] {
   const flat = text.replace(/\s+/g, " ").trim();

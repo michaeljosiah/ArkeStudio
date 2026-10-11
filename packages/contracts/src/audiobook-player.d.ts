@@ -19,6 +19,8 @@ export interface AudiobookPlayerBlock {
   /** When `audio` is absent, each block's own take plays. */
   src?: string;
   sentences: ReadonlyArray<{ at: number; text: string }>;
+  /** Validated acoustic intervals on the chapter clock; absent/stale uses estimated phrase timing. */
+  words?: ReadonlyArray<{ text: string; startSec: number; endSec: number }>;
 }
 
 export interface AudiobookPlayerChapter {
