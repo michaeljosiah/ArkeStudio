@@ -98,6 +98,19 @@ Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` wit
 
 ## Select the checks
 
+For the approved editor effects designs 213–215 (SPEC-053 proposed), regenerate with
+`node design-system/editor-effects-213.mjs`, record new turns with
+`node design-system/check-master.mjs --record`, then rebuild the companion with
+`node design-system/build-review.mjs`. Run `node design-system/editor-effects-213.check.mjs`
+for headless Chrome drawings and isolated review interactions; `CHROME` overrides its binary.
+Screenshots and the report go to ignored `.dev/editor-effects-design/`. Inspect desktop,
+Fold, phone, target/time placement, granular protection, audio-source selection, Advanced,
+changed-source and changed-base states, composite cards before/after explicit review entry,
+and revisions arriving without replacing the preview, then run the standard master
+render and companion checks below. Synthetic audio/AI fixtures establish design behaviour
+only, not real analysis, model execution, export parity or installed-app acceptance. See
+[the design notes](../../design-system/editor-effects-213.notes.md).
+
 For design-only production conversation work, turn 196 in the design master is the reference
 for the thirteen card families and Studio layouts (#1424). Generate its companion with
 `npm run design:review`, check it with `npm run design:review -- --check`, and run
