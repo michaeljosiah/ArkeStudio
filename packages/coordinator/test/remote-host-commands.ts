@@ -12,6 +12,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       { kind: "import-folder", worldId, sourcePath },
       { kind: "upload-artifacts", worldId, requestId: worldId, sourcePaths: [sourcePath] },
       { kind: "upload-artifacts", worldId, requestId: worldId },
+      { kind: "upload-artifacts", worldId, requestId: worldId, browserFiles: [{ name: "clip.mp4", data: "YQ==" }] },
       { kind: "stage-playblast", ...playblast },
       { kind: "conversation-action-stage-playblast-complete", ...playblast, conversationId, actionId: "act_" + worldId, status: "completed" },
     ];

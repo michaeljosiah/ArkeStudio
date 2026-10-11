@@ -1,4 +1,5 @@
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
+import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
@@ -3220,6 +3221,7 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
+  private readonly browserMediaImports = new BrowserMediaImports();
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -17064,6 +17066,27 @@ export class Coordinator {
       case "upload-artifacts": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
+        if (msg.browserFiles !== undefined) {
+          if (!store || store.worldId !== msg.worldId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "Open this world's editor before importing media.");
+            return;
+          }
+          if (!store.canWrite()) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "This world is read-only. Reopen it for editing before importing media.");
+            return;
+          }
+          if (msg.sourcePaths !== undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "Choose either browser files or desktop files for one import.");
+            return;
+          }
+          const { browserFiles, ...request } = msg;
+          if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
+          try {
+            await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
+              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }));
+          } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
+          return;
+        }
         if (!store || store.worldId !== msg.worldId || (!pick && !msg.sourcePaths)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
