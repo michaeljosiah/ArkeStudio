@@ -649,6 +649,14 @@ describe("the tool row's words are tips, not text in the composer (local.16)", (
 });
 
 describe("World Chat's named model", () => {
+  it("labels an unresolved harness choice without borrowing a provider default", async () => {
+    await mount(<Holder chip={{ value: undefined, readOnly: true }} />);
+    const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;
+    assert.equal(label.textContent, "Harness default");
+    assert.equal(label.getAttribute("aria-label"), "Language model: Harness default. Chosen by the harness");
+    assert.equal(container.querySelector(".fy-mchip svg"), null);
+  });
+
   it("stays a muted label with no mark, menu or effort, and its tip says where it is chosen", async () => {
     await mount(<Holder chip={{ readOnly: true }} />);
     const label = container.querySelector<HTMLElement>(".fy-mchip__btn--fixed")!;

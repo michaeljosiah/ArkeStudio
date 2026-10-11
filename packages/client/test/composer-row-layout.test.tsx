@@ -154,7 +154,7 @@ const chrome = findChrome();
 describe("the composer's tool row in the production dock (local.16)", { skip: chrome === null ? "no Chrome to lay the row out" : false }, () => {
   it("keeps send whole and clear, the name readable, and no reason written over the editor, at 302, 331 and 430", async () => {
     const rows = await measure(chrome!, [
-      { key: "zen", value: undefined, set: false },
+      { key: "zen", value: "opencode/fledge", set: false },
       { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
       { key: "gpt-highest", value: "openai/gpt-5.4", set: true, variant: "xhigh" },
     ], [302, 331, 430]);
@@ -177,7 +177,7 @@ describe("the composer's tool row in the production dock (local.16)", { skip: ch
 
   it("says the effort's value without its chevron when narrow, and draws Effort as its glyph", async () => {
     const rows = await measure(chrome!, [
-      { key: "zen", value: undefined, set: false },
+      { key: "zen", value: "opencode/fledge", set: false },
       { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
     ], [302, 430]);
     const effort = (key: string, width: number) => rows.find((row) => row.key === key && row.width === width)!.controls.find((control) => control.label === "Effort")!;
@@ -192,8 +192,8 @@ describe("the composer's tool row in the production dock (local.16)", { skip: ch
   // the editor and left it 0 wide, and with Read replies offered send sat past the screen's edge.
   it("puts the tools under the words on a touch screen, send whole, at the phone sheet's 330 and 360", async () => {
     const rows = await measure(chrome!, [
-      { key: "zen", value: undefined, set: false },
-      { key: "zen-read", value: undefined, set: false, readReplies: true },
+      { key: "zen", value: "opencode/fledge", set: false },
+      { key: "zen-read", value: "opencode/fledge", set: false, readReplies: true },
       { key: "gpt", value: "openai/gpt-5.4", set: true, variant: "high" },
     ], [330, 360], { touch: true });
     assert.equal(rows.length, 6);

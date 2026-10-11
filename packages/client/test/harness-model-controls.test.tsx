@@ -640,16 +640,34 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     assert.equal(isSet(), false);
   });
 
-  it("offers Every chat in this production with nothing chosen and nothing kept, keeping the model in force (195b, local.15)", async () => {
+  it("does not name or remember a provider default as the unpinned session's model", async () => {
     const state = modelState();
-    state.app.harnessModels = state.app.harnessModels.map((model) => (model.id === "opus[1m]" ? { ...model, isDefault: true } : model));
+    state.app.harnessModels = state.app.harnessModels.map((model) => ({ ...model, isDefault: true, variants: { names: ["low", "high"], default: "high" } }));
     state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
     await mount(state, pageConversation());
     assert.equal(isSet(), false, "the harness's default is in force, chosen by nobody");
+    assert.equal(chip().textContent, "Harness default");
+    assert.equal(container.querySelector('button[aria-label="Effort"]'), null, "no effort belongs to an unidentified runtime model");
     await openChip();
-    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models", "Every chat in this production"], "Clear is offered only once the production keeps one");
+    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"], "a provider preference cannot become a saved production choice");
+    assert.equal(dialogRoot(container).querySelector('[role="option"][aria-selected="true"]'), null);
+    await act(async () => chip().click());
+    await say("Explain the scene");
+    const turn = sent.findLast((message) => message.kind === "world-chat-send");
+    assert.ok(turn?.kind === "world-chat-send");
+    assert.equal(turn.modelId, undefined, "the real harness fallback still resolves the unpinned send");
+    assert.equal(turn.variant, undefined);
+    assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("can remember a known agent model when the production has no choice", async () => {
+    const state = modelState();
+    state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
+    state.app.agents = state.app.agents.map((agent) => agent.name === "world-builder" ? { ...agent, model: OPUS } : agent);
+    await mount(state, pageConversation());
+    assert.equal(chip().textContent, "Opus");
     await chipPress(/Every chat in this production/);
-    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS), "the default becomes the production's choice");
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS));
   });
 
   describe("the effort (design turn 195)", () => {

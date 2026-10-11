@@ -885,8 +885,7 @@ export function ProductionConversation({
   // The effort belongs to a model, so it is kept by the model's reference: this chat's own choice,
   // else what the production kept for that model. Nothing is sent for a model nobody named: the
   // harness's default has no session pinned to it for an effort to apply to.
-  const chipModel = effectiveLanguageModelId ? model : state?.app.harnessModels.find((candidate) => candidate.isDefault);
-  const effortRef = chipModel ? harnessModelReference(chipModel) : effectiveLanguageModelId;
+  const effortRef = model ? harnessModelReference(model) : effectiveLanguageModelId;
   const keptVariant = effortRef !== undefined ? productionVariants(state, productionId)?.[effortRef] : undefined;
   const chatVariant = effortRef !== undefined ? chatVariants[effortRef] : undefined;
   const effectiveVariant = chatVariant ?? keptVariant;
@@ -1270,8 +1269,8 @@ export function ProductionConversation({
       }}
       // Every chat in this production stands in the picker's foot wherever the conversation can
       // remember a choice (design turn 195, rule 2; 195b): this chat's own model, or — with nothing
-      // chosen here and nothing kept for the production — the model in force, the harness's default
-      // included. Only a production that keeps one already offers Clear instead.
+      // chosen here and nothing kept for the production — a known agent choice. Per-provider
+      // defaults cannot identify the unpinned session's model. Only a kept choice offers Clear.
       {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined) || (languageModelId === undefined && rememberedLanguageModel === undefined && effortRef !== undefined)) && worldId && languageUnavailableReason === undefined
         ? { onRemember: () => {
             const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
