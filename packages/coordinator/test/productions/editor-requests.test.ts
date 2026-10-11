@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   EditorRequestFileSchema,
@@ -9,12 +9,13 @@ import {
   orderedTrackClips,
   sortScenes,
   storyTimelineFingerprint,
+  defaultEffectClip,
   type ProductionTimeline,
   type TimelineClipId,
   type ModelEditorRequest,
 } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, retainEditorRequests, stageEditorRequests } from "../../src/productions/editor-requests.js";
-import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { applyHumanTimelineCommand, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -52,6 +53,30 @@ async function moveSecondEarlier(store: WorldStore): Promise<{ timeline: Product
 }
 
 describe("Arke's editor requests (issue 684)", () => {
+  it("refuses effect-track edits both at staging and generic Accept (SPEC-053 R-26, R-36)", async () => {
+    const store = await open();
+    const timeline = await assembleStory(store, PRODUCTION);
+    await applyHumanTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: timeline.revision,
+      sourceFingerprint: storyTimelineFingerprint(productionOf(store)), commands: [
+        { kind: "add-track", trackId: "tr_effects", trackKind: "effect", name: "Effects" },
+        { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 120, seed: 7 }) },
+      ] });
+    const commands: ModelEditorRequest["commands"] = [{ kind: "set-track", trackId: "tr_effects", muted: true }];
+    await assert.rejects(stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD,
+      requests: [{ summary: "Hide effects", commands }], now: NOW }), /effects arrangement review/i);
+    // An older or manually supplied operational record cannot acquire a stronger Accept path.
+    const current = productionOf(store).timeline;
+    assert.ok(current?.status === "ready");
+    const request = { id: "req_01J8G0000000000000000000R1", productionId: PRODUCTION, conversationId: CONVERSATION,
+      baseRevision: current.timeline.revision, sourceFingerprint: storyTimelineFingerprint(productionOf(store)),
+      commands, summary: "Hide effects", createdAt: NOW, status: "pending" as const };
+    await writeFile(requestsPath(store), JSON.stringify(EditorRequestFileSchema.parse({ schemaVersion: 1, requests: [request] })));
+    const before = await readFile(timelinePath(store), "utf8");
+    await assert.rejects(decideEditorRequest(store, { productionId: PRODUCTION, requestId: request.id, decision: "accept", now: NOW }), /effects arrangement review/i);
+    assert.equal(await readFile(timelinePath(store), "utf8"), before);
+    assert.equal(JSON.parse(await readFile(requestsPath(store), "utf8")).requests[0].status, "pending");
+  });
+
   it("stages only for the thread's production, and only what applies", async () => {
     const store = await open();
     const { commands, timeline } = await moveSecondEarlier(store);

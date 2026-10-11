@@ -98,7 +98,17 @@ Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` wit
 
 ## Select the checks
 
-For the approved editor effects designs 213–215 (SPEC-053 proposed), regenerate with
+For editor effects T-1 (SPEC-053 accepted), run contracts `test/editor-effects.test.ts`,
+`test/editor-effect-protection.test.ts`, `test/editor-request.test.ts`, `test/timeline.test.ts`
+and `test/render-plan.test.ts`, together with coordinator `test/productions/timeline-effects.test.ts`,
+`test/productions/editor-requests.test.ts`, `test/productions/timeline.test.ts` and the timeline
+migration/world schema tests. These verify authored state, retained phase/fades, granular
+protection, direct-human versus generic acceptance authority, schema-floor persistence and
+legacy compatibility. They do not establish renderer or real-UI acceptance; that evidence is
+recorded with the subsequent implementation slices. Run the root lint/typecheck/build gates
+after the final test edit and run client tests from `packages/client`.
+
+For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with
 `node design-system/build-review.mjs`. Run `node design-system/editor-effects-213.check.mjs`

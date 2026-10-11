@@ -163,7 +163,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Seventy-one is a micro drama's Target, on the draft and on season.json (design turn 205).
 // Seventy-two is a saved kit look's optional name (turn 207); seventy-three adds retained
 // audiobook motion and exact-audio word timing to the strict chapter record (turn 208).
-export const SUPPORTED_SCHEMA_VERSION = 73;
+// Seventy-four adds procedural editor effects, independent audio reaction and granular
+// protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
+export const SUPPORTED_SCHEMA_VERSION = 74;
 
 export class WorldOpenError extends Error {
   constructor(

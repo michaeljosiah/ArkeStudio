@@ -71,20 +71,28 @@ export const ModelSceneEditSchema = z.discriminatedUnion("kind", [
 ]);
 export type ModelSceneEdit = z.infer<typeof ModelSceneEditSchema>;
 
-// Live-source detachment is a direct editor action; request ghosts cannot resolve it.
-type PreviewableCommandOption = Exclude<(typeof TimelineCommandSchema.options)[number], { shape: { kind: z.ZodLiteral<"detach-audio"> } }>;
+// This is deliberately an allowlist. A new direct editor command must not silently become a
+// generic model tool or an Accept action, especially protection release (SPEC-053 R-26, R-36).
+const GENERIC_EDITOR_COMMANDS = [
+  "set-performance-source", "move-adjacent", "move-to-order", "move-to-frame", "trim", "split",
+  "duplicate", "delete", "ripple-delete", "switch-take", "place", "set-clip-gain", "set-clip-audio",
+  "set-clip-role", "set-track", "add-track", "remove-track", "add-to-library", "remove-from-library",
+  "set-mix", "add-subtitle-track", "add-cue", "edit-cue", "delete-cue", "import-cues", "set-subtitle-style",
+] as const;
+type GenericEditorCommandKind = (typeof GENERIC_EDITOR_COMMANDS)[number];
+const genericEditorCommandKinds = new Set<string>(GENERIC_EDITOR_COMMANDS);
+type PreviewableCommandOption = Extract<(typeof TimelineCommandSchema.options)[number], { shape: { kind: z.ZodLiteral<GenericEditorCommandKind> } }>;
 const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandSchema.options.filter(
-  (option): option is PreviewableCommandOption => option.shape.kind.value !== "detach-audio",
+  (option): option is PreviewableCommandOption => genericEditorCommandKinds.has(option.shape.kind.value),
 ) as [PreviewableCommandOption, ...PreviewableCommandOption[]]);
 
 /** SPEC-051 R-33: both prompt paths name the actual vocabulary, including explicit exclusions. */
-export const TIMELINE_EDITOR_COMMAND_GUIDE = TimelineCommandSchema.options.map(option => {
+export const TIMELINE_EDITOR_COMMAND_GUIDE = EditorRequestCommandSchema.options.map(option => {
   const kind = option.shape.kind.value;
-  if (kind === "detach-audio") return "detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching";
   return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
-}).join(" | ");
+}).join(" | ") + " | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks";
 /** The shared result shape stays compact; the turn's action guide supplies command fields. */
-export const TIMELINE_EDITOR_COMMAND_NAMES = TimelineCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
+export const TIMELINE_EDITOR_COMMAND_NAMES = EditorRequestCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
 
 /** What the model returns: a summary in the person's terms and the exact commands (R-27, R-34). */
 export const ModelEditorRequestSchema = z
@@ -94,6 +102,18 @@ export const ModelEditorRequestSchema = z
   })
   .strict();
 export type ModelEditorRequest = z.infer<typeof ModelEditorRequestSchema>;
+
+/** Checked again at acceptance: a persisted generic card cannot inherit later effect authority. */
+export function genericEditorRequestRefusal(base: ProductionTimeline, commands: readonly TimelineCommand[]): string | null {
+  for (const command of commands) {
+    if (!genericEditorCommandKinds.has(command.kind)) return "Effects require Review in timeline and Apply reviewed version; generic Accept cannot apply effects or release protection.";
+    if (command.kind === "add-track" && command.trackKind === "effect") return "Effect tracks require the effects arrangement review flow.";
+    if ("trackId" in command && base.tracks.some(track => track.id === command.trackId && track.kind === "effect")) {
+      return "Effect tracks require the effects arrangement review flow.";
+    }
+  }
+  return null;
+}
 
 /** The durable record (R-28). Model output cannot touch it after creation; only a decision moves its status. */
 export const EditorRequestSchema = z
@@ -219,6 +239,8 @@ export function previewEditorRequest(
     selections?: readonly TimelineSelectionChange[];
   } = {},
 ): EditorRequestPreview {
+  const refusal = genericEditorRequestRefusal(base, commands);
+  if (refusal !== null) return { ok: false, reason: refusal };
   const switches = commands.filter((command): command is Extract<TimelineCommand, { kind: "switch-take" }> => command.kind === "switch-take");
   const clipCommands = commands.filter((command): command is TimelineClipCommand => command.kind !== "switch-take");
   let next: ProductionTimeline;
