@@ -163,6 +163,43 @@ test("real source sampling keeps the previous 30fps frame at nonaligned 24fps in
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });
 
+test("picture and alpha delivery keep exact half-open frame boundaries after gaps and inside export windows", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("frame-boundaries"), samples = [];
+  try {
+    const still = Buffer.from(Array.from({ length: 4 }, () => [96, 96, 96, 255]).flat());
+    await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-i", "pipe:0", "-frames:v", "1", join(dir, "still.png")], still);
+    for (const fps of [24, 25, 30] as const) {
+      // 3842/24 rounds above FFmpeg's 3842*(1/24); 29/25 and 123/30 expose
+      // truncation when a decimal-second placement is divided back by the time base.
+      const offset = fps === 24 ? 3842 : fps === 25 ? 29 : 123;
+      // NUT preserves these exact frame timestamps; Matroska's millisecond time base would
+      // turn this placement test into a source-frame resampling test as well.
+      const values = [32, 96, 160, 224], source = `source-${fps}.nut`;
+      const pixels = Buffer.concat(values.map(value => Buffer.from(Array.from({ length: 4 }, () => [value, value, value, 255]).flat())));
+      await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-framerate", String(fps), "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", join(dir, source)], pixels);
+      for (const startFrame of [0, 2 * fps]) for (const kind of ["still", "video", "scoped", "composition"] as const) {
+        const from = startFrame + offset, to = from + values.length, frameCount = offset + values.length + 2;
+        const plan: ExportPlan = { preset: "review-cut", frameRate: fps, items: [], overlays: [], audio: [], totalSec: frameCount / fps,
+          effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: fps, startFrame,
+            endFrame: startFrame + frameCount, effectLayers: [], issues: [], pictureLayers: kind === "composition" ? [] : [{
+              clipId: "picture", trackId: "picture", order: 0, kind: "media", label: kind, path: kind === "video" ? source : "still.png", still: kind !== "video",
+              startFrame: from, endFrame: to, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" }] } };
+        const alpha = kind === "scoped" || kind === "composition" ? [{ ...(kind === "scoped" ? { pictureClipId: "picture" } : {}), path: join(dir, source), startFrame: from, endFrame: to }] : [];
+        const args = buildFfmpegArgs(plan, dir, "pipe:1", "unused.ttf", alpha);
+        args[args.indexOf("-pix_fmt") + 1] = "rgba"; args.splice(args.length - 1, 0, "-c:v", "rawvideo", "-f", "rawvideo");
+        const delivered = await processBytes(args);
+        assert.equal(delivered.length, frameCount * 16);
+        const actual = Array.from({ length: values.length + 4 }, (_, index) => delivered[(offset - 2 + index) * 16]!);
+        const expected = [0, 0, ...(kind === "still" ? values.map(() => 96) : values), 0, 0];
+        assert.ok(actual.every((value, index) => Math.abs(value - expected[index]!) <= 2),
+          `${fps}fps ${kind} window ${startFrame}, placement ${from}: actual ${actual}; expected ${expected}`);
+        samples.push({ fps, kind, startFrame, from, to, actual, expected });
+      }
+    }
+    report.frameBoundaries = { samples, exactHalfOpenWindows: true };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
 test("scoped animated alpha stays inside contain bounds and upper picture windows are half-open", { skip: !hasFfmpeg }, async () => {
   const dir = await fixtureDir("contain");
   try {

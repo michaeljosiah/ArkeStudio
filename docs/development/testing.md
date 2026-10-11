@@ -120,7 +120,9 @@ after the final test edit and run client tests from `packages/client`.
 Editor effects T-2 adds contracts `test/editor-effect-renderer.test.ts`, client
 `test/editor-effect-preview.test.ts` and coordinator `test/media/editor-effect-native.test.ts`.
 The native tests use real FFmpeg/FFprobe (`ARKE_FFMPEG`/`ARKE_FFPROBE` or PATH); set
-`ARKE_EFFECT_EVIDENCE_DIR` to retain measured parity evidence. Run
+`ARKE_EFFECT_EVIDENCE_DIR` to retain measured parity evidence. The frame-boundary case covers
+stills, video, scoped alpha and composition alpha at exact
+half-open intervals after gaps, at 24/25/30 fps and inside nonzero export windows. Run
 `node --import tsx scripts/smoke-editor-effects-preview.mjs` for real Chrome decoding, source
 alpha, contained targets, multiple picture layers, all six presets and seek/worker checks.
 `node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
