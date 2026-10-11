@@ -1,4 +1,4 @@
-import type { TimelineClip, TimelineClipId } from "@arke-studio/contracts";
+import type { TimelineClipId } from "@arke-studio/contracts";
 import { framesFromDelta, type PictureGesture } from "../lib/picture-edit.js";
 import { autoScrollStep, snapFrame, snapMoveDelta } from "../lib/clip-gesture.js";
 
@@ -16,8 +16,8 @@ import { autoScrollStep, snapFrame, snapMoveDelta } from "../lib/clip-gesture.js
 /** Pixels within which an edge is pulled onto a snap candidate (Clipchamp's feel at 1×). */
 export const SNAP_PX = 8;
 
-export interface GestureUpdate {
-  clipId: TimelineClipId;
+export interface GestureUpdate<Id extends string = TimelineClipId> {
+  clipId: Id;
   gesture: PictureGesture;
   /** The pointer's travel in frames, after snapping. */
   deltaFrames: number;
@@ -29,7 +29,7 @@ export interface GestureUpdate {
   moved: boolean;
 }
 
-export interface GestureOptions {
+export interface GestureOptions<Id extends string = TimelineClipId> {
   /** The press. Its `currentTarget` takes pointer capture. */
   event: { button: number; pointerId: number; clientX: number; clientY?: number; pointerType?: string; currentTarget: EventTarget | null; preventDefault(): void; stopPropagation(): void };
   selected?: boolean;
@@ -39,13 +39,15 @@ export interface GestureOptions {
   /** The scroll container, for auto-scroll; null when there is none to scroll. */
   canvas: HTMLElement | null;
   totalFrames: number;
-  clip: TimelineClip;
+  clip: { id: Id; startFrame: number; durationFrames: number };
+  /** The owning view can cancel a gesture on unmount or when authoring becomes unavailable. */
+  signal?: AbortSignal;
   gesture: PictureGesture;
   /** Absolute frames an edge may snap onto; null when Snap is off. */
   snapFrames: readonly number[] | null;
-  onUpdate: (update: GestureUpdate) => void;
+  onUpdate: (update: GestureUpdate<Id>) => void;
   /** Release. Null when the gesture was cancelled or never moved: nothing is written. */
-  onEnd: (update: GestureUpdate | null) => void;
+  onEnd: (update: GestureUpdate<Id> | null) => void;
 }
 
 /** A second finger or a pan cancels the menu; a detached target cannot open one later. */
@@ -64,10 +66,10 @@ export const pointerIsTouch = (event: { pointerType?: string }) => event.pointer
   : typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true;
 
 /** Attach the gesture to a press. Returns false when the press could not start one. */
-export function startClipGesture(options: GestureOptions): boolean {
+export function startClipGesture<Id extends string>(options: GestureOptions<Id>): boolean {
   const { event, lane, canvas, clip, gesture } = options;
   const element = event.currentTarget as (HTMLElement & Partial<Pick<HTMLElement, "setPointerCapture" | "releasePointerCapture">>) | null;
-  if (element === null) return false;
+  if (element === null || options.signal?.aborted) return false;
   const touch = pointerIsTouch(event);
   // A first touch belongs to lane panning; selection happens only on its eventual click.
   if (touch && gesture === "move" && options.selected !== true) {
@@ -93,7 +95,7 @@ export function startClipGesture(options: GestureOptions): boolean {
   let travelled = !touch;
   let longPress: ReturnType<typeof setTimeout> | undefined;
 
-  const compute = (clientX: number): GestureUpdate => {
+  const compute = (clientX: number): GestureUpdate<Id> => {
     const rawDelta = framesFromDelta(clientX - originX + scrolled, laneWidth, span);
     const candidates = options.snapFrames;
     let deltaFrames = rawDelta;
@@ -160,6 +162,7 @@ export function startClipGesture(options: GestureOptions): boolean {
     element.removeEventListener("pointercancel", cancel);
     if (typeof window !== "undefined") window.removeEventListener("keydown", onKey, true);
     if (touch) window.removeEventListener("pointerdown", anotherFinger);
+    options.signal?.removeEventListener("abort", cancel);
   };
   const up = (pointer: PointerEvent) => {
     if (pointer.pointerId !== event.pointerId) return;
@@ -176,6 +179,7 @@ export function startClipGesture(options: GestureOptions): boolean {
   };
   // A gesture the browser took away — a touch the OS claimed, capture lost — was never completed.
   const cancel = () => {
+    if (ended) return;
     finish();
     options.onEnd(null);
   };
@@ -193,5 +197,6 @@ export function startClipGesture(options: GestureOptions): boolean {
   if (touch && gesture === "move" && options.onLongPress) longPress = setTimeout(() => { cancel(); if (element.isConnected) options.onLongPress?.(); }, 450);
   if (typeof window !== "undefined") window.addEventListener("keydown", onKey, true);
   if (touch) window.addEventListener("pointerdown", anotherFinger);
+  options.signal?.addEventListener("abort", cancel, { once: true });
   return true;
 }

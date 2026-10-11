@@ -37,6 +37,7 @@ import {
   cueAtSec,
   type ArtifactSidecar,
   orderedShots,
+  effectPresetDefinition,
 } from "@arke-studio/contracts";
 import { Button } from "../components/ui.js";
 import {
@@ -112,6 +113,11 @@ import { CutTouchContext, EditorSheetSlot, LaneSheet, cutTime, useCutLayout, use
 import { PageSheet } from "../components/page-sheet.js";
 import { Grid2x2, More, Pause, SplitMark as Columns, Trash as Trash2, RotateCcw as Undo2, RotateCw as Redo2 } from "../components/icons.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { EffectLibrary } from "./editor-effect-library.js";
+import { EffectTrackRows } from "./editor-effect-tracks.js";
+import { EditorPanelTabs } from "./editor-panel-tabs.js";
+import { EffectPanel } from "./editor-effect-panel.js";
+import { useHumanEffectDraft } from "./editor-effect-draft.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -335,6 +341,7 @@ function CutEditorScreen() {
     // Once, on arrival: the drawer is the person's to close afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
   const [ghostRequestId, setGhostRequestId] = useState<string | null>(null);
@@ -428,6 +435,8 @@ function CutEditorScreen() {
     subtitleView,
     subtitleHidden,
   });
+  const effectDraft = useHumanEffectDraft(editableTimeline, selected?.kind === "effect" ? selected.id : null,
+    renderPlan?.ok ? renderPlan.plan : null, setTimelineCommandError);
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
@@ -444,10 +453,11 @@ function CutEditorScreen() {
    * blank editor space the export never emits. Both come from the plan, which reads the record
    * the editor edits; a production with no story keeps room past its last clip for the next one.
    */
-  const canvasSec = spineCut
+  const mediaCanvasSec = spineCut
     ? spineCut.trackDurationSec
     : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
-  const filmSec = planTotalSec ?? canvasSec;
+  const canvasSec = Math.max(mediaCanvasSec, ...(editableTimeline?.tracks.flatMap(track => (track.effects ?? []).map(effect => (effect.startFrame + effect.durationFrames) / frameRate)) ?? []));
+  const filmSec = planTotalSec ?? mediaCanvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
@@ -504,7 +514,7 @@ function CutEditorScreen() {
     if (decision === "accept") setInFlight({ revision: timelineRevision, since: Date.now() });
     decideEditorRequest(worldId, prodId, requestId, decision);
   };
-  const shownTimeline = draft ?? ghostTimeline ?? editableTimeline;
+  const shownTimeline = effectDraft.draft ?? draft ?? ghostTimeline ?? editableTimeline;
   /*
    * The strip under a clip reads its in-point from the resolver's entry, and a live head trim
    * shows the draft: resolved from the saved record, the entry would name the old in-point until
@@ -533,6 +543,7 @@ function CutEditorScreen() {
     : [];
   const drift = production && editableTimeline && timelineState.status === "ready" ? storyOrderDrift(production, editableTimeline) : null;
   const allCues = editableTimeline ? editableTimeline.tracks.flatMap((track) => (track.cues ?? []).map((cue) => ({ cue, track }))) : [];
+  const allEffects = editableTimeline?.tracks.flatMap(track => track.effects ?? []) ?? [];
   const selectedExists =
     selected?.kind === "picture"
       ? spineCut
@@ -540,11 +551,12 @@ function CutEditorScreen() {
         : allClips.some(({ clip }) => clip.id === selected.id)
       : selected?.kind === "cue"
         ? allCues.some(({ cue }) => cue.id === selected.id)
-        : false;
+        : selected?.kind === "effect" && allEffects.some(effect => effect.id === selected.id);
   // Nothing is selected until someone selects (R-25a): the Inspector opens on the cut, and
   // Escape has something to clear only after a click. A selection that no longer exists reads as none.
   const activeSelection: CutSelection | null = selectedExists ? selected : null;
   const revealDetails = () => {
+    setDetailTab("inspector");
     setLibraryOpen(false);
     if (phone) return;
     setRightOpen(true);
@@ -564,6 +576,7 @@ function CutEditorScreen() {
     revealDetails();
     if (phone) setRightOpen(true);
   };
+  const selectEffect = (id: string) => { setSelected({ kind: "effect", id }); revealDetails(); if (phone) setRightOpen(true); };
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
   // on it from the moment the production opens.
@@ -586,6 +599,10 @@ function CutEditorScreen() {
   // timing rows move with the hand rather than freezing until release (issue 1036).
   const shownClips = shownTimeline ? shownTimeline.tracks.flatMap((track) => track.clips.map((clip) => ({ clip, track }))) : allClips;
   const shownSelected = activeSelection?.kind === "picture" ? (shownClips.find(({ clip }) => clip.id === activeSelection.id) ?? selectedAny) : null;
+  const selectedEffect = activeSelection?.kind === "effect" ? allEffects.find(effect => effect.id === activeSelection.id) ?? null : null;
+  const shownEffect = selectedEffect ? shownTimeline?.tracks.flatMap(track => track.effects ?? []).find(effect => effect.id === selectedEffect.id) ?? selectedEffect : null;
+  const selectedTimed = selectedEffect ?? selectedAny?.clip ?? null;
+  const selectedLabel = selectedEffect ? effectPresetDefinition(selectedEffect.preset).label : selectedAny?.clip.source.label ?? "";
   const selectedPictureIndex = selectedPictureClip
     ? orderedPictureClips.findIndex((clip) => clip.id === selectedPictureClip.id)
     : -1;
@@ -631,6 +648,7 @@ function CutEditorScreen() {
   const sendCommands = (commands: TimelineCommand[], label?: string) => {
     if (commandsDisabled || !worldId || !prodId || !production || fence === null) return;
     setTimelineCommandError(null);
+    effectDraft.preview(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
@@ -702,6 +720,9 @@ function CutEditorScreen() {
     if (allClips.some(({ clip }) => clip.id === id)) {
       pendingSelect.current = null;
       selectPicture(id);
+    } else if (allEffects.some(effect => effect.id === id)) {
+      pendingSelect.current = null;
+      selectEffect(id);
     } else if (!commandPending) {
       // The write was refused or answered without the clip: the old selection stands.
       pendingSelect.current = null;
@@ -725,9 +746,14 @@ function CutEditorScreen() {
   const mintClipId = (): TimelineClipId => `cl_${ulid()}`;
   const playheadFrame = secondsToFrames(Math.max(0, Math.min(transport.time, totalSec)), frameRate);
   /** Every edge a drag can land against while Snap is on (issue 1034): clip edges on every lane, the playhead, zero. */
-  const snapFrames = snap && shownTimeline ? (except: TimelineClipId) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
+  const snapFrames = snap && shownTimeline ? (except: string) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
   /** The viewer follows an edge in hand (issue 1036): one seek per frame the edge crosses. */
   const scrubTo = (frame: number) => transport.seek(frame / frameRate);
+  const effectAuthoring = shownEffect && shownTimeline ? {
+    effect: shownEffect, timeline: shownTimeline, frameRate, playheadFrame,
+    authoringRevision: editableTimeline?.revision, disabled: commandsDisabled,
+    onCommands: sendCommands, onPreview: effectDraft.preview, onScrub: scrubTo,
+  } : undefined;
   /** A press on empty lane, measured across the track stack the same way the ruler measures itself. */
   const seekFromLane = seekDrag({ totalSec, transport, laneOf: (element) => element, seekOnPress: true });
   const canUndo = !commandsDisabled && timelineRevision !== null && timelineUndo > 0;
@@ -739,10 +765,10 @@ function CutEditorScreen() {
   const cuePlan = renderPlan?.ok ? renderPlan.plan : null;
   const cueAt = useMemo(() => (cuePlan === null ? null : (sec: number) => cueAtSec(cuePlan, sec)), [cuePlan]);
   const playheadInsideSelected =
-    selectedAny !== null &&
-    playheadFrame > selectedAny.clip.startFrame &&
-    playheadFrame < selectedAny.clip.startFrame + selectedAny.clip.durationFrames;
-  const unpickedSplit = phone && !selectedAny ? orderedPictureClips.find(clip => playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames) : undefined;
+    selectedTimed !== null &&
+    playheadFrame > selectedTimed.startFrame &&
+    playheadFrame < selectedTimed.startFrame + selectedTimed.durationFrames;
+  const unpickedSplit = phone && !activeSelection ? orderedPictureClips.find(clip => playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames) : undefined;
   /** Placement from the Library (SPEC-039 R-9, R-10): one `place` command, never a host path. */
   const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number,
     options: { kind?: "picture" | "audio"; newTrack?: boolean } = {}) => {
@@ -890,6 +916,17 @@ function CutEditorScreen() {
     sendTimelineTranscribe(worldId, prodId, timelineRevision, trackId, language);
   };
   const selectedAction = (action: "split" | "duplicate" | "delete" | "ripple") => {
+    if (selectedEffect) {
+      const clipId = selectedEffect.id as TimelineClipId;
+      if (action === "split") sendCommands([{ kind: "effect-split", clipId, atFrame: playheadFrame, newClipId: mintClipId() }], "Split effect");
+      else if (action === "duplicate") {
+        const newClipId = mintClipId();
+        pendingSelect.current = newClipId;
+        sendCommands([{ kind: "effect-duplicate", clipId, newClipId, newLineageId: `ef_${ulid()}`,
+          startFrame: selectedEffect.startFrame + selectedEffect.durationFrames, seed: crypto.getRandomValues(new Uint32Array(1))[0]! }], "Duplicate effect");
+      } else if (action === "delete") sendCommands([{ kind: "effect-remove", clipId }], "Remove effect");
+      return;
+    }
     if (action === "delete" && selectedCueId !== null) {
       sendCommands([{ kind: "delete-cue", cueId: selectedCueId as `cu_${string}` }], "Delete subtitle");
       return;
@@ -967,8 +1004,8 @@ function CutEditorScreen() {
       </div>
     );
   }
-  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen });
-  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen };
+  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled, keysOpen });
+  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled, keysOpen };
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
@@ -1061,6 +1098,9 @@ function CutEditorScreen() {
         event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files));
       }}>
       <ArtifactPanel
+        effects={<EffectLibrary timeline={editableTimeline} frameRate={frameRate} pictureDurationFrames={secondsToFrames(filmSec, frameRate)}
+          selectedPictureId={selectedAny?.track.kind === "picture" ? selectedAny.clip.id : null} playheadFrame={playheadFrame}
+          disabled={commandsDisabled} onCommands={sendCommands} onCreated={selectEffect} />}
         worldId={worldId}
         artifacts={world?.artifacts ?? []}
         slug={slug}
@@ -1180,7 +1220,8 @@ function CutEditorScreen() {
             transport={transport}
             cueAt={cueAt}
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
-            plan={renderPlan?.ok ? renderPlan.plan : null}
+            plan={effectDraft.plan}
+            effectControls={effectAuthoring}
             {...(worldId && production && editableTimeline && worldArtifacts ? { analysisContext: { worldId, production, artifacts: worldArtifacts, timeline: editableTimeline } } : {})}
           />
         </div>
@@ -1294,10 +1335,10 @@ function CutEditorScreen() {
                 >
                   <SplitMark size={12} />
                 </button>
-                <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}>
+                <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={commandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}>
                   <Copy size={12} />
                 </button>
-                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("delete")}>
+                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={commandsDisabled || !selectedTimed} onClick={() => selectedAction("delete")}>
                   <Trash size={12} />
                 </button>
                 <button type="button" className="fy-tlbtn fy-tip" data-tip="Ripple delete · ⇧⌫" aria-label="Ripple delete" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("ripple")}>
@@ -1354,7 +1395,7 @@ function CutEditorScreen() {
                * was reached. Pressing empty lane still clears, because that is the gesture this
                * handler is for; the two surfaces that exist to move the clock are not it.
                */
-              if (target.closest(".fy-cutseg, .fy-typedclip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
+              if (target.closest(".fy-cutseg, .fy-typedclip, .fy-effect-clip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
               setSelected(null);
             }}
           >
@@ -1488,6 +1529,13 @@ function CutEditorScreen() {
                 <EmptyEditorTrack label="Picture" detail="Opening accepted takes…" kind="picture" />
               )}
               {editableTimeline && (
+                <EffectTrackRows timeline={shownTimeline ?? editableTimeline} totalFrames={totalFrames} frameRate={frameRate}
+                  authoringRevision={editableTimeline.revision}
+                  selectedEffectId={selectedEffect?.id ?? null} playheadFrame={playheadFrame} disabled={commandsDisabled}
+                  onSelect={selectEffect} onCommands={sendCommands} onPreview={effectDraft.preview} onScrub={scrubTo}
+                  snapFrames={snapFrames} tool={tool} onCreated={selectEffect} />
+              )}
+              {editableTimeline && (
                 <NewLaneStrip
                   onAdd={compact ? () => setAddLaneOpen(true) : undefined}
                   onDrop={commandsDisabled ? null : dropOnNewLane}
@@ -1587,18 +1635,8 @@ function CutEditorScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
-        {/*
-          Inspector and Arke stack rather than tabbing (design turn 122). Tabs assert that two
-          things are alternatives; a property sheet scoped to the selection and a collaborator
-          scoped to the whole cut are not, and tabbing them means consulting one costs the other
-          at exactly the moment both are wanted — a clip selected, and something to say about it.
-
-          The Inspector is capped at half the edge and scrolls inside it, so a selection with a
-          lot to author can never push the composer off the screen: it is the one control here
-          that must not need scrolling to reach.
-        */}
         <div className="fy-cutside__head">
-          <span className="fy-cutside__headlabel">Details</span>
+          <EditorPanelTabs value={detailTab} onChange={setDetailTab} />
           <button
             type="button"
             className="fy-cutside__close"
@@ -1611,10 +1649,12 @@ function CutEditorScreen() {
             &times;
           </button>
         </div>
-        <EditorSheetSlot sheet={phone} open={rightOpen} title={selectedAny ? `${selectedAny.clip.source.kind === "shot" ? `Shot ${selectedAny.clip.source.shotNumber} · ` : ""}${selectedAny.clip.source.label}` : "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
+        <EditorSheetSlot sheet={phone} open={rightOpen} title={selectedLabel || "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
           footer={<><span>± one frame · {frameRate} fps</span><Button variant="primary" onClick={() => setRightOpen(false)}>Done</Button></>}>
-        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel">
-            <CutInspector
+        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && detailTab !== "inspector"}>
+            {effectAuthoring && worldId && production ? <EffectPanel key={effectAuthoring.effect.id} {...effectAuthoring}
+              plan={renderPlan?.ok ? renderPlan.plan : null}
+              context={{ worldId, production, artifacts: worldArtifacts ?? [], timeline: editableTimeline! }} /> : <CutInspector
               worldId={worldId}
               prodId={prodId}
               production={production}
@@ -1641,12 +1681,12 @@ function CutEditorScreen() {
               }}
               mintClipId={mintClipId}
               sourceLength={sourceLength}
-            />
-            {compact && !phone && selectedAny && <div className="fy-cut-detail-actions"><Button disabled={commandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={commandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
+            />}
+            {compact && !phone && selectedTimed && <div className="fy-cut-detail-actions"><Button disabled={commandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={commandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
           </div>
         </EditorSheetSlot>
         <EditorSheetSlot sheet={compact} open={arkeOpen} title="Arke" onClose={() => setArkeOpen(false)} className="fy-cut-arke-sheet">
-        <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel">
+        <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-arke-tab"} hidden={!compact && detailTab !== "arke"}>
             {assembly !== null && (
               <div className="fy-arkenotes" data-testid="arke-notes">
                 <div className="fy-cutinspect__eyebrow">{assembly.label.toUpperCase()}</div>
@@ -1688,16 +1728,16 @@ function CutEditorScreen() {
       </aside>
       {compact && <>
         {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
-        <div className="fy-cut-tools" data-picked={phone && selectedAny !== null || undefined}>
-          {phone && selectedAny && <div className="fy-cut-tools__selection"><Film size={13} />{selectedAny.clip.source.label} · {(selectedAny.clip.durationFrames / frameRate).toFixed(1)}s</div>}
-          {(!phone || !selectedAny) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
+        <div className="fy-cut-tools" data-picked={phone && selectedTimed !== null || undefined}>
+          {phone && selectedTimed && <div className="fy-cut-tools__selection"><Film size={13} />{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
+          {(!phone || !selectedTimed) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
           <button type="button" disabled={commandsDisabled || !playheadInsideSelected && !unpickedSplit} onClick={() => unpickedSplit ? sendCommands([{ kind: "split", clipId: unpickedSplit.id, atFrame: playheadFrame, newClipId: mintClipId() }], "Split clip") : selectedAction("split")}><Scissors size={20} /><span>Split</span></button>
-          {phone && selectedAny && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>Trim</span></button>}
-          {(!phone || selectedAny) && <><button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
-            <button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction(phone ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone ? "Delete" : "Ripple delete"}</span></button></>}
-          {phone && selectedAny ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedAny.clip.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
+          {phone && selectedTimed && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>{selectedEffect ? "Inspector" : "Trim"}</span></button>}
+          {(!phone || selectedTimed) && <><button type="button" disabled={commandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
+            <button type="button" disabled={commandsDisabled || !selectedTimed} onClick={() => selectedAction(phone || selectedEffect ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone || selectedEffect ? "Delete" : "Ripple delete"}</span></button></>}
+          {phone && selectedTimed ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedTimed.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
             : <><button type="button" disabled={!canUndo} onClick={() => sendHistory("undo")}><Undo2 size={20} /><span>Undo</span></button><button type="button" disabled={!canRedo} onClick={() => sendHistory("redo")}><Redo2 size={20} /><span>Redo</span></button></>}
-          {phone && !selectedAny && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
+          {phone && !selectedTimed && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
           {!phone && <><button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-.5)}><Minus size={16} /></button><button type="button" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => zoomBy(.5)}><Plus size={16} /></button></>}
         </div>
       </>}

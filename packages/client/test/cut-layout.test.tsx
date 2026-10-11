@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
+import { applyTimelineCommands, defaultEffectClip, type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, importEditorMedia } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -34,7 +34,7 @@ let root: Root | null = null;
 let sent: ClientMessage[] = [];
 const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
-async function mount(size = 390, remote = false, tail?: number) {
+async function mount(size = 390, remote = false, tail?: number, withEffect = false) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
@@ -42,7 +42,17 @@ async function mount(size = 390, remote = false, tail?: number) {
   Object.assign(dom.window, { arke: remote ? undefined : bridge });
   const state = cutLayoutFixture(), timeline = state.world!.productions[0]!.timeline;
   if (tail !== undefined && timeline?.status === "ready") timeline.timeline.tracks[0]!.endFrame = tail;
+  if (withEffect && timeline?.status === "ready") {
+    // Canvas/worker pixels have separate browser parity coverage; this fixture exercises real Cut event ownership.
+    Object.getPrototypeOf(document.createElement("canvas")).getContext = () => null;
+    Object.assign(globalThis, { requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
+    timeline.timeline = applyTimelineCommands(timeline.timeline, [
+      { kind: "add-track", trackId: "tr_effects", trackKind: "effect", name: "Atmosphere" },
+      { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 9 }) },
+    ], { effectAuthority: "human" });
+  }
   await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App /></MemoryRouter>); });
+  return state;
 }
 afterEach(async () => { await act(async () => root?.unmount()); root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
 const find = (selector: string) => dom.document.querySelector<HTMLElement>(selector)!;
@@ -50,6 +60,44 @@ const click = async (element: HTMLElement) => { assert.ok(element); await act(as
 function props(element: HTMLElement): Record<string, (event: never) => void> { const key = Object.keys(element).find(name => name.startsWith('__reactProps$'))!; return (element as unknown as Record<string, Record<string, (event: never) => void>>)[key]!; }
 function pointer(target: EventTarget, type: string, x: number, y = 20) { const event = new dom.Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, pointerType: "touch", clientX: x, clientY: y }); target.dispatchEvent(event); }
 const timelineCommands = () => sent.filter((m): m is Extract<ClientMessage, { kind: "timeline-command" }> => m.kind === "timeline-command").flatMap(m => m.commands);
+
+it("an effect lane click keeps its selection, Inspector and explicit preview area control", async () => {
+  await mount(1360, false, undefined, true);
+  const effect = find('[data-effect="cl_dust"]'), seek = find('[aria-label="Seek"]');
+  const heldTime = seek.getAttribute("aria-valuenow");
+  assert.equal(effect.getAttribute("aria-pressed"), "false");
+  assert.equal(find(".fx-target-area__toggle"), null);
+  // Click the real descendant so both the effect row and enclosing timeline canvas receive the event.
+  await click(find('[data-effect="cl_dust"] .fy-effect-clip__name'));
+  assert.equal(effect.getAttribute("aria-pressed"), "true");
+  assert.ok(find('.fx-inspector'), "the selected effect must keep its Inspector after canvas bubbling");
+  const toggle = find(".fx-target-area__toggle");
+  assert.equal(toggle.textContent, "Edit emitting area");
+  await click(toggle);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.ok(find(".fx-target-area"));
+  assert.equal(effect.getAttribute("aria-pressed"), "true");
+  assert.equal(seek.getAttribute("aria-valuenow"), heldTime);
+  assert.equal(timelineCommands().length, 0, "selection and overlay inspection must not author an edit");
+});
+
+it("adding an effect selects it after the coordinator snapshot arrives", async () => {
+  const state = await mount(1360, false, undefined, true);
+  await click([...document.querySelectorAll<HTMLElement>('button')].find(button => button.textContent === "Effects")!);
+  await click(find(".fy-effect-library__add"));
+  await act(async () => { find(".fy-effect-add").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  const commands = timelineCommands(), creation = commands.find(command => command.kind === "effect-create");
+  assert.ok(creation?.kind === "effect-create");
+  assert.equal(find(`[data-effect="${creation.effect.id}"]`), null, "the saved timeline is still awaiting the reply");
+  const next = structuredClone(state), timeline = next.world!.productions[0]!.timeline;
+  assert.ok(timeline?.status === "ready");
+  timeline.timeline = applyTimelineCommands(timeline.timeline, commands.filter(command => command.kind !== "switch-take"), { effectAuthority: "human" });
+  await act(async () => { __setStateForTest(next); });
+  assert.equal(find(`[data-effect="${creation.effect.id}"]`).getAttribute("aria-pressed"), "true");
+  assert.ok(find(".fx-inspector"));
+  assert.equal(find(".fx-target-area__toggle").textContent, "Edit emitting area");
+  assert.equal(timelineCommands().length, commands.length, "accepting the snapshot must not issue another edit");
+});
 
 it("touch moves require a picked clip and at least eight pixels", () => {
   const target = document.createElement("button"); document.body.append(target);

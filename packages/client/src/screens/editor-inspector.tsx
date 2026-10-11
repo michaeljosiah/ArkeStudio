@@ -32,7 +32,7 @@ import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
 
-export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string };
+export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string } | { kind: "effect"; id: string };
 
 function InspectorRow({ label, children }: { label: string; children: ReactNode }) {
   return (

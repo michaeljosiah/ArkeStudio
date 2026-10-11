@@ -1,4 +1,5 @@
 import type { EffectClip } from "./editor-effects.js";
+import type { ProductionTimeline } from "./timeline.js";
 
 /** Slate pixels are delivery content, independent of the application's colour theme. */
 export const EFFECT_SLATE_STYLE = Object.freeze({ background: "#000000", colour: "#ffffff", fontFamily: "Geist Sans", fontSize: 48 });
@@ -38,6 +39,37 @@ export interface EffectRenderProjection {
   pictureLayers: RenderPictureLayer[];
   effectLayers: RenderEffectLayer[];
   issues: Array<{ kind: "missing-target" | "analysis-required"; effectId: string; reason: string }>;
+}
+
+/** Reuses resolved picture/audio while an effect gesture changes only procedural records. */
+export function projectEffectLayers(record: ProductionTimeline): Pick<EffectRenderProjection, "effectLayers" | "issues"> {
+  const effectLayers = record.tracks.filter(track => track.kind === "effect" && !track.muted)
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .flatMap(track => [...(track.effects ?? [])].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+      .map(effect => ({ trackId: track.id, trackOrder: track.order, effect: structuredClone(effect) })));
+  const issues: EffectRenderProjection["issues"] = [];
+  for (const { effect } of effectLayers) {
+    const target = effect.target;
+    const present = target.kind === "composition" || (target.kind === "picture-track"
+      ? record.tracks.some(track => track.kind === "picture" && track.id === target.trackId)
+      : record.tracks.some(track => track.kind === "picture" && track.clips.some(clip => clip.id === target.clipId)));
+    if (!present) issues.push({ kind: "missing-target", effectId: effect.id, reason: "Visual target missing" });
+    if (effect.reaction.enabled) issues.push({ kind: "analysis-required", effectId: effect.id, reason: "Audio analysis required" });
+  }
+  return { effectLayers, issues };
+}
+
+/** Delivery readiness uses the same target contribution as rendering, including scoped gaps. */
+export function deliveredEffectLayers(plan: EffectRenderProjection): RenderEffectLayer[] {
+  return plan.effectLayers.filter(({ effect }) => {
+    const start = Math.max(plan.startFrame, effect.startFrame);
+    const end = Math.min(plan.endFrame, effect.startFrame + effect.durationFrames);
+    if (start >= end) return false;
+    const target = effect.target;
+    return target.kind === "composition" || plan.pictureLayers.some(picture => picture.kind === "media" &&
+      picture.startFrame < end && picture.endFrame > start && (target.kind === "picture-track"
+        ? picture.trackId === target.trackId : picture.clipId === target.clipId));
+  });
 }
 
 export function pictureStackAtFrame(plan: EffectRenderProjection, absoluteFrame: number): RenderPictureLayer[] {

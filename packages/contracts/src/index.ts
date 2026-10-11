@@ -81,6 +81,7 @@ export * from "./editor-effect-render-plan.js";
 export * from "./editor-effect-analysis.js";
 export * from "./editor-effect-audio-features.js";
 export * from "./editor-effect-reaction.js";
+export * from "./editor-effect-authoring.js";
 export * from "./editor-effect-audio-source.js";
 export * from "./render-plan.js";
 export * from "./timeline-migration.js";

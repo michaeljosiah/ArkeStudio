@@ -153,6 +153,18 @@ Ready metadata and fetched manifests are separate; test stale arrivals and same-
 replacement as well as authored edits. Changes to the manifest route also require the actual
 sandboxed Electron file-page transport smoke and `smoke:main`.
 
+Editor effects T-4 adds client `test/editor-effect-library-tracks.test.tsx`,
+`editor-effect-inspector.test.tsx`, `editor-effect-target-area.test.tsx`,
+`editor-effect-controls.test.tsx`, `editor-effect-integration.test.ts` and
+`editor-effect-draft-analysis.test.tsx`, with the readiness and shared gesture suites. Contracts
+`test/editor-effect-authoring.test.ts` and `editor-effects.test.ts` cover protected response
+selection, explicit beat overrides, uncovered passages and signed retained curve phase.
+Exercise gesture cancellation, stale saved revisions, overlap selection, normalized area/curve
+typing and dragging, exact boundary versus fixed passage protection, and explicit Release.
+Use the real authenticated editor at desktop, Fold and 390/320px phone sizes in both themes;
+keep screenshots of keyboard focus, scrollable Inspector sections, target/source choices and
+export readiness. Real manual authoring evidence is separate from component fixtures.
+
 For the approved editor effects designs 213–215, regenerate with
 `node design-system/editor-effects-213.mjs`, record new turns with
 `node design-system/check-master.mjs --record`, then rebuild the companion with

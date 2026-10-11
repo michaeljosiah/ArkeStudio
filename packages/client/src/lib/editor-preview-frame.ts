@@ -1,4 +1,4 @@
-import { assertEffectRasterSize, compositeRgba, prepareEffectReactions, renderEffectLayersRgba, type EffectClip,
+import { assertEffectRasterSize, compositeRgba, effectReactionFingerprintMaterial, prepareEffectReactions, renderEffectLayersRgba, type EffectClip,
   type EffectFeatureManifest, type PreparedEffectReaction } from "@arke-studio/contracts";
 import type { PreviewPicturePixels } from "./editor-preview-media.js";
 
@@ -41,28 +41,39 @@ export function renderPreviewFrame(request: PreviewFrameRequest, preparedByEffec
   return output;
 }
 
-/** Long-song arrays cross the worker boundary once per mapping change, never once per frame. */
+/** Long-song arrays cross the worker boundary only when the retained source set changes. */
 export interface PreviewAnalysisInstall {
   kind: "analysis";
   analysisEpoch: number;
   effects: readonly EffectClip[];
   startFrame: number;
   endFrame: number;
-  manifestsByKey: Readonly<Record<string, EffectFeatureManifest>>;
+  /** Omitted for a mapping-only update; a supplied object replaces the retained bounded set. */
+  manifestsByKey?: Readonly<Record<string, EffectFeatureManifest>>;
   manifestKeyByEffectId: Readonly<Record<string, string>>;
 }
 export type PreviewAnalysisResult = { kind: "analysis-ready"; analysisEpoch: number; error?: string };
-export type PreviewReactionSources = Pick<PreviewAnalysisInstall, "manifestsByKey" | "manifestKeyByEffectId">;
+export type PreviewReactionSources = Required<Pick<PreviewAnalysisInstall, "manifestsByKey" | "manifestKeyByEffectId">>;
+
+/** Appearance does not invalidate prepared response; source, phase and response edits do. */
+export function previewReactionMappingKey(effects: readonly EffectClip[], sources: PreviewReactionSources,
+  range: { startFrame: number; endFrame: number }): string {
+  return JSON.stringify([range.startFrame, range.endFrame, effects.filter(effect => effect.reaction.enabled && sources.manifestKeyByEffectId[effect.id])
+    .map(effect => [effect.id, effect.startFrame, effect.durationFrames, effect.preset, effect.audioInput,
+      effectReactionFingerprintMaterial(effect, sources.manifestKeyByEffectId[effect.id]!)])]);
+}
 
 export class PreviewReactionBank {
   private epoch = 0;
   private prepared: Readonly<Record<string, PreparedEffectReaction>> = {};
   private error: string | null = null;
+  private manifests: Readonly<Record<string, EffectFeatureManifest>> = {};
 
   install(input: PreviewAnalysisInstall): void {
     this.epoch = input.analysisEpoch; this.prepared = {}; this.error = null;
     try {
-      this.prepared = prepareEffectReactions(input.effects, input.manifestsByKey, input.manifestKeyByEffectId,
+      if (input.manifestsByKey !== undefined) this.manifests = input.manifestsByKey;
+      this.prepared = prepareEffectReactions(input.effects, this.manifests, input.manifestKeyByEffectId,
         { startFrame: input.startFrame, endFrame: input.endFrame });
     } catch (error) {
       this.error = error instanceof Error ? error.message : "The reaction could not be prepared.";

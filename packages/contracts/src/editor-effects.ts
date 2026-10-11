@@ -22,7 +22,8 @@ export const EffectAudioInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("video-sound"), clipId }).strict(),
 ]);
 export const EffectCurvePointSchema = z.object({
-  id: z.string().regex(/^ep_[A-Za-z0-9][A-Za-z0-9_-]*$/), offsetFrames: frame,
+  // A head extension keeps the simulation origin; points in the newly exposed head precede it.
+  id: z.string().regex(/^ep_[A-Za-z0-9][A-Za-z0-9_-]*$/), offsetFrames: signedFrame,
   value: unit, interpolation: z.enum(["hold", "linear", "smooth"]),
 }).strict();
 export const EffectCurveSchema = z.object({ points: z.array(EffectCurvePointSchema).max(EFFECT_POINT_LIMIT) }).strict().superRefine((curve, ctx) => {
