@@ -4,8 +4,8 @@ import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 import { until } from "./wait.js";
 
-const pending = { providerID: "github-copilot", id: "fixture-model", package: "@ai-sdk/github-copilot" };
-const ready = { ...pending, package: "aisdk:@ai-sdk/anthropic", limit: { input: 123_456 } };
+const pending = { providerID: "github-copilot", id: "fixture-model", package: "aisdk:@ai-sdk/github-copilot" };
+const ready = { ...pending, package: "@opencode/ai/providers/anthropic", settings: { endpoint: "messages" }, limit: { input: 123_456 } };
 
 async function fixture(run: (stub: StubOpenCodeV2, adapter: OpenCodeV2Adapter, traces: string[]) => Promise<void>, modelReadyMs = 5_000) {
   const stub = new StubOpenCodeV2();
@@ -72,13 +72,38 @@ describe("Copilot per-location readiness (#1696)", () => {
         if (polls === 2) return { models: [] };
         if (polls === 3) return { models: [{ ...ready, disabled: true }] };
         if (polls === 4) return { models: [{ ...ready, id: "another-model" }] };
-        return { models: [{ ...ready, package: "aisdk:@ai-sdk/github-copilot" }] };
+        return { models: [{ ...ready, package: "aisdk:@ai-sdk/github-copilot", settings: { endpoint: "responses" } }] };
       };
       await prepare(adapter, "/scratch/slow");
       assert.equal(polls, 5);
       assert.equal(stub.requests.some(r => r.path.endsWith("/prompt")), false);
     });
   });
+
+  for (const endpoint of ["chat", "responses"]) {
+    it(`accepts Copilot's resolved ${endpoint} route without guessing from the model name`, async () => {
+      await fixture(async (stub, adapter) => {
+        stub.modelResponse = () => ({ models: [{ ...pending, settings: { endpoint } }] });
+        await prepare(adapter, "/scratch/resolved");
+        assert.equal(stub.requests.filter(r => r.path === "/api/model").length, 1);
+      });
+    });
+  }
+
+  for (const row of [
+    { ...pending, package: "@ai-sdk/github-copilot", settings: undefined },
+    { ...ready, package: "aisdk:@ai-sdk/anthropic" },
+    { ...ready, settings: undefined },
+    { ...ready, settings: { endpoint: "chat" } },
+  ]) {
+    it(`refuses an unresolved or obsolete route (${row.package}, ${row.settings?.endpoint ?? "no endpoint"})`, async () => {
+      await fixture(async (stub, adapter, traces) => {
+        stub.modelResponse = () => ({ models: [row] });
+        await assert.rejects(prepare(adapter, "/scratch/obsolete"), /No prompt was sent/);
+        assertRetiredWithoutPrompt(stub, traces);
+      }, 100);
+    });
+  }
 
   for (const mode of ["fallback", "missing", "disabled", "hung"] as const) {
     it(`bounds ${mode} readiness and retires the unpublished session without a prompt`, async () => {
