@@ -71,6 +71,29 @@ test("move after a head crop preserves signed simulation phase and fixed audio c
   assert.equal(effects(extended)[0]!.simulationOriginFrame, -50);
 });
 
+test("points in an extended head use signed offsets and retain phase and passage protection on split", () => {
+  let timeline = human(placed(), [{ kind: "effect-move", clipId: "cl_dust", startFrame: 50 },
+    { kind: "effect-trim", clipId: "cl_dust", edge: "head", deltaFrames: -25 },
+    { kind: "effect-patch", clipId: "cl_dust", patch: { intensityCurve: { points: [
+      { id: "ep_head", offsetFrames: -25, value: 0.2, interpolation: "smooth" },
+      { id: "ep_origin", offsetFrames: 0, value: 0.5, interpolation: "linear" },
+      { id: "ep_tail", offsetFrames: 150, value: 1, interpolation: "hold" },
+    ] } } }]);
+  timeline = human(timeline, [{ kind: "effect-protect", rule: { id: "pr_curve", lineageId: "ef_dust", kind: "property", property: "intensityCurve", scope: { kind: "passage", startFrame: 25, endFrame: 100 } } }]);
+  const original = effects(timeline)[0]!;
+  assert.equal(original.simulationOriginFrame, 50);
+  assert.equal(original.intensityCurve.points[0]!.offsetFrames, -25);
+  const split = ProductionTimelineSchema.parse(applyTimelineCommands(timeline, [{ kind: "effect-split", clipId: "cl_dust", atFrame: 40, newClipId: "cl_head_right" }]));
+  for (let frame = 25; frame < 250; frame++) assert.equal(effects(split).reduce((sum, effect) => sum + effectVisibilityAt(effect, frame), 0), effectVisibilityAt(original, frame));
+  assert.deepEqual(split.effectProtection, timeline.effectProtection);
+  const patch = { intensityCurve: { points: original.intensityCurve.points.map(point => point.id === "ep_head" ? { ...point, value: 0.9 } : point) } };
+  assert.throws(() => applyTimelineCommands(timeline, [{ kind: "effect-patch", clipId: "cl_dust", patch }]), /protect/i);
+  const changed = human(timeline, [{ kind: "effect-patch", clipId: "cl_dust", patch }]);
+  assert.notEqual(changed.effectProtection![0]!.baselineFingerprint, timeline.effectProtection![0]!.baselineFingerprint);
+  assert.deepEqual(undoTimelineHistory(changed).tracks, timeline.tracks);
+  assert.deepEqual(undoTimelineHistory(changed).effectProtection, timeline.effectProtection);
+});
+
 test("overlapping independent effects work while split segments retain unique lineage coverage", () => {
   const timeline = human(placed(), [{ kind: "effect-create", trackId: "tr_fx", effect: defaultEffectClip({ id: "cl_rain", lineageId: "ef_rain", startFrame: 50, durationFrames: 200, seed: 9, preset: "rain" }) }]);
   assert.equal(effects(timeline).length, 2);

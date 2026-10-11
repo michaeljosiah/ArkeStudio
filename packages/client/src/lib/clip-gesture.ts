@@ -54,13 +54,13 @@ export function snapMoveDelta(
 
 /** Every edge on the timeline a drag can land against, plus the playhead and zero. */
 export function snapCandidates(
-  tracks: ReadonlyArray<{ clips: readonly TimelineClip[] }>,
+  tracks: ReadonlyArray<{ clips: readonly TimelineClip[]; effects?: ReadonlyArray<{ id: string; startFrame: number; durationFrames: number }> }>,
   playheadFrame: number,
-  except: TimelineClipId | null = null,
+  except: string | null = null,
 ): number[] {
   const edges = new Set<number>([0, playheadFrame]);
   for (const track of tracks) {
-    for (const clip of track.clips) {
+    for (const clip of [...track.clips, ...(track.effects ?? [])]) {
       if (clip.id === except) continue;
       edges.add(clip.startFrame);
       edges.add(clip.startFrame + clip.durationFrames);

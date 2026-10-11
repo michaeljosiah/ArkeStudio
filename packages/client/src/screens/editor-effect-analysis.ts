@@ -48,7 +48,9 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
   const effects = plan.effectRender?.effectLayers;
   const sources = useMemo(() => (effects ?? []).map(({ effect }) => {
     const source = context && effect.audioInput ? resolveEffectAudioSource({ ...context, plan, input: effect.audioInput }) : null;
-    return { effect, source, requestFingerprint: source?.requestFingerprint ?? null };
+    const saved = context?.timeline.tracks.flatMap(track => track.effects ?? []).find(row => row.id === effect.id);
+    const canRequest = saved?.reaction.enabled === true && JSON.stringify(saved.audioInput) === JSON.stringify(effect.audioInput);
+    return { effect, source, canRequest, requestFingerprint: source?.requestFingerprint ?? null };
   }), [effects, context?.production, context?.artifacts, context?.timeline, plan]);
   const current = useMemo(() => sources.map(row => ({ ...row,
     state: effectPreviewAnalysisState(row.effect, row.requestFingerprint, projection?.byEffectId[row.effect.id], row.source?.ok === false ? row.source.reason : undefined),
@@ -67,7 +69,7 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
   const command = (effectId: string, action: "prepare" | "retry" | "cancel") => {
     if (!worldId || !productionId || !canPrepare) return;
     const row = current.find(value => value.effect.id === effectId);
-    if (!row) return;
+    if (!row?.canRequest) return;
     const sent = send({ kind: "editor-effect-analysis", worldId, productionId, effectId: TimelineClipIdSchema.parse(row.effect.id), action, requestId: ulid(),
       ...(row.state.sourceFingerprint ? { expectedSourceFingerprint: row.state.sourceFingerprint } : {}) });
     if (sent && action !== "cancel" && row.requestFingerprint) requested.current.set(effectId, row.requestFingerprint);
@@ -75,7 +77,7 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
   useEffect(() => {
     for (const row of current) {
       if (row.state.status !== "source-changed") { requested.current.delete(row.effect.id); continue; }
-      if (!canPrepare || !row.source?.ok || !row.requestFingerprint || row.state.status !== "source-changed") continue;
+      if (!canPrepare || !row.canRequest || !row.source?.ok || !row.requestFingerprint || row.state.status !== "source-changed") continue;
       if (requested.current.get(row.effect.id) === row.requestFingerprint) continue;
       command(row.effect.id, "prepare");
     }
@@ -123,8 +125,8 @@ export function useEffectAnalyses(context: EffectAnalysisContext | undefined, pl
       preview: row.state.status === "off" || local?.manifest ? "ready" : local?.error ? "failed" : row.state.status === "ready" ? "loading" : "base",
       ...(local?.error ? { reason: local.error } : {}),
       retry: local?.error ? () => { if (row.state.status === "ready") cache.current?.retry(row.state.manifestKey); setAttempt(value => value + 1); }
-        : canPrepare && (["failed", "source-changed"].includes(row.state.status) || (row.state.status === "missing-source" && row.source?.ok)) ? () => command(row.effect.id, "retry") : null,
-      cancel: canPrepare && row.state.status === "analysing" ? () => command(row.effect.id, "cancel") : null };
+        : canPrepare && row.canRequest && (["failed", "source-changed"].includes(row.state.status) || (row.state.status === "missing-source" && row.source?.ok)) ? () => command(row.effect.id, "retry") : null,
+      cancel: canPrepare && row.canRequest && row.state.status === "analysing" ? () => command(row.effect.id, "cancel") : null };
   });
   return { sources: readySources, readiness };
 }

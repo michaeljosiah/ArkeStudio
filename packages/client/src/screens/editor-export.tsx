@@ -20,7 +20,9 @@ import {
   cancelExport,
   exportCut,
   useExports,
+  useStore,
 } from "../lib/store.js";
+import { effectExportRefusal } from "../lib/editor-effect-export.js";
 import { storyShotCount } from "./production-story.js";
 
 /**
@@ -63,6 +65,8 @@ export function ExportSheet({
   commandsDisabled: boolean;
 }) {
   const exportsState = useExports();
+  const { state } = useStore();
+  const effectStates = state?.effectAnalyses?.find(row => row.worldId === worldId && row.productionId === prodId)?.byEffectId ?? {};
   const { compact } = useCutLayout();
   const [selection, setSelection] = useState<{ worldId: string | undefined; prodId: string | undefined; preset: keyof typeof PRESETS } | null>(null);
   const preset = selection && selection.worldId === worldId && selection.prodId === prodId
@@ -93,6 +97,9 @@ export function ExportSheet({
       ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset })
       : null;
   if (plan !== null && !plan.ok && blockedBy === null) blockedBy = plan.reason;
+  const reactionRefusal = production && ready && plan?.ok ? (delivery: RenderPlan) => effectExportRefusal({ production,
+    timeline: timelineState.timeline, artifacts: world?.artifacts ?? [], canonical: plan.plan, delivery, states: effectStates }) : () => null;
+  const productionReactionRefusal = plan?.ok ? reactionRefusal(plan.plan) : null;
   /*
    * Nothing to render, said before the encode (issue 453): an empty plan is `concat=n=0`, which is
    * not a filter graph, and the coordinator would only fail it after reporting it running. The
@@ -195,9 +202,9 @@ export function ExportSheet({
             </span>}
           </span>
         </div>
-        {blockedBy !== null && (
+        {(blockedBy !== null || productionReactionRefusal !== null) && (
           <div className="fy-exsheet__warn" role="status">
-            {blockedBy}
+            {blockedBy ?? productionReactionRefusal}
           </div>
         )}
         {blockedBy === null && gaps > 0 && (
@@ -212,7 +219,7 @@ export function ExportSheet({
               const range = episodeTimelineRange(production, timelineState.timeline, episode.id);
               const episodePlan = range.ok ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState,
                 scope: { kind: "episode", episodeId: episode.id }, preset }) : null;
-              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : null;
+              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : episodePlan?.ok ? reactionRefusal(episodePlan.plan) : null;
               const episodeAudio = episodePlan?.ok ? exportAudioStatus(episodePlan.plan) : null;
               // A duplicate order should never be minted (issue 947), but a person reading this
               // list still needs to tell two same-numbered rows apart at a glance.
@@ -275,9 +282,9 @@ export function ExportSheet({
           type="button"
           className="fy-libpick__confirm"
           data-primary="true"
-          disabled={blockedBy !== null || !worldId || !prodId || commandsDisabled}
+          disabled={blockedBy !== null || productionReactionRefusal !== null || !worldId || !prodId || commandsDisabled}
           onClick={() => {
-            if (blockedBy !== null || !worldId || !prodId || commandsDisabled) return;
+            if (blockedBy !== null || productionReactionRefusal !== null || !worldId || !prodId || commandsDisabled) return;
             exportCut(worldId, prodId, preset, revision, undefined, subtitleChoice);
             onClose();
           }}

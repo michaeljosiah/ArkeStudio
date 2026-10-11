@@ -36,7 +36,7 @@ import {
 } from "./timeline.js";
 import { productionFrameRate, type FrameRate } from "./world.js";
 import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleOutputMode, type SubtitleStyle } from "./subtitles.js";
-import type { EffectRenderProjection, RenderPictureLayer } from "./editor-effect-render-plan.js";
+import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
 
 /**
@@ -350,19 +350,7 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
 function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
   frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
   if (!record.tracks.some(track => track.effects?.length)) return undefined;
-  const effectLayers = record.tracks.filter(track => track.kind === "effect" && !track.muted)
-    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-    .flatMap(track => [...(track.effects ?? [])].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-      .map(effect => ({ trackId: track.id, trackOrder: track.order, effect: structuredClone(effect) })));
-  const issues: EffectRenderProjection["issues"] = [];
-  for (const { effect } of effectLayers) {
-    const target = effect.target;
-    const present = target.kind === "composition" || (target.kind === "picture-track"
-      ? record.tracks.some(track => track.kind === "picture" && track.id === target.trackId)
-      : record.tracks.some(track => track.kind === "picture" && track.clips.some(clip => clip.id === target.clipId)));
-    if (!present) issues.push({ kind: "missing-target", effectId: effect.id, reason: "Visual target missing" });
-    if (effect.reaction.enabled) issues.push({ kind: "analysis-required", effectId: effect.id, reason: "Audio analysis required" });
-  }
+  const { effectLayers, issues } = projectEffectLayers(record);
   const dimensions = PRESETS[preset];
   return { rendererVersion: "software-rgba-v1", width: dimensions.width, height: dimensions.height, frameRate,
     startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: pictures.map((picture, order) => ({ ...picture, order })),

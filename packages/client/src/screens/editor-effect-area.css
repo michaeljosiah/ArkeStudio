@@ -1,0 +1,29 @@
+.fx-area { min-width: 0; }
+.fx-area__diagram { height: 124px; position: relative; border: 1px solid var(--border); margin: var(--space-3) 0; background: var(--muted); border-radius: 5px; }
+.fx-area__fields { display: grid; gap: var(--space-2); }
+.fx-area-overlay { position: absolute; inset: 0; pointer-events: none; }
+.fx-area-overlay__region { position: absolute; box-sizing: border-box; border: 1px solid var(--timeline-selection); }
+.fx-area-overlay__handle { position: absolute; pointer-events: auto; touch-action: none; min-width: 28px; min-height: 28px; width: 28px; height: 28px; padding: 0; border: 1px solid var(--media-overlay-bg); background: var(--media-control-bg); color: var(--media-control-fg); border-radius: 4px; opacity: 0.95; transform: translate(-50%, -50%); cursor: nwse-resize; }
+.fx-area-overlay__handle::after { content: ""; position: absolute; inset: 10px; border: 1px solid currentColor; }
+.fx-area-overlay__handle--nw { left: 0; top: 0; transform: translate(0, 0); }
+.fx-area-overlay__handle--ne { left: 100%; top: 0; transform: translate(-100%, 0); cursor: nesw-resize; }
+.fx-area-overlay__handle--sw { left: 0; top: 100%; transform: translate(0, -100%); cursor: nesw-resize; }
+.fx-area-overlay__handle--se { left: 100%; top: 100%; transform: translate(-100%, -100%); }
+.fx-area-overlay__handle--move { left: 50%; top: 50%; cursor: move; }
+.fx-area-overlay__handle--move::after { display: none; }
+.fx-area-overlay__handle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fx-target-area__stage { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.fx-target-area { position: absolute; pointer-events: none; overflow: hidden; }
+.fx-target-area__unavailable { position: absolute; left: var(--space-2); right: var(--space-2); bottom: var(--space-12); padding: var(--space-2); border-radius: 5px; color: var(--media-overlay-fg); background: var(--media-overlay-bg); font-size: 12px; line-height: 1.4; }
+.fx-target-area__toolbar { position: absolute; top: var(--space-2); left: var(--space-2); right: var(--space-2); display: flex; justify-content: space-between; align-items: start; gap: var(--space-2); pointer-events: none; }
+.fx-target-area__toolbar > * { pointer-events: auto; }
+.fx-target-area__toolbar .fy-effectpreview__quality { position: static; flex-wrap: wrap; justify-content: flex-end; max-width: 50%; min-height: 44px; box-sizing: border-box; }
+.fx-target-area__toggle { min-height: 44px; max-width: 50%; padding: var(--space-2); border: 1px solid var(--media-overlay-fg); border-radius: 5px; color: var(--media-overlay-fg); background: var(--media-overlay-bg); font: 12px var(--font-sans); cursor: pointer; }
+.fy-cutviewer--effect-controls .fy-effectpreview__notice { top: var(--space-16); }
+.fx-target-area__toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fx-target-area__toggle:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 600px), (pointer: coarse) {
+  .fx-area-overlay__handle { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .fx-area-overlay__handle::after { inset: 17px; }
+  .fx-area__diagram { height: 160px; }
+}

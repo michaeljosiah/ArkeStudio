@@ -21,6 +21,7 @@ import {
 import { type Transport } from "./editor-transport.js";
 import { EffectCutPreview } from "./editor-effect-preview.js";
 import type { EffectAnalysisContext } from "./editor-effect-analysis.js";
+import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 
 // ---- Cut (24a) -------------------------------------------------------------
 
@@ -38,6 +39,7 @@ interface CutPreviewProps {
   compact?: boolean;
   plan?: RenderPlan | null;
   analysisContext?: EffectAnalysisContext;
+  effectControls?: EffectAuthoringProps;
 }
 
 export function CutPreview(props: CutPreviewProps) {

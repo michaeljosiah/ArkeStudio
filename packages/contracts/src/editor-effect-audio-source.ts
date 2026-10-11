@@ -38,6 +38,8 @@ export function resolveEffectAudioSource({ timeline, production, artifacts, plan
     const track = tracks.find(track => track.id === input.trackId);
     if (!track || !AUDIO_TRACK_KINDS.has(track.kind)) return failed(`Audio track ${input.trackId} is missing`);
   }
+  if (input.kind === "audio-clip" && !tracks.some(track => AUDIO_TRACK_KINDS.has(track.kind) && track.clips.some(clip => clip.id === input.clipId))) return failed("Choose a clip on an audio track; picture sound uses Video sound");
+  if (input.kind === "video-sound" && !tracks.some(track => track.kind === "picture" && track.clips.some(clip => clip.id === input.clipId))) return failed("Video sound must reference a clip on a Picture track");
   if (!selected || (input.kind !== "composition-mix" && input.kind !== "audio-track" && selected.length !== 1)) return failed("The placed audio source is missing");
   const fps = timeline.frameRate;
   const resolved: Array<{ clipId: string; path: string; window?: EffectAudioWindow; identity: unknown }> = [];
