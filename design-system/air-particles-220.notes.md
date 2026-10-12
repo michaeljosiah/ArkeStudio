@@ -1,18 +1,49 @@
 # Air Particles design turns 220–223
 
-Status: **proposed, awaiting owner review**, 12 October 2026. No design approval,
+Status: **turn 220 revision 2 proposed; turns 221–223 preliminary**, 12 October 2026. No design approval,
 specification acceptance or product implementation is implied.
 
 Open the [focused review](air-particles-220.review.html), the
 [master](Arke%20Studio.dc.html#t220), or the [review index](design-review.html).
-The generator writes the same 31 HTML drawings into both review surfaces.
+The generator writes 34 HTML drawings into both review surfaces: ten revised turn 220 drawings and 24 earlier interaction concepts. The focused page collapses the earlier drawings under explicit preliminary labels.
 
 | Turn | Focus | Frames |
 | --- | --- | --- |
-| 220 | Adding, independent placement, appearance, pattern, phone/Fold/dark | a–g |
+| 220 revision 2 | Existing library/dialog/Inspector, placement, appearance, Motion, area/fades, phone/Fold/dark | a–j |
 | 221 | Speed, airflow, contacts, boundary behaviour and optional audio | a–f |
 | 222 | Normal/Screen/Add, opacity, imported overlay, protection and release | a–i |
 | 223 | Arke cards, explicit Review, manual adjustments, revisions, stale state, Apply | a–i |
+
+## Revision 2: preserve the existing editor
+
+The owner rejected the earlier shell as too large an editor redesign. Turn 220 now
+adds Air Particles within the existing Cut editor. Inspector and Arke remain its only
+permanent panel tabs. Appearance and Motion are existing scrolling section headings;
+there are no new Appearance, Physics, Blend or Changes tabs.
+
+The desktop drawing follows the 44px titlebar, 46px production rail, 286px library,
+308px Inspector, 53px Cut header and 348px preview row in the current source. It retains
+the two-column preset grid, existing Add effect modal, Effects lane and independent
+Visual target / Start / End / Move to fields. Time fields use HH:MM:SS:FF at 24fps.
+Colour, Direction, emitting area, fades, curves, optional audio and protection remain
+in the Inspector. Texture, Softness, Depth variation and Blend mode follow the existing
+Appearance fields. Pattern and an expandable Particle physics group follow Direction
+and Speed in Motion.
+
+Phone uses the existing Details sheet with a fixed Done footer. Fold uses the compact
+preview/Inspector row, full-width timeline below, bottom tools and right Arke rail.
+Dashed gold outlines are removable review annotations, not new product decoration.
+
+Sources checked: client fidelity.css, editor-effect-library, editor-effect-inspector,
+editor-effect-fields, editor-effect-area, editor-effect-target, editor-responsive and
+EditorDialog, plus saved real application acceptance captures. The live app inspection
+connection timed out; no claim of a fresh live pixel comparison is made. Public sample
+artwork replaces private scratch artwork, and unrelated controls remain illustrative.
+The design drawings are not screenshots or a production implementation.
+
+Turns 221–223 preserve earlier interaction ideas for discussion, explicitly labelled
+preliminary and awaiting shell alignment. They do not authorize an alternative editor
+layout. This revision makes no application or private specification changes.
 
 ## Motion refinement behind the designs
 
@@ -83,19 +114,22 @@ design stage. A specification should follow owner approval.
 
 ## Isolated fixture and limitations
 
-The 72-second fixture supports typed appearance and physics edits, a real procedural
-motion canvas, blend/opacity preview, explicit new patterns, placement/cancel, separate
-property/boundary/coverage protection, named release, synthetic Arke suggestions, explicit
-review, sticky Amount edits, incoming versions, changed-base recovery, Apply, Undo, discard
-and local resume. It persists only browser-local demonstration state. Reset clears it.
+Revision 2's focused fixture exercises the turn 220 integration: select the preset,
+open Add effect, choose independent target/frame range/track, cancel or add, edit
+appearance/colour, preview motion and blending, choose a new pattern, and Undo. New
+appearance and physics controls use the original independent procedural study. Direction,
+emitting area, curves, audio, protection, other presets, Arke and export are context only
+and are disabled or labelled as such in this fixture. They remain existing app features.
 
-There is one selected-effect fixture and one public picture. Add demonstrates that slot;
-it is not a multi-effect library. Track/clip targets, audio mappings and protected passages
-show the proposed authoring contract; there is no real target compositor, audio analysis,
-arbitrary chat interpretation, passage segmentation or production authority. The source
-overlay drawings use an original synthetic plate, not the owner's media. The master has a
-procedural still; the focused review paints the proposed states and animates the live area.
-The demo's display-referred canvas and alpha conversion are not final colour/render rules.
+The fixture uses one selected-effect slot and public artwork, without real target
+compositing, audio analysis, world writes or model calls. It does not persist state.
+Review shortcuts above it are outside the app drawing, explicitly labelled as review
+navigation. They select an example effect to expose the relevant Inspector section.
+The study's display-referred canvas and alpha conversion are not final render rules.
+
+The old standalone prototype source remains as historical interaction evidence; it is
+not loaded by the revised focused review. Preliminary 221–223 drawings remain available
+in collapsed sections. Arke/protection approval awaits their revised designs.
 
 ## Regenerate and verify
 
@@ -109,11 +143,12 @@ node design-system/air-particles-220.check.mjs
 node design-system/air-particles-220.serve.mjs
 ```
 
-The focused check starts isolated headless Chrome (`CHROME` overrides the executable),
-captures all 31 drawings and writes a report to `.dev/air-particles-design/`. It checks
-artwork/fonts, desktop/Fold/390/320px layout, placement cancellation, pattern changes,
-review entry, sticky adjustment, incoming version, release/application/Undo, stale refresh,
-resume/discard and explicit audio-source selection. Product gates are not evidence for
-this design-only change; implementation and platform rendering checks follow approval.
+The focused check starts isolated headless Chrome (CHROME overrides the executable),
+captures the ten revised drawings and writes a report to .dev/air-particles-design/.
+It checks artwork/fonts, desktop/Fold/390/320px layout, preservation of existing tabs,
+preliminary labels, placement cancellation, target/range independence, frame validation,
+appearance edits, pattern/Undo, phone Add/Details/Done and removable review annotations.
 
-Validation on 12 October 2026: 31 drawings and 60 focused browser checks passed. Master rendering, Geist loading, anchors and generated-review consistency passed. The pre-existing missing-turn t195 ledger warning remains; no historical turn was edited. Appearance, physics, blend examples, granular protection, Arke review, dark and phone drawings were visually inspected.
+Validation on 12 October 2026: ten revised drawings and 34 focused browser checks
+passed. Application tests are outside this design-only change. The pre-existing missing
+turn t195 ledger warning remains; no historical turn before 220 was edited.
