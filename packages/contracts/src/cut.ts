@@ -692,9 +692,10 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), { source: next, picture }]);
       continue;
     }
-    // Keep placement and half-open coverage in frames. Decimal seconds can round on opposite
-    // sides of the same boundary in setpts and overlay, dropping the first or final picture.
-    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${shiftFrames})*lt(n,${to - startFrame})'[${next}]`);
+    // FFmpeg 6's overlay enable counter can diverge when its secondary stream starts late.
+    // Recover the exact delivery frame from the master timestamp; rounding also avoids a
+    // decimal-second boundary dropping the first frame at rates such as 24 or 30 fps.
+    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*${fps}),${shiftFrames})*lt(round(t*${fps}),${to - startFrame})'[${next}]`);
     last = next;
   }
   for (const [index, entries] of [...tracks.values()].entries()) {
@@ -717,7 +718,9 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
         picture.fadeOut ? `1-max(0,min(1,(N+${startFrame}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
       // Each source blends against the same lower-track backdrop. Weight premultiplied
       // contributions, then composite the track once: opaque crossfades never dim midway.
-      filters.push(`[${source}]geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1[${prefix}Weighted]`);
+      // These are exact pixel reads. Older geq bilinear sampling clamps edge coordinates to
+      // the preceding pixel, changing picture alpha and colour even at integer coordinates.
+      filters.push(`[${source}]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1[${prefix}Weighted]`);
       return `${prefix}Weighted`;
     });
     let track = pictures[0]!;
@@ -739,7 +742,7 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       filters.push(`[${next}MaskSource]alphaextract,format=gbrap[${next}Mask]`);
       filters.push(`[${next}Backdrop][${next}Colour]blend=all_mode=${composition.blendMode === "add" ? "addition" : "screen"}:shortest=1[${next}Blend]`);
       filters.push(`[${next}Base][${next}Blend][${next}Mask]maskedmerge=planes=7[${next}]`);
-    } else filters.push(`[${last}][${plate}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${composition.startFrame - startFrame})*lt(n,${composition.endFrame - startFrame})'[${next}]`);
+    } else filters.push(`[${last}][${plate}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*${fps}),${composition.startFrame - startFrame})*lt(round(t*${fps}),${composition.endFrame - startFrame})'[${next}]`);
     last = next;
   }
   return { last, inputIndex };
