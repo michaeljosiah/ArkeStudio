@@ -29,16 +29,17 @@ export function ConnectedEffectProposalCard({ world, production, familyId, versi
     return () => cancelAnimationFrame(frame);
   }, [focus?.serial, familyId, versionId]);
   if (!family || !version) return <p role="status">This exact retained effects version is unavailable. Refresh the conversation.</p>;
+  const pending = family.status === "pending";
   const ref = effectCardRef(family, version);
   const error = sameEffectProposalVersion(review.state.error?.ref, ref) ? review.state.error?.reason : undefined;
   const currentHash = production.timeline?.status === "ready" ? production.timeline.hash : undefined;
-  const currentStale = !!base.timeline && (base.timeline.revision !== version.dependencies.base.revision || (currentHash !== undefined && currentHash !== version.dependencies.base.timelineHash));
+  const currentStale = pending && !!base.timeline && (base.timeline.revision !== version.dependencies.base.revision || (currentHash !== undefined && currentHash !== version.dependencies.base.timelineHash));
   const currentChanged = currentStale ? "Current changed · Update proposal and review the new version." : undefined;
-  const dependencyStatus = freshness.checking ? "checking" : freshness.staleReason ? "stale" : undefined;
+  const dependencyStatus = pending ? freshness.checking ? "checking" : freshness.staleReason ? "stale" : undefined : undefined;
   return <div className="fy-effect-proposal"><EffectProposalCard key={version.id} family={family} version={version} timeline={base.timeline} frameRate={productionFrameRate(production.meta)}
-    activeReview={review.active} busy={review.busy} readOnly={review.readOnly} currentStale={currentStale} dependencyStatus={dependencyStatus} statusReason={error ?? base.reason ?? currentChanged ?? freshness.staleReason ?? undefined}
+    activeReview={review.active} busy={review.busy} readOnly={review.readOnly} currentStale={currentStale} dependencyStatus={dependencyStatus} statusReason={pending ? error ?? base.reason ?? currentChanged ?? freshness.staleReason ?? undefined : undefined}
     expanded={expanded} onExpandedChange={setExpanded} onReview={review.review} onIntent={review.intent}
     onInspect={review.inspect} onUpdate={review.update} onRetry={review.retry} onDiscard={review.discard} />
-    {review.busy && review.canEdit && sameEffectProposalVersion(review.state.pending?.operation.ref, ref) && <div className="fy-effect-proposal__actions"><button type="button" onClick={review.retryRequest}>Check response</button><span>Resends the same pending action.</span></div>}
+    {pending && review.busy && review.canEdit && sameEffectProposalVersion(review.state.pending?.operation.ref, ref) && <div className="fy-effect-proposal__actions"><button type="button" onClick={review.retryRequest}>Check response</button><span>Resends the same pending action.</span></div>}
   </div>;
 }
