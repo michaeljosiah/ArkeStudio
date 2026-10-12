@@ -171,9 +171,9 @@ export async function handlePictureReview(store: WorldStore, command: PictureRev
       family[op.direction === "undo" ? "redo" : "undo"].push(version.id); sticky = previous.sticky; model = previous.model; origin = "history";
     } else origin = "update";
     return async () => {
-    const next = await makeVersion(store, command.productionId, family, model, sticky, origin, deps, base, version);
+    const next = await makeVersion(store, command.productionId, family, model, sticky, origin, deps, base, updateBase);
     if (op.kind !== "update" && next.conflicts.length) throw new Error(next.conflicts.join("; "));
-    if (op.kind !== "history") { family.undo.push(version.id); family.redo = []; }
+    if (op.kind !== "history") { family.undo.push(updateBase.id); family.redo = []; }
     family.versions.push(next); family.headVersionId = next.id;
     // Ordinary manual adjustments keep the user in their pending edit; release/update always
     // require a new explicit Review and never grant themselves application authority.

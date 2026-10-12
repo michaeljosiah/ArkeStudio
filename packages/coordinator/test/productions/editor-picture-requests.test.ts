@@ -131,6 +131,34 @@ test("Update accepts an already completed human Release and still requires a fre
   assert.equal(clip.visual.blendMode, "screen"); assert.equal(clip.visual.protection, undefined);
 });
 
+test("Update from an old card records the latest manual decisions as its Undo predecessor", async () => {
+  const { store, stage, operate, readTimeline } = await setup();
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const edit = await operate({ kind: "edit", ref, commands: [
+    { kind: "picture-appearance", clipId: "cl_first", patch: { opacity: .4 } },
+    { kind: "picture-protect", clipId: "cl_first", rule: { id: "vp_pending", property: "opacity", scope: { kind: "whole" } } },
+  ] });
+  assert.equal(edit.outcome, "updated", edit.reason);
+  const current = JSON.parse(await readTimeline());
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: current.revision,
+    sourceFingerprint: storyTimelineFingerprint(store.getBundle().productions.find(value => value.meta.id === productionId)!),
+    commands: [{ kind: "picture-appearance", clipId: "cl_second", patch: { opacity: .8 } }] });
+  const before = await readTimeline(), updated = await operate({ kind: "update", ref });
+  assert.equal(updated.outcome, "updated", updated.reason); assert.equal(updated.reviewId, undefined);
+  let family = (await readPictureFamilies(store, productionId))[0]!;
+  assert.equal(family.versions.at(-1)!.parentVersionId, edit.ref.versionId);
+  assert.equal(family.undo.at(-1), edit.ref.versionId);
+  await operate({ kind: "review", ref: updated.ref });
+  const undone = await operate({ kind: "history", ref: updated.ref, direction: "undo" });
+  assert.equal(undone.outcome, "updated", undone.reason);
+  family = (await readPictureFamilies(store, productionId))[0]!;
+  assert.deepEqual(family.versions.at(-1)!.sticky, family.versions.find(value => value.id === edit.ref.versionId)!.sticky);
+  assert.equal(family.versions.at(-1)!.pictures[0]!.visual?.opacity, .4);
+  assert.equal(family.versions.at(-1)!.pictures[0]!.visual?.protection?.[0]?.id, "vp_pending");
+  assert.equal(await readTimeline(), before);
+});
+
 test("picture Apply detects changed source bytes and Update retains decisions but grants no Review", async () => {
   const { store, stage, operate, artifact, readTimeline } = await setup(), before = await readTimeline();
   const first = await stage(), ref = pictureVersionRef(first.family.id, first.version), review = await operate({ kind: "review", ref });
