@@ -1,7 +1,7 @@
 import {initial,screen} from './global-chat-224.view.mjs';
 const root=document.querySelector('#chat-prototype');
 let state=initial();
-const render=focus=>{root.innerHTML=screen({...state,live:true,device:root.clientWidth<600?'phone':root.clientWidth<1100?'fold':undefined});if(focus)root.querySelector(focus)?.focus();};
+const render=focus=>{root.innerHTML=screen({...state,live:true,device:root.clientWidth<600?'phone':root.clientWidth<1100?'fold':undefined});if(focus){let target=root.querySelector(focus);if(target?.disabled)target=root.querySelector('.gc224-panel [data-act=adopt],.gc224-panel [data-act=world]');target?.focus();}};
 const stash=()=>{const input=root.querySelector('[data-draft]');if(input&&!input.disabled)state.drafts[state.chat]=input.value;};
 const open=()=>{state.chat=state.page;state.worldChanged=false;state.open=true;state.history=false;};
 function act(action){
