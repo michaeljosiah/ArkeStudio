@@ -37,6 +37,17 @@ Client, coordinator and integrations ──> shared contracts
 
 ## Change entry points
 
+Air Particles designs (proposed, awaiting approval): turns 220–223 revision 3 extend the
+existing Cut library, scrolling Inspector and Arke composite-card flow. The
+[focused review](../../design-system/air-particles-220.review.html) and
+[notes](../../design-system/air-particles-220.notes.md) describe physics, blending,
+protection and explicit review. `design-system/air-particles-220.mjs` generates the
+master/index entries; `.native.mjs`, `.native-panels.mjs`, `.native.css` and
+`.native-prototype.mjs` own the isolated fixture. Run
+`node design-system/air-particles-220.check.mjs` for browser/render checks and
+`node design-system/air-particles-220.serve.mjs` for the read-only review URL.
+No Air Particles/blend implementation or specification acceptance is implied.
+
 Crossfade designs (approved 2026-10-12; SPEC-054 accepted): turns 216–219 draw fixed-cut
 still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
 batch scopes and explicit short-clip exceptions, separate join and

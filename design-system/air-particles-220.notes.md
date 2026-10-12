@@ -1,23 +1,23 @@
 # Air Particles design turns 220–223
 
-Status: **turn 220 revision 2 proposed; turns 221–223 preliminary**, 12 October 2026. No design approval,
+Status: **turns 220–223 revision 3 proposed, awaiting owner review**, 12 October 2026. No design approval,
 specification acceptance or product implementation is implied.
 
 Open the [focused review](air-particles-220.review.html), the
 [master](Arke%20Studio.dc.html#t220), or the [review index](design-review.html).
-The generator writes 34 HTML drawings into both review surfaces: ten revised turn 220 drawings and 24 earlier interaction concepts. The focused page collapses the earlier drawings under explicit preliminary labels.
+The generator writes 38 HTML drawings into the master and focused review. The generated review index retains each drawing’s scoped styles and desktop/Fold/phone width. All four turns now use the existing Cut structure.
 
 | Turn | Focus | Frames |
 | --- | --- | --- |
-| 220 revision 2 | Existing library/dialog/Inspector, placement, appearance, Motion, area/fades, phone/Fold/dark | a–j |
-| 221 | Speed, airflow, contacts, boundary behaviour and optional audio | a–f |
-| 222 | Normal/Screen/Add, opacity, imported overlay, protection and release | a–i |
-| 223 | Arke cards, explicit Review, manual adjustments, revisions, stale state, Apply | a–i |
+| 220 | Existing library/dialog/Inspector, placement, appearance, Motion, area/fades, phone/Fold/dark | a–j |
+| 221 | Speed, airflow, contacts, boundary behaviour and optional audio and readiness | a–h |
+| 222 | Normal/Screen/Add, opacity, imported overlay, protection and release | a–j |
+| 223 | Arke cards, explicit Review, manual adjustments, revisions, stale state, Apply, phone/Fold | a–j |
 
-## Revision 2: preserve the existing editor
+## Revision 3: all four turns in the existing editor
 
-The owner rejected the earlier shell as too large an editor redesign. Turn 220 now
-adds Air Particles within the existing Cut editor. Inspector and Arke remain its only
+The owner rejected the earlier shell as too large an editor redesign. All four turns now
+place the additions within the existing Cut editor. Inspector and Arke remain its only
 permanent panel tabs. Appearance and Motion are existing scrolling section headings;
 there are no new Appearance, Physics, Blend or Changes tabs.
 
@@ -36,14 +36,28 @@ Dashed gold outlines are removable review annotations, not new product decoratio
 
 Sources checked: client fidelity.css, editor-effect-library, editor-effect-inspector,
 editor-effect-fields, editor-effect-area, editor-effect-target, editor-responsive and
-EditorDialog, plus saved real application acceptance captures. The live app inspection
+EditorDialog, editor-effect-audio/protection/review-bar, editor-effect-proposal-card,
+ProductionConversation and saved real application acceptance captures. The live app inspection
 connection timed out; no claim of a fresh live pixel comparison is made. Public sample
 artwork replaces private scratch artwork, and unrelated controls remain illustrative.
 The design drawings are not screenshots or a production implementation.
 
-Turns 221–223 preserve earlier interaction ideas for discussion, explicitly labelled
-preliminary and awaiting shell alignment. They do not authorize an alternative editor
-layout. This revision makes no application or private specification changes.
+Turn 221 expands Particle physics inside Motion and uses the existing Audio reaction
+section for optional source, response presets and Advanced. Silent and changed-source
+states distinguish base atmosphere from unavailable reaction.
+
+Turn 222 places effect blending in Appearance and clip blending beneath the existing
+placed-picture source/timing controls. Imported media uses the Media library and its
+ordinary picture clip; no procedural effect is manufactured. Property scopes, exact
+boundaries and coverage use the existing protection section. Named pending Release
+creates a fresh card and leaves Current protected until explicit Review and Apply.
+
+Turn 223 uses the current Arke panel/composite-card structure, and existing Arke sheets
+on compact devices. Only explicit Review opens the temporary comparison bar. Show
+changes returns to the card; Inspect effect uses the ordinary Inspector. Manual
+adjustments are visible and retained through the scripted revision. Source/Current
+changes disable Apply until Update and another Review. No application or private
+specification changes are included.
 
 ## Motion refinement behind the designs
 
@@ -114,22 +128,34 @@ design stage. A specification should follow owner approval.
 
 ## Isolated fixture and limitations
 
-Revision 2's focused fixture exercises the turn 220 integration: select the preset,
-open Add effect, choose independent target/frame range/track, cancel or add, edit
-appearance/colour, preview motion and blending, choose a new pattern, and Undo. New
-appearance and physics controls use the original independent procedural study. Direction,
-emitting area, curves, audio, protection, other presets, Arke and export are context only
-and are disabled or labelled as such in this fixture. They remain existing app features.
+The focused fixture exercises adding, target/range/track choice, cancellation, appearance,
+colour, procedural motion, blend/opacity, Pattern and Undo. It illustrates audio binding
+and response controls without audio playback or analysis. The defaults/mappings use the
+existing Gentle shimmer, Beat pulse and Build with energy vocabulary.
 
-The fixture uses one selected-effect slot and public artwork, without real target
-compositing, audio analysis, world writes or model calls. It does not persist state.
-Review shortcuts above it are outside the app drawing, explicitly labelled as review
-navigation. They select an example effect to expose the relevant Inspector section.
-The study's display-referred canvas and alpha conversion are not final render rules.
+Scripted Arke cards support explicit Review, ordinary pending edits, Keep current,
+scoped permission to revise, named Current and pending release, incoming versions,
+stale Update/Review, close/reopen, Discard and exact one-step Apply/Undo. Arrival retains
+the selected panel, clock and active preview. It is one selected-effect example, not an
+AI engine, real authority, complete multi-effect compiler or production acceptance test.
+Fixed-passage controls record the illustrated scope; the fixture does not implement
+arbitrary segmentation or a real target compositor. All proposal state resets on reload.
 
-The old standalone prototype source remains as historical interaction evidence; it is
-not loaded by the revised focused review. Preliminary 221–223 drawings remain available
-in collapsed sections. Arke/protection approval awaits their revised designs.
+Direction/emitting-area behaviour, curves, other presets and export remain labelled
+context-only. Buttons above the drawing are review shortcuts/simulations, not editor
+navigation. Only public artwork and an independently generated synthetic overlay are
+used; the imported video examples do not decode the owner’s original file.
+
+The focused canvases use the independent study. Static master/index canvases use a
+representative original still, gated by the active interval and the selected blend mode,
+opacity and transparent/opaque source type. They are not exact motion checkpoints or
+preview/export acceptance evidence. The live study uses a retained simulation origin
+and anchored fades: trims preserve phase/envelopes, Move shifts them, and Fit fades is
+explicit. Playback/seek update both clocks and the playhead. The study’s display-referred
+colour and alpha handling still require a production rendering specification.
+
+The earlier alternate-shell modules remain historical source, unloaded by this page.
+All visible 220–223 drawings and the active fixture now use the shared native layout.
 
 ## Regenerate and verify
 
@@ -144,11 +170,15 @@ node design-system/air-particles-220.serve.mjs
 ```
 
 The focused check starts isolated headless Chrome (CHROME overrides the executable),
-captures the ten revised drawings and writes a report to .dev/air-particles-design/.
-It checks artwork/fonts, desktop/Fold/390/320px layout, preservation of existing tabs,
-preliminary labels, placement cancellation, target/range independence, frame validation,
-appearance edits, pattern/Undo, phone Add/Details/Done and removable review annotations.
+captures all 38 revised drawings and writes a report to .dev/air-particles-design/.
+It checks artwork/fonts, desktop/Fold/390/320px layout, existing panel tabs, Add/Cancel,
+independent placement, frame validation, simulation/fade anchors, clocks, appearance,
+Pattern/Undo, audio bindings, granular release, sticky manual/Keep current decisions,
+explicit review entry, incoming/stale recovery, Apply/Undo and mobile sheets. It also
+opens the generated review index to verify retained CSS, device widths, active-interval
+gating and static Normal/Add compositing.
 
-Validation on 12 October 2026: ten revised drawings and 34 focused browser checks
-passed. Application tests are outside this design-only change. The pre-existing missing
+Validation on 12 October 2026: all 38 revised drawings and 107 focused browser checks
+passed, including the generated review index. Master rendering/fonts/anchors and generated
+review consistency passed. Application tests are outside this design-only change. The pre-existing missing
 turn t195 ledger warning remains; no historical turn before 220 was edited.

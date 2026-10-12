@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url));
-const roots=new Set(['air-particles-220.native.mjs','air-particles-220.native.css','air-particles-220.native-prototype.mjs','air-particles-220.review.html','air-particles-220.css','air-particles-220.prototype.mjs','air-particles-220.view.mjs','air-particles-220.renderer.mjs','air-particles-220.physics.mjs','Arke Studio.dc.html','design-review.html','support.js','theme-switch.js','image-slot.js']);
+const roots=new Set(['air-particles-220.native-panels.mjs','air-particles-220.native.mjs','air-particles-220.native.css','air-particles-220.native-prototype.mjs','air-particles-220.review.html','air-particles-220.css','air-particles-220.prototype.mjs','air-particles-220.view.mjs','air-particles-220.renderer.mjs','air-particles-220.physics.mjs','Arke Studio.dc.html','design-review.html','support.js','theme-switch.js','image-slot.js']);
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.jpg':'image/jpeg','.svg':'image/svg+xml','.woff2':'font/woff2'};
 export function createDesignServer(){
   return http.createServer((req,res)=>{
