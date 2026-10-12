@@ -308,7 +308,7 @@ import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-sessi
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { benchReadRows } from "../bench/chat-reads.js";
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
-import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
+import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
 import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
@@ -975,9 +975,8 @@ function preparedWorldPayload(
       : WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: compileProductionTimelineRequest(store, action, actionId) });
     case "production-audio-edit": return WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: action.request });
     case "production-effects-propose": {
-      if (subject?.kind !== "effect-arrangement") throw new Error("Choose the effects arrangement target, range and optional audio before requesting a proposal");
       return WorldChatEffectProposalActionSchema.parse({ kind: "world-chat-effect-proposal", worldId, productionId: action.productionId,
-        proposal: action.proposal, scope: subject.scope, ...(subject.reviewed ? { reviewed: subject.reviewed } : {}) });
+        proposal: action.proposal, ...effectProposalRequestContext(store.getBundle(), action.productionId, action.scope, subject) });
     }
     case "production-audio-cue": return WorldChatProductionAudioCueActionSchema.parse({ kind: "world-chat-production-audio-cue", ...common, ...freezeProductionAudioCue(store, action.productionId) });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
@@ -1384,10 +1383,10 @@ export function prepareWorldChatActions(
   turn: WorldChatActionTurn,
   deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
-  const scopeProblem = effectOnlyTurnProblem(turn.subject, turn);
-  if (scopeProblem) throw new Error(scopeProblem);
   const editorCount = turn.editorRequests.length + editorProposalActionCount(turn.actions);
   if (editorCount > 2) throw new Error(`${editorCount} editor proposals exceed the 2-per-turn limit across all result paths`);
+  const scopeProblem = effectOnlyTurnProblem(turn.subject, turn);
+  if (scopeProblem) throw new Error(scopeProblem);
   // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
   // whatever the model returned and through whichever channel — candidates, bible edits, scene
   // edits, editor requests or actions: `Hold this against the style` stages nothing.

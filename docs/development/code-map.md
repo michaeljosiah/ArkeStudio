@@ -99,8 +99,11 @@ and finalizes their net result as one ordinary history entry. Coordinator
 them, including a fresh disk resolution scan before the committing marker. `world/commit.ts`
 owns that rollback-capable hook. Proposal v2 writes and durable effect request scopes raise the
 world floor to 75; reads never migrate. `world-chat/effect-proposals.ts` links native conversation
-actions while refusing generic approval, and `effect-proposal-scope.ts` fences sibling result
-channels. `effect-proposal-reads.ts` pages complete effect/decision records. The authenticated
+actions while refusing generic approval. `effect-proposal-scope.ts` resolves explicit editor scope
+or a bounded ordinary-chat proposal, validates current bindings/delivery, and fences sibling result
+channels. The shared effect model guide is included in production chat even without an active
+review; applied arrangements are history and follow-ups propose against Current. Cut carries an
+authored effect selection as a timeline subject. `effect-proposal-reads.ts` pages complete effect/decision records. The authenticated
 `editor-effect-proposal` route delegates to `productions/editor-effect-review.ts`; model tools
 cannot call it.
 

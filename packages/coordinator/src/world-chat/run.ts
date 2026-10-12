@@ -39,7 +39,6 @@ import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
-import { EDITOR_EFFECT_MODEL_GUIDE } from "@arke-studio/contracts";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -1483,7 +1482,7 @@ const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each qu
 
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
-  if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.\n${EDITOR_EFFECT_MODEL_GUIDE}`;
+  if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.`;
   const named = subject.kind === "chapter"
     ? `chapter ${subject.chapterId}`
     : subject.kind === "timeline-clip"
