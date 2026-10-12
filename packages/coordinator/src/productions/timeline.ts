@@ -20,6 +20,7 @@ import {
   storyTimelineFingerprint,
   timelineCarriesEffects,
   timelineCarriesTransitions,
+  timelineCarriesPictureAppearance,
   undoTimelineHistory,
   type ProductionBundle,
   type ProductionTimeline,
@@ -361,10 +362,9 @@ async function writeTimeline(
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);
         next = command.kind === "undo" ? undoTimelineHistory(current) : redoTimelineHistory(current);
-        // Generic approval cannot inverse an effects transaction or release its rules. The
-        // dedicated reviewed-candidate authority owns suggested effect history (SPEC-053 R-36).
-        if (effectAuthority !== "human" && (timelineCarriesEffects(current) || timelineCarriesEffects(next) || timelineCarriesTransitions(current) || timelineCarriesTransitions(next))) {
-          throw new TimelineCommandRefused("Use the editor's Undo or Redo for an effects timeline.");
+        // Generic approval cannot inverse protected authoring or release its rules (SPEC-053/055).
+        if (effectAuthority !== "human" && [current, next].some(value => timelineCarriesEffects(value) || timelineCarriesTransitions(value) || timelineCarriesPictureAppearance(value))) {
+          throw new TimelineCommandRefused("Use the editor's Undo or Redo for effects, transitions or picture appearance.");
         }
         /*
          * An accepted request whose revision is undone stays accepted and says so (SPEC-039

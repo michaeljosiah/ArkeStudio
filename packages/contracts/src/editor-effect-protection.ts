@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { effectCurveAt, EffectLineageIdSchema, type EffectClip } from "./editor-effects.js";
+import { effectAuthoredValue } from "./editor-effect-setting.js";
 
 const frame = z.number().int().nonnegative().safe();
 const ruleId = z.string().regex(/^pr_[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const EffectProtectedPropertySchema = z.enum([
-  "target", "preset", "appearance.amount", "appearance.size", "appearance.opacity", "appearance.colour",
+  "target", "preset", "seed", "appearance.amount", "appearance.size", "appearance.opacity", "appearance.colour",
+  "appearance.texture", "appearance.softness", "appearance.depth", "appearance.blendMode",
+  "motion.airflow", "motion.particleDeflections", "motion.boundary",
   "motion.direction", "motion.speed", "motion.area", "fades.inFrames", "fades.outFrames", "intensityCurve",
   "audioInput", "reaction.enabled", "reaction.preset", "reaction.strength", "reaction.beat", "reaction.bass",
   "reaction.energy", "reaction.property", "reaction.limit", "reaction.smoothingFrames", "reactionCurve", "cueOverrides",
@@ -75,8 +78,7 @@ function propertyAt(effect: EffectClip, path: EffectProtectedProperty, at: numbe
     case "cueOverrides": return effect.cueOverrides.filter(cue => at >= cue.frame && at < cue.frame + cue.durationFrames)
       .map(cue => ({ ...cue, frame: cue.frame - at })).sort((a, b) => a.id.localeCompare(b.id));
     default: {
-      let value: unknown = effect;
-      for (const key of path.split(".")) value = value === undefined ? undefined : (value as Record<string, unknown>)[key];
+      const value = effectAuthoredValue(effect, path);
       return path === "appearance.colour" && typeof value === "string" ? value.toLowerCase() : value;
     }
   }

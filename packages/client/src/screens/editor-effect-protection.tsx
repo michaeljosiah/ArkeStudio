@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
-import { EffectProtectedPropertySchema, EffectProtectionInputSchema, uncoveredEffectPassages, ulid,
+import { EffectProtectedPropertySchema, EffectProtectionInputSchema, uncoveredEffectPassages, ulid, effectAuthoredValue,
   type EffectClip, type EffectProtectedProperty, type EffectProtectionInput, type EffectProtectionRule, type ProductionTimeline } from "@arke-studio/contracts";
 import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 import { formatTimecode } from "../lib/timeline-drag.js";
 import { EffectTimeField } from "./editor-effect-fields.js";
 
 export const EFFECT_PROTECTION_LABELS: Record<EffectProtectedProperty, string> = {
+  seed: "Pattern", "appearance.texture": "Texture", "appearance.softness": "Softness", "appearance.depth": "Depth variation", "appearance.blendMode": "Blend mode",
+  "motion.airflow": "Airflow variation", "motion.particleDeflections": "Gentle particle deflections", "motion.boundary": "Picture boundary",
   target: "Visual target", preset: "Atmosphere preset", "appearance.amount": "Amount", "appearance.size": "Particle Size", "appearance.opacity": "Opacity", "appearance.colour": "Colour",
   "motion.direction": "Direction", "motion.speed": "Speed", "motion.area": "Emitting area", "fades.inFrames": "Fade in", "fades.outFrames": "Fade out", intensityCurve: "Intensity curve",
   audioInput: "Audio source", "reaction.enabled": "Reaction On/Off", "reaction.preset": "Response preset", "reaction.strength": "Reaction Strength", "reaction.beat": "Beat weight", "reaction.bass": "Bass weight",
   "reaction.energy": "Energy weight", "reaction.property": "Affected property", "reaction.limit": "Response limit", "reaction.smoothingFrames": "Smoothing", reactionCurve: "Reaction curve", cueOverrides: "Beat corrections and accents",
 };
-const percent = new Set<EffectProtectedProperty>(["appearance.amount", "appearance.size", "appearance.opacity", "motion.speed", "reaction.strength", "reaction.beat", "reaction.bass", "reaction.energy", "reaction.limit"]);
+const percent = new Set<EffectProtectedProperty>(["appearance.amount", "appearance.size", "appearance.opacity", "appearance.texture", "appearance.softness", "appearance.depth", "motion.airflow", "motion.speed", "reaction.strength", "reaction.beat", "reaction.bass", "reaction.energy", "reaction.limit"]);
 export function effectProtectionValue(effect: EffectClip, property: EffectProtectedProperty, timeline?: ProductionTimeline): string {
-  let value: unknown = effect;
-  for (const key of property.split(".")) value = value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
-  if (typeof value === "number") return percent.has(property) ? `${Math.round(value * 100)}%` : `${value}${property === "motion.direction" ? "°" : " frames"}`;
+  const value = effectAuthoredValue(effect, property);
+  if (typeof value === "number") return percent.has(property) ? `${Math.round(value * 100)}%` : `${value}${property === "seed" ? "" : property === "motion.direction" ? "°" : " frames"}`;
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (value === undefined) return "No source";
   if (typeof value === "string") return value.replaceAll("-", " ");

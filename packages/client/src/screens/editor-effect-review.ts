@@ -10,7 +10,7 @@ import { claimEditorReview, subscribeEditorReviewOwner } from "../lib/editor-rev
 
 interface SessionEntry { worldId: string; productionId: string; session: EffectReviewSession }
 const sessions = new Map<string, SessionEntry>();
-subscribeEditorReviewOwner(event => { if (event.kind === "transitions") sessions.get(event.key)?.session.close(); });
+subscribeEditorReviewOwner(event => { if (event.kind !== "effects") sessions.get(event.key)?.session.close(); });
 const activations = new Set<(event: { worldId: string; productionId: string; active: ActiveEffectReview }) => void>();
 let listening = false;
 const emptySession = new EffectReviewSession();

@@ -18,6 +18,7 @@ export interface EffectLibraryProps {
 }
 
 const descriptions: Record<EffectClip["preset"]["id"], string> = {
+  "air-particles": "Textured, dispersed floating particles",
   dust: "Soft particles drifting through the picture", embers: "Warm sparks rising through the air", snow: "Gentle falling flakes",
   lights: "Slow, softly glowing lights", rain: "Fine streaks falling across the picture", smoke: "Soft clouds moving through the scene",
 };

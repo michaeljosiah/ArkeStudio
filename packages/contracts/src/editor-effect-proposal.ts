@@ -18,7 +18,7 @@ export const EffectProposalRangeSchema = z.object({ startFrame: frame, endFrame:
 export const EffectArrangementScopeSchema = z.object({ kind: z.literal("effects-only"), target: EffectTargetSchema,
   range: EffectProposalRangeSchema, audio: z.discriminatedUnion("kind", [z.object({ kind: z.literal("off") }).strict(),
     z.object({ kind: z.literal("source"), input: EffectAudioInputSchema }).strict()]),
-  direction: z.string().trim().min(1).max(2000), palette: z.array(EffectPresetSchema).min(1).max(6),
+  direction: z.string().trim().min(1).max(2000), palette: z.array(EffectPresetSchema).min(1).max(7),
 }).strict();
 export type EffectArrangementScope = z.infer<typeof EffectArrangementScopeSchema>;
 

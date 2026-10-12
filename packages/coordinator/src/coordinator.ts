@@ -413,6 +413,7 @@ import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
 import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
 import { handleTransitionReview } from "./productions/editor-transition-requests.js";
+import { handlePictureReview } from "./productions/editor-picture-requests.js";
 import { handleEffectReview } from "./productions/editor-effect-review.js";
 import type { EffectAudioAnalysisHost } from "./media/node-effect-audio.js";
 import type { EffectRasterHost } from "./media/node-effect-renderer.js";
@@ -11774,6 +11775,15 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const { result, conversationId } = await handleTransitionReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) { await this.conversationActionLifecycle(store).recoverConversation(conversationId); await this.refreshConversationOutcome(store, conversationId); }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "editor-picture-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handlePictureReview(store, msg, this.effectDependencies);
         this.emit(result);
         if (conversationId) { await this.conversationActionLifecycle(store).recoverConversation(conversationId); await this.refreshConversationOutcome(store, conversationId); }
         await this.refreshWorldSnapshot(msg.worldId);

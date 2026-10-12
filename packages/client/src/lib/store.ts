@@ -687,7 +687,9 @@ export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
 const dialogueListeners = new Set<(result: DialogueResult) => void>();
 export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
 const transitionProposalListeners = new Set<(result: import("@arke-studio/contracts").TransitionReviewResult) => void>();
+const pictureProposalListeners = new Set<(result: import("@arke-studio/contracts").PictureReviewResult) => void>();
 export function subscribeTransitionProposalResults(listener: (result: import("@arke-studio/contracts").TransitionReviewResult) => void): () => void { transitionProposalListeners.add(listener); return () => { transitionProposalListeners.delete(listener); }; }
+export function subscribePictureProposalResults(listener: (result: import("@arke-studio/contracts").PictureReviewResult) => void): () => void { pictureProposalListeners.add(listener); return () => { pictureProposalListeners.delete(listener); }; }
 const effectProposalListeners = new Set<(result: import("@arke-studio/contracts").EffectReviewResult) => void>();
 export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void {
   effectProposalListeners.add(listener); return () => { effectProposalListeners.delete(listener); };
@@ -1675,6 +1677,7 @@ function handleFrame(json: string): void {
     }
     if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
     if (event.type === "editor-transition.proposal-result") for (const listener of transitionProposalListeners) listener(event);
+    if (event.type === "editor-picture.proposal-result") for (const listener of pictureProposalListeners) listener(event);
     if (event.type === "editor-effect.proposal-result") for (const listener of effectProposalListeners) listener(event);
     if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);

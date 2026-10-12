@@ -344,16 +344,16 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
     path, still, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, sourceInSec,
     ...(!still && sourceOutSec !== undefined ? { sourceOutSec } : {}),
     ...(size?.width && size.height ? { sourceSize: { width: size.width, height: size.height } } : {}),
-    fit: "contain", matte: "source-alpha" };
+    fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}) };
 }
 
 /** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
 function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
   frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
-  if (!record.tracks.some(track => track.effects?.length) && !record.transitions?.length) return undefined;
+  if (!record.tracks.some(track => track.effects?.length || track.clips.some(clip => clip.visual)) && !record.transitions?.length) return undefined;
   const { effectLayers, issues } = projectEffectLayers(record);
   const dimensions = PRESETS[preset];
-  return { rendererVersion: "software-rgba-v1", width: dimensions.width, height: dimensions.height, frameRate,
+  return { rendererVersion: "software-rgba-v2", width: dimensions.width, height: dimensions.height, frameRate,
     startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: projectPictureTransitions(record, pictures).map((picture, order) => ({ ...picture, order })),
     effectLayers, issues };
 }
@@ -675,7 +675,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     items.push({ type: "slate", label: slateLabel, durationSec: entry.durationSec });
     if (clip !== undefined && base !== null) basePictures.push({ clipId: clip.id, trackId: base.id, order: base.order,
       kind: "slate", label: slateLabel, still: true, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames,
-      sourceInSec: 0, fit: "contain", matte: "source-alpha" });
+      sourceInSec: 0, fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}) });
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];

@@ -109,5 +109,13 @@ export function markEditorRequestHistory(file: EditorRequestFile, requestId: str
     const { undoneAt: _undone, ...receipt } = family.receipt;
     return { ...family, receipt };
   });
-  return changed ? { ...file, requests, effectFamilies, ...(transitionFamilies ? { transitionFamilies } : {}) } : file;
+  const pictureFamilies = file.pictureFamilies?.map(family => {
+    if (family.id !== requestId || !family.receipt) return family;
+    if (family.receipt.historyEntryDigest !== historyEntryDigest) throw new EditorRequestFileInvalid("Picture receipt does not match timeline history");
+    changed = true;
+    if (direction === "undo") return { ...family, receipt: { ...family.receipt, undoneAt: at } };
+    const { undoneAt: _undone, ...receipt } = family.receipt;
+    return { ...family, receipt };
+  });
+  return changed ? { ...file, requests, effectFamilies, ...(transitionFamilies ? { transitionFamilies } : {}), ...(pictureFamilies ? { pictureFamilies } : {}) } : file;
 }

@@ -1,3 +1,4 @@
+import { PictureProposalCard } from "./editor-picture-proposal-card.js";
 import { StudioCard, useProductionStudio } from "./production-studio-context.js";
 import { useMemo, useState } from "react";
 import { orderedShots, productionFrameRate, timelineSourceFingerprint, type HumanDecisionCard,
@@ -43,6 +44,11 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
     case "transition-proposal": {
       const production = world.productions.find(value => value.meta.id === control.productionId);
       if (production) content = <TransitionProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
+      break;
+    }
+    case "picture-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <PictureProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
       break;
     }
     case "effect-proposal": {

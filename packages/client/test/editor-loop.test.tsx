@@ -30,7 +30,7 @@ it("keeps loop, pause/seek and the canonical clock through Current/Suggested wit
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { messages.push(JSON.parse(json)); } });
   const current: RenderPlan = { preset: "review-cut", frameRate: 30, items: [], overlays: [], audio: [], totalSec: .2, revision: 1,
     range: { startSec: 0, endSec: .2 }, scope: { kind: "production" }, mix: DEFAULT_MIX, speech: [], subtitles: null };
-  const suggested: RenderPlan = { ...current, effectRender: { rendererVersion: "software-rgba-v1", width: 32, height: 18,
+  const suggested: RenderPlan = { ...current, effectRender: { rendererVersion: "software-rgba-v2", width: 32, height: 18,
     frameRate: 30, startFrame: 0, endFrame: 6, pictureLayers: [], effectLayers: [], issues: [] } };
   let transport!: CutTransport;
   function Harness({ plan, token = 0 }: { plan: RenderPlan; token?: number }) {

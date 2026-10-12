@@ -7,6 +7,8 @@ import { CutDialog, useCutLayout } from "./editor-responsive.js";
 import { pointerIsTouch, startClipGesture } from "./editor-gesture.js";
 import type { EditorTool } from "./editor-timeline.js";
 import { effectTargetLabel } from "./editor-effect-target.js";
+import { Eye, EyeOff, Sparkle } from "../components/icons.js";
+import { IconButton } from "../components/ui.js";
 
 export interface EffectTrackRowsProps {
   timeline: ProductionTimeline; totalFrames: number; frameRate: FrameRate; selectedEffectId: string | null;
@@ -152,9 +154,9 @@ export function EffectTrackRows(props: EffectTrackRowsProps) {
   return <>
     {tracks.map(track => <div key={track.id} className="fy-track fy-effect-track" data-track="effect" data-track-id={track.id} data-hidden={track.muted || undefined}>
       <div className="fy-track__label fy-track__label--typed">
-        <button type="button" className="fy-effect-track__settings fy-cut-lane-open" aria-label={`${track.name} effects track settings`} onClick={() => setLaneMenu(track.id)}>✦</button>
-        {!phone && <><span className="fy-track__name">{track.name}</span><button type="button" className="fy-effect-track__visibility" disabled={disabled} aria-pressed={track.muted === true}
-          aria-label={`${track.muted ? "Show" : "Hide"} ${track.name}`} onClick={() => send([{ kind: "set-track", trackId: track.id, muted: !track.muted }], track.muted ? "Show effects track" : "Hide effects track")}>{track.muted ? "Show" : "Hide"}</button></>}
+        <IconButton type="button" className="fy-effect-track__settings fy-cut-lane-open" label={`${track.name} effects track settings`} onClick={() => setLaneMenu(track.id)}><Sparkle size={16} /></IconButton>
+        {!phone && <><span className="fy-track__name">{track.name}</span><IconButton type="button" className="fy-effect-track__visibility" disabled={disabled} aria-pressed={track.muted === true}
+          label={`${track.muted ? "Show" : "Hide"} ${track.name}`} onClick={() => send([{ kind: "set-track", trackId: track.id, muted: !track.muted }], track.muted ? "Show effects track" : "Hide effects track")}>{track.muted ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton></>}
       </div>
       <div className={`fy-track__lane fy-effect-track__lane${tool === "hand" ? " fy-pictlane--hand" : tool === "blade" ? " fy-pictlane--blade" : ""}`} onPointerDown={pan} style={{ "--effect-row-count": Math.max(1, track.effects?.length ?? 0) } as CSSProperties}>
         {!track.effects?.length && <span className="fy-track__empty">Add an effect from the Library</span>}

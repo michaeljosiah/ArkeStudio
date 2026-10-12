@@ -27,7 +27,8 @@ async function snapshot(store: WorldStore, productionId: string) {
 }
 function replace(file: EditorRequestFile, family: TransitionProposalFamily): EditorRequestFile {
   const families = file.schemaVersion === 2 ? file.transitionFamilies ?? [] : [];
-  const next = { schemaVersion: 2 as const, requests: file.requests, effectFamilies: file.schemaVersion === 2 ? file.effectFamilies : [],
+  const next = { schemaVersion: 2 as const, requests: file.requests,
+    ...(file.schemaVersion === 2 && file.pictureFamilies ? { pictureFamilies: file.pictureFamilies } : {}), effectFamilies: file.schemaVersion === 2 ? file.effectFamilies : [],
     transitionFamilies: families.some(value => value.id === family.id) ? families.map(value => value.id === family.id ? family : value) : [...families, family] };
   return next;
 }
