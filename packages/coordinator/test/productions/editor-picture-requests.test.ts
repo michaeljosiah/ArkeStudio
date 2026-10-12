@@ -128,7 +128,7 @@ test("Update accepts an already completed human Release and still requires a fre
   const applied = await operate({ kind: "apply", ref: updated.ref, reviewId: review.reviewId! });
   assert.equal(applied.outcome, "applied", applied.reason);
   const clip = JSON.parse(await readTimeline()).tracks[0].clips[0];
-  assert.equal(clip.visual.blendMode, "screen"); assert.deepEqual(clip.visual.protection, []);
+  assert.equal(clip.visual.blendMode, "screen"); assert.equal(clip.visual.protection, undefined);
 });
 
 test("picture Apply detects changed source bytes and Update retains decisions but grants no Review", async () => {
