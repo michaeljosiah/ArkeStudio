@@ -1,12 +1,12 @@
 # Crossfade design turns 216–219
 
-Status: **proposed, awaiting owner review**. Created 12 October 2026. No new capability
-specification or application implementation is included. The owner has agreed to preserve
-existing cut positions and total production duration.
+Status: **approved for implementation**, 12 October 2026, including turn 216 revision 2.
+SPEC-054 records the accepted requirements and implementation acceptance. Existing cut
+positions and total production duration remain fixed.
 
 Open the [focused review](crossfade-216.review.html) for the interactive example and all
 33 HTML drawings. The [design master](Arke%20Studio.dc.html#t219) holds the same turns;
-the [review index](design-review.html) records their proposed status.
+the [review index](design-review.html) records their approval.
 
 | Turn | Review focus | Frames |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ the [review index](design-review.html) records their proposed status.
 | [218](crossfade-216.review.html#turn-218) | Separate join/duration protection, named release, broken adjacency | a–f |
 | [219](crossfade-216.review.html#turn-219) | Arke composite cards, explicit Review, sticky edits, incoming versions, stale bases and Apply | a–h |
 
-## Decisions proposed for approval
+## Approved decisions
 
 - Turn 216 revision 2 replaces the preliminary Inspector step with a picker at the cut.
   Hover or focus reveals a generous + target; touch has a named join row. Click +, then
@@ -48,16 +48,16 @@ the [review index](design-review.html) records their proposed status.
   Review. Apply saves exactly the reviewed arrangement in one Undo entry. Discard leaves
   Current unchanged; closing review preserves the pending proposal.
 
-## Review points before specification
+## Specification decisions
 
-These are proposed choices, not unresolved implementation promises:
+These choices were approved:
 
-1. Confirm the one-second starting value and the first scope of adjacent stills only.
-2. Confirm explicit acceptance of shorter batch fades rather than automatic fitting.
-3. Confirm separate protection of transition presence/type and duration, including the
+1. Accepted the one-second starting value and the first scope of adjacent stills only.
+2. Accepted explicit acceptance of shorter batch fades rather than automatic fitting.
+3. Accepted separate protection of transition presence/type and duration, including the
    behaviour when the original clip pair stops touching.
 
-After design approval, the specification should settle frame rounding at the symmetric
+SPEC-054 settles frame rounding at the symmetric
 boundary, exact maximum-duration calculation, still transforms during extended blend
 coverage, alpha/compositing behaviour, source invalidation, persistence and export parity.
 SPEC-053 covers the existing effects authoring and review vocabulary; these picture
