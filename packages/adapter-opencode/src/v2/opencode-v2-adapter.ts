@@ -27,6 +27,7 @@ import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { OPENCODE2_PINNED_VERSION } from "../discovery.js";
 import { waitForSessionModel } from "./model-readiness.js";
+import { imagePrompt, sessionImageInput, type SessionImageInput } from "./image-input.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import {
   normalizeAttempt,
@@ -67,6 +68,7 @@ interface TrackedSession {
   cwd?: string;
   agent?: string;
   permissionPolicy: SessionPermissionPolicy | null;
+  image: SessionImageInput;
 }
 
 /**
@@ -99,6 +101,12 @@ function freshWireId(): string {
 
 export class OpenCodeV2Adapter implements HarnessAdapter {
   readonly id = "opencode2";
+  readonly imageInput = true;
+  imageInputForSession(id: string): boolean { return this.sessions.get(id)?.image.supported === true; }
+  imageDestinationForSession(id: string) {
+    const image = this.sessions.get(id)?.image;
+    return { provider: image?.provider ?? this.id, local: image?.local === true };
+  }
   private readonly http: OpenCodeV2Http;
   private caps = new Set<HarnessCapability>();
   private ready: Readiness = { ready: false, reason: "not probed yet" };
@@ -187,6 +195,8 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   private lastKnownWindow: number | null = null;
   /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
   private readonly modelWindows = new Map<string, number>();
+  /** A global row only admits the scoped verification below; it never proves destination. */
+  private readonly visionModels = new Set<string>();
   /**
    * The pinned model's window per session, taken at creation from the catalogue as it stood
    * then. Null is a pinned model whose window the catalogue did not state: the caller's floor
@@ -264,6 +274,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
     let window = model !== null ? this.modelWindows.get(`${model.providerID}/${model.id}`) ?? null : undefined;
+    let image = sessionImageInput(null, model?.providerID ?? this.id);
     try {
       // The envelope assertion in reqData covers scoped GETs; session create echoes the location
       // inside data, so assert here too — a session in the wrong directory writes the wrong world.
@@ -280,6 +291,29 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       }
       const row = await waitForSessionModel(this.http, model, location ?? session.location?.directory, input.signal, this.opts.modelReadyMs);
       if (row !== null) window = modelMetadata(row).inputTokenLimit ?? null;
+      // Only a pinned selection identifies where these bytes will go. A global default or a
+      // model name is not evidence for this location; failed/unknown metadata stays unreadable.
+      if (model !== null && (modelMetadata(row ?? {}).inputModalities?.includes("image") === true ||
+        this.visionModels.has(`${model.providerID}/${model.id}`))) {
+        try {
+          const signal = AbortSignal.any([AbortSignal.timeout(5_000), ...(input.signal ? [input.signal] : [])]);
+          const scopedLocation = location ?? session.location?.directory;
+          let rows = row ? [row] : null;
+          if (rows === null) {
+            const envelope = await this.http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
+              { location: scopedLocation, signal });
+            if (scopedLocation !== undefined && !sameDirectory(envelope?.location?.directory, scopedLocation)) {
+              throw new Error("OpenCode image catalog did not confirm the session location");
+            }
+            rows = envelope?.data;
+          }
+          const matches = Array.isArray(rows) ? rows.filter(item => item.providerID === model.providerID && item.id === model.id) : [];
+          const selected = matches.length === 1 ? matches[0] : undefined;
+          image = sessionImageInput(selected ?? null, model.providerID);
+        } catch {
+          input.signal?.throwIfAborted();
+        }
+      }
       input.signal?.throwIfAborted();
     } catch (error) {
       // Nobody upstream has this id yet. A failed pin, readiness check or stop must not leave
@@ -293,6 +327,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
       permissionPolicy,
+      image,
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -306,19 +341,19 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * changed. The caller's correlation id stays on this side of the wire.
    */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
+    if (input.parts.some(part => part.type === "image") && !this.imageInputForSession(input.sessionId)) {
+      throw new Error("This OpenCode session cannot inspect images. Select a model with verified image input.");
+    }
     // The turn's completion arrives only on the stream — make sure someone is listening even
     // if the host never called streamEvents(), or sendMessage waits on silence forever.
     void this.pump();
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
-    const text = input.parts.map(p => {
-      if (p.type !== "text") throw new Error("This OpenCode adapter does not accept image input.");
-      return p.text;
-    }).join("\n");
+    const prompt = imagePrompt(input.parts);
     void (async () => {
       try {
         await this.http.reqData<{ id?: string }>("POST", `/api/session/${input.sessionId}/prompt`, {
           id: freshWireId(),
-          text,
+          ...prompt,
         });
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
@@ -535,10 +570,12 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const out: ModelInfo[] = [];
     this.lastKnownWindow = null;
     this.modelWindows.clear();
+    this.visionModels.clear();
     for (const row of rows) {
       if (!row.id || !row.providerID || !modelEnabled(row)) continue;
       const key = `${row.providerID}/${row.id}`;
       const metadata = modelMetadata(row);
+      if (metadata.inputModalities?.includes("image")) this.visionModels.add(key);
       if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
       if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
@@ -766,6 +803,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.sessions.clear();
     this.sessionWindows.clear();
     this.pumpAbort.abort();
     for (const sub of this.subscribers) {
