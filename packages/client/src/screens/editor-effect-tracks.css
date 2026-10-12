@@ -1,8 +1,8 @@
 .fy-effect-track { --effect-row-height: 44px; }
 .fy-effect-track .fy-effect-track__lane { position: relative; display: block; height: calc(var(--effect-row-count) * var(--effect-row-height) + 8px); box-sizing: border-box; }
 .fy-effect-track__settings, .fy-effect-track__visibility { border: 0; background: transparent; color: var(--muted-foreground); padding: 4px; cursor: pointer; }
-.fy-effect-track__settings.fy-cut-lane-open { display: inline-grid; place-items: center; min-width: 24px; min-height: 28px; }
-.fy-effect-track__visibility { font-size: 10px; margin-left: auto; }
+.fy-effect-track__settings.fy-cut-lane-open { display: inline-grid; place-items: center; width: 20px; min-width: 20px; height: 28px; min-height: 28px; padding: 2px; }
+.fy-effect-track__visibility { width: 20px; min-width: 20px; height: 28px; padding: 2px; margin-left: auto; }
 .fy-effect-clip { position: absolute; height: calc(var(--effect-row-height) - 4px); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; min-width: 2px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 5px; background: color-mix(in srgb, var(--timeline-selection) 12%, var(--card)); color: var(--foreground); overflow: hidden; text-align: left; user-select: none; cursor: grab; }
 .fy-effect-clip[aria-pressed=true] { border-color: var(--timeline-selection); box-shadow: inset 0 0 0 1px var(--timeline-selection); }
 .fy-effect-clip:focus-visible, .fy-effect-track :is(button, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

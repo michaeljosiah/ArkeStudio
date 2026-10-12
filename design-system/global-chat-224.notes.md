@@ -1,10 +1,10 @@
-# Global Chat · design turn 220
+# Global Chat · design turn 224
 
 Status: **proposed, awaiting author approval**, 13 October 2026. The author explicitly
 requested a design turn before application implementation. No new Chat UI is implemented.
 
-Open [the focused review](global-chat-220.review.html) for nine HTML drawings and an isolated
-interactive example. The [master](Arke%20Studio.dc.html#t220) holds the binding proposed rules.
+Open [the focused review](global-chat-224.review.html) for nine HTML drawings and an isolated
+interactive example. The [master](Arke%20Studio.dc.html#t224) holds the binding proposed rules.
 SPEC-051 records the proposal; acceptance depends on explicit author design approval.
 
 Chat prepends to the titlebar's right-hand controls. Opening follows the current page;
@@ -22,12 +22,12 @@ the on-screen keyboard or production proposals. No application imports or writes
 From the repository root:
 
 ```powershell
-node design-system/global-chat-220.mjs
+node design-system/global-chat-224.mjs
 node design-system/check-master.mjs --record
 node design-system/build-review.mjs
 node design-system/check-master.mjs
 node design-system/build-review.mjs --check
-node design-system/global-chat-220.check.mjs
+node design-system/global-chat-224.check.mjs
 ```
 
 The focused check uses local headless Chrome and writes its report/screenshots to

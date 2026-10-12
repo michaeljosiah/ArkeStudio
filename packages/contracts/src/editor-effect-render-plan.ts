@@ -1,6 +1,17 @@
-import type { EffectClip } from "./editor-effects.js";
+import type { EffectClip, PictureBlendMode } from "./editor-effects.js";
 import type { ProductionTimeline } from "./timeline.js";
 import { crossfadeWindow, transitionInactiveReason, transitionJoin, crossfadeWeight } from "./editor-transitions.js";
+
+/** Normal layers share an intermediate; other modes need their actual backdrop. */
+export function partitionEffectBlendLayers(effects: readonly EffectClip[]): Array<{ effects: EffectClip[]; blendMode: PictureBlendMode }> {
+  const groups: Array<{ effects: EffectClip[]; blendMode: PictureBlendMode }> = [];
+  for (const effect of effects) {
+    const blendMode = effect.appearance.blendMode ?? "normal", previous = groups.at(-1);
+    if (blendMode === "normal" && previous?.blendMode === "normal") previous.effects.push(effect);
+    else groups.push({ effects: [effect], blendMode });
+  }
+  return groups;
+}
 
 /** Slate pixels are delivery content, independent of the application's colour theme. */
 export const EFFECT_SLATE_STYLE = Object.freeze({ background: "#000000", colour: "#ffffff", fontFamily: "Geist Sans", fontSize: 48 });
@@ -21,6 +32,8 @@ export interface RenderPictureLayer {
   sourceSize?: { width: number; height: number };
   fit: "contain";
   matte: "source-alpha";
+  blendMode?: PictureBlendMode;
+  opacity?: number;
   /** SPEC-054 R-4: source coverage extends; authored clip boundaries remain unchanged. */
   fadeIn?: { startFrame: number; durationFrames: number };
   fadeOut?: { startFrame: number; durationFrames: number };
@@ -53,7 +66,7 @@ export interface RenderEffectLayer {
 }
 
 export interface EffectRenderProjection {
-  rendererVersion: "software-rgba-v1";
+  rendererVersion: "software-rgba-v2";
   width: number;
   height: number;
   frameRate: number;
@@ -101,10 +114,13 @@ export function pictureStackAtFrame(plan: EffectRenderProjection, absoluteFrame:
   return plan.pictureLayers.filter(layer => absoluteFrame >= layer.startFrame && absoluteFrame < layer.endFrame);
 }
 
-export function effectsForPicture(plan: EffectRenderProjection, picture: RenderPictureLayer | null, absoluteFrame: number): RenderEffectLayer[] {
+export function effectsForPicture(plan: EffectRenderProjection, picture: RenderPictureLayer | null, absoluteFrame: number, includeInactive = false): RenderEffectLayer[] {
   if (absoluteFrame < plan.startFrame || absoluteFrame >= plan.endFrame) return [];
   return plan.effectLayers.filter(({ effect }) => {
-    if (absoluteFrame < effect.startFrame || absoluteFrame >= effect.startFrame + effect.durationFrames) return false;
+    if (includeInactive) {
+      const start = Math.max(plan.startFrame, picture?.startFrame ?? plan.startFrame), end = Math.min(plan.endFrame, picture?.endFrame ?? plan.endFrame);
+      if (effect.startFrame >= end || effect.startFrame + effect.durationFrames <= start) return false;
+    } else if (absoluteFrame < effect.startFrame || absoluteFrame >= effect.startFrame + effect.durationFrames) return false;
     const target = effect.target;
     if (picture === null) return target.kind === "composition";
     if (picture.kind !== "media") return false;

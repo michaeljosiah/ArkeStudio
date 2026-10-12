@@ -1,5 +1,6 @@
 import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
 import { EffectClipSchema, type EffectClip, type EffectPatch } from "./editor-effects.js";
+import { effectAuthoredValue } from "./editor-effect-setting.js";
 import { EffectProtectedPropertySchema } from "./editor-effect-protection.js";
 import type { ProductionTimeline } from "./timeline.js";
 import { effectOriginDescendsFrom, effectSegmentDescendsFrom, proposalEffects } from "./editor-effect-proposal-identity.js";
@@ -7,7 +8,7 @@ import type { EffectCreativeCommand, EffectHumanDecision, EffectIdentityLedger, 
 
 const equal = (a: unknown, b: unknown) => canonical(a ?? null) === canonical(b ?? null);
 export function effectValueAt(effect: EffectClip, path: string): unknown {
-  return path.split(".").reduce<unknown>((value, key) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, effect);
+  return effectAuthoredValue(effect, path);
 }
 function put(value: object, path: string, next: unknown): void {
   const keys = path.split("."); let owner = value as Record<string, unknown>;
@@ -158,7 +159,7 @@ export function preserveEffectStickyCommands(timeline: ProductionTimeline, comma
 
 /** Human Keep current restores exact phase via move then trims, retaining ordinary semantics. */
 export function restoreEffectCommands(current: EffectClip, desired: EffectClip): EffectCreativeCommand[] {
-  if (current.id !== desired.id || current.lineageId !== desired.lineageId || current.seed !== desired.seed) throw new Error("Keep current cannot substitute another effect identity.");
+  if (current.id !== desired.id || current.lineageId !== desired.lineageId) throw new Error("Keep current cannot substitute another effect identity.");
   const commands: EffectCreativeCommand[] = [], delta = desired.simulationOriginFrame - current.simulationOriginFrame;
   const movedStart = current.startFrame + delta;
   if (movedStart < 0) throw new Error("Restoring this placement needs an explicit structural decision.");
@@ -169,7 +170,7 @@ export function restoreEffectCommands(current: EffectClip, desired: EffectClip):
   if (duration !== desired.durationFrames) commands.push({ kind: "effect-trim", clipId: current.id, edge: "tail", deltaFrames: desired.durationFrames - duration });
   if (desired.order !== current.order) commands.push({ kind: "effect-reorder", clipId: current.id, order: desired.order });
   const parsed = EffectClipSchema.parse(desired);
-  commands.push({ kind: "effect-patch", clipId: current.id, patch: { preset: parsed.preset, target: parsed.target, appearance: parsed.appearance, motion: parsed.motion,
+  commands.push({ kind: "effect-patch", clipId: current.id, patch: { seed: parsed.seed, preset: parsed.preset, target: parsed.target, appearance: parsed.appearance, motion: parsed.motion,
     fades: parsed.fades, intensityCurve: parsed.intensityCurve, reactionCurve: parsed.reactionCurve, audioInput: parsed.audioInput ?? null, reaction: parsed.reaction, cueOverrides: parsed.cueOverrides } });
   return commands;
 }

@@ -168,7 +168,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
 // 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
 // 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
-export const SUPPORTED_SCHEMA_VERSION = 76;
+// 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
+export const SUPPORTED_SCHEMA_VERSION = 77;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -870,6 +871,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // allowing a later writer to replace unreadable families with an empty v1 file.
     let editorRequests: ProductionBundle["editorRequests"] = [], effectFamilies: NonNullable<ProductionBundle["effectFamilies"]> = [];
     let transitionFamilies: NonNullable<ProductionBundle["transitionFamilies"]> = [];
+    let pictureFamilies: NonNullable<ProductionBundle["pictureFamilies"]> = [];
     let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
     try {
       const { raw, file } = await readEditorRequestFileAt(dir, id);
@@ -877,6 +879,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       editorRequests = file.requests;
       if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
       if (file.schemaVersion === 2) transitionFamilies = file.transitionFamilies ?? [];
+      if (file.schemaVersion === 2) pictureFamilies = file.pictureFamilies ?? [];
     } catch (error) {
       const message = (error instanceof Error ? error.message : "Editor requests are unavailable").slice(0, 500);
       editorRequestState = { status: "invalid", message };
@@ -966,6 +969,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       editorRequests,
       effectFamilies,
       transitionFamilies,
+      pictureFamilies,
       editorRequestState,
       takeMediaInfo,
     });

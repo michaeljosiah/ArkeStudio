@@ -13,7 +13,7 @@ import { tempDir } from "../tmp.js";
 
 const effect = defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", seed: 42, startFrame: 0, durationFrames: 24 });
 const plan = (): ExportPlan => ({ preset: "review-cut", frameRate: 24, totalSec: 1, items: [], overlays: [], audio: [], effectRender: {
-  rendererVersion: "software-rgba-v1", width: 64, height: 64, frameRate: 24, startFrame: 0, endFrame: 24,
+  rendererVersion: "software-rgba-v2", width: 64, height: 64, frameRate: 24, startFrame: 0, endFrame: 24,
   effectLayers: [{ effect, trackId: "tr_fx", trackOrder: 0 }], issues: [], pictureLayers: [{ clipId: "cl_picture", trackId: "tr_picture", order: 0,
     kind: "media", label: "picture", path: "artifacts/effect-picture.png", still: true, sourceInSec: 0, startFrame: 0, endFrame: 24, fit: "contain", matte: "source-alpha" }] } });
 async function world() { const store = await WorldStore.open(await makeTempWorld()); closeOnCleanup(() => store.close());

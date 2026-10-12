@@ -24,3 +24,8 @@
   .fx-inspector input, .fx-inspector select { font-size: 16px; }
   .fx-inspector__hint, .fx-inspector__conversion { font-size: 12px; }
 }
+.fx-inspector__pattern { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fx-inspector__pattern strong { display: block; }
+.fx-inspector__physics summary { cursor: pointer; font-weight: 600; margin-block: 12px; }
+.fx-inspector__physics > :not(summary) { margin-block: 12px; }
+.fx-inspector__contacts { display: flex; align-items: center; gap: 8px; }

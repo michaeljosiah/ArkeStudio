@@ -5,7 +5,7 @@ Proposed 2026-10-13. No global Chat UI is implemented in the OpenCode image-hand
 One persistent Chat icon in the application's right-hand titlebar controls can make Arke easier
 to reach. It should open the existing conversation for the current context, preserving the
 world/production authorities, tool leases and ordinary approval cards. SPEC-051 records this
-proposal. [Design turn 220](../../design-system/global-chat-220.review.html) supplies nine
+proposal. [Design turn 224](../../design-system/global-chat-224.review.html) supplies nine
 HTML drawings and an interactive fixture. Application implementation must wait for the
 author's explicit design approval, followed by responsive browser validation.
 

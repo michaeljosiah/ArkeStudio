@@ -181,9 +181,11 @@ describe("legacy placements before the first write (issue 1159)", () => {
     try {
       clip(screen, A1);
       clip(screen, A2);
-      const mute = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "Mute Overlay L1");
-      assert.ok(mute, "the folded track has the typed row's controls");
-      await act(async () => mute.click());
+      const hide = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "Hide Overlay L1");
+      assert.ok(hide, "the folded picture track has the visibility control");
+      assert.equal(hide.dataset.tip, "Hide Overlay L1");
+      assert.ok(hide.querySelector("svg"));
+      await act(async () => hide.click());
       const sent = commands(screen).at(-1);
       assert.ok(sent);
       assert.deepEqual(sent.commands, [{ kind: "set-track", trackId: "tr_lane-1", muted: true }]);

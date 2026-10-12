@@ -24,7 +24,7 @@ import {
   type TimelineTrackId,
   PICTURE_TRACK_ID,
 } from "@arke-studio/contracts";
-import { cx } from "../components/ui.js";
+import { cx, IconButton } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
 import type { EditorTool } from "./editor-timeline.js";
 import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
@@ -42,7 +42,7 @@ import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
  * same one the render plan reads.
  */
 
-import { Film, Mic, MusicMark, TextMark, Waveform, X } from "../components/icons.js";
+import { Eye, EyeOff, Film, Mic, MusicMark, Speaker, SpeakerOff, TextMark, Waveform, X } from "../components/icons.js";
 
 export const ARTIFACT_DRAG_TYPE = "application/x-arke-artifact";
 /**
@@ -352,35 +352,35 @@ export function TypedTrackRows({
               <span className="fy-track__name" title={`${track.name} · ${kindLabel}`}>{track.name}</span>
               <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
                 {removable && (
-                  <button
+                  <IconButton
                     type="button"
                     className="fy-trackbtns__remove"
-                    aria-label={`Remove ${track.name}`}
+                    label={`Remove ${track.name}`}
                     disabled={disabled}
                     onClick={() => onCommands([{ kind: "remove-track", trackId: track.id }], `Remove ${track.name}`)}
                   >
-                    <X size={9} />
-                  </button>
+                    <X size={14} />
+                  </IconButton>
                 )}
-                <button
+                <IconButton
                   type="button"
                   aria-pressed={track.muted}
-                  aria-label={`Mute ${track.name}`}
+                  label={`${audio ? track.muted ? "Unmute" : "Mute" : track.muted ? "Show" : "Hide"} ${track.name}`}
                   disabled={disabled}
-                  onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`)}
+                  onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], `${audio ? track.muted ? "Unmute" : "Mute" : track.muted ? "Show" : "Hide"} ${track.name}`)}
                 >
-                  M
-                </button>
+                  {audio ? track.muted ? <SpeakerOff size={14} /> : <Speaker size={14} /> : track.muted ? <EyeOff size={14} /> : <Eye size={14} />}
+                </IconButton>
                 {audio && (
-                  <button
+                  <IconButton
                     type="button"
                     aria-pressed={track.solo === true}
-                    aria-label={`Solo ${track.name}`}
+                    label={`${track.solo ? "Unsolo" : "Solo"} ${track.name}`}
                     disabled={disabled}
                     onClick={() => onCommands([{ kind: "set-track", trackId: track.id, solo: track.solo !== true }], track.solo === true ? `Unsolo ${track.name}` : `Solo ${track.name}`)}
                   >
                     S
-                  </button>
+                  </IconButton>
                 )}
               </span>
             </span>

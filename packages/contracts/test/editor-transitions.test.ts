@@ -90,7 +90,7 @@ test("crossfade projection extends only the still coverage and midpoint has no d
     path: `${clip.id}.png`, still: true, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, sourceInSec: 0, fit: "contain" as const, matte: "source-alpha" as const }));
   const layers = projectPictureTransitions(base, pictures);
   assert.equal(layers[0]!.endFrame, 84); assert.equal(layers[1]!.startFrame, 60);
-  const plan: EffectRenderProjection = { rendererVersion: "software-rgba-v1", width: 1, height: 1, frameRate: 24, startFrame: 0, endFrame: 216, pictureLayers: layers, effectLayers: [], issues: [] };
+  const plan: EffectRenderProjection = { rendererVersion: "software-rgba-v2", width: 1, height: 1, frameRate: 24, startFrame: 0, endFrame: 216, pictureLayers: layers, effectLayers: [], issues: [] };
   assert.equal(pictureStackAtFrame(plan, 72).length, 2);
   const track = new Float32Array(4), output = new Uint8ClampedArray([0, 0, 0, 255]);
   addWeightedPicture(track, new Uint8ClampedArray([255, 0, 0, 255]), pictureTransitionWeight(layers[0]!, 72), { x: 0, y: 0, width: 1, height: 1 }, 1);

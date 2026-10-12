@@ -129,7 +129,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
             if (layer.kind === "slate") {
               const captured = pool.captureSlate(layer.label, width, height, resolution);
               if (!captured) { waiting = true; continue; }
-              pictures.push({ id: layer.clipId, ...captured, effects: [], trackId: layer.trackId, weight: pictureTransitionWeight(layer, at) });
+              pictures.push({ id: layer.clipId, ...captured, effects: [], trackId: layer.trackId, weight: pictureTransitionWeight(layer, at), blendMode: layer.blendMode, opacity: layer.opacity });
               continue;
             }
             if (!layer.path) throw new Error(`Picture ${layer.label} has no media.`);
@@ -138,12 +138,12 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
               ...(layer.sourceOutSec === undefined ? {} : { sourceOutSec: layer.sourceOutSec }),
             }, width, height, live.current.playing, nowMs, projection.frameRate);
             if (!captured) { waiting = true; continue; }
-            pictures.push({ id: layer.clipId, ...captured, effects: effectsForPicture(projection, layer, at).map(row => row.effect), trackId: layer.trackId, weight: pictureTransitionWeight(layer, at) });
+            pictures.push({ id: layer.clipId, ...captured, effects: effectsForPicture(projection, layer, at, true).map(row => row.effect), trackId: layer.trackId, weight: pictureTransitionWeight(layer, at), blendMode: layer.blendMode, opacity: layer.opacity });
           }
         } catch (failure) { setError(failure instanceof Error ? failure.message : "The picture could not be captured."); return null; }
         if (waiting) return null;
         lastRequested = at;
-        return { absoluteFrame: at, frameRate: projection.frameRate, width, height, pictures, composition: effectsForPicture(projection, null, at).map(row => row.effect), analysisEpoch };
+        return { absoluteFrame: at, frameRate: projection.frameRate, width, height, pictures, composition: effectsForPicture(projection, null, at, true).map(row => row.effect), analysisEpoch };
       });
     };
     const flushAnalysis = () => {

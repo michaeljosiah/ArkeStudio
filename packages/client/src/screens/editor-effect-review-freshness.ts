@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ArtifactSidecar, EffectProposalVersion, TransitionProposalVersion, ProductionBundle, ProductionTimeline } from "@arke-studio/contracts";
+import type { ArtifactSidecar, EffectProposalVersion, TransitionProposalVersion, PictureProposalVersion, ProductionBundle, ProductionTimeline } from "@arke-studio/contracts";
 import { cachedEffectReviewFreshness, checkEffectReviewFreshness, type PreparedEffectReviewFreshness } from "../lib/editor-effect-review-freshness.js";
 
 export interface EffectReviewFreshness { checking: boolean; staleReason: string | null }
 
 /** The exact candidate and current source resolution own a digest result, never just its version ID. */
 export function useEffectReviewFreshness(production: ProductionBundle | null | undefined, artifacts: readonly ArtifactSidecar[] | undefined,
-  base: ProductionTimeline | null | undefined, version?: EffectProposalVersion | TransitionProposalVersion,
+  base: ProductionTimeline | null | undefined, version?: EffectProposalVersion | TransitionProposalVersion | PictureProposalVersion,
   check: (prepared: PreparedEffectReviewFreshness) => Promise<string | null> = checkEffectReviewFreshness): EffectReviewFreshness {
   const prepared = useMemo(() => version && production && base
     ? cachedEffectReviewFreshness({ production, artifacts: artifacts ?? [], base, version }) : null,

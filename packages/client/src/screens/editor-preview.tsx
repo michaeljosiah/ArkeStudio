@@ -7,7 +7,6 @@ import {
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
-  PauseSolid,
   Play,
 } from "../components/icons.js";
 import { clock } from "../components/player.js";
@@ -267,17 +266,17 @@ function LegacyCutPreview({
           {liveCue.text}
         </span>
       )}
-      <button
+      {!playing && <button
         type="button"
         className="fy-playbtn"
-        aria-label={playing ? "Pause" : "Play"}
+        aria-label="Play"
         onClick={() => {
-          if (!playing && timeRef.current >= totalSec) seek(0);
-          setPlaying((p) => !p);
+          if (timeRef.current >= totalSec) seek(0);
+          setPlaying(true);
         }}
       >
-        {playing ? <PauseSolid size={22} /> : <Play size={22} />}
-      </button>
+        <Play size={22} />
+      </button>}
       <span className="fy-viewer__tag">
         {compact ? current?.label.match(/SHOT \d+/i)?.[0].replace(/SHOT/i, "SH") ?? clock(time) : <>{clock(time)} / {clock(totalSec)}{current ? ` · ${current.label}` : ""}</>}
       </span>

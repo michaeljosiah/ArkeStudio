@@ -1,3 +1,4 @@
+import { ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema,
   ProductionTransitionsProposeModelActionSchema, WorldChatTransitionProposalActionSchema, ProductionEffectsProposeModelActionSchema, WorldChatEffectProposalActionSchema } from "@arke-studio/contracts";
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
@@ -481,6 +482,7 @@ const CLIENT_COMMAND_METADATA = {
   "timeline-move-picture": action("production", "command", "timeline", "authored-change", ["timeline", "shots"], { reads: COMPLETE_TIMELINE_READ }),
   "timeline-command": action("production", "command", "timeline", "authored-change", ["timeline", "shots", "takes", "artifacts", "subtitles", "audio"], { reads: COMPLETE_TIMELINE_READ }),
   "editor-transition-proposal": humanOnly("Only the person may review, adjust, apply or discard transition proposals."),
+  "editor-picture-proposal": humanOnly("Only the person may review, adjust, apply or discard transition proposals."),
   "editor-request-decide": humanOnly("Only the person may accept or reject an existing Arke editor request.", "editor-request"),
   "editor-effect-analysis": humanOnly("The editor prepares local audio analysis; this does not apply an arrangement or release protection."),
   "editor-effect-proposal": humanOnly("Only the authenticated editor can review, adjust, release, discard or apply an exact effects version."),
@@ -910,6 +912,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     ...action("production", "command", "timeline", "authored-change", ["timeline"]),
   },
   "world-chat-transition-proposal": { kind: "world-chat-transition-proposal", schema: WorldChatTransitionProposalActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
+  "world-chat-picture-proposal": { kind: "world-chat-picture-proposal", schema: WorldChatPictureProposalActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "world-chat-effect-proposal": {
     kind: "world-chat-effect-proposal", schema: WorldChatEffectProposalActionSchema,
     ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]),
@@ -1319,6 +1322,7 @@ export interface ArkeBlockedAuthoritySeam {
 /** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
   "production-transitions-propose": { kind: "production-transitions-propose", schema: ProductionTransitionsProposeModelActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
+  "production-pictures-propose": { kind: "production-pictures-propose", schema: ProductionPicturesProposeModelActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "production-effects-propose": { kind: "production-effects-propose", schema: ProductionEffectsProposeModelActionSchema,
     ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "production-timeline-operation": { kind: "production-timeline-operation", schema: ProductionTimelineModelActionSchema,
@@ -1521,7 +1525,7 @@ export function modelActionFields(schema: z.ZodTypeAny): readonly ModelActionFie
 
 /** The prepared-action descriptor behind one model action kind, keyed as the model sends it. */
 export function worldChatActionDescriptor(modelKind: string) {
-  const key = modelKind === "production-transitions-propose" ? "world-chat-transition-proposal" : modelKind === "production-audio-edit" ? "world-chat-editor-request" : modelKind === "production-effects-propose" ? "world-chat-effect-proposal" : `world-chat-${modelKind}`;
+  const key = modelKind === "production-pictures-propose" ? "world-chat-picture-proposal" : modelKind === "production-transitions-propose" ? "world-chat-transition-proposal" : modelKind === "production-audio-edit" ? "world-chat-editor-request" : modelKind === "production-effects-propose" ? "world-chat-effect-proposal" : `world-chat-${modelKind}`;
   return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, key)
     ? WORLD_CHAT_ACTION_REGISTRY[key as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
     : undefined;

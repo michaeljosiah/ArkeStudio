@@ -8,18 +8,20 @@ import type { ProductionTimeline } from "./timeline.js";
 /** No read-only upgrade: callers invoke this only while staging an authorized request mutation. */
 export function retainEditorRequestFile(file: EditorRequestFile, pins: { requestIds?: readonly string[] } = {}): EditorRequestFile {
   const next = structuredClone(file), pinned = new Set(pins.requestIds ?? []);
-  const count = () => next.requests.length + (next.schemaVersion === 2 ? [...next.effectFamilies, ...(next.transitionFamilies ?? [])].reduce((sum, family) => sum + family.versions.length, 0) : 0);
+  const count = () => next.requests.length + (next.schemaVersion === 2 ? [...next.effectFamilies, ...(next.transitionFamilies ?? []), ...(next.pictureFamilies ?? [])].reduce((sum, family) => sum + family.versions.length, 0) : 0);
   const bytes = () => new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`).byteLength;
   while (count() > EFFECT_PROPOSAL_BOUNDS.kept || bytes() > EFFECT_PROPOSAL_BOUNDS.requestFileBytes) {
     const eligible = [
       ...next.requests.filter(request => request.status !== "pending" && !pinned.has(request.id)).map(request => ({ kind: "legacy" as const, id: request.id, at: request.createdAt })),
       ...(next.schemaVersion === 2 ? next.effectFamilies.filter(family => family.status !== "pending" && !pinned.has(family.id)).map(family => ({ kind: "effect" as const, id: family.id, at: family.createdAt })) : []),
       ...(next.schemaVersion === 2 ? (next.transitionFamilies ?? []).filter(family => family.status !== "pending" && !pinned.has(family.id)).map(family => ({ kind: "transition" as const, id: family.id, at: family.versions[0]!.createdAt })) : []),
+      ...(next.schemaVersion === 2 ? (next.pictureFamilies ?? []).filter(family => family.status !== "pending" && !pinned.has(family.id)).map(family => ({ kind: "picture" as const, id: family.id, at: family.versions[0]!.createdAt })) : []),
     ].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
     const oldest = eligible[0];
     if (!oldest) throw new Error(`Editor requests retain ${count()} records and ${bytes()} bytes; the limits are 200 records and ${EFFECT_PROPOSAL_BOUNDS.requestFileBytes} bytes. Pending work and history receipts remain pinned.`);
     if (oldest.kind === "legacy") next.requests = next.requests.filter(request => request.id !== oldest.id);
     else if (next.schemaVersion === 2 && oldest.kind === "effect") next.effectFamilies = next.effectFamilies.filter(family => family.id !== oldest.id);
+    else if (next.schemaVersion === 2 && oldest.kind === "picture") next.pictureFamilies = next.pictureFamilies?.filter(family => family.id !== oldest.id);
     else if (next.schemaVersion === 2) next.transitionFamilies = next.transitionFamilies?.filter(family => family.id !== oldest.id);
   }
   return next;

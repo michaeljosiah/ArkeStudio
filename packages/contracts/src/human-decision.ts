@@ -32,6 +32,7 @@ export type HumanDecisionControl =
   | { kind: "proposal"; proposalId: string }
   | { kind: "editor-request"; productionId: string; requestId: string }
   | { kind: "transition-proposal"; productionId: string; familyId: string; versionId: string }
+  | { kind: "picture-proposal"; productionId: string; familyId: string; versionId: string }
   | { kind: "effect-proposal"; productionId: string; familyId: string; versionId: string }
   | { kind: "extraction"; artifactId: string }
   | { kind: "voice-sample"; review: VoiceSampleReview }
@@ -47,6 +48,7 @@ export const HumanDecisionControlSchema: z.ZodType<HumanDecisionControl> = z.dis
   z.object({ kind: z.literal("proposal"), proposalId: ProposalIdSchema }).strict(),
   z.object({ kind: z.literal("editor-request"), productionId: SlugSchema, requestId: z.string().min(1).max(100) }).strict(),
   z.object({ kind: z.literal("transition-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("picture-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
   z.object({ kind: z.literal("effect-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
   z.object({ kind: z.literal("extraction"), artifactId: ArtifactIdSchema }).strict(),
   z.object({ kind: z.literal("voice-sample"), review: VoiceSampleReviewSchema }).strict(),

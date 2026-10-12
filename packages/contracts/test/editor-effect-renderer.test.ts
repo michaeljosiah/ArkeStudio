@@ -27,8 +27,8 @@ test("all six software presets have pinned, distinct visible RGBA fixtures", () 
     rain: "cbf6cbac1f0b70cd5808e90cced00f6198a6e4e7c2321f0044c4a202b67b8a4a",
     smoke: "fc81b85709781d771fc1be9aabccca73b9c491e22333a6e418f6da475971b4d1",
   };
-  assert.equal(EFFECT_PRESET_CATALOGUE.length, 6);
-  for (const preset of EFFECT_PRESET_CATALOGUE) {
+  assert.equal(EFFECT_PRESET_CATALOGUE.length, 7);
+  for (const preset of EFFECT_PRESET_CATALOGUE.filter(value => value.id !== "air-particles")) {
     const frame = evaluate(effect(preset.id), 73);
     assert.ok(frame.particles.length > 0 && frame.particles.length <= EFFECT_RENDER_PROFILE.maxParticlesPerEffect);
     const rgba = rasterizeEffectFrame(frame, 160, 90);
@@ -96,7 +96,7 @@ test("source-atop preserves translucent and transparent picture alpha exactly", 
 });
 
 function projection(effects: EffectClip[] = []): EffectRenderProjection {
-  return { rendererVersion: "software-rgba-v1", width: 1920, height: 1080, frameRate: 25, startFrame: 0, endFrame: 5500, pictureLayers: [],
+  return { rendererVersion: "software-rgba-v2", width: 1920, height: 1080, frameRate: 25, startFrame: 0, endFrame: 5500, pictureLayers: [],
     effectLayers: effects.map((value, index) => ({ effect: value, trackId: `tr_${index}`, trackOrder: index })), issues: [] };
 }
 
@@ -117,7 +117,7 @@ test("oversized raster/profile work is refused rather than silently reducing pop
   assert.throws(() => renderEffectLayersRgba([effect()], 25, 25, 3840, 2160), /pixels/);
   assert.throws(() => renderEffectLayersRgba(Array.from({ length: 9 }, () => effect()), 25, 25, 160, 90), /8/);
   const frame = evaluate(effect(), 25);
-  assert.throws(() => rasterizeEffectFrame({ ...frame, particles: Array(129).fill(frame.particles[0]) } as EffectFrame, 160, 90), /population/);
+  assert.throws(() => rasterizeEffectFrame({ ...frame, particles: Array(EFFECT_RENDER_PROFILE.maxParticlesPerEffect + 1).fill(frame.particles[0]) } as EffectFrame, 160, 90), /population/);
   const timeline: ProductionTimeline = { schemaVersion: 1, revision: 0, frameRate: 25, tracks: [], history: { undo: [], redo: [] }, mix: DEFAULT_MIX, library: [],
     effectProtection: [{ id: "pr_large", lineageId: "ef_fixture", kind: "boundary", boundary: "end", baselineRevision: 0, baselineFingerprint: "x".repeat(4 * 1024 * 1024) }] };
   assert.match(effectTimelineCapabilityProblem(timeline)!, /4 MiB/);

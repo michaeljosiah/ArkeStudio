@@ -1,8 +1,8 @@
 import type { EffectClip } from "./editor-effects.js";
-import type { EffectRenderProjection } from "./editor-effect-render-plan.js";
+import { partitionEffectBlendLayers, type EffectRenderProjection } from "./editor-effect-render-plan.js";
 import type { ProductionTimeline } from "./timeline.js";
 
-export const EDITOR_EFFECT_RENDERER_VERSION = "software-rgba-v1" as const;
+export const EDITOR_EFFECT_RENDERER_VERSION = "software-rgba-v2" as const;
 
 /** Versioned finite work budgets; a refusal is preferable to dropping particles (SPEC-053 R-20). */
 export const EFFECT_RENDER_PROFILE = Object.freeze({
@@ -13,7 +13,7 @@ export const EFFECT_RENDER_PROFILE = Object.freeze({
   maxEffects: 8,
   maxConcurrentPictures: 8,
   maxGroups: 128,
-  maxParticlesPerEffect: 128,
+  maxParticlesPerEffect: 1024,
   maxCandidateBirths: 160,
   maxRasterRadius: 160,
   maxDurationSeconds: 30 * 60,
@@ -25,7 +25,7 @@ export interface EffectPresetDefinition {
   id: EffectClip["preset"]["id"];
   version: 1;
   label: string;
-  shape: "soft-disc" | "streak" | "flake" | "smoke";
+  shape: "soft-disc" | "streak" | "flake" | "smoke" | "air-texture";
   birthsPerSecond: number;
   minimumLifetimeSec: number;
   maximumLifetimeSec: number;
@@ -55,6 +55,8 @@ const definitions: EffectPresetDefinition[] = [
     minimumRadius: 0.0005, maximumRadius: 0.0014, speedPerSecond: 0.5, directionDegrees: 102, drift: 0.004, opacity: 0.7, tint: [0.7, 0.85, 1], supportedReactionProperties: properties },
   { id: "smoke", version: 1, label: "Smoke", shape: "smoke", birthsPerSecond: 4, minimumLifetimeSec: 3, maximumLifetimeSec: 6,
     minimumRadius: 0.015, maximumRadius: 0.07, speedPerSecond: 0.025, directionDegrees: -90, drift: 0.08, opacity: 0.25, tint: [0.8, 0.85, 0.92], supportedReactionProperties: properties },
+  { id: "air-particles", version: 1, label: "Air Particles", shape: "air-texture", birthsPerSecond: 0, minimumLifetimeSec: 12, maximumLifetimeSec: 12,
+    minimumRadius: .001, maximumRadius: .028, speedPerSecond: .035, directionDegrees: 0, drift: .05, opacity: 1, tint: [1, 1, 1], supportedReactionProperties: properties },
 ];
 export const EFFECT_PRESET_CATALOGUE: readonly EffectPresetDefinition[] = Object.freeze(definitions.map(value => Object.freeze({
   ...value, tint: Object.freeze(value.tint), supportedReactionProperties: Object.freeze([...value.supportedReactionProperties]),
@@ -92,7 +94,7 @@ export function effectRenderCapabilityProblem(plan: EffectRenderProjection): str
     if (![24, 25, 30].includes(plan.frameRate) || !Number.isSafeInteger(plan.startFrame) || !Number.isSafeInteger(plan.endFrame) || plan.startFrame < 0 || plan.endFrame < plan.startFrame) throw new RangeError("Effect delivery needs valid whole production-frame bounds");
     if (plan.effectLayers.length && plan.endFrame - plan.startFrame > plan.frameRate * EFFECT_RENDER_PROFILE.maxDurationSeconds) throw new RangeError("Effects currently support deliveries up to 30 minutes");
     const events: Array<{ frame: number; delta: number }> = [];
-    const groups = new Set<string>();
+    const groups = new Map<string, EffectClip[]>();
     const pictureEvents = plan.pictureLayers.filter(picture => picture.kind === "media").flatMap(picture => {
       const from = Math.max(picture.startFrame, plan.startFrame), to = Math.min(picture.endFrame, plan.endFrame);
       return to > from ? [{ frame: from, delta: 1 }, { frame: to, delta: -1 }] : [];
@@ -108,7 +110,8 @@ export function effectRenderCapabilityProblem(plan: EffectRenderProjection): str
       const windows = target.kind === "composition" ? [{ startFrame: plan.startFrame, endFrame: plan.endFrame }] : plan.pictureLayers.filter(picture => picture.kind === "media" &&
         (target.kind === "picture-track" ? picture.trackId === target.trackId : picture.clipId === target.clipId));
       for (const window of windows) if (Math.max(plan.startFrame, effect.startFrame, window.startFrame) < Math.min(plan.endFrame, effect.startFrame + effect.durationFrames, window.endFrame)) {
-        groups.add(target.kind === "composition" ? "composition" : `picture:${"clipId" in window ? window.clipId : ""}`);
+        const key = target.kind === "composition" ? "composition" : `picture:${"clipId" in window ? window.clipId : ""}`;
+        groups.set(key, [...(groups.get(key) ?? []), effect]);
       }
       const ranges = windows.map(window => ({ startFrame: Math.max(plan.startFrame, effect.startFrame, window.startFrame), endFrame: Math.min(plan.endFrame, effect.startFrame + effect.durationFrames, window.endFrame) }))
         .filter(range => range.endFrame > range.startFrame).sort((a, b) => a.startFrame - b.startFrame);
@@ -120,7 +123,8 @@ export function effectRenderCapabilityProblem(plan: EffectRenderProjection): str
       }
       for (const range of merged) events.push({ frame: range.startFrame, delta: 1 }, { frame: range.endFrame, delta: -1 });
     }
-    if (groups.size > EFFECT_RENDER_PROFILE.maxGroups) throw new RangeError(`At most ${EFFECT_RENDER_PROFILE.maxGroups} scoped picture/composition effect groups are supported`);
+    const groupCount = [...groups.values()].reduce((count, effects) => count + partitionEffectBlendLayers(effects).length, 0);
+    if (groupCount > EFFECT_RENDER_PROFILE.maxGroups) throw new RangeError(`At most ${EFFECT_RENDER_PROFILE.maxGroups} scoped picture/composition effect groups are supported`);
     events.sort((a, b) => a.frame - b.frame || a.delta - b.delta);
     let active = 0;
     for (const event of events) {

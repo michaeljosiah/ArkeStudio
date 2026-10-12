@@ -29,7 +29,7 @@ function fixture() {
     { id: "tr_fx", kind: "effect", name: "Effects", order: 2, muted: false, clips: [], effects: [effect] },
   ] };
   const plan: RenderPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: 10, revision: 0, range: { startSec: 0, endSec: 10 }, scope: { kind: "production" }, mix: DEFAULT_MIX, speech: [], subtitles: null,
-    effectRender: { rendererVersion: "software-rgba-v1", width: 1280, height: 720, frameRate: 24, startFrame: 0, endFrame: 240, pictureLayers: [], ...projectEffectLayers(timeline) } };
+    effectRender: { rendererVersion: "software-rgba-v2", width: 1280, height: 720, frameRate: 24, startFrame: 0, endFrame: 240, pictureLayers: [], ...projectEffectLayers(timeline) } };
   const context: EffectAnalysisContext = { worldId: state.world!.meta.worldId, production, artifacts: [], timeline };
   state.effectAnalyses = [{ worldId: context.worldId, productionId: production.meta.id, canPrepare: true, byEffectId: { cl_dust: { status: "off" } } }];
   __setStateForTest(state);

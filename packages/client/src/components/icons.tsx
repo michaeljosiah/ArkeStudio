@@ -620,6 +620,8 @@ export const GroupMark = icon(<><path d="M3 7V5c0-1.1.9-2 2-2h2" /><path d="M17 
 /* The branch map's marks (design turn 157): an ending's flag, a warning's triangle, an exclusion. */
 export const Flag = icon(<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></>);
 export const TriangleAlert = icon(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>);
+/* Open eye from the user's design-system bundle, paired with the existing hidden mark. */
+export const Eye = icon(<><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" /><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /></>);
 export const EyeOff = icon(
   <>
     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />

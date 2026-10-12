@@ -157,6 +157,8 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("screens", "editor-effect-review.ts"), "sessionStorage"],
     // SPEC-054: a version/Review grant reference only; server verification owns authority.
     [join("lib", "editor-transition-review.ts"), "sessionStorage"],
+    // SPEC-055: the same validated version/Review reference, never credentials or authority.
+    [join("lib", "editor-picture-review.ts"), "sessionStorage"],
     [join("lib", "continuity.ts"), "sessionStorage"],
     [join("lib", "storyboard-layout.ts"), "localStorage"],
     [join("lib", "publication-preferences.ts"), "localStorage"],

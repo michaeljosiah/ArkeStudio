@@ -37,6 +37,26 @@ Client, coordinator and integrations ──> shared contracts
 
 ## Change entry points
 
+Air Particles (approved turns 220–223 revision 3; SPEC-055 accepted) extends the
+existing Cut library, scrolling Inspector and Arke composite-card flow. The
+[focused review](../../design-system/air-particles-220.review.html) and
+[notes](../../design-system/air-particles-220.notes.md) describe physics, blending,
+protection and explicit review. `design-system/air-particles-220.mjs` generates the
+master/index entries; `.native.mjs`, `.native-panels.mjs`, `.native.css` and
+`.native-prototype.mjs` own the isolated fixture. Run
+`node design-system/air-particles-220.check.mjs` for browser/render checks and
+`node design-system/air-particles-220.serve.mjs` for the read-only review URL.
+Contracts `editor-air-particles.ts` owns the bounded seeded simulation and
+`editor-particle-texture.ts` its stamps. `editor-effect-raster.ts`, `editor-effect-render-plan.ts`
+and `cut.ts` share Normal/Screen/Add composition across preview and native export.
+`editor-picture-appearance.ts` owns clip appearance/protection and
+`editor-picture-proposal.ts` the typed, sticky proposal compiler. Coordinator
+`productions/editor-picture-requests.ts` owns durable Review/Apply and
+`world-chat/picture-proposals.ts` binds the Arke action; client
+`editor-picture-appearance.tsx`, `editor-picture-proposal-card.tsx` and
+`lib/editor-picture-review.ts` reuse the existing Inspector and chat. World schema 77
+prevents older readers from dropping these fields, including retained history.
+
 Crossfade designs (approved 2026-10-12; SPEC-054 accepted): turns 216–219 draw fixed-cut
 still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
 batch scopes and explicit short-clip exceptions, separate join and
@@ -151,6 +171,7 @@ See [running the standalone server](standalone-server.md) and coordinator
 | Production human decisions | contracts `human-decision.ts` defines coordinator-only controls and retained Stage reviews; coordinator `world-chat/human-decisions.ts` binds the thread to current plan, proposal, editor, extraction and voice authorities; `productions/stage-review.ts` retains inspected drafts, archives settled drafts outside refreshes, reconciles interrupted host completion and uses the ordinary scene commit as the Keep receipt; `world/contained-file.ts` checks private-file containment; client `components/human-decision-card.tsx` reuses proposal/editor controls, `extraction-review.tsx`, `PlanGateControls`, inline `VoiceSampleFlow` with operation-specific settlement and the visible `SceneStage` renderer preserving unsaved edits; `scene-writer.ts` forwards the optional human review binding | coordinator `test/world-chat/human-decisions.test.ts`, `test/productions/stage-review.test.ts`, `test/arke-actions/human-decision-parity.test.ts`, `test/audio/character-sample.test.ts`; client `test/human-decisions.test.tsx`, `test/scene-stage.test.tsx`; SPEC-051 R-19..R-23, SPEC-002 schema 56; issue #1418 |
 | Production action sequencing | contracts `turn-action-sequencing.ts` validates current-turn refs; `scene-command-candidate.ts` computes pure prospective scene results; coordinator `world-chat/action-sequencing.ts` groups independent scene edits and resolves new-shot refs across dependency previews; `actions.ts` binds lifecycle dependencies and frozen result cards; `productions/scene-commands.ts` applies the batch under one gate/version fence; `generation-quotes.ts` and `production-generation.ts` quote projected scenes and validate actual parent results before admission | contracts `test/turn-action-sequencing.test.ts`; coordinator `test/world-chat/actions.test.ts`, `turn-result.test.ts`, `generation-quotes.test.ts`, `production-generation.test.ts`, `test/productions/scene-commands.test.ts`; SPEC-051 R-14..R-17, SPEC-002 schema 55; issue #1417 |
 | Conversation image inspection | contracts `world-chat-images.ts`, adapter image parts and pinned-session capabilities; coordinator `world-chat/images.ts` resolves leased image identities and journals cloud disclosures/byte receipts, `image-rendition.ts` bounds codecs through the desktop media runner; `production-take-images.ts` names produced take images, segment posters and frozen start frames, exposed by `target-reads.ts`; `take-review-inspection.ts` binds review explanations to that turn's served pixels; `world/reference-files.ts` supplies stable reads and verified file snapshots for large videos; contracts `take.ts` and coordinator take arrival/upload/Bench filing retain original `mediaHash`; `conversation-runs.ts` assembles attachment parts; `world-query.ts` returns MCP image blocks; client conversation notices and Harness privacy controls | coordinator `test/world-chat/images.test.ts`, `actions.test.ts`, `run.test.ts`, `retrieval.test.ts`, `world/reference-files.test.ts`, `takes/takes.test.ts`; three adapter `test/adapter.test.ts` image input cases; client `test/world-chat.test.tsx`; SPEC-050 R-31..R-34, SPEC-051 R-43, SPEC-002 schemas 53/54; issues #1409/#1414 |
+| Global Chat design (proposed, awaiting approval) | [Design turn 224](../../design-system/global-chat-224.review.html), [interaction proposal](../issues/global-context-chat.md); one titlebar entry point and existing scoped conversations, preserving thread/draft on navigation | SPEC-051 proposal; no application UI implementation before author approval |
 | H3 adapters and content access | contracts `adapters.ts` (bundle identity and shared combination checks); providers `comfyui/hearmeman.generated.ts`, `comfyui/adapters.ts`, `comfyui/adapter-bundles.ts` (frozen experimental bundle); coordinator `local-ai/adapter-library.ts`, `adapter-media.ts`, setup/queue hooks; client `settings-adapters.tsx`, `adapter-picker.tsx` | [Adapter integration and validation](h3-adapters.md); SPEC-021, SPEC-033; issue #1248 |
 | H3 adapter GPU evidence | providers scripts `inspect-h3-adapters.ts`, `probe-h3-adapter-loader.py`, `smoke-h3-adapters.ts`; trusted candidate composition in `comfyui/adapters.ts`; bounded owner approval in contracts `adapters.ts` | [Maintainer GPU checks](h3-adapters.md#maintainer-gpu-checks); [owner acceptance and actual coverage](h3-adapter-validation.md); approval and measured verification remain separate |
 | Route or screen | client `src/App.tsx` → `screens/registry.ts` → `screens/`, `components/`, `domain/connected.tsx` | client `test/routes.test.tsx`, matching screen test |

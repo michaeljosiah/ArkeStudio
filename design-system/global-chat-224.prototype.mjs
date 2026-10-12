@@ -1,4 +1,4 @@
-import {initial,screen} from './global-chat-220.view.mjs';
+import {initial,screen} from './global-chat-224.view.mjs';
 const root=document.querySelector('#chat-prototype');
 let state=initial();
 const render=focus=>{root.innerHTML=screen({...state,live:true,device:root.clientWidth<600?'phone':root.clientWidth<1100?'fold':undefined});if(focus)root.querySelector(focus)?.focus();};
@@ -22,7 +22,7 @@ root.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(b&&!
 root.addEventListener('input',e=>{if(e.target.matches('[data-draft]'))state.drafts[state.chat]=e.target.value;});
 root.addEventListener('keydown',e=>{
  if(e.key==='Escape'){e.preventDefault();if(state.overlay){state.overlay=null;render('[data-draft]');}else if(state.history){state.history=false;render('[data-act=history]');}else if(state.open)act('close');}
- if(e.key==='Tab'&&root.querySelector('.gc220-phone .gc220-panel')&&!state.overlay){const els=[...root.querySelectorAll('.gc220-panel button:not(:disabled),.gc220-panel textarea:not(:disabled)')].filter(x=>x.getClientRects().length);const first=els[0],last=els.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}
+ if(e.key==='Tab'&&root.querySelector('.gc224-phone .gc224-panel')&&!state.overlay){const els=[...root.querySelectorAll('.gc224-panel button:not(:disabled),.gc224-panel textarea:not(:disabled)')].filter(x=>x.getClientRects().length);const first=els[0],last=els.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}
 });
 document.querySelectorAll('[data-demo]').forEach(b=>b.addEventListener('click',()=>{
  const demo=b.dataset.demo;
