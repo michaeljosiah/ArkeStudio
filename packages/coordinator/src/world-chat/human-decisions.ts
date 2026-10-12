@@ -61,11 +61,13 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
         // An unopened story or measured spine has the same derived revision-zero base as requestBase.
         const currentRevision = production.timeline?.status === "invalid" ? null : production.timeline?.status === "ready" ? production.timeline.timeline.revision : 0;
         const stale = currentRevision === null || currentRevision !== version.dependencies.base.revision;
-        const detail = version.conflicts[0]?.reason ?? version.dependencies.issues[0]?.reason ??
-          (stale ? "Current changed · Update proposal" : undefined);
-        add(`effects:${family.id}:${version.id}`, `Effects · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",
+        const pending = family.status === "pending";
+        const detail = pending ? version.conflicts[0]?.reason ?? version.dependencies.issues[0]?.reason ??
+          (stale ? "Current changed · Update proposal" : undefined) : undefined;
+        const reason = pending ? "Review in timeline to adjust and apply this exact arrangement" : family.status === "discarded" ? "Discarded arrangement history" : "Retained arrangement history";
+        add(`effects:${family.id}:${version.id}`, `Effects · Version ${version.number}`, reason,
           { kind: "effect-proposal", productionId, familyId: family.id, versionId: version.id }, action,
-          family.status !== "pending" ? "settled" : detail ? "blocked" : "pending", detail?.slice(0, 1000));
+          !pending ? "settled" : detail ? "blocked" : "pending", detail?.slice(0, 1000));
       }
     }
   }

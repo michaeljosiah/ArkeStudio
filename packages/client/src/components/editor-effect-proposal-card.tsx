@@ -18,8 +18,9 @@ export interface EffectProposalCardProps {
 /** A version in the conversation. Only Review asks the editor to enter Suggested. */
 export function EffectProposalCard(props: EffectProposalCardProps) {
   const { family, version, timeline, frameRate, activeReview, busy, readOnly, expanded, onExpandedChange } = props;
-  const id = useId(), ref = effectCardRef(family, version), active = sameEffectProposalVersion(activeReview?.ref, ref);
-  const decisions = effectCardDecisions(family, version), pending = family.status === "pending";
+  const pending = family.status === "pending";
+  const id = useId(), ref = effectCardRef(family, version), active = pending && sameEffectProposalVersion(activeReview?.ref, ref);
+  const decisions = effectCardDecisions(family, version);
   const retained = activeEffectStickyChanges(decisions);
   const decisionChanged = version.decisionRevision !== family.decisionRevision;
   const disabled = busy || readOnly || !pending || decisionChanged || props.currentStale === true || !!props.dependencyStatus || !timeline;
@@ -41,14 +42,14 @@ export function EffectProposalCard(props: EffectProposalCardProps) {
       <div><dt>Requested range</dt><dd>{effectRangeLabel(family.scope.range.startFrame, family.scope.range.endFrame, frameRate)}</dd></div>
       <div><dt>Audio reaction</dt><dd>{audio}</dd></div>
     </dl>
-    {active && <p className="fy-effect-proposal__note">{activeReview?.comparison === "current" ? "Comparing Current. This reviewed version stays retained." : "Suggested is active in the timeline."}</p>}
-    {props.statusReason && <p role="status" className="fy-effect-proposal__notice">{props.statusReason}</p>}
-    {readOnly && <p className="fy-effect-proposal__notice">Inspection only. Editing is unavailable on this connection.</p>}
-    {version.conflicts.map(conflict => <div className="fy-effect-proposal__notice" key={conflict.id}>
+    {pending && active && <p className="fy-effect-proposal__note">{activeReview?.comparison === "current" ? "Comparing Current. This reviewed version stays retained." : "Suggested is active in the timeline."}</p>}
+    {pending && props.statusReason && <p role="status" className="fy-effect-proposal__notice">{props.statusReason}</p>}
+    {pending && readOnly && <p className="fy-effect-proposal__notice">Inspection only. Editing is unavailable on this connection.</p>}
+    {pending && version.conflicts.map(conflict => <div className="fy-effect-proposal__notice" key={conflict.id}>
       <strong>{conflict.kind === "protection" ? "Protected setting" : "Needs your decision"}</strong><p>{conflict.reason}</p>
       {conflict.remedies.length > 0 && <p>{conflict.remedies.join(" · ")}</p>}
     </div>)}
-    {version.dependencies.issues.map((issue, index) => <p className="fy-effect-proposal__notice" key={`${issue.kind}:${index}`}>{issue.reason}</p>)}
+    {pending && version.dependencies.issues.map((issue, index) => <p className="fy-effect-proposal__notice" key={`${issue.kind}:${index}`}>{issue.reason}</p>)}
     <div className="fy-effect-proposal__actions">
       {pending && <button type="button" className="fy-effect-proposal__primary" disabled={busy || readOnly} onClick={() => props.onReview(ref)}>
         {active ? `Review version ${version.number} again` : version.number === 1 ? "Review in timeline" : `Review version ${version.number}`}
@@ -57,25 +58,29 @@ export function EffectProposalCard(props: EffectProposalCardProps) {
     </div>
     <div id={id} hidden={!expanded} className="fy-effect-proposal__details">
       {expanded && <>
-      {version.delta.length === 0 && <p>No authored changes to apply. Review any requested decisions below.</p>}
+      {version.delta.length === 0 && <p>{pending ? "No authored changes to apply. Review any requested decisions below." : "No authored changes recorded for this version."}</p>}
+      {!pending && (version.conflicts.length > 0 || version.dependencies.issues.length > 0) && <section aria-label="Recorded preparation issues"><h4>Recorded preparation issues</h4>
+        {version.conflicts.map(conflict => <p key={conflict.id}>{conflict.reason}</p>)}
+        {version.dependencies.issues.map((issue, index) => <p key={`${issue.kind}:${index}`}>{issue.reason}</p>)}
+      </section>}
       <PagedRows label="Effect changes" rows={changes.map(change => {
         const effect = change.after ?? change.before!;
         return <EffectChange key={effect.id} change={change} {...props} disabled={disabled}
-          canInspect={active && !!change.after && activeReview?.comparison === "suggested"} />;
+          canInspect={pending && active && !!change.after && activeReview?.comparison === "suggested"} />;
       })} size={6} />
       {tracks.map(change => <div className="fy-effect-proposal__change" key={`track:${change.trackId}`}><h4>{change.after ? change.before ? "Change effect track" : "Add effect track" : "Remove effect track"}</h4>
         <p>{change.before?.name ?? "Not present"} → {change.after?.name ?? "Not present"}</p>
         {change.before && change.after && <p>{change.before.muted ? "Hidden" : "Visible"} → {change.after.muted ? "Hidden" : "Visible"} · stacking {change.before.order} → {change.after.order}</p>}
       </div>)}
       {version.state.protection.length > 0 && <section aria-label="Preserved protection"><h4>Protected</h4>
-        <p className="fy-effect-proposal__note">Existing rules stay in place. New rules are marked Protect on Apply. You can still edit protected settings yourself.</p>
+        <p className="fy-effect-proposal__note">{pending ? "Existing rules stay in place. New rules are marked Protect on Apply. You can still edit protected settings yourself." : "Protection recorded for this version."}</p>
         <PagedRows label="Protected rules" rows={version.state.protection.map(rule => {
           const segments = effects.filter(value => value.lineageId === rule.lineageId), effect = segments[0];
           const added = version.delta.some(change => change.kind === "protect-result" && change.ruleId === rule.id);
           return <div className="fy-effect-proposal__decision" key={rule.id}><strong>{effect ? effectName(effect) : "Effect"} · {effectRuleLabel(rule, frameRate)}</strong>
             {effect && <span>{[...new Set(segments.map(value => effectCardTargetLabel(value.target, timeline)))].join(", ")} · {effectRangeLabel(Math.min(...segments.map(value => value.startFrame)), Math.max(...segments.map(value => value.startFrame + value.durationFrames)), frameRate)}</span>}
-            <span>{added ? "Protect on Apply" : "Protected"} · {ruleValue(rule, effects, frameRate, timeline)}</span>
-            <button type="button" disabled={disabled} onClick={() => intent({ kind: "release", ruleId: rule.id })}>Release {effectRuleLabel(rule, frameRate)} on Apply</button>
+            <span>{added ? pending ? "Protect on Apply" : "Proposed protection" : "Protected"} · {ruleValue(rule, effects, frameRate, timeline)}</span>
+            {pending && <button type="button" disabled={disabled} onClick={() => intent({ kind: "release", ruleId: rule.id })}>Release {effectRuleLabel(rule, frameRate)} on Apply</button>}
           </div>;
         })} size={8} />
       </section>}
@@ -87,7 +92,7 @@ export function EffectProposalCard(props: EffectProposalCardProps) {
               <strong>{decision.kind === "keep-current" ? "Keep current" : "Adjusted by you"} · retained in revisions</strong>
               <span>{effect ? effectName(effect) : "Effect"} · {effectStickyLabel(scope)}</span>
               {effect && scope.kind === "property" && <span>{effectProtectionValue(effect, scope.property, timeline ?? undefined)}</span>}
-              <button type="button" disabled={disabled} onClick={() => intent({ kind: "permit-revision", adjustmentIds: [decision.id], scopes: [scope] })}>Allow Arke to revise {effectStickyLabel(scope)}</button>
+              {pending && <button type="button" disabled={disabled} onClick={() => intent({ kind: "permit-revision", adjustmentIds: [decision.id], scopes: [scope] })}>Allow Arke to revise {effectStickyLabel(scope)}</button>}
             </div>;
           }));
           if (decision.kind === "exclude") return [<div className="fy-effect-proposal__decision" key={decision.id}><strong>Excluded · retained in revisions</strong><span>Origin {decision.originId}</span></div>];
@@ -95,8 +100,8 @@ export function EffectProposalCard(props: EffectProposalCardProps) {
           return [];
         })} size={8} />
       </section>}
-      {releases.length > 0 && <section aria-label="Release on Apply"><h4>Release on Apply</h4><p className="fy-effect-proposal__note">Only these named rules will be released when this exact reviewed version is applied. Current is unchanged.</p>
-        {releases.map(change => <div className="fy-effect-proposal__decision" key={change.ruleId}><strong>{effectRuleLabel(change.before, frameRate)}</strong><span>Release on Apply · rule {change.ruleId}</span></div>)}
+      {releases.length > 0 && <section aria-label={pending ? "Release on Apply" : "Proposed releases"}><h4>{pending ? "Release on Apply" : "Proposed releases"}</h4><p className="fy-effect-proposal__note">{pending ? "Only these named rules will be released when this exact reviewed version is applied. Current is unchanged." : "Named rules in this version’s proposed changes."}</p>
+        {releases.map(change => <div className="fy-effect-proposal__decision" key={change.ruleId}><strong>{effectRuleLabel(change.before, frameRate)}</strong><span>{pending ? "Release on Apply" : "Proposed release"} · rule {change.ruleId}</span></div>)}
       </section>}
       {version.dependencies.reactions.length > 0 && <section aria-label="Frozen audio readiness"><h4>Audio readiness for this version</h4>
         <PagedRows label="Audio readiness" rows={version.dependencies.reactions.map(row => {
@@ -104,16 +109,16 @@ export function EffectProposalCard(props: EffectProposalCardProps) {
           return <p key={row.effectId}><strong>{effect ? effectName(effect) : row.effectId}</strong> · {row.status === "off" ? "Reaction Off" : row.status === "ready" ? "Ready" : `${row.status} · ${row.reason}`}</p>;
         })} size={8} />
       </section>}
-      {version.requestedActions.length > 0 && <section aria-label="Requested human decisions"><h4>Arke is asking for your decision</h4>
+      {version.requestedActions.length > 0 && <section aria-label="Requested human decisions"><h4>{pending ? "Arke is asking for your decision" : "Requested human decisions"}</h4>
         {version.requestedActions.map((request, index) => <div className="fy-effect-proposal__decision" key={`${request.kind}:${index}`}><p>{request.reason}</p>
-          {request.kind === "protect" && <><span>{effectRuleLabel(request.rule, frameRate)}</span><button type="button" disabled={disabled} onClick={() => intent({ kind: "protect", rule: request.rule })}>Protect {effectRuleLabel(request.rule, frameRate)}</button></>}
+          {request.kind === "protect" && <><span>{effectRuleLabel(request.rule, frameRate)}</span>{pending && <button type="button" disabled={disabled} onClick={() => intent({ kind: "protect", rule: request.rule })}>Protect {effectRuleLabel(request.rule, frameRate)}</button>}</>}
           {request.kind === "release" && (() => {
             const rule = version.state.protection.find(value => value.id === request.ruleId);
-            return rule ? <><span>{effectRuleLabel(rule, frameRate)} · {ruleValue(rule, effects, frameRate, timeline)}</span><button type="button" disabled={disabled} onClick={() => intent({ kind: "release", ruleId: rule.id })}>Release {effectRuleLabel(rule, frameRate)} on Apply</button></> : <span>The named rule is no longer present in this version.</span>;
+            return rule ? <><span>{effectRuleLabel(rule, frameRate)} · {ruleValue(rule, effects, frameRate, timeline)}</span>{pending && <button type="button" disabled={disabled} onClick={() => intent({ kind: "release", ruleId: rule.id })}>Release {effectRuleLabel(rule, frameRate)} on Apply</button>}</> : <span>The named rule is no longer present in this version.</span>;
           })()}
           {request.kind === "new-slot" && <><span>{effectCardTargetLabel(family.scope.target, timeline)} · {effectRangeLabel(family.scope.range.startFrame, family.scope.range.endFrame, frameRate)}</span>
-            <button type="button" disabled={disabled} onClick={() => intent({ kind: "grant-new-slot", target: family.scope.target, range: family.scope.range, count: request.count })}>Allow {request.count} new {request.count === 1 ? "effect" : "effects"} in this scope</button></>}
-          {request.kind === "identity" && <span>Identity {request.entityId}. Resolve the named conflict before revising.</span>}
+            {pending && <button type="button" disabled={disabled} onClick={() => intent({ kind: "grant-new-slot", target: family.scope.target, range: family.scope.range, count: request.count })}>Allow {request.count} new {request.count === 1 ? "effect" : "effects"} in this scope</button>}</>}
+          {request.kind === "identity" && <span>Identity {request.entityId}.{pending && " Resolve the named conflict before revising."}</span>}
         </div>)}
       </section>}
       {pending && <div className="fy-effect-proposal__actions">
@@ -140,7 +145,7 @@ function ruleValue(rule: EffectProtectionRule, effects: readonly EffectClip[], f
 
 function EffectChange(props: EffectProposalCardProps & { change: Extract<EffectFinalDelta, { kind: "effect-result" }>; disabled: boolean; canInspect: boolean }) {
   const { change, family, version, timeline, frameRate, disabled } = props;
-  const effect = change.after ?? change.before!, ref = effectCardRef(family, version);
+  const effect = change.after ?? change.before!, ref = effectCardRef(family, version), pending = family.status === "pending";
   const segment = family.identities.segments.find(value => value.clipId === effect.id), origin = family.identities.origins.find(value => value.originId === segment?.originId);
   const rows = effectPropertyDifferences(change, family, timeline, frameRate);
   const keep = (scope: EffectStickyScope) => segment && props.onIntent(ref, { kind: "keep-current", entityId: segment.segmentId, scope });
@@ -149,16 +154,16 @@ function EffectChange(props: EffectProposalCardProps & { change: Extract<EffectF
     <dl className="fy-effect-proposal__bindings"><div><dt>Visual target</dt><dd>{effectCardTargetLabel(effect.target, timeline)}</dd></div>
       <div><dt>Time</dt><dd>{effectRangeLabel(effect.startFrame, effect.startFrame + effect.durationFrames, frameRate)}</dd></div>
       <div><dt>Audio reaction</dt><dd>{effectAudioLabel(effect, timeline)}</dd></div></dl>
-    <div className="fy-effect-proposal__actions">
+    {pending && <div className="fy-effect-proposal__actions">
       {change.after && <button type="button" disabled={!props.canInspect} onClick={() => props.onInspect(ref, effect.id)}>Inspect effect</button>}
       {origin?.kind === "current" && <button type="button" disabled={disabled || !segment} onClick={() => keep({ kind: "whole-effect" })}>Keep current effect</button>}
       {origin?.kind === "addition" && <button type="button" disabled={disabled} onClick={() => props.onIntent(ref, { kind: "exclude", originId: origin.originId })}>Exclude effect</button>}
-    </div>
-    {change.after && !props.canInspect && <p className="fy-effect-proposal__note">Review this version in Suggested to open its Inspector.</p>}
+    </div>}
+    {pending && change.after && !props.canInspect && <p className="fy-effect-proposal__note">Review this version in Suggested to open its Inspector.</p>}
     <details><summary>Before and after · {rows.length} {rows.length === 1 ? "setting" : "settings"}</summary>
       <PagedRows label={`${effectName(effect)} settings`} rows={rows.map(row => <div className="fy-effect-proposal__property" key={row.key}>
-        <strong>{row.label}</strong><dl><div><dt>Current</dt><dd>{row.before}</dd></div><div><dt>Suggested</dt><dd>{row.after}</dd></div></dl>
-        {origin?.kind === "current" && row.keepScope && <button type="button" disabled={disabled || !segment} onClick={() => keep(row.keepScope!)}>Keep current {row.label}</button>}
+        <strong>{row.label}</strong><dl><div><dt>{pending ? "Current" : "Before"}</dt><dd>{row.before}</dd></div><div><dt>{pending ? "Suggested" : "Proposed"}</dt><dd>{row.after}</dd></div></dl>
+        {pending && origin?.kind === "current" && row.keepScope && <button type="button" disabled={disabled || !segment} onClick={() => keep(row.keepScope!)}>Keep current {row.label}</button>}
       </div>)} size={10} />
     </details>
   </article>;

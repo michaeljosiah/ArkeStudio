@@ -73,6 +73,31 @@ test("Protected, retained manual adjustment and Release on Apply remain distinct
   assert.equal(view.events.some(event => event.kind === "review"), false, "Release asks for a new candidate without entering it");
 });
 
+test("discarded versions retain protection, decisions and release history without pending actions or instructions", async () => {
+  const fixture = effectProposalFixture();
+  const timeline = applyTimelineCommands(fixture.timeline, [{ kind: "effect-protect", rule: { id: "pr_end", lineageId: fixture.effect.lineageId, kind: "boundary", boundary: "end" } }], { effectAuthority: "human" });
+  let family = createEffectProposalFamily({ id: fixture.family.id, productionId: "saltlight", conversationId: fixture.family.conversationId, scope: fixture.family.scope,
+    base: timeline, timelineHash: effectProposalTestFence(timeline).base.timelineHash, baseId: "base_protected", at: EFFECT_REVIEW_TEST_AT });
+  family = appendEffectProposalTestModel(family, timeline, { summary: "Quieter dust", identities: [], commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .15 } } }] });
+  family = appendEffectProposalTestHuman(family, timeline, { kind: "protect", rule: { id: "pr_amount", lineageId: fixture.effect.lineageId,
+    kind: "property", property: "appearance.amount", scope: { kind: "whole" } } });
+  family = appendEffectProposalTestHuman(family, timeline, { kind: "adjust", commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .42 } } }] });
+  family = appendEffectProposalTestHuman(family, timeline, { kind: "release", ruleId: "pr_end" });
+  const version = { ...family.versions.at(-1)!, conflicts: [{ id: "recorded", kind: "scope" as const, reason: "Earlier passage could not be changed", remedies: ["Ask Arke for a corrected revision"] }],
+    requestedActions: [{ kind: "release" as const, ruleId: "pr_amount", reason: "A requested Amount release" }] };
+  const view = await mount({ family: { ...effectProposalFamilyView(family), status: "discarded" }, version, timeline,
+    currentStale: true, dependencyStatus: "stale", statusReason: "Current changed · Update proposal", readOnly: true,
+    activeReview: { ref: effectCardRef(effectProposalFamilyView(family), version), comparison: "suggested" } });
+  assert.match(view.host.textContent!, /Discarded/); assert.match(view.host.textContent!, /Adjusted by you/);
+  assert.match(view.host.textContent!, /Proposed protection · 42%/); assert.match(view.host.textContent!, /Proposed releases/);
+  assert.match(view.host.textContent!, /Recorded preparation issues/); assert.match(view.host.textContent!, /Earlier passage could not be changed/);
+  assert.match(view.host.textContent!, /A requested Amount release/);
+  assert.equal(view.host.querySelector("[data-reviewing]"), null);
+  assert.doesNotMatch(view.host.textContent!, /Current changed|Update proposal|Suggested is active|Editing is unavailable|Release on Apply|Protect on Apply|Ask Arke for a corrected revision|Arke is asking for your decision/);
+  assert.ok([...view.host.querySelectorAll("button")].every(button => button.textContent?.endsWith("Hide details")));
+  assert.deepEqual(view.events, []);
+});
+
 test("an earlier card retains its own decisions while an arriving version does not become active", async () => {
   const fixture = effectProposalFixture(), family = appendEffectProposalTestHuman(fixture.family, fixture.timeline,
     { kind: "adjust", commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .42 } } }] });

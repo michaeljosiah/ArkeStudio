@@ -99,6 +99,15 @@ it("an effects proposal against an unopened derived base is pending, while chang
   assert.equal((await cards())[0]?.status, "blocked"); assert.match((await cards())[0]?.detail ?? "", /Current changed/);
   current.timeline = { status: "invalid", message: "Unreadable timeline" };
   assert.equal((await cards())[0]?.status, "blocked");
+  assert.match((await cards())[0]!.body.reason, /Review in timeline to adjust and apply/);
+  const control = (await cards())[0]!.body.control;
+  for (const status of ["applied", "discarded"] as const) {
+    current.effectFamilies![0]!.status = status;
+    const terminal = (await cards())[0]!;
+    assert.equal(terminal.status, "settled"); assert.equal(terminal.detail, undefined);
+    assert.equal(terminal.body.reason, status === "applied" ? "Retained arrangement history" : "Discarded arrangement history");
+    assert.deepEqual(terminal.body.control, control, "settling preserves access to the exact retained version");
+  }
 });
 
 it("projects existing authorities and settles screen and thread decisions through their ordinary commands", async t => {

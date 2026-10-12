@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { effectProposalFamilyView, newId, orderedShots, ScratchPerformanceSchema, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
+import { EffectApplyReceiptSchema, effectProposalFamilyView, newId, orderedShots, ScratchPerformanceSchema, StageReviewSchema, VoiceSampleReviewSchema, WorldChatWorkspaceSchema, type ClientMessage, type HumanDecisionCard, type HumanDecisionControl } from "@arke-studio/contracts";
 import { HumanDecisionCardView } from "../src/components/human-decision-card.js";
 import { ConversationTranscript } from "../src/components/conversation.js";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
@@ -76,6 +76,47 @@ it("only the linked native effects card replaces a generic permission card", () 
   assert.equal(effectCompositeReplacesAction({ ...action, actionKind: "world-chat-editor-request" }, [decision]), false);
   assert.equal(effectCompositeReplacesAction({ ...action, actionId: newId("act") }, [decision]), false);
   assert.equal(effectCompositeReplacesAction(action, [{ ...decision, conversationId: newId("cv") }]), false);
+});
+
+it("settled effect cards retain their receipt status after Apply, Undo and Redo without pending stale notices", async () => {
+  const fixture = effectProposalFixture(), world = structuredClone(FIXTURE_STATE.world!);
+  world.meta.worldId = newId("cv").slice(3);
+  const production = world.productions.find(value => value.meta.id === "saltlight")!;
+  production.timeline = { status: "ready", timeline: { ...fixture.timeline, revision: 76 } }; production.effectFamilies = [fixture.view];
+  const decision = card({ kind: "effect-proposal", productionId: production.meta.id, familyId: fixture.family.id, versionId: fixture.version.id });
+  decision.worldId = world.meta.worldId;
+  const receipt = EffectApplyReceiptSchema.parse({ familyId: fixture.family.id, versionId: fixture.version.id, candidateHash: fixture.version.candidateHash,
+    branchId: fixture.version.branchId, decisionRevision: fixture.version.decisionRevision, applyActionIds: ["apply_exact"], resultRevision: 77,
+    historyEntryDigest: "a".repeat(64), adjustmentIds: [], releaseDecisionIds: [], bindings: [], preservedRuleIds: [], releasedRuleIds: [], appliedAt: "2026-10-11T22:00:00.000Z" });
+  const { host, sent } = await mount(<HumanDecisionCardView card={decision} />);
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
+  assert.match(host.textContent!, /Current changed · Update proposal and review the new version/);
+  const details = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.endsWith("Show details"));
+  await press(details()!);
+  assert.ok([...host.querySelectorAll("button")].some(button => button.textContent === "Update proposal"));
+  for (const [revision, undoneAt, expected] of [[77, undefined, "Applied"], [78, "2026-10-11T22:01:00.000Z", "Applied · undone in Current"], [79, undefined, "Applied"]] as const) {
+    production.timeline.timeline.revision = revision;
+    production.effectFamilies = [{ ...fixture.view, status: "applied", receipt: { ...receipt, ...(undoneAt ? { undoneAt } : {}) } }];
+    await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+    assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, expected);
+    assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested|Current stays unchanged until Apply/);
+    assert.ok([...host.querySelectorAll(".fy-effect-proposal button")].every(button => /Hide details$|^Previous$|^Next$/.test(button.textContent ?? "")));
+    assert.match(host.textContent!, /30%/); assert.match(host.textContent!, /15%/);
+  }
+  const revised = appendEffectProposalTestModel(fixture.family, fixture.timeline, { summary: "Revised amount", identities: [],
+    commands: [{ kind: "effect-patch", clipId: fixture.effect.id, patch: { appearance: { amount: .2 } } }] });
+  const applied = revised.versions.at(-1)!;
+  production.effectFamilies = [{ ...effectProposalFamilyView(revised), status: "applied", receipt: { ...receipt,
+    versionId: applied.id, candidateHash: applied.candidateHash, branchId: applied.branchId, decisionRevision: applied.decisionRevision } }];
+  await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+  assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, "Earlier version · arrangement applied");
+  assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested/);
+  production.effectFamilies = [{ ...fixture.view, status: "discarded" }];
+  await act(async () => __setStateForTest(structuredClone({ ...FIXTURE_STATE, world })));
+  assert.equal(host.querySelector(".fy-effect-proposal__heading strong")?.textContent, "Discarded");
+  assert.doesNotMatch(host.textContent!, /Current changed|Update proposal|Review this version in Suggested/);
+  assert.match(host.textContent!, /30%/); assert.match(host.textContent!, /15%/);
+  assert.equal(sent.length, 0, "opening history and receiving settled snapshots never sends an effects action");
 });
 
 it("only the originating version offers to check a pending response", async () => {
