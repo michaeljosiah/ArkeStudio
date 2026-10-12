@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { defaultEffectClip, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -15,6 +15,8 @@ Object.assign(dom.window, { innerWidth: 1400, innerHeight: 900,
   matchMedia: (query: string) => ({ matches: compact && query === "(max-width: 1099px)", media: query }) });
 Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, setPointerCapture() {}, releasePointerCapture() {},
   showModal(this: HTMLElement) { this.setAttribute("open", ""); }, close(this: HTMLElement) { this.removeAttribute("open"); } });
+Object.defineProperty(dom.HTMLElement.prototype, "innerText", { configurable: true,
+  get(this: HTMLElement) { return this.textContent ?? ""; }, set(this: HTMLElement, value: string) { this.textContent = value; } });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), { pause() {}, play: () => Promise.resolve(), load() {} });
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement,
   HTMLMediaElement: dom.HTMLMediaElement, Element: dom.Element, Node: dom.Node, Event: dom.Event,
@@ -53,6 +55,31 @@ const button = (name: string) => {
   assert.ok(found, name); return found;
 };
 async function click(node: HTMLElement) { await act(async () => node.click()); }
+
+test("ordinary Cut chat carries the selected authored effect without fabricating a review or sending a preparation request", async () => {
+  const state = fixture(), sent: ClientMessage[] = [], production = state.world!.productions[0]!;
+  assert.equal(production.timeline?.status, "ready");
+  if (production.timeline?.status !== "ready") return;
+  production.timeline.timeline.tracks.push({ id: "tr_fx", kind: "effect", name: "Effects", order: 10, muted: false, clips: [],
+    effects: [defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 7 })] });
+  state.worldChat = { conversationId: CV as never, status: "open", initiative: "collaborate", hasMore: false, runStatus: null,
+    runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 1, actions: [], messages: [], points: [] };
+  const before = JSON.stringify(production.timeline), container = await mount(state, sent);
+  const effect = container.querySelector<HTMLButtonElement>('[data-effect="cl_dust"]'); assert.ok(effect); await click(effect);
+  const arke = container.querySelector<HTMLButtonElement>('#cut-arke-tab'); assert.ok(arke); await click(arke);
+  assert.equal(sent.some(message => message.kind === "world-chat-send"), false);
+  const composer = container.querySelector<HTMLElement>('[role="textbox"][aria-label="Ask Arke about this production…"]'); assert.ok(composer);
+  await act(async () => {
+    composer.textContent = "Make this effect more pronounced";
+    composer.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const send = container.querySelector<HTMLButtonElement>('[aria-label="Send"]'); assert.ok(send); assert.equal(send.disabled, false); await click(send);
+  const request = sent.find(message => message.kind === "world-chat-send"); assert.ok(request);
+  assert.deepEqual(request.subject, { kind: "timeline-clip", clipId: "cl_dust" });
+  assert.equal(container.querySelector('[aria-label="Effects arrangement review"]'), null);
+  assert.equal(sent.some(message => message.kind === "timeline-command" || message.kind === "editor-effect-proposal"), false);
+  assert.equal(JSON.stringify(production.timeline), before);
+});
 
 for (const width of [1400, 810]) for (const playing of [false, true]) {
   test(`preparing an arrangement keeps Current, selection, panels and ${playing ? "playing" : "paused"} transport at ${width}px`, async () => {

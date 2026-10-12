@@ -1779,7 +1779,7 @@ function CutEditorScreen() {
               pointsEmpty="Nothing understood yet."
               subject={effectReview.active ? { kind: "effect-arrangement", scope: effectReview.active.family.scope, reviewed: effectReview.active.ref,
                 ...(selectedEffect ? { selectedEffectId: selectedEffect.id as TimelineClipId } : {}) }
-                : selectedAny ? { kind: "timeline-clip", clipId: selectedAny.clip.id } : undefined}
+                : selectedTimed ? { kind: "timeline-clip", clipId: selectedTimed.id as TimelineClipId } : undefined}
               side={
                 production && production.editorRequests.length > 0 ? (
                   <EditorRequestCards

@@ -175,6 +175,11 @@ Editor effects T-5 adds contracts `test/editor-effect-proposal.test.ts`,
 commit/recovery/schema, conversation lifecycle/action/retrieval and transport suites too.
 Check mixed human/model protection, old-parent sticky revisions, exact scoped Release, limits,
 read-only resume, stale media/profile/resolution, crash recovery, and receipt retries after Undo.
+For ordinary effects chat, include `world-chat/action-guide.test.ts` and the after-Apply cases in
+`effect-proposal-authority.test.ts`: no form is required to prepare a bounded proposal, editor
+scope cannot be overridden, invalid bindings are refused, and no review/release/apply authority
+is inherited. Client `editor-effect-preparation-panel.test.tsx` checks authored effect selection
+on ordinary messages as well as passive arrangement preparation.
 Native analysis tests require FFmpeg/FFprobe; use `ARKE_EFFECT_NATIVE_REQUIRED=1` to make missing
 native support fail. The precommit validator must not prepare analysis, and tests must exercise
 an external metadata change while the write gate suppresses watcher adoption.

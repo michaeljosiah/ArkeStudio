@@ -23,6 +23,21 @@ const SCHEMA_KINDS = ModelWorldChatActionSchema.options.map(
 );
 const HUGE = 10_000_000;
 
+it("ordinary Cut chat receives effect vocabulary and a scoped proposal example without selecting a form", () => {
+  const entry = describeAction("production-effects-propose")!;
+  assert.ok("example" in entry && entry.example?.kind === "production-effects-propose");
+  assert.equal(entry.example.scope?.kind, "effects-only");
+  assert.ok(entry.fields?.some(field => field.startsWith("scope?")));
+  for (const budget of [HUGE, 1000]) {
+    const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
+    assert.match(guide, /ordinary chat/); assert.match(guide, /Otherwise include action.scope/);
+    assert.match(guide, /Applied and discarded families are history/);
+    assert.match(guide, /Prior releases or review grants never transfer/);
+    assert.match(guide, /build-with-energy/);
+    assert.doesNotMatch(guide, /Only prepare production-effects-propose when/);
+  }
+});
+
 it("advertises every complete receipt enforced by whole-cut actions", () => {
   const entry = ACTION_GUIDE_ENTRIES.find(value => value.kind === "production-timeline-operation")!;
   assert.deepEqual(entry.reads, ["get_timeline", "list_scenes", "get_scene", "list_takes", "list_artifacts"]);

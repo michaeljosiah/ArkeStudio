@@ -1066,9 +1066,9 @@ export const ProductionPerformanceModelActionSchema = z.object({ kind: z.literal
 /** Audio edits share the canonical typed timeline vocabulary and its editor-request decision. */
 export const ProductionAudioEditModelActionSchema = z.object({ kind: z.literal("production-audio-edit"),
   productionId: SlugSchema, request: ModelEditorRequestSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
-/** Model intent can prepare a card; scope and reviewed human authority come from the host. */
+/** Chat may propose a bounded scope; reviewed human authority still comes only from the host. */
 export const ProductionEffectsProposeModelActionSchema = z.object({ kind: z.literal("production-effects-propose"),
-  productionId: SlugSchema, proposal: ModelEffectProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+  productionId: SlugSchema, scope: EffectArrangementScopeSchema.optional(), proposal: ModelEffectProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 /** Count every model entry point that prepares an editor request, not just one result array. */
 export function editorProposalActionCount(actions: readonly { kind: string; request?: unknown }[]): number {
   return actions.filter(action => ["production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||

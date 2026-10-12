@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   ModelWorldChatActionSchema, ModelEffectProposalSchema, ModelEditorRequestSchema,
   defaultEffectClip, newId, ulid, storyTimelineFingerprint, timelineSourceFingerprint, groupApprovalEligible,
+  buildRenderPlan, defaultExportPreset, orderedShots,
   type ConversationActionCard, type EffectArrangementScope, type ModelEffectProposal,
   type WorldChatCheckReceipt, type WorldChatSubject,
 } from "@arke-studio/contracts";
@@ -18,7 +19,7 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { EditorEffectDependencies } from "../../src/productions/editor-effect-dependencies.js";
 import { EditorEffectAnalysisService } from "../../src/productions/editor-effect-analysis.js";
-import { readEffectProposalFamilies, reviewEffectProposal } from "../../src/productions/editor-effect-requests.js";
+import { applyReviewedEffectVersion, readEffectProposalFamilies, reviewEffectProposal } from "../../src/productions/editor-effect-requests.js";
 import { decideEditorRequest } from "../../src/productions/editor-requests.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -37,12 +38,22 @@ async function setup() {
   const analysis = new EditorEffectAnalysisService(undefined, () => {});
   closeOnCleanup(async () => { await analysis.stop(); await store.close(); });
   const production = store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!;
+  const scene = production.scenes.find(row => orderedShots(row).length > 0)!;
+  const shot = orderedShots(scene)[0]!;
   const effect = defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 7 });
   effect.appearance.amount = 0.6;
   await applyHumanTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_picture", startFrame: 0, durationFrames: 240, sourceInFrames: 0,
+      source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: "Picture fixture" } } },
     { kind: "add-track", trackKind: "effect", trackId: "tr_fx", name: "Effects" }, { kind: "effect-create", trackId: "tr_fx", effect },
     { kind: "effect-protect", rule: { id: "pr_amount", lineageId: "ef_dust", kind: "property", property: "appearance.amount", scope: { kind: "whole" } } },
   ] });
+  const ready = store.getBundle().productions.find(row => row.meta.id === PRODUCTION)!;
+  const plan = buildRenderPlan({ production: ready, timeline: ready.timeline, artifacts: store.getBundle().artifacts,
+    scope: { kind: "production" }, preset: defaultExportPreset(ready.meta) });
+  assert.ok(plan.ok, plan.ok ? "" : plan.reason);
+  assert.equal(ready.timeline?.status, "ready");
+  assert.ok(plan.plan.totalSec * (ready.timeline?.status === "ready" ? ready.timeline.timeline.frameRate : 0) >= scope.range.endFrame);
   const conversationId = newId("cv"), entryContext = { kind: "cut" as const, productionId: PRODUCTION };
   const log = new WorldChatStore(conversationDir(store.dir, conversationId));
   await log.create(conversationId, AT);
@@ -78,7 +89,7 @@ async function setup() {
   const approve = async (card: ConversationActionCard, grouped = false) => lifecycle.decide({ kind: "conversation-action-decide", worldId: store.worldId,
     conversationId, actionId: card.actionId, expectedConversationSeq: (await loaded()).seq, expectedStatus: "pending", decision: "approve", requestId: ulid(),
     ...(grouped ? { groupApprovalTurnId: card.turnId } : {}) });
-  return { store, log, adapter, lifecycle, current, requests, loaded, receipts, turn, bind, approve };
+  return { store, log, adapter, lifecycle, dependencies, current, requests, loaded, receipts, turn, bind, approve };
 }
 
 test("a real chat effects card only stages; generic/group approval cannot apply or release even after explicit Review", async () => {
@@ -114,18 +125,76 @@ test("model preparation takes exact scope from the trusted subject and rejects e
   assert.deepEqual(prepared.payload.scope, scope);
   assert.equal(prepared.payload.productionId, PRODUCTION);
   const rawAction = one.actions[0]!;
-  for (const extra of [{ scope: { ...scope, range: { startFrame: 0, endFrame: 500 } } }, { authority: "human" }, { reviewed: { familyId: "invented" } }]) {
+  for (const extra of [{ authority: "human" }, { reviewed: { familyId: "invented" } }]) {
     assert.equal(ModelWorldChatActionSchema.safeParse({ ...rawAction, ...extra }).success, false);
   }
+  const changedScope = ModelWorldChatActionSchema.parse({ ...rawAction, scope: { ...scope, range: { startFrame: 0, endFrame: 500 } } });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, { ...one, actions: [changedScope] }), /cannot override/);
   for (const command of [{ kind: "effect-release", ruleId: "pr_amount" }, { kind: "effect-protect", rule: { id: "pr_fake", lineageId: "ef_dust", kind: "boundary", boundary: "start" } }]) {
     assert.equal(ModelEffectProposalSchema.safeParse({ ...proposal(), commands: [command] }).success, false);
     assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Generic bypass", commands: [command] }).success, false);
   }
   assert.equal(ARKE_CLIENT_COMMAND_REGISTRY["editor-effect-proposal"].classification, "human-only-control-plane");
-  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, w.turn(proposal(), { subject: undefined })), /Choose the effects arrangement/);
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, w.turn(proposal(), { subject: undefined })), /Include an effects-only scope/);
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, { ...one, actions: [{ ...rawAction, productionId: "another-production" } as typeof rawAction] }), /another production/);
   assert.equal(await w.current(), before);
   await assert.rejects(w.requests(), { code: "ENOENT" }, "pure preparation cannot create a proposal file before its durable intent");
+});
+
+test("ordinary chat prepares a bounded card without a form and without Review, Apply or Release authority", async () => {
+  const w = await setup(), before = await w.current(), one = w.turn();
+  const action = ModelWorldChatActionSchema.parse({ ...one.actions[0], scope });
+  const { card } = await w.bind({ ...one, subject: undefined, actions: [action] });
+  const [family] = await readEffectProposalFamilies(w.store, PRODUCTION);
+  assert.ok(family); assert.deepEqual(family.scope, scope);
+  assert.equal(family.status, "pending"); assert.equal(family.versions[0]!.conflicts.length, 0);
+  assert.deepEqual(family.reviewGrants, []); assert.deepEqual(family.decisions, []);
+  assert.equal(family.receipt, undefined);
+  assert.equal((await w.approve(card)).disposition, "refused");
+  assert.equal((await w.approve(card, true)).disposition, "refused");
+  assert.equal(await w.current(), before);
+});
+
+test("ordinary chat rejects nonexistent bindings and out-of-delivery ranges before creating an intent", async () => {
+  const w = await setup(), before = await w.current();
+  for (const patch of [
+    { target: { kind: "visual-clip", clipId: "cl_absent" } },
+    { target: { kind: "picture-track", trackId: "tr_absent" } },
+    { range: { startFrame: 0, endFrame: 999999 } },
+    { audio: { kind: "source", input: { kind: "audio-clip", clipId: "cl_absent" } } },
+  ]) {
+    const one = w.turn(), action = ModelWorldChatActionSchema.parse({ ...one.actions[0], scope: { ...scope, ...patch } });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, { ...one, subject: undefined, actions: [action] }), /scope must name/);
+  }
+  assert.equal((await w.loaded()).actions.length, 0); assert.equal(await w.current(), before);
+  await assert.rejects(w.requests(), { code: "ENOENT" });
+});
+
+test("a natural follow-up after Apply prepares a new family from Current without inheriting old authority", async () => {
+  const w = await setup();
+  await w.bind(w.turn());
+  const [first] = await readEffectProposalFamilies(w.store, PRODUCTION);
+  assert.ok(first); const version = first.versions[0]!;
+  const review = await reviewEffectProposal(w.store, { productionId: PRODUCTION, ref: { familyId: first.id, versionId: version.id,
+    candidateHash: version.candidateHash, decisionRevision: first.decisionRevision }, now: AT });
+  await applyReviewedEffectVersion(w.store, { productionId: PRODUCTION, familyId: first.id, versionId: version.id,
+    candidateHash: version.candidateHash, reviewId: review.id, requestId: ulid(), now: AT }, w.dependencies);
+  const before = await w.current(), one = w.turn({ summary: "Make the existing dust more visible", identities: [],
+    commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity: .8, size: .6 } } }] });
+  await w.bind({ ...one, subject: { kind: "timeline-clip", clipId: "cl_dust" },
+    actions: [ModelWorldChatActionSchema.parse({ ...one.actions[0], scope })] });
+  const families = await readEffectProposalFamilies(w.store, PRODUCTION);
+  assert.equal(families.length, 2);
+  const previous = families.find(family => family.id === first.id)!, fresh = families.find(family => family.id !== first.id)!;
+  assert.equal(previous.status, "applied"); assert.ok(previous.receipt);
+  assert.equal(fresh.status, "pending"); assert.equal(fresh.receipt, undefined);
+  assert.deepEqual(fresh.reviewGrants, []); assert.deepEqual(fresh.decisions, []);
+  assert.equal(fresh.versions[0]!.conflicts.length, 0);
+  const dust = fresh.versions[0]!.state.tracks.flatMap(track => track.effects).find(effect => effect.id === "cl_dust")!;
+  assert.equal(dust.appearance.opacity, .8); assert.equal(dust.appearance.size, .6);
+  assert.equal(dust.appearance.amount, .6); assert.equal(dust.appearance.colour, "#223344");
+  assert.equal(fresh.versions[0]!.state.protection[0]!.id, "pr_amount");
+  assert.equal(await w.current(), before);
 });
 
 test("effects cards require complete and current timeline and request reads", async () => {
