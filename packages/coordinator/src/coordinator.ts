@@ -412,6 +412,7 @@ import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
 import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
+import { handleTransitionReview } from "./productions/editor-transition-requests.js";
 import { handleEffectReview } from "./productions/editor-effect-review.js";
 import type { EffectAudioAnalysisHost } from "./media/node-effect-audio.js";
 import type { EffectRasterHost } from "./media/node-effect-renderer.js";
@@ -11767,6 +11768,15 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         this.trackBackground(this.effectAnalysis.request(store, msg.productionId, msg.effectId, msg.action, msg.expectedSourceFingerprint));
+        return;
+      }
+      case "editor-transition-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handleTransitionReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) { await this.conversationActionLifecycle(store).recoverConversation(conversationId); await this.refreshConversationOutcome(store, conversationId); }
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "editor-effect-proposal": {

@@ -83,7 +83,9 @@ describe("Production Chat contexts and records (SPEC-051 R-37, R-41..45)", () =>
     const reads = new WorldChatTargetReads({ getAudioRights: async () => [] });
     const first = await reads.call(lease, bundle, "list_editor_requests", { productionId: "saltlight", limit: 1 });
     assert.equal(first.result.complete, false);
-    const last = await reads.call(lease, bundle, "list_editor_requests", { productionId: "saltlight", limit: 1, cursor: first.result.nextCursor });
+    const middle = await reads.call(lease, bundle, "list_editor_requests", { productionId: "saltlight", limit: 1, cursor: first.result.nextCursor });
+    assert.equal(middle.result.complete, false, "the file-status row and two requests occupy three pages");
+    const last = await reads.call(lease, bundle, "list_editor_requests", { productionId: "saltlight", limit: 1, cursor: middle.result.nextCursor });
     assert.equal(last.result.complete, true);
     production.editorRequests[0]!.status = "rejected";
     await assert.rejects(reads.call(lease, bundle, "list_editor_requests", { productionId: "saltlight", cursor: first.result.nextCursor }), /changed/);

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { TransitionJoins } from "./editor-transitions.js";
 import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
@@ -506,6 +507,7 @@ export function PictureTrack({
             {filesOver && onFileDrop && !disabled ? "Drop to add · Picture" : onDrop === undefined ? "No picture yet" : "drop a picture here, or add from the Library"}
           </span>
         )}
+        <TransitionJoins trackId={views.length ? timeline.tracks.find(track => track.clips.some(clip => clip.id === views[0]!.clip.id))?.id ?? "" : ""} totalFrames={span} />
         {hover !== null && hover.refused && <span className="fy-track__refuse">picture lanes take picture</span>}
         {hover !== null && !hover.refused && (
           <DropTarget

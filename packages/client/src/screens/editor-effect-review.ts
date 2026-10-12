@@ -6,9 +6,11 @@ import { EffectReviewSession, parseEffectReviewSavedState, sameEffectVersion, ty
 import { effectReviewBase } from "../lib/editor-effect-review-base.js";
 import { sendEffectProposalCommand, subscribeEffectProposalResults, useStore } from "../lib/store.js";
 import { useEffectReviewFreshness } from "./editor-effect-review-freshness.js";
+import { claimEditorReview, subscribeEditorReviewOwner } from "../lib/editor-review-ownership.js";
 
 interface SessionEntry { worldId: string; productionId: string; session: EffectReviewSession }
 const sessions = new Map<string, SessionEntry>();
+subscribeEditorReviewOwner(event => { if (event.kind === "transitions") sessions.get(event.key)?.session.close(); });
 const activations = new Set<(event: { worldId: string; productionId: string; active: ActiveEffectReview }) => void>();
 let listening = false;
 const emptySession = new EffectReviewSession();
@@ -32,7 +34,7 @@ function getSession(worldId: string, productionId: string): EffectReviewSession 
   const savedKey = storageKey(worldId, productionId);
   const session = new EffectReviewSession(value => {
     try { if (value) window.sessionStorage.setItem(savedKey, JSON.stringify(value)); else window.sessionStorage.removeItem(savedKey); } catch { /* Storage is optional; the exact server version remains durable. */ }
-  }, stored(savedKey), active => { for (const listener of activations) listener({ worldId, productionId, active }); });
+  }, stored(savedKey), active => { claimEditorReview({ key, kind: "effects" }); for (const listener of activations) listener({ worldId, productionId, active }); });
   sessions.set(key, { worldId, productionId, session });
   return session;
 }

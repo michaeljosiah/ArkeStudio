@@ -9,6 +9,8 @@ import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { resolvedAuthoredDuration } from "./scene.js";
 import { z } from "zod";
+import { CrossfadeSchema, TransitionCommandSchema, isTransitionCommand, applyTransitionCommand, transitionStill,
+  transitionKey, transitionInactiveReason, transitionProtectionProblem, type Crossfade, type TransitionCommand } from "./editor-transitions.js";
 import type { ProductionBundle } from "./client-state.js";
 import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
@@ -305,6 +307,7 @@ export const TimelineChangeHistoryEntrySchema = z
     tracks: z.array(TimelineTrackChangeSchema).max(200).default([]),
     cues: z.array(TimelineCueChangeSchema).max(MAX_TRACK_CLIPS * 8).default([]),
     effectClips: z.array(TimelineEffectChangeSchema).max(EFFECT_CLIP_LIMIT * 8).optional(),
+    transitions: z.object({ before: z.array(CrossfadeSchema).max(4000), after: z.array(CrossfadeSchema).max(4000) }).strict().optional(),
     effectProtection: z.object({ before: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT), after: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT) }).strict().optional(),
     mix: z.object({ before: MixSettingsSchema, after: MixSettingsSchema }).strict().optional(),
     /** The Library before and after, when the action changed it. */
@@ -326,6 +329,7 @@ export const TimelineChangeHistoryEntrySchema = z
       entry.cues.length > 0 ||
       (entry.effectClips?.length ?? 0) > 0 ||
       entry.effectProtection !== undefined ||
+      entry.transitions !== undefined ||
       entry.mix !== undefined ||
       entry.library !== undefined,
     "a history entry must change something",
@@ -353,6 +357,7 @@ export const ProductionTimelineSchema = z
     frameRate: FrameRateSchema,
     tracks: z.array(TimelineTrackSchema),
     history: TimelineHistorySchema,
+    transitions: z.array(CrossfadeSchema).max(4000).optional(),
     effectProtection: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT).optional(),
     /** Defaulted so a record written before the mix existed reads with the documented policy. */
     mix: MixSettingsSchema.default(DEFAULT_MIX),
@@ -367,6 +372,7 @@ export const ProductionTimelineSchema = z
   .strict()
   .superRefine((timeline, ctx) => {
     const trackIds = new Set<TimelineTrackId>();
+    if (new Set((timeline.transitions ?? []).map(transitionKey)).size !== (timeline.transitions?.length ?? 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transitions"], message: "Each clip pair has at most one transition" });
     const trackOrders = new Set<number>();
     const clipIds = new Set<TimelineClipId>();
 
@@ -488,6 +494,7 @@ const SignedFramesSchema = z
  * writes name the same clip.
  */
 export const TimelineCommandSchema = z.discriminatedUnion("kind", [
+  ...TransitionCommandSchema.options,
   ...EffectCommandSchema.options,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
@@ -591,6 +598,7 @@ export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, 
 
 /** A plain, present-tense line for a history entry or a request card (SPEC-039 R-34). */
 export function describeTimelineCommand(command: TimelineCommand): string {
+  if (isTransitionCommand(command)) return command.kind === "transition-set" ? `Set crossfade to ${command.durationFrames} frames` : command.kind === "transition-remove" ? "Remove crossfade" : `${command.kind === "transition-protect" ? "Protect" : "Release"} transition ${command.setting}`;
   if (isEffectCommand(command)) return command.kind === "effect-create" ? `Add ${command.effect.preset.id}` : command.kind === "effect-protect" ? "Protect effect from suggestions" : command.kind === "effect-release" ? "Release effect protection" : `${command.kind.slice(7)} effect ${command.clipId}`;
   switch (command.kind) {
     case "move-adjacent":
@@ -906,7 +914,7 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand>[];
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -1200,6 +1208,7 @@ interface Working {
   touchedTracks: Map<TimelineTrackId, { kind: TimelineTrackKind; before: TimelineTrackProps | null }>;
   touchedCues: Map<SubtitleCueId, { trackId: TimelineTrackId; before: SubtitleCue | null }>;
   effectProtection: EffectProtectionRule[];
+  transitions: Crossfade[];
   effectAuthority: "human" | "suggestion";
 }
 
@@ -1449,6 +1458,12 @@ function relayPreservingHoles(before: readonly TimelineClip[], reordered: readon
 }
 
 function applyClipCommand(working: Working, command: TimelineClipCommand): void {
+  if (isTransitionCommand(command)) {
+    try { working.transitions = applyTransitionCommand(working.tracks, working.transitions, command, working.effectAuthority,
+      working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined); }
+    catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
   if (isEffectCommand(command)) {
     try { applyEffectCommand(working, command); }
     catch (error) { throw error instanceof TimelineOperationRefused ? error : new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
@@ -1844,6 +1859,7 @@ function workingTimeline(working: Working): ProductionTimeline {
     tracks: working.tracks,
     mix: working.mix,
     library: working.library,
+    ...(working.timeline.transitions !== undefined || working.transitions.length ? { transitions: working.transitions } : {}),
     ...(working.timeline.effectProtection !== undefined || working.effectProtection.length ? { effectProtection: working.effectProtection } : {}),
     history: { undo: [], redo: [] },
   };
@@ -1851,6 +1867,18 @@ function workingTimeline(working: Working): ProductionTimeline {
 
 /** Check the coherent segment, so an intermediate split or restored value grants no authority. */
 function finishTrustedTimelineSegment(working: Working, timeline: ProductionTimeline): void {
+  for (const value of working.transitions) {
+    const old = timeline.transitions?.find(row => transitionKey(row) === transitionKey(value));
+    if (canonical(old) !== canonical(value)) {
+      const problem = transitionInactiveReason(working.tracks, working.transitions, value,
+        working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined);
+      if (problem && (!old || old.durationFrames !== value.durationFrames)) throw new TimelineOperationRefused(problem);
+    }
+  }
+  if (working.effectAuthority === "suggestion") {
+    const problem = transitionProtectionProblem(timeline, { tracks: working.tracks, transitions: working.transitions });
+    if (problem) throw new TimelineOperationRefused(problem);
+  }
   const structureProblems = effectStructureProblems(allEffects(working.tracks));
   if (structureProblems.length) throw new TimelineOperationRefused(structureProblems[0]!);
   if (working.effectAuthority === "suggestion") {
@@ -1902,6 +1930,7 @@ function timelineNetChanges(timeline: ProductionTimeline, working: Working): Tim
   const library = canonical(working.library) === canonical(timeline.library) ? undefined : { before: timeline.library, after: working.library };
   return {
     clips, tracks, cues,
+    ...(canonical(timeline.transitions ?? []) === canonical(working.transitions) ? {} : { transitions: { before: timeline.transitions ?? [], after: working.transitions } }),
     ...(effectClips.length ? { effectClips } : {}),
     ...(effectProtection ? { effectProtection } : {}),
     ...(mix !== undefined ? { mix } : {}),
@@ -1931,6 +1960,7 @@ export function compileTrustedTimelineSteps(
     touchedTracks: new Map(),
     touchedCues: new Map(),
     effectProtection: [...(timeline.effectProtection ?? [])],
+    transitions: [...(timeline.transitions ?? [])],
     effectAuthority: "suggestion",
   };
   let commandCount = 0;
@@ -1971,7 +2001,7 @@ export function finishTrustedTimelineSteps(
   if (proof.baseMaterial !== authoredTimelineMaterial(timeline)) throw new TimelineOperationRefused("timeline reduction was compiled against a different authored base");
   const changes = structuredClone(proof.changes);
   const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (changes.clips.length === 0 && selections.length === 0 && changes.tracks.length === 0 && changes.cues.length === 0 && changes.mix === undefined && changes.library === undefined && changes.effectClips === undefined && changes.effectProtection === undefined) {
+  if (changes.clips.length === 0 && selections.length === 0 && changes.tracks.length === 0 && changes.cues.length === 0 && changes.mix === undefined && changes.library === undefined && changes.effectClips === undefined && changes.effectProtection === undefined && changes.transitions === undefined) {
     return { kind: "unchanged", timeline };
   }
   const entry: TimelineChangeHistoryEntry = {
@@ -2153,6 +2183,13 @@ function replayEffectProtection(rules: readonly EffectProtectionRule[] | undefin
   return [...(phase === "undo" ? entry.effectProtection.before : entry.effectProtection.after)];
 }
 
+function replayTransitions(values: readonly Crossfade[] | undefined, entry: TimelineHistoryEntry, phase: "undo" | "redo"): Crossfade[] | undefined {
+  if (entry.kind !== "change" || !entry.transitions) return values === undefined ? undefined : [...values];
+  const expected = phase === "undo" ? entry.transitions.after : entry.transitions.before;
+  if (canonical(values ?? []) !== canonical(expected)) throw new TimelineOperationRefused(`saved transition history is not in its ${phase} position`);
+  return [...(phase === "undo" ? entry.transitions.before : entry.transitions.after)];
+}
+
 function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelineTrack[] {
   return entry.kind === "move" ? replayMove(tracks, entry, phase) : replayChange(tracks, entry, phase);
 }
@@ -2163,6 +2200,7 @@ function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { 
   let mix = timeline.mix;
   let library: readonly TimelineLibraryItem[] = timeline.library;
   let protection = timeline.effectProtection;
+  let transitions = timeline.transitions;
   for (let index = timeline.history[stack].length - 1; index >= 0; index -= 1) {
     try {
       const entry = timeline.history[stack][index]!;
@@ -2170,6 +2208,7 @@ function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { 
       mix = replayMix(mix, entry, stack);
       library = replayLibrary(library, entry, stack);
       protection = replayEffectProtection(protection, entry, stack);
+      transitions = replayTransitions(transitions, entry, stack);
     } catch (error) {
       if (error instanceof TimelineOperationRefused) {
         return { index, message: `saved history is not replayable from its ${stack} position: ${error.reason}` };
@@ -2198,6 +2237,7 @@ export function undoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "undo"),
+    ...(timeline.transitions !== undefined || (entry.kind === "change" && entry.transitions) ? { transitions: replayTransitions(timeline.transitions, entry, "undo") } : {}),
     mix: replayMix(timeline.mix, entry, "undo"),
     library: replayLibrary(timeline.library, entry, "undo"),
     ...(timeline.effectProtection !== undefined || (entry.kind === "change" && entry.effectProtection) ? { effectProtection: replayEffectProtection(timeline.effectProtection, entry, "undo") } : {}),
@@ -2212,6 +2252,7 @@ export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "redo"),
+    ...(timeline.transitions !== undefined || (entry.kind === "change" && entry.transitions) ? { transitions: replayTransitions(timeline.transitions, entry, "redo") } : {}),
     mix: replayMix(timeline.mix, entry, "redo"),
     library: replayLibrary(timeline.library, entry, "redo"),
     ...(timeline.effectProtection !== undefined || (entry.kind === "change" && entry.effectProtection) ? { effectProtection: replayEffectProtection(timeline.effectProtection, entry, "redo") } : {}),

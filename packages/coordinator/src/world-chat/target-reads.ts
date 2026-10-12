@@ -15,6 +15,7 @@ import {
   storyShotFrames,
   storyTimelineFingerprint,
   summariseVoices,
+  pictureJoins, transitionStill, maxCrossfadeFrames,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
@@ -316,6 +317,11 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       ]),
       ...(timeline.effectProtection ?? []).map(rule => { const { baselineFingerprint, ...scope } = rule;
         return { key: `42:protection:${rule.id}`, value: { kind: "effect-protection", rule: scope, baselineHash: sha256(baselineFingerprint) } }; }),
+      ...(timeline.transitions ?? []).map((transition, index) => ({ key: `43:transition:${padded(index)}`, value: { kind: "transition", transition } })),
+      ...pictureJoins(timeline.tracks, clip => transitionStill(clip, artifacts)).map((join, index) => ({ key: `44:join:${padded(index)}`, value: {
+        kind: "picture-join", trackId: join.trackId, leftClipId: join.leftClipId, rightClipId: join.rightClipId, cutFrame: join.cutFrame,
+        labels: [join.left.source.label, join.right.source.label], ...(join.reason ? { ineligible: join.reason } : { maxDurationFrames: maxCrossfadeFrames(timeline.tracks, timeline.transitions ?? [], join) }),
+      } })),
     );
   }
   if (production !== undefined) {

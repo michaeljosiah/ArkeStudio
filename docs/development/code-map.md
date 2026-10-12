@@ -37,7 +37,7 @@ Client, coordinator and integrations ──> shared contracts
 
 ## Change entry points
 
-Crossfade designs (proposed 2026-10-12, awaiting owner review): turns 216–219 draw fixed-cut
+Crossfade designs (approved 2026-10-12; SPEC-054 accepted): turns 216–219 draw fixed-cut
 still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
 batch scopes and explicit short-clip exceptions, separate join and
 duration protection, and Arke composite review. The [focused review](../../design-system/crossfade-216.review.html)
@@ -45,8 +45,8 @@ and [notes](../../design-system/crossfade-216.notes.md) describe the decisions a
 `design-system/crossfade-216.mjs` generates the master drawings and review index entries;
 `crossfade-216.view.mjs`, `.entry.mjs`, `.css` and `.prototype.mjs` own the isolated fixture.
 Run `node design-system/crossfade-216.check.mjs` for browser checks or
-`node design-system/crossfade-216.serve.mjs` for the read-only review URL. This is proposed
-design work; it does not extend SPEC-053 or implement picture transitions in Studio.
+`node design-system/crossfade-216.serve.mjs` for the read-only review URL. These remain isolated
+design fixtures; the implementation entry points and live acceptance are listed below.
 
 Editor effect designs (approved 2026-10-11; SPEC-053 accepted): turns 213–215 draw independent
 visual targets and time ranges, optional audio-reaction presets with Advanced beat/bass/energy,
@@ -473,6 +473,18 @@ The dispatcher verifies returned artifacts through `queue/verify.ts`; Coordinato
 ### Edit a production timeline
 
 Follow client timeline UI and store commands into contracts `timeline.ts`/`frames.ts`. Coordinator routes `timeline-command`, `timeline-move-picture` and `timeline-history` to `applyTimelineCommand` in `productions/timeline.ts`. That module validates and persists the operation; the handler refreshes world state. Playback reads the resulting data through shared render planning and client `lib/plan-playback.ts`/`playback-engine.ts`.
+
+Crossfades at fixed still-image cuts (SPEC-054) use contracts `editor-transitions.ts` for exact
+pairs, local frame bounds, batch plans and independent join/duration protection. `timeline.ts`
+owns their ordinary commands and durable Undo/Redo; schema 76 includes retained transition
+history. `editor-effect-render-plan.ts`, `editor-effect-raster.ts` and `cut.ts` share the
+premultiplied track blend with browser preview and native export. Client `screens/editor-transitions.tsx`
+contains the join picker, Library drag, Inspector and batch controls. `editor-transition-review-bar.tsx`,
+`components/editor-transition-proposal-card.tsx` and `lib/editor-transition-review.ts` own explicit
+Current/Suggested review. `lib/editor-review-ownership.ts` permits one active candidate across
+effects and transitions. Coordinator `productions/editor-transition-requests.ts` owns retained
+versions, sticky human decisions, review grants, source revalidation and atomic Apply;
+`world-chat/transition-proposals.ts` exposes preparation to Arke while refusing generic Accept.
 
 Whole-delivery Loop is local preview state in `screens/editor-transport.tsx`, exposed by
 `screens/editor-loop.tsx` in the desktop toolbar and compact clock. The shared transport's

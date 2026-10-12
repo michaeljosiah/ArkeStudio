@@ -36,6 +36,26 @@ export function compositeRgba(destination: Uint8ClampedArray, source: Uint8Clamp
   return destination;
 }
 
+/** SPEC-054 R-4: add weighted premultiplied pictures on one track, then Over once. */
+export function addWeightedPicture(destination: Float32Array, pixels: Uint8ClampedArray, weight: number,
+  rect: { x: number; y: number; width: number; height: number }, width: number): void {
+  if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new RangeError("Invalid picture blend weight");
+  for (let y = 0; y < rect.height; y++) for (let x = 0; x < rect.width; x++) {
+    const source = (y * rect.width + x) * 4, target = ((y + rect.y) * width + x + rect.x) * 4;
+    const alpha = pixels[source + 3]! / 255 * weight;
+    for (let channel = 0; channel < 3; channel++) destination[target + channel] = destination[target + channel]! + pixels[source + channel]! * alpha;
+    destination[target + 3] = destination[target + 3]! + alpha;
+  }
+}
+export function compositeWeightedTrack(destination: Uint8ClampedArray, track: Float32Array): void {
+  if (destination.length !== track.length) throw new RangeError("Picture track dimensions differ");
+  for (let at = 0; at < track.length; at += 4) {
+    const alpha = Math.min(1, track[at + 3]!);
+    if (alpha <= 0) continue;
+    overPixel(destination, at, track[at]! / alpha, track[at + 1]! / alpha, track[at + 2]! / alpha, Math.round(alpha * 255));
+  }
+}
+
 function particleCoverage(particle: EffectParticle, localX: number, localY: number, radius: number): number {
   const along = localX * particle.directionX + localY * particle.directionY;
   const across = -localX * particle.directionY + localY * particle.directionX;

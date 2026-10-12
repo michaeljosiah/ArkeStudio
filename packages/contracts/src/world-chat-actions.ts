@@ -13,6 +13,7 @@ import { DeliverySchema } from "./voice.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { ModelEditorRequestSchema, ModelSceneEditSchema } from "./editor-request.js";
 import { ModelEffectProposalSchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
+import { ModelTransitionProposalSchema } from "./editor-transition-proposal.js";
 import {
   ArtifactIdSchema,
   CandidateIdSchema,
@@ -1069,9 +1070,11 @@ export const ProductionAudioEditModelActionSchema = z.object({ kind: z.literal("
 /** Chat may propose a bounded scope; reviewed human authority still comes only from the host. */
 export const ProductionEffectsProposeModelActionSchema = z.object({ kind: z.literal("production-effects-propose"),
   productionId: SlugSchema, scope: EffectArrangementScopeSchema.optional(), proposal: ModelEffectProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+export const ProductionTransitionsProposeModelActionSchema = z.object({ kind: z.literal("production-transitions-propose"),
+  productionId: SlugSchema, proposal: ModelTransitionProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 /** Count every model entry point that prepares an editor request, not just one result array. */
 export function editorProposalActionCount(actions: readonly { kind: string; request?: unknown }[]): number {
-  return actions.filter(action => ["production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||
+  return actions.filter(action => ["production-transitions-propose", "production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||
     (action.kind === "production-timeline-operation" && !["transcribe", "undo", "redo"].includes((action.request as { operation?: string } | undefined)?.operation ?? ""))).length;
 }
 export const ProductionAudioCueModelActionSchema = z.object({ kind: z.literal("production-audio-cue"), productionId: SlugSchema,
@@ -1390,6 +1393,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionPerformanceModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioEditModelActionSchema.extend(ActionSequencingShape),
   ProductionEffectsProposeModelActionSchema.extend(ActionSequencingShape),
+  ProductionTransitionsProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
 ]);
@@ -1649,6 +1653,8 @@ export type WorldChatEditorRequestAction = z.infer<typeof WorldChatEditorRequest
 export const WorldChatEffectProposalActionSchema = z.object({ kind: z.literal("world-chat-effect-proposal"),
   worldId: UlidSchema, productionId: SlugSchema, proposal: ModelEffectProposalSchema, scope: EffectArrangementScopeSchema,
   reviewed: EffectVersionRefSchema.optional() }).strict();
+export const WorldChatTransitionProposalActionSchema = z.object({ kind: z.literal("world-chat-transition-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, proposal: ModelTransitionProposalSchema }).strict();
 
 export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatPropAuthoringActionSchema,
@@ -1658,6 +1664,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatSceneActionSchema,
   WorldChatEditorRequestActionSchema,
   WorldChatEffectProposalActionSchema,
+  WorldChatTransitionProposalActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatCanonActionSchema,
   WorldChatCanonRetireActionSchema,

@@ -14,3 +14,10 @@ export function carriesEditorEffects(raw: string): boolean {
   try { return carries(JSON.parse(raw)); }
   catch { return false; }
 }
+
+/** SPEC-054 R-14: removing the last transition does not remove the history compatibility floor. */
+export function carriesEditorTransitions(raw: string): boolean {
+  const carries = (value: unknown): boolean => Array.isArray(value) ? value.some(carries) : value !== null && typeof value === "object" &&
+    (Object.hasOwn(value, "transitions") || Object.values(value).some(carries));
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}

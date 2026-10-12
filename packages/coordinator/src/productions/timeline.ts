@@ -19,6 +19,7 @@ import {
   spineTimelineFingerprint,
   storyTimelineFingerprint,
   timelineCarriesEffects,
+  timelineCarriesTransitions,
   undoTimelineHistory,
   type ProductionBundle,
   type ProductionTimeline,
@@ -362,7 +363,7 @@ async function writeTimeline(
         next = command.kind === "undo" ? undoTimelineHistory(current) : redoTimelineHistory(current);
         // Generic approval cannot inverse an effects transaction or release its rules. The
         // dedicated reviewed-candidate authority owns suggested effect history (SPEC-053 R-36).
-        if (effectAuthority !== "human" && (timelineCarriesEffects(current) || timelineCarriesEffects(next))) {
+        if (effectAuthority !== "human" && (timelineCarriesEffects(current) || timelineCarriesEffects(next) || timelineCarriesTransitions(current) || timelineCarriesTransitions(next))) {
           throw new TimelineCommandRefused("Use the editor's Undo or Redo for an effects timeline.");
         }
         /*

@@ -19,8 +19,8 @@ export function effectCardDecisions(family: EffectProposalFamilyView, version: E
 
 /** Preparation/failure stays visible until the corresponding native composite card exists. */
 export function effectCompositeReplacesAction(action: Pick<ConversationActionCard, "actionKind" | "actionId" | "worldId" | "conversationId">, cards: readonly HumanDecisionCard[]): boolean {
-  return action.actionKind === "world-chat-effect-proposal" && cards.some(card => card.actionId === action.actionId &&
-    card.worldId === action.worldId && card.conversationId === action.conversationId && card.body.control.kind === "effect-proposal");
+  return (action.actionKind === "world-chat-effect-proposal" || action.actionKind === "world-chat-transition-proposal") && cards.some(card => card.actionId === action.actionId &&
+    card.worldId === action.worldId && card.conversationId === action.conversationId && (card.body.control.kind === "effect-proposal" || card.body.control.kind === "transition-proposal"));
 }
 
 export function effectFrameLabel(frame: number, fps: number): string {

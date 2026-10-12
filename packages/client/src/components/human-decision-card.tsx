@@ -7,6 +7,7 @@ import { isRemoteSession } from "../lib/remote-session.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { EditorRequestCards } from "../screens/editor-requests.js";
+import { TransitionProposalCard } from "./editor-transition-proposal-card.js";
 import { ConnectedEffectProposalCard } from "./editor-effect-proposal-connected.js";
 import { exportViewFor } from "../screens/editor-export.js";
 import { PlanGateControls } from "../screens/scene-workspace/plans.js";
@@ -37,6 +38,11 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
     case "editor-request": {
       const production = world.productions.find(value => value.meta.id === control.productionId);
       if (production) content = <ThreadEditorRequest world={world} production={production} requestId={control.requestId} blocked={card.status === "blocked"} />;
+      break;
+    }
+    case "transition-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <TransitionProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
       break;
     }
     case "effect-proposal": {
