@@ -471,7 +471,11 @@ fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbo
 native steering.
 
 OpenCode image changes also run `packages/adapter-opencode/test/v2-images.test.ts` and the
-coordinator's `test/world-chat/images.test.ts`. The exact-binary image probe above uses an
+coordinator's `test/world-chat/images.test.ts`. Verify that cloud aliases exposed through a
+loopback Ollama server remain cloud destinations: only bounded read-only model metadata
+with local architecture and no upstream route can qualify local inspection. Redirects,
+unknown/oversized metadata and cancellation must never send media or authorize locality.
+The exact-binary image probe above uses an
 isolated scripted vision provider and MCP server to verify decoded pixels from both inline
 PNG attachments and direct `view_image` results. Native MCP registration is asynchronous;
 the probe allows bounded ordinary reads while the direct tool catalogue settles, without

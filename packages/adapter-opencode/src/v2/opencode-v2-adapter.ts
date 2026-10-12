@@ -27,7 +27,7 @@ import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { OPENCODE2_PINNED_VERSION } from "../discovery.js";
 import { waitForSessionModel } from "./model-readiness.js";
-import { imagePrompt, sessionImageInput, type SessionImageInput } from "./image-input.js";
+import { imagePrompt, sessionImageInput, qualifySessionImageInput, type SessionImageInput } from "./image-input.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 import {
   normalizeAttempt,
@@ -309,7 +309,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
           }
           const matches = Array.isArray(rows) ? rows.filter(item => item.providerID === model.providerID && item.id === model.id) : [];
           const selected = matches.length === 1 ? matches[0] : undefined;
-          image = sessionImageInput(selected ?? null, model.providerID);
+          image = await qualifySessionImageInput(selected ?? null, model.providerID, signal);
         } catch {
           input.signal?.throwIfAborted();
         }
