@@ -28,6 +28,18 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN GLOBAL CHAT 220
+  { group: "Global Chat · awaiting author approval", screen: "One place to reach Arke", frame: "220a", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Chat is the first icon on the right, before Proposals, Activity, Settings and Account. The existing Activity/Settings pair stays together. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "World Chat beside the world", frame: "220b", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Opening Chat uses this world’s conversation. Its context is visible above the messages and beside the composer. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Builder Chat beside the production", frame: "220c", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Opening from Saltlight resumes its production conversation, using existing cards and review controls. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "A shot keeps its own subject", frame: "220d", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["The context label names Shot 4. A proposal retains that exact shot and version when it is reviewed. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Navigate without moving the conversation", frame: "220e", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["The World conversation and draft stay in view after navigating to Shot 4. Use this page explicitly resumes or creates the shot’s conversation. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Close chat while Arke works", frame: "220f", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["The chat icon has a quiet running dot. Closing hides the conversation; Activity continues to carry application-wide work and decisions. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Phone · the same conversation", frame: "220g", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["A sheet below the persistent titlebar gives messages and the composer independent space. Close returns focus to Chat. Phone controls are at least 44px. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Changing worlds makes the boundary visible", frame: "220h", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Switching worlds pauses this visible conversation and disables send. Open this world’s chat resumes The Stillwater. The prior draft remains in The Undersong. Proposal only; application implementation awaits author design approval." ] },
+  { group: "Global Chat · awaiting author approval", screen: "Before a world is open", frame: "220i", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["The persistent icon explains how to begin. This increment offers Open world; no unscoped world tools or new pre-world assistant. Proposal only; application implementation awaits author design approval." ] },
+  // END GLOBAL CHAT 220
+
   // BEGIN CROSSFADE 216
   { group: "The Cut · crossfades at fixed cuts · approved", screen: "Hover a boundary · reveal Add transition", frame: "216a", route: "Production / Cut", status: "drawn", checked: "2026-10-12", controls: [], notes: ["Hover near the shared edge to reveal +. The 44px hit area also accepts keyboard focus; this reveals the control without editing either clip. Approved 12 October 2026; implementation and acceptance tracked in SPEC-054." ] },
   { group: "The Cut · crossfades at fixed cuts · approved", screen: "Click + · choose in the transition picker", frame: "216b", route: "Production / Cut", status: "drawn", checked: "2026-10-12", controls: [], notes: ["The picker opens at this exact cut. Choose Crossfade to insert immediately at the one-second default. No preliminary visit to the Inspector. Approved 12 October 2026; implementation and acceptance tracked in SPEC-054." ] },
@@ -638,6 +650,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "global-chat-220.review.html", what: "Design turn 220: persistent contextual Chat, navigation, drafts, phone and world boundary. Interactive isolated fixture.", state: "proposed · awaiting author approval" },
   { file: "crossfade-216.review.html", what: "Approved crossfade designs 216–219 and isolated prototype: fixed cuts, bulk authoring, protection and Arke review.", state: "approved · SPEC-054 implementation" },
   { file: "editor-effects-213.review.html", what: "Approved designs 213–215: effect targets, optional audio reaction and editable AI arrangement review; isolated clickable prototype.", state: "design approved · SPEC-053 proposed · not implemented" },
   { file: "Arke Studio.dc.html", what: "The design master. Every decision, newest first.", state: "current" },
@@ -787,6 +800,7 @@ const page = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Arke Studio · design review</title>
+<link rel="stylesheet" href="global-chat-220.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
