@@ -12,10 +12,11 @@ export function effectTimeFrames(text: string, frameRate: FrameRate): number | n
   return timecodeFrames(value, frameRate);
 }
 
-function EffectTypedField({ label, value, shown, parse, validate, disabled, suffix, onCommit, resetToken }: {
+function EffectTypedField({ label, value, shown, parse, validate, disabled, suffix, onCommit, resetToken, timecode = false }: {
   label: string; value: number; shown: string; parse: (text: string) => number | null;
   validate: (value: number) => string | null; disabled: boolean; suffix?: string; onCommit: (value: number) => void;
   resetToken?: number | string;
+  timecode?: boolean;
 }) {
   const id = useId(), [text, setText] = useState(shown), [error, setError] = useState<string | null>(null);
   const dirty = useRef(false);
@@ -28,7 +29,7 @@ function EffectTypedField({ label, value, shown, parse, validate, disabled, suff
     dirty.current = false; setError(null); setText(shown);
     if (next !== value) onCommit(next);
   };
-  return <div className="fx-field">
+  return <div className={`fx-field${timecode ? " fx-field--time" : ""}`}>
     <label htmlFor={id}>{label}{suffix && <span className="fx-field__unit">{suffix}</span>}</label>
     <input id={id} value={text} inputMode="decimal" disabled={disabled} spellCheck={false}
       aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-error` : undefined}
@@ -81,7 +82,7 @@ export function EffectTimeField({ label, value, frameRate, min = 0, max = Number
   label: string; value: number; frameRate: FrameRate; min?: number; max?: number; disabled: boolean; onCommit: (frame: number) => void;
   resetToken?: number | string;
 }) {
-  return <EffectTypedField label={label} value={value} shown={formatFrames(value, frameRate)} disabled={disabled} resetToken={resetToken}
+  return <EffectTypedField timecode label={label} value={value} shown={formatFrames(value, frameRate)} disabled={disabled} resetToken={resetToken}
     parse={text => effectTimeFrames(text, frameRate)} validate={next => next < min || next > max ? `Use a time from ${formatFrames(min, frameRate)} to ${max === Number.MAX_SAFE_INTEGER ? "the end of the timeline" : formatFrames(max, frameRate)}.` : null}
     onCommit={onCommit} />;
 }

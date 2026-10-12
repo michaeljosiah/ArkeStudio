@@ -92,7 +92,7 @@ describe("manual effect Inspector (SPEC-053 R-2, R-6–8)", () => {
     const test = await mount(); const before = structuredClone(effectOf(test.saved()));
     const select = test.container.querySelector('[aria-label="Atmosphere preset"]')!;
     Object.defineProperty(select, "value", { configurable: true, value: "snow" }); await fire(select, "change");
-    assert.equal(test.calls.length, 0); assert.match(test.container.textContent!, /no conversion is needed/);
+    assert.equal(test.calls.length, 0); assert.match(test.container.textContent!, /settings are retained when another preset is chosen/);
     await fire(button(test.container, "Use Snow"), "click"); assert.equal(test.calls.length, 1);
     assert.deepEqual(effectOf(test.saved()), { ...before, preset: { id: "snow", version: 1 } });
   });

@@ -28,7 +28,7 @@ function family(timeline = base()): EffectProposalFamily {
 }
 function fence(timeline: ProductionTimeline): EffectProposalDependencies {
   return { schemaVersion: 1, base: { revision: timeline.revision, timelineHash: `sha256:${hash(JSON.stringify(timeline))}` }, resolutionHash: hash("resolution"),
-    profiles: { rendererVersion: "software-rgba-v1", catalogueHash: hash("catalogue"), analysisProfileId: "audible-pcm-v1" }, sources: [], reactions: [], protection: [], issues: [] };
+    profiles: { rendererVersion: "software-rgba-v2", catalogueHash: hash("catalogue"), analysisProfileId: "audible-pcm-v1" }, sources: [], reactions: [], protection: [], issues: [] };
 }
 function append(owner: EffectProposalFamily, result: EffectProposalCompilation, id: string, parent?: string,
   branchId = `branch_${id}`, baseId = "base_0"): EffectProposalFamily {
@@ -56,6 +56,15 @@ function human(timeline: ProductionTimeline, owner: EffectProposalFamily, from: 
 }
 const patch = (amount: number, clipId = "cl_0"): EffectCreativeCommand => ({ kind: "effect-patch", clipId, patch: { appearance: { amount } } });
 const effect = (result: EffectProposalCompilation, id = "cl_0") => result.draft.state.tracks.flatMap(track => track.effects).find(row => row.id === id)!;
+
+test("manual Pattern changes survive a broad model revision", () => {
+  const timeline = base(); let owner = family(timeline);
+  const first = model(timeline, owner, [patch(.3)], "pattern-v1"); assert.equal(first.ok, true); owner = append(owner, first, "pattern-v1");
+  const adjusted = human(timeline, owner, "pattern-v1", { kind: "adjust", commands: [{ kind: "effect-patch", clipId: "cl_0", patch: { seed: 81273 } }] }, "pattern-v2");
+  assert.equal(adjusted.ok, true); owner = append(owner, adjusted, "pattern-v2", "pattern-v1");
+  const revised = model(timeline, owner, [{ kind: "effect-patch", clipId: "cl_0", patch: { seed: 5, appearance: { size: .9 } } }], "pattern-v3", "pattern-v2");
+  assert.equal(revised.ok, true); assert.equal(effect(revised).seed, 81273); assert.equal(effect(revised).appearance.size, .9);
+});
 
 test("model creative schemas refuse authority switches, permanent protection and unbounded segments", () => {
   const proposal = { summary: "quiet", commands: [patch(0.3)], identities: [] };

@@ -1,0 +1,88 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFile, appendFile } from "node:fs/promises";
+import { join } from "node:path";
+import { storyTimelineFingerprint, pictureVersionRef, type PictureReviewOperation, type ModelPictureProposal } from "@arke-studio/contracts";
+import { WorldStore } from "../../src/world/store.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
+import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
+import { EditorEffectAnalysisService } from "../../src/productions/editor-effect-analysis.js";
+import { EditorEffectDependencies } from "../../src/productions/editor-effect-dependencies.js";
+import { stagePictureProposal, handlePictureReview, readPictureFamilies } from "../../src/productions/editor-picture-requests.js";
+
+
+const productionId = "saltlight", conversationId = "cv_01J8G0000000000000000000C1";
+
+const model = (opacity = .7): ModelPictureProposal => ({ summary: "Lighten overlay", commands: [{ kind: "picture-appearance", clipId: "cl_first", patch: { blendMode: "screen", opacity } }] });
+async function setup() {
+  const store = await WorldStore.open(await makeTempWorld()); closeOnCleanup(() => store.close());
+  const production = store.getBundle().productions.find(value => value.meta.id === productionId)!;
+  const artifact = store.getBundle().artifacts.find(value => value.kind === "board")!;
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands:
+    ["cl_first", "cl_second"].map((id, index) => ({ kind: "place" as const, trackId: "tr_picture" as const,
+      clip: { id: id as `cl_${string}`, startFrame: index * 96, durationFrames: 96, sourceInFrames: 0, source: { kind: "artifact" as const, artifactId: artifact.id, label: `Image ${index + 1}` } } })),
+  });
+  const analysis = new EditorEffectAnalysisService(undefined, () => {}); closeOnCleanup(() => analysis.stop());
+  const deps = new EditorEffectDependencies(analysis); let action = 0;
+  const readTimeline = () => readFile(join(store.dir, "productions", productionId, "timeline.json"), "utf8");
+  const stage = (proposal = model()) => stagePictureProposal(store, { productionId, conversationId, proposal, actionId: `act_01J8G00000000000000000${String(++action).padStart(4, "0")}` }, deps);
+  const operate = async (operation: PictureReviewOperation) => (await handlePictureReview(store, { kind: "editor-picture-proposal", worldId: store.worldId, productionId,
+    requestId: `human-${++action}`, operation }, deps)).result;
+  return { store, deps, readTimeline, stage, operate, artifact };
+}
+
+test("picture composite Review is explicit, Apply is exact/idempotent and one durable Undo restores appearance", async () => {
+  const { store, readTimeline, stage, operate } = await setup(), before = await readTimeline();
+  const staged = await stage(), ref = pictureVersionRef(staged.family.id, staged.version);
+  assert.equal(await readTimeline(), before);
+  assert.equal((await operate({ kind: "apply", ref, reviewId: "not-reviewed" })).outcome, "refused");
+  const reviewed = await operate({ kind: "review", ref }); assert.equal(reviewed.outcome, "reviewed", reviewed.reason);
+  assert.equal(await readTimeline(), before);
+  const applied = await operate({ kind: "apply", ref, reviewId: reviewed.reviewId! }); assert.equal(applied.outcome, "applied", applied.reason);
+  const after = JSON.parse(await readTimeline());
+  assert.equal(after.revision, JSON.parse(before).revision + 1);
+  assert.equal(after.tracks[0].clips[0].visual.blendMode, "screen");
+  assert.equal(after.history.undo.at(-1).requestId, staged.family.id);
+  assert.equal((await operate({ kind: "apply", ref, reviewId: reviewed.reviewId! })).outcome, "applied");
+  assert.equal(await readTimeline(), JSON.stringify(after, null, 2) + "\n");
+  await applyHumanTimelineCommand(store, productionId, { kind: "undo", baseRevision: after.revision });
+  assert.equal(JSON.parse(await readTimeline()).tracks[0].clips[0].visual, undefined);
+  assert.ok((await readPictureFamilies(store, productionId))[0]!.receipt?.undoneAt);
+  assert.equal(JSON.parse(await readFile(join(store.dir, "world.json"), "utf8")).schemaVersion, 77);
+});
+
+test("manual picture values, named protection and Keep Current remain sticky; Release requires fresh Review", async () => {
+  const { stage, operate, readTimeline } = await setup(), before = await readTimeline();
+  const first = await stage(); let ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const edit = await operate({ kind: "edit", ref, commands: [{ kind: "picture-appearance", clipId: "cl_first", patch: { opacity: .4 } },
+    { kind: "picture-protect", clipId: "cl_first", rule: { id: "vp_blend", property: "blendMode", scope: { kind: "whole" } } }] });
+  assert.equal(edit.outcome, "updated", edit.reason); ref = edit.ref;
+  const revised = await stage({ summary: "Brighter", commands: [{ kind: "picture-appearance", clipId: "cl_first", patch: { opacity: 1, blendMode: "add" } }],
+    family: { id: ref.familyId, parentVersionId: ref.versionId, candidateHash: ref.candidateHash } });
+  assert.equal(revised.version.pictures[0]!.visual?.opacity, .4); assert.equal(revised.version.pictures[0]!.visual?.blendMode, "screen");
+  ref = pictureVersionRef(revised.family.id, revised.version);
+  assert.equal((await operate({ kind: "apply", ref, reviewId: edit.reviewId! })).outcome, "refused");
+  const reviewed = await operate({ kind: "review", ref });
+  const release = await operate({ kind: "edit", ref, commands: [{ kind: "picture-release", ruleId: "vp_blend" }] });
+  assert.equal(release.outcome, "updated", release.reason); assert.equal(release.reviewId, undefined);
+  assert.equal((await operate({ kind: "apply", ref: release.ref, reviewId: reviewed.reviewId! })).outcome, "refused");
+  await operate({ kind: "review", ref: release.ref });
+  const keep = await operate({ kind: "keep", ref: release.ref, clipId: "cl_first" }); assert.equal(keep.outcome, "updated", keep.reason);
+  const next = await stage({ ...model(.9), family: { id: ref.familyId, parentVersionId: keep.ref.versionId, candidateHash: keep.ref.candidateHash } });
+  assert.equal(next.version.pictures[0]!.visual?.opacity, 1); assert.equal(next.version.pictures[0]!.visual?.blendMode, "normal");
+  assert.equal(await readTimeline(), before);
+
+});
+
+test("picture Apply detects changed source bytes and Update retains decisions but grants no Review", async () => {
+  const { store, stage, operate, artifact, readTimeline } = await setup(), before = await readTimeline();
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version), review = await operate({ kind: "review", ref });
+  await appendFile(join(store.dir, "artifacts", artifact.file), "changed source");
+  const refused = await operate({ kind: "apply", ref, reviewId: review.reviewId! }); assert.equal(refused.outcome, "refused"); assert.match(refused.reason!, /Media changed/);
+  assert.equal(await readTimeline(), before);
+  const update = await operate({ kind: "update", ref }); assert.equal(update.outcome, "updated", update.reason); assert.equal(update.reviewId, undefined);
+  assert.equal((await operate({ kind: "apply", ref: update.ref, reviewId: review.reviewId! })).outcome, "refused");
+});
+

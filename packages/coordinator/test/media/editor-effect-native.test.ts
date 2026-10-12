@@ -49,7 +49,7 @@ test("native odd-frame crossfade with transparent stills, scoped effects and upp
     await alphaFile(join(dir, "scoped.mkv"), scoped, count); await alphaFile(join(dir, "upper.mkv"), upper, count); await alphaFile(join(dir, "composition.mkv"), composition, count);
     const fade = { startFrame: 48, durationFrames: 5 };
     const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
-      effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 53, effectLayers: [], issues: [], pictureLayers: [
+      effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 53, effectLayers: [], issues: [], pictureLayers: [
         { clipId: "a", trackId: "picture", order: 0, kind: "media", label: "A", path: "a.png", still: true, startFrame: 0, endFrame: 53, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha", fadeOut: fade },
         { clipId: "b", trackId: "picture", order: 1, kind: "media", label: "B", path: "b.png", still: true, startFrame: 48, endFrame: 100, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha", fadeIn: fade },
         { clipId: "upper", trackId: "upper", order: 2, kind: "media", label: "Upper", path: "upper.mkv", still: false, startFrame: 48, endFrame: 53, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" },
@@ -70,6 +70,40 @@ test("native odd-frame crossfade with transparent stills, scoped effects and upp
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });
 
+test("native Screen/Add clip and scoped/composition blending agrees across an alpha crossfade", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("picture-blend"), count = 5;
+  try {
+    const lower = new Uint8ClampedArray([30, 50, 80, 255, 100, 20, 90, 128, 0, 0, 0, 255, 80, 120, 50, 255]);
+    const a = new Uint8ClampedArray([150, 80, 20, 255, 150, 80, 20, 128, 150, 80, 20, 0, 150, 80, 20, 64]);
+    const b = new Uint8ClampedArray([20, 90, 180, 64, 20, 90, 180, 255, 20, 90, 180, 128, 20, 90, 180, 0]);
+    const particles = new Uint8ClampedArray(Array.from({ length: 4 }, () => [100, 60, 30, 80]).flat());
+    for (const [name, pixels] of [["a", a], ["b", b], ["lower", lower], ["particles", particles]] as const) await alphaFile(join(dir, `${name}.mkv`), pixels, count);
+    for (const mode of ["screen", "add"] as const) {
+      const fade = { startFrame: 48, durationFrames: 5 };
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 53, effectLayers: [], issues: [], pictureLayers:
+          ["lower", "a", "b"].map((name, order) => ({ clipId: name, trackId: name === "lower" ? "lower" : "upper", order, kind: "media", label: name,
+            path: `${name}.mkv`, still: false, startFrame: 48, endFrame: 53, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha",
+            ...(name === "a" ? { blendMode: mode, opacity: .65, fadeOut: fade } : name === "b" ? { blendMode: "screen" as const, opacity: .8, fadeIn: fade } : {}) })) } };
+      const output = join(dir, `${mode}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", [
+        { pictureClipId: "a", blendMode: mode, path: join(dir, "particles.mkv"), startFrame: 48, endFrame: 53 },
+        { blendMode: mode, path: join(dir, "particles.mkv"), startFrame: 48, endFrame: 53 }]);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+      const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * 16);
+      let maxError = 0;
+      for (let frame = 0; frame < count; frame++) {
+        const expected = new Uint8ClampedArray(Array.from({ length: 4 }, () => [0, 0, 0, 255]).flat()), track = new Float32Array(16);
+        compositeRgba(expected, lower);
+        addWeightedPicture(track, compositeRgba(a.slice(), particles, "atop", mode), 1 - frame / count, { x: 0, y: 0, width: 2, height: 2 }, 2, expected, mode, .65);
+        addWeightedPicture(track, b, frame / count, { x: 0, y: 0, width: 2, height: 2 }, 2, expected, "screen", .8);
+        compositeWeightedTrack(expected, track); compositeRgba(expected, particles, "over", mode);
+        for (let channel = 0; channel < 16; channel++) maxError = Math.max(maxError, Math.abs(pixels[frame * 16 + channel]! - expected[channel]!));
+      }
+      assert.ok(maxError <= 4, `${mode} channel error ${maxError}`); report[`picture-${mode}`] = { maxChannelError: maxError, frames: count };
+    }
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
 test("real FFmpeg source-atop alpha, picture order, composition order and absolute window agree with the integer compositor", { skip: !hasFfmpeg }, async () => {
   const dir = await fixtureDir("parity"), start = performance.now();
   try {
@@ -80,7 +114,7 @@ test("real FFmpeg source-atop alpha, picture order, composition order and absolu
     await alphaFile(join(dir, "lower.mkv"), lower); await alphaFile(join(dir, "upper.mkv"), upper);
     await alphaFile(join(dir, "scoped.mkv"), scoped); await alphaFile(join(dir, "atmosphere.mkv"), atmosphere);
     const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: 4 / 24,
-      effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 52, effectLayers: [], issues: [], pictureLayers:
+      effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 52, effectLayers: [], issues: [], pictureLayers:
         ["lower", "upper"].map((name, order) => ({ clipId: name, trackId: name, order, kind: "media", label: name, path: `${name}.mkv`, still: false,
           startFrame: 48, endFrame: 52, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" })) } };
     const output = join(dir, "result.mkv");
@@ -179,7 +213,7 @@ test("real source sampling keeps the previous 30fps frame at nonaligned 24fps in
     const samples = [];
     for (const sourceName of ["source.mkv", "source.mp4"]) for (const sourceInSec of [0.05, 0.9]) {
       const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: 8 / 24,
-        effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 56, effectLayers: [], issues: [], pictureLayers: [{
+        effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 56, effectLayers: [], issues: [], pictureLayers: [{
           clipId: "source", trackId: "source", order: 0, kind: "media", label: "source", path: sourceName, still: false,
           startFrame: 48, endFrame: 56, sourceInSec, sourceOutSec: 1, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" }] } };
       const output = join(dir, `result-${sourceName}-${sourceInSec}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
@@ -213,7 +247,7 @@ test("picture and alpha delivery keep exact half-open frame boundaries after gap
       for (const startFrame of [0, 2 * fps]) for (const kind of ["still", "video", "scoped", "composition"] as const) {
         const from = startFrame + offset, to = from + values.length, frameCount = offset + values.length + 2;
         const plan: ExportPlan = { preset: "review-cut", frameRate: fps, items: [], overlays: [], audio: [], totalSec: frameCount / fps,
-          effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: fps, startFrame,
+          effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: fps, startFrame,
             endFrame: startFrame + frameCount, effectLayers: [], issues: [], pictureLayers: kind === "composition" ? [] : [{
               clipId: "picture", trackId: "picture", order: 0, kind: "media", label: kind, path: kind === "video" ? source : "still.png", still: kind !== "video",
               startFrame: from, endFrame: to, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" }] } };
@@ -242,7 +276,7 @@ test("scoped animated alpha stays inside contain bounds and upper picture window
     await alphaFile(join(dir, "lower.mkv"), lower); await alphaFile(join(dir, "upper.mkv"), upper);
     await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-framerate", "24", "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", join(dir, "scoped.mkv")], Buffer.concat(effects.map(pixels => Buffer.from(pixels))));
     const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: 4 / 24,
-      effectRender: { rendererVersion: "software-rgba-v1", width: 4, height: 2, frameRate: 24, startFrame: 48, endFrame: 52, effectLayers: [], issues: [], pictureLayers:
+      effectRender: { rendererVersion: "software-rgba-v2", width: 4, height: 2, frameRate: 24, startFrame: 48, endFrame: 52, effectLayers: [], issues: [], pictureLayers:
         ["lower", "upper"].map((name, order) => ({ clipId: name, trackId: name, order, kind: "media", label: name, path: `${name}.mkv`, still: false,
           startFrame: order ? 49 : 48, endFrame: order ? 51 : 52, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" })) } };
     const output = join(dir, "result.mkv"), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", [{ pictureClipId: "lower", path: join(dir, "scoped.mkv"), startFrame: 48, endFrame: 52 }]);

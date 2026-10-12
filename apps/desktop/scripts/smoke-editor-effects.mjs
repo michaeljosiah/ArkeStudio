@@ -24,7 +24,7 @@ const workers = (await readdir(join(dist, "assets"))).filter(name => /^editor-ef
 assert.equal(workers.length, 1, "build the client so exactly one effects worker is available");
 const workerName = workers[0];
 const workerSource = await readFile(join(dist, "assets", workerName));
-const cases = ["dust", "embers", "snow", "lights", "rain", "smoke"].map((preset, index) => {
+const cases = ["dust", "embers", "snow", "lights", "rain", "smoke", "air-particles"].map((preset, index) => {
   const effect = defaultEffectClip({ id: "cl_fx", lineageId: "ef_fx", seed: 42, startFrame: 0, durationFrames: 240, preset });
   effect.appearance = { amount: 1, size: 1, opacity: 1, colour: "#ff0000" };
   const pixels = new Uint8ClampedArray(320 * 180 * 4);
@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
   const preferences = window.webContents.getLastWebPreferences();
   assert.equal(preferences.sandbox, true); assert.equal(preferences.contextIsolation, true); assert.equal(preferences.nodeIntegration, false);
   const result = await window.webContents.executeJavaScript("window.runEffectsSmoke()");
-  assert.equal(result.results.length, 13); assert.deepEqual(result.violations, []);
+  assert.equal(result.results.length, ${cases.length}); assert.deepEqual(result.violations, []);
   assert.equal(result.results.filter(row => row.preset === "two-bound-speed-reactions").length, 5);
   assert.ok(result.results.some(row => row.staleEpochRejected));
   await writeFile(join(__dirname, "result.json"), JSON.stringify({ platform: process.platform, electron: process.versions.electron, chromium: process.versions.chrome, sandbox: preferences.sandbox, contextIsolation: preferences.contextIsolation, nodeIntegration: preferences.nodeIntegration, ...result }, null, 2));

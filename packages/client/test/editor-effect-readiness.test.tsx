@@ -81,7 +81,7 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
       { ...effect, id: "cl_absent", target: { kind: "visual-clip", clipId: "cl_picture_later" } },
       { ...effect, id: "cl_slate", target: { kind: "visual-clip", clipId: "cl_picture_slate" } },
     ].map((value, index) => ({ trackId: "tr_fx", trackOrder: index, effect: value as typeof effect }));
-    const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v1", width: 64, height: 36, frameRate: 24, startFrame: 0, endFrame: 240, issues: [], effectLayers: layers,
+    const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v2", width: 64, height: 36, frameRate: 24, startFrame: 0, endFrame: 240, issues: [], effectLayers: layers,
       pictureLayers: [picture("cl_picture_lower", "tr_lower", 0), picture("cl_picture_upper", "tr_upper", 1),
         { ...picture("cl_picture_later", "tr_later", 2), startFrame: 100, endFrame: 200 },
         { ...picture("cl_picture_slate", "tr_slate", 3), kind: "slate" }] };
@@ -192,7 +192,7 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
     const canvasPrototype = Object.getPrototypeOf(document.createElement("canvas"));
     canvasPrototype.getContext = () => ({ createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }), putImageData(image: { data: Uint8ClampedArray }) { painted.push(image.data.slice()); } });
     const { effect } = fixture();
-    const projection = { rendererVersion: "software-rgba-v1" as const, frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
+    const projection = { rendererVersion: "software-rgba-v2" as const, frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
       pictureLayers: [], effectLayers: [{ trackId: "tr_effects", trackOrder: 0, effect }], issues: [] };
     const transport = { time: 2, timeRef: { current: 2 }, playing: false, seek() {}, setPlaying() {} } as unknown as Transport;
     const urlFor = () => null;
@@ -285,7 +285,7 @@ describe("derived effect readiness in the editor (SPEC-053 R-14–16)", () => {
     }) as typeof document.createElement;
     try {
       const { effect } = fixture(); effect.reaction.enabled = false;
-      const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v1", frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
+      const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v2", frameRate: 24, width: 64, height: 36, startFrame: 0, endFrame: 240,
         pictureLayers: [{ clipId: "cl_picture", trackId: "tr_picture", order: 0, kind: "media", label: "Cover", path: "cover.png", still: true,
           startFrame: 0, endFrame: 240, sourceInSec: 0, fit: "contain", matte: "source-alpha" }], effectLayers: [{ trackId: "tr_effects", trackOrder: 0, effect }], issues: [] };
       const transport = { time: 2, timeRef: { current: 2 }, playing: false, seek() {}, setPlaying() {} } as unknown as Transport;

@@ -25,6 +25,7 @@ import { TimelineStateSchema } from "./timeline.js";
 import { EditorRequestSchema } from "./editor-request.js";
 import { EffectProposalFamilyViewSchema } from "./editor-effect-proposal.js";
 import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
+import { PictureProposalFamilySchema } from "./editor-picture-proposal.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
@@ -213,6 +214,7 @@ export const ProductionBundleSchema = valueSchema(z
     editorRequests: z.array(EditorRequestSchema).default([]),
     effectFamilies: z.array(EffectProposalFamilyViewSchema).optional(),
     transitionFamilies: z.array(TransitionProposalFamilySchema).optional(),
+    pictureFamilies: z.array(PictureProposalFamilySchema).optional(),
     editorRequestState: z.discriminatedUnion("status", [z.object({ status: z.literal("absent") }).strict(),
       z.object({ status: z.literal("ready") }).strict(), z.object({ status: z.literal("invalid"), message: z.string().max(500) }).strict()]).optional(),
     /**

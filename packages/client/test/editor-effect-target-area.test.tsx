@@ -24,7 +24,7 @@ function fixture() {
     { id: "tr_picture", kind: "picture", name: "Portraits", order: 0, muted: false, clips: [{ id: "cl_portrait", startFrame: 0, durationFrames: 100, sourceInFrames: 0, source: { kind: "artifact", artifactId: "ar_portrait", label: "Ade portrait" } }] },
     { id: "tr_effect", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [effect] },
   ] };
-  const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v1", width: 320, height: 180, frameRate: 24, startFrame: 0, endFrame: 240,
+  const projection: EffectRenderProjection = { rendererVersion: "software-rgba-v2", width: 320, height: 180, frameRate: 24, startFrame: 0, endFrame: 240,
     effectLayers: [{ trackId: "tr_effect", trackOrder: 1, effect }], issues: [], pictureLayers: [{ clipId: "cl_portrait", trackId: "tr_picture", kind: "media", order: 0,
       label: "Ade portrait", path: "artifacts/portrait.png", still: true, startFrame: 0, endFrame: 100, sourceInSec: 0, fit: "contain", matte: "source-alpha", sourceSize: { width: 100, height: 200 } }] };
   return { effect, timeline, projection };

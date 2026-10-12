@@ -1,7 +1,8 @@
 # Air Particles design turns 220–223
 
-Status: **turns 220–223 revision 3 proposed, awaiting owner review**, 12 October 2026. No design approval,
-specification acceptance or product implementation is implied.
+Status: **turns 220–223 revision 3 approved for implementation**, 12 October 2026.
+SPEC-055 records the accepted decisions. Implementation and validation are tracked in PR #1734;
+the drawings below remain design fixtures rather than screenshots of the application.
 
 Open the [focused review](air-particles-220.review.html), the
 [master](Arke%20Studio.dc.html#t220), or the [review index](design-review.html).

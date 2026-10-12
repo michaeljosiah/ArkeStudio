@@ -9,7 +9,7 @@ export const EFFECT_REVIEW_TEST_AT = "2026-10-11T20:00:00.000Z";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 export function effectProposalTestFence(timeline: ProductionTimeline): EffectProposalDependencies {
   return { schemaVersion: 1, base: { revision: timeline.revision, timelineHash: `sha256:${digest(JSON.stringify(timeline))}` },
-    resolutionHash: digest("resolution"), profiles: { rendererVersion: "software-rgba-v1", catalogueHash: digest("catalogue"), analysisProfileId: "audible-pcm-v1" },
+    resolutionHash: digest("resolution"), profiles: { rendererVersion: "software-rgba-v2", catalogueHash: digest("catalogue"), analysisProfileId: "audible-pcm-v1" },
     sources: [], reactions: [], protection: [], issues: [] };
 }
 export function effectProposalTestRef(family: EffectProposalFamily, version = family.versions.at(-1)!): EffectVersionRef {

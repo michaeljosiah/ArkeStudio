@@ -9,7 +9,9 @@ const trackId = z.string().regex(/^tr_[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const EffectLineageIdSchema = z.string().regex(/^ef_[A-Za-z0-9][A-Za-z0-9_-]*$/);
 export const EFFECT_CLIP_LIMIT = 4000;
 export const EFFECT_POINT_LIMIT = 2000;
-export const EffectPresetSchema = z.object({ id: z.enum(["dust", "embers", "snow", "lights", "rain", "smoke"]), version: z.literal(1) }).strict();
+export const EffectPresetSchema = z.object({ id: z.enum(["dust", "embers", "snow", "lights", "rain", "smoke", "air-particles"]), version: z.literal(1) }).strict();
+export const PictureBlendModeSchema = z.enum(["normal", "screen", "add"]);
+export type PictureBlendMode = z.infer<typeof PictureBlendModeSchema>;
 export const EffectTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("composition") }).strict(),
   z.object({ kind: z.literal("picture-track"), trackId }).strict(),
@@ -39,8 +41,10 @@ export const EffectAreaSchema = z.object({ x: unit, y: unit, width: unit, height
   area => area.width > 0 && area.height > 0 && area.x + area.width <= 1 && area.y + area.height <= 1,
   "emitting area must have positive dimensions inside the target",
 );
-export const EffectAppearanceSchema = z.object({ amount: unit, size: unit, opacity: unit, colour: z.string().regex(/^#[0-9a-fA-F]{6}$/) }).strict();
-export const EffectMotionSchema = z.object({ direction: z.number().finite().min(-360).max(360), speed: unit, area: EffectAreaSchema }).strict();
+export const EffectAppearanceSchema = z.object({ amount: unit, size: unit, opacity: unit, colour: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  texture: unit.optional(), softness: unit.optional(), depth: unit.optional(), blendMode: PictureBlendModeSchema.optional() }).strict();
+export const EffectMotionSchema = z.object({ direction: z.number().finite().min(-360).max(360), speed: unit, area: EffectAreaSchema,
+  airflow: unit.optional(), particleDeflections: z.boolean().optional(), boundary: z.enum(["soft-bounce", "open-flow"]).optional() }).strict();
 /** The retained envelope is independent of the cropped segment bounds (R-8). */
 export const EffectFadesSchema = z.object({ startFrame: signedFrame, endFrame: signedFrame, inFrames: frame, outFrames: frame }).strict().superRefine((fade, ctx) => {
   const duration = fade.endFrame - fade.startFrame;
@@ -79,6 +83,7 @@ export type EffectReaction = z.infer<typeof EffectReactionSchema>;
 export type EffectCue = z.infer<typeof EffectCueSchema>;
 
 export const EffectPatchSchema = z.object({
+  seed: z.number().int().min(0).max(0xffffffff).optional(),
   preset: EffectPresetSchema.optional(), target: EffectTargetSchema.optional(), appearance: EffectAppearanceSchema.partial().strict().optional(),
   motion: EffectMotionSchema.partial().strict().optional(), fades: EffectFadesSchema.optional(),
   intensityCurve: EffectCurveSchema.optional(), reactionCurve: EffectCurveSchema.optional(),
@@ -115,7 +120,10 @@ export function effectVisibilityAt(effect: EffectClip, productionFrame: number):
 export function defaultEffectClip(input: { id: string; lineageId: string; startFrame: number; durationFrames: number; seed: number; preset?: EffectClip["preset"]["id"]; target?: EffectTarget; order?: number }): EffectClip {
   return EffectClipSchema.parse({ ...input, kind: "procedural", order: input.order ?? 0,
     preset: { id: input.preset ?? "dust", version: 1 }, target: input.target ?? { kind: "composition" }, simulationOriginFrame: input.startFrame,
-    appearance: { amount: 0.3, size: 0.3, opacity: 0.5, colour: "#ffffff" }, motion: { direction: 0, speed: 0.2, area: { x: 0, y: 0, width: 1, height: 1 } },
+    appearance: input.preset === "air-particles" ? { amount: .65, size: .55, opacity: .7, colour: "#ffffff", texture: .75, softness: .55, depth: .6, blendMode: "screen" }
+      : { amount: 0.3, size: 0.3, opacity: 0.5, colour: "#ffffff" },
+    motion: { direction: 0, speed: input.preset === "air-particles" ? .35 : .2, area: { x: 0, y: 0, width: 1, height: 1 },
+      ...(input.preset === "air-particles" ? { airflow: .5, particleDeflections: true, boundary: "soft-bounce" } : {}) },
     fades: { startFrame: input.startFrame, endFrame: input.startFrame + input.durationFrames, inFrames: 0, outFrames: 0 },
     intensityCurve: { points: [] }, reactionCurve: { points: [] }, cueOverrides: [],
     reaction: { enabled: false, preset: "gentle-shimmer", version: 1, strength: 0.5, beat: 0, bass: 0, energy: 0.3, property: "brightness", limit: 0.3, smoothingFrames: 10 },

@@ -21,7 +21,7 @@ function plans() {
   const current: RenderPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: 10, revision: 0,
     range: { startSec: 0, endSec: 10 }, scope: { kind: "production" }, mix: DEFAULT_MIX, speech: [], subtitles: null };
   const suggested: RenderPlan = { ...current, effectRender: {
-    rendererVersion: "software-rgba-v1", width: 32, height: 18, frameRate: 24, startFrame: 0, endFrame: 240,
+    rendererVersion: "software-rgba-v2", width: 32, height: 18, frameRate: 24, startFrame: 0, endFrame: 240,
     pictureLayers: [], issues: [], effectLayers: [{ trackId: "tr_effect", trackOrder: 1,
       effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", seed: 8, startFrame: 0, durationFrames: 240 }) }],
   } };

@@ -46,10 +46,10 @@ function fixture() {
   return { ...f, props, requests, closed };
 }
 
-test("arrangement defaults to Off, exposes six presets and Cancel has no authored side effect", async () => {
+test("arrangement defaults to Off, exposes seven presets and Cancel has no authored side effect", async () => {
   const f = fixture(), before = structuredClone(f.timeline); await mount(<EffectArrangementDialog {...f.props} />);
   assert.equal(input("Arrangement audio reaction").value, "off");
-  assert.equal(document.querySelectorAll('.fx-arrangement__palette input[type="checkbox"]').length, 6);
+  assert.equal(document.querySelectorAll('.fx-arrangement__palette input[type="checkbox"]').length, 7);
   assert.equal(button("Selected range").disabled, true);
   await click("Cancel"); assert.deepEqual(f.closed, [true]); assert.equal(f.requests.length, 0); assert.deepEqual(f.timeline, before);
 });

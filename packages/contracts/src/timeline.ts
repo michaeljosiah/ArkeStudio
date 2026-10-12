@@ -2,6 +2,7 @@ import type { ArtifactSidecar } from "./artifact.js";
 import { EffectClipSchema, EFFECT_CLIP_LIMIT, type EffectClip } from "./editor-effects.js";
 import { effectTimelineCapabilityProblem } from "./editor-effect-catalogue.js";
 import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffect, duplicateEffect, type EffectCommand } from "./editor-effect-commands.js";
+import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
 import { FullSha256Schema } from "./audio.js";
@@ -117,6 +118,8 @@ export const TimelineClipSchema = z
     audio: z.enum(["keep", "mute"]).optional(),
     /** The other half of a split: the sound this picture lost, or the picture this sound left. */
     linkedClipId: TimelineClipIdSchema.optional(),
+    visual: PictureAppearanceSchema.optional(),
+    visualOriginId: TimelineClipIdSchema.optional(),
   })
   .strict();
 export type TimelineClip = z.infer<typeof TimelineClipSchema>;
@@ -371,6 +374,8 @@ export const ProductionTimelineSchema = z
   })
   .strict()
   .superRefine((timeline, ctx) => {
+    const visualProblem = pictureAppearanceStructureProblem(timeline.tracks);
+    if (visualProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: visualProblem });
     const trackIds = new Set<TimelineTrackId>();
     if (new Set((timeline.transitions ?? []).map(transitionKey)).size !== (timeline.transitions?.length ?? 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transitions"], message: "Each clip pair has at most one transition" });
     const trackOrders = new Set<number>();
@@ -496,6 +501,7 @@ const SignedFramesSchema = z
 export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...TransitionCommandSchema.options,
   ...EffectCommandSchema.options,
+  ...PictureAppearanceCommandSchema.options,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
   z.object({ kind: z.literal("move-to-order"), clipId: TimelineClipIdSchema, index: WholeFrameSchema }).strict(),
@@ -600,6 +606,7 @@ export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, 
 export function describeTimelineCommand(command: TimelineCommand): string {
   if (isTransitionCommand(command)) return command.kind === "transition-set" ? `Set crossfade to ${command.durationFrames} frames` : command.kind === "transition-remove" ? "Remove crossfade" : `${command.kind === "transition-protect" ? "Protect" : "Release"} transition ${command.setting}`;
   if (isEffectCommand(command)) return command.kind === "effect-create" ? `Add ${command.effect.preset.id}` : command.kind === "effect-protect" ? "Protect effect from suggestions" : command.kind === "effect-release" ? "Release effect protection" : `${command.kind.slice(7)} effect ${command.clipId}`;
+  if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
   switch (command.kind) {
     case "move-adjacent":
       return `Move ${command.clipId} ${command.direction}`;
@@ -914,7 +921,7 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand>[];
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -1458,6 +1465,16 @@ function relayPreservingHoles(before: readonly TimelineClip[], reordered: readon
 }
 
 function applyClipCommand(working: Working, command: TimelineClipCommand): void {
+  if (isPictureAppearanceCommand(command)) {
+    try {
+      const next = applyPictureAppearanceCommand(working.tracks, command, working.effectAuthority);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
   if (isTransitionCommand(command)) {
     try { working.transitions = applyTransitionCommand(working.tracks, working.transitions, command, working.effectAuthority,
       working.sources ? clip => transitionStill(clip, working.sources!.artifacts) : undefined); }
@@ -1568,7 +1585,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const fitsAfter = following === undefined || following.startFrame - clipEnd(clip) >= clip.durationFrames;
       // Beside the original when the space is free, otherwise after everything: never a ripple.
       const startFrame = fitsAfter ? clipEnd(clip) : clipEnd(ordered[ordered.length - 1]!);
-      const copy: TimelineClip = { ...clip, id: command.newClipId, startFrame };
+      const copy: TimelineClip = { ...clip, id: command.newClipId, startFrame, ...duplicatePictureAppearance(clip, command.newClipId, startFrame - clip.startFrame) };
       touch(working, track.id, copy.id, null);
       replaceTrackClips(working, track.id, [...ordered, copy]);
       return;
@@ -1878,6 +1895,8 @@ function finishTrustedTimelineSegment(working: Working, timeline: ProductionTime
   if (working.effectAuthority === "suggestion") {
     const problem = transitionProtectionProblem(timeline, { tracks: working.tracks, transitions: working.transitions });
     if (problem) throw new TimelineOperationRefused(problem);
+    const visualProblem = pictureAppearanceProtectionProblem(timeline, { tracks: working.tracks });
+    if (visualProblem) throw new TimelineOperationRefused(visualProblem);
   }
   const structureProblems = effectStructureProblems(allEffects(working.tracks));
   if (structureProblems.length) throw new TimelineOperationRefused(structureProblems[0]!);

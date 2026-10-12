@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
+import { PictureProposalFamilySchema } from "./editor-picture-proposal.js";
 import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema } from "./editor-request-vocabulary.js";
 import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
@@ -97,6 +98,7 @@ export type ModelEditorRequest = z.infer<typeof ModelEditorRequestSchema>;
 export function genericEditorRequestRefusal(base: ProductionTimeline, commands: readonly TimelineCommand[]): string | null {
   for (const command of commands) {
     if (!genericEditorCommandKinds.has(command.kind)) return "Effects require Review in timeline and Apply reviewed version; generic Accept cannot apply effects or release protection.";
+    if (command.kind === "place" && (command.clip.visual || command.clip.visualOriginId)) return "Picture appearance requires Review in timeline and Apply reviewed version. Place the clip first, then propose its appearance.";
     if (command.kind === "add-track" && command.trackKind === "effect") return "Effect tracks require the effects arrangement review flow.";
     if ("trackId" in command && base.tracks.some(track => track.id === command.trackId && track.kind === "effect")) {
       return "Effect tracks require the effects arrangement review flow.";
@@ -141,10 +143,11 @@ const EditorRequestFileV1Schema = z
 export const EditorRequestFileSchema = z.union([EditorRequestFileV1Schema, z.object({ schemaVersion: z.literal(2),
   requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept), effectFamilies: z.array(EffectProposalFamilySchema).max(EDITOR_REQUEST_BOUNDS.kept),
   transitionFamilies: z.array(TransitionProposalFamilySchema).max(200).optional(),
+  pictureFamilies: z.array(PictureProposalFamilySchema).max(200).optional(),
 }).strict().superRefine((file, ctx) => {
-  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) + (file.transitionFamilies ?? []).reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
+  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) + [...(file.transitionFamilies ?? []), ...(file.pictureFamilies ?? [])].reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "legacy requests and effect versions exceed the combined 200-record limit" });
-  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id), ...(file.transitionFamilies ?? []).map(family => family.id)];
+  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id), ...[...(file.transitionFamilies ?? []), ...(file.pictureFamilies ?? [])].map(family => family.id)];
   if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "request and effect family IDs must be unique" });
 })]);
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;

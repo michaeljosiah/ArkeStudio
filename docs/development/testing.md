@@ -124,6 +124,22 @@ state across Fold resizing, and returning to the timeline without authoring a co
 For resource-limited local runs, put `--test-concurrency=4` **before the file globs** in each
 workspace's Node test command. Client tests still require `packages/client` as their cwd.
 
+For Air Particles and layer blending (SPEC-055), run contracts
+`test/editor-air-particles.test.ts`, `test/editor-effect-proposal.test.ts` and
+`test/editor-effect-renderer.test.ts`; client `test/editor-air-particles.test.tsx` and
+`test/editor-picture-review.test.tsx`; coordinator
+`test/productions/editor-picture-requests.test.ts`. These exercise deterministic late seeks,
+physics/texture controls, Pattern protection and sticky edits, clip lineage across splits,
+fixed passage protection, explicit Review/Release, exact Apply and one-step Undo.
+Require the native `test/media/editor-effect-native.test.ts` suite with
+`ARKE_EFFECT_NATIVE_REQUIRED=1`; its Screen/Add case compares source alpha, clip opacity,
+scoped/composition effects and crossfades against the shared compositor (at most four
+8-bit channel levels of native rounding). After building, run
+`node --import tsx apps/desktop/scripts/smoke-editor-effects.mjs` for all seven presets
+through the sandboxed Electron file-page worker. Compare live Inspector, phone sheet and
+Arke cards with approved turns 220–223; label locally staged cards as fixtures when no
+model call was made. Keep world media and acceptance captures outside the public repository.
+
 For editor effects T-1 (SPEC-053 accepted), run contracts `test/editor-effects.test.ts`,
 `test/editor-effect-protection.test.ts`, `test/editor-request.test.ts`, `test/timeline.test.ts`
 and `test/render-plan.test.ts`, together with coordinator `test/productions/timeline-effects.test.ts`,

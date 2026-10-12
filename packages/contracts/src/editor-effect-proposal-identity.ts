@@ -161,12 +161,12 @@ export function admitEffectModelIdentity(input: { ledger: EffectIdentityLedger; 
   return { ledger: validateEffectIdentityLedger(ledger), commands };
 }
 
-/** Final authored identities must remain exactly attached to their admitted origin/seed. */
+/** Creation seeds are allocated by the host; Pattern is subsequently an authored protected setting. */
 export function reconcileEffectIdentityLedger(ledger: EffectIdentityLedger, effects: readonly EffectClip[]): EffectIdentityLedger {
   const next = structuredClone(ledger);
   for (const effect of effects) {
     const segment = next.segments.find(row => row.clipId === effect.id), origin = next.origins.find(row => row.originId === segment?.originId);
-    if (!segment || !origin || origin.lineageId !== effect.lineageId || origin.seed !== effect.seed) refused("Effect identity, lineage or seed differs from its admitted origin.");
+    if (!segment || !origin || origin.lineageId !== effect.lineageId) refused("Effect identity or lineage differs from its admitted origin.");
     for (const [kind, points] of [["intensity-point", effect.intensityCurve.points], ["reaction-point", effect.reactionCurve.points], ["cue", effect.cueOverrides]] as const) for (const point of points) {
       if (!next.points.some(row => row.originId === origin.originId && row.kind === kind && row.authoredId === point.id)) refused(`Unmapped ${kind} ${point.id}. Provide a stable point identity.`);
     }

@@ -68,9 +68,9 @@ const clip = (id = "cl_dust") => document.querySelector<HTMLButtonElement>(`[dat
 const compile = (timeline: ProductionTimeline, commands: TimelineCommand[]) => applyTimelineCommands(timeline, commands as TimelineClipCommand[], { effectAuthority: "human" });
 
 describe("Effects library and independent Add", () => {
-  it("offers all six presets and Cancel authors nothing", async () => {
+  it("offers all seven presets and Cancel authors nothing", async () => {
     const props = libraryProps(); await mount(<EffectLibrary {...props} />);
-    assert.deepEqual(buttons(document.querySelector('[aria-label="Effect presets"]')!).map(value => value.getAttribute("aria-label")), ["Floating dust", "Embers", "Snow", "Floating lights", "Rain", "Smoke"]);
+    assert.deepEqual(buttons(document.querySelector('[aria-label="Effect presets"]')!).map(value => value.getAttribute("aria-label")), ["Floating dust", "Embers", "Snow", "Floating lights", "Rain", "Smoke", "Air Particles"]);
     await click(button("Add effect")); assert.ok(button("Selected range").disabled);
     await click(button("Cancel")); assert.equal(props.sent.length, 0); assert.equal(props.created.length, 0);
   });

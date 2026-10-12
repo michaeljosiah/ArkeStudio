@@ -10,6 +10,7 @@ import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 import type { FrameRate } from "./world.js";
 import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection } from "./editor-effect-render-plan.js";
+import type { PictureBlendMode } from "./editor-effects.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -628,6 +629,7 @@ export function buildExportPlan(
  * drawtext label; clips trimmed by their ranges; everything concatenated in a single encode.
  */
 export interface EffectAlphaInput {
+  blendMode?: PictureBlendMode;
   /** Absent for the final composition layer; a clip id for a source-atop picture layer. */
   pictureClipId?: string;
   path: string;
@@ -643,8 +645,8 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   let inputIndex = 0, last = "effectGround";
   args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
   filters.push(`[${inputIndex++}:v]format=gbrap[${last}]`);
-  const blending = projection.pictureLayers.some(picture => picture.fadeIn || picture.fadeOut);
-  const tracks = new Map<string, string[]>();
+  const blending = projection.pictureLayers.some(picture => picture.fadeIn || picture.fadeOut || picture.blendMode && picture.blendMode !== "normal" || picture.opacity !== undefined && picture.opacity !== 1);
+  const tracks = new Map<string, Array<{ source: string; picture: typeof projection.pictureLayers[number] }>>();
   for (const [number, picture] of projection.pictureLayers.entries()) {
     const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
     if (from >= to) continue;
@@ -669,26 +671,25 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       // Keep the last source frame at or before the production sample, including a non-aligned
       // in-point. Input seeking would discard that predecessor and pick the following frame.
       filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
-      const overlay = alpha.find(value => value.pictureClipId === picture.clipId);
-      if (overlay) {
+      for (const [layer, overlay] of alpha.filter(value => value.pictureClipId === picture.clipId).entries()) {
         args.push("-i", overlay.path);
-        const effect = `ea${number}`, mask = `em${number}`, next = `es${number}`;
+        const effect = `ea${number}_${layer}`, mask = `em${number}_${layer}`, next = `es${number}_${layer}`;
         filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${overlay.startFrame - startFrame},split[${effect}][${mask}Source]`);
         filters.push(`[${mask}Source]alphaextract,format=gbrap[${mask}]`);
         // Source-atop preserves the picture's alpha. Multiplying both alphas and then using
         // ordinary overlay would wrongly increase coverage at transparent edges (R-18).
-        filters.push(`[${source}][${effect}][${mask}]maskedmerge=planes=7[${next}]`);
+        if (overlay.blendMode && overlay.blendMode !== "normal") {
+          filters.push(`[${source}]split[${next}Base][${next}Backdrop]`);
+          filters.push(`[${next}Backdrop][${effect}]blend=all_mode=${overlay.blendMode === "add" ? "addition" : "screen"}:shortest=1[${next}Blend]`);
+          filters.push(`[${next}Base][${next}Blend][${mask}]maskedmerge=planes=7[${next}]`);
+        } else filters.push(`[${source}][${effect}][${mask}]maskedmerge=planes=7[${next}]`);
         source = next;
       }
     }
     const next = `ec${number}`;
     if (blending) {
-      const weight = [picture.fadeIn ? `max(0,min(1,(N+${from}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
-        picture.fadeOut ? `1-max(0,min(1,(N+${from}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
-      // Weight alpha before premultiplying, then add the two pictures on their own track.
-      // Over-ing two faded pictures separately would dim an opaque midpoint (SPEC-054 R-4).
-      filters.push(`[${source}]geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1,pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${shiftFrames}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${next}]`);
-      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), next]);
+      filters.push(`[${source}]pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${shiftFrames}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${next}]`);
+      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), { source: next, picture }]);
       continue;
     }
     // Keep placement and half-open coverage in frames. Decimal seconds can round on opposite
@@ -696,7 +697,29 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
     filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${shiftFrames})*lt(n,${to - startFrame})'[${next}]`);
     last = next;
   }
-  for (const [index, pictures] of [...tracks.values()].entries()) {
+  for (const [index, entries] of [...tracks.values()].entries()) {
+    const styled = entries.filter(entry => entry.picture.blendMode && entry.picture.blendMode !== "normal");
+    if (styled.length) {
+      filters.push(`[${last}]split=${styled.length + 1}[trackBase${index}]${styled.map((_, i) => `[trackBackdrop${index}_${i}]`).join("")}`);
+      last = `trackBase${index}`;
+    }
+    let styleIndex = 0;
+    const pictures = entries.map(({ source, picture }, i) => {
+      const prefix = `pictureStyle${index}_${i}`;
+      if (picture.blendMode && picture.blendMode !== "normal") {
+        filters.push(`[${source}]split[${prefix}Colour][${prefix}MatteSource]`);
+        filters.push(`[${prefix}MatteSource]alphaextract[${prefix}Matte]`);
+        filters.push(`[trackBackdrop${index}_${styleIndex++}][${prefix}Colour]blend=all_mode=${picture.blendMode === "add" ? "addition" : "screen"}:shortest=1,format=gbrp[${prefix}Blend]`);
+        filters.push(`[${prefix}Blend][${prefix}Matte]alphamerge[${prefix}Straight]`);
+        source = `${prefix}Straight`;
+      }
+      const weight = [picture.opacity ?? 1, picture.fadeIn ? `max(0,min(1,(N+${startFrame}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
+        picture.fadeOut ? `1-max(0,min(1,(N+${startFrame}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
+      // Each source blends against the same lower-track backdrop. Weight premultiplied
+      // contributions, then composite the track once: opaque crossfades never dim midway.
+      filters.push(`[${source}]geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1[${prefix}Weighted]`);
+      return `${prefix}Weighted`;
+    });
     let track = pictures[0]!;
     for (let number = 1; number < pictures.length; number++) {
       const sum = `transitionSum${index}_${number}`;
@@ -706,12 +729,18 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
     filters.push(`[${track}]unpremultiply=inplace=1[${straight}]`);
     filters.push(`[${last}][${straight}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[${next}]`); last = next;
   }
-  const composition = alpha.find(value => value.pictureClipId === undefined);
-  if (composition) {
+  for (const [layer, composition] of alpha.filter(value => value.pictureClipId === undefined).entries()) {
     args.push("-i", composition.path);
-    filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${composition.startFrame - startFrame}[compositionAlpha]`);
-    filters.push(`[${last}][compositionAlpha]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${composition.startFrame - startFrame})*lt(n,${composition.endFrame - startFrame})'[effectComposition]`);
-    last = "effectComposition";
+    const plate = `compositionAlpha${layer}`, next = `effectComposition${layer}`;
+    filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${composition.startFrame - startFrame}[${plate}]`);
+    if (composition.blendMode && composition.blendMode !== "normal") {
+      filters.push(`[${last}]split[${next}Base][${next}Backdrop]`);
+      filters.push(`[${plate}]split[${next}Colour][${next}MaskSource]`);
+      filters.push(`[${next}MaskSource]alphaextract,format=gbrap[${next}Mask]`);
+      filters.push(`[${next}Backdrop][${next}Colour]blend=all_mode=${composition.blendMode === "add" ? "addition" : "screen"}:shortest=1[${next}Blend]`);
+      filters.push(`[${next}Base][${next}Blend][${next}Mask]maskedmerge=planes=7[${next}]`);
+    } else filters.push(`[${last}][${plate}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${composition.startFrame - startFrame})*lt(n,${composition.endFrame - startFrame})'[${next}]`);
+    last = next;
   }
   return { last, inputIndex };
 }
