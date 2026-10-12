@@ -119,6 +119,8 @@ Use `ARKE_EFFECT_NATIVE_REQUIRED=1` and `ARKE_EFFECT_EVIDENCE_DIR` to require an
 Application acceptance additionally uses an isolated scratch world through the normal join,
 batch, protection, Arke composite and export controls. Compare matching states with approved
 designs 216–219 at desktop, Fold and phone sizes; the design fixture alone is not acceptance.
+Client `test/cut-layout.test.tsx` also checks the inline phone transition Inspector, its retained
+state across Fold resizing, and returning to the timeline without authoring a command.
 For resource-limited local runs, put `--test-concurrency=4` **before the file globs** in each
 workspace's Node test command. Client tests still require `packages/client` as their cwd.
 
