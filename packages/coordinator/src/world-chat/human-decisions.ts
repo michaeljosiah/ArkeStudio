@@ -44,8 +44,20 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
         { kind: "editor-request", productionId, requestId: request.id }, action, blocked ? "blocked" : "pending", blocked ? action.blockedReason : undefined);
     }
     for (const family of (production.effectFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      const versions = new Map(family.versions.map(version => [version.id, version]));
       for (const version of family.versions) {
-        const action = version.actionId ? actionById.get(version.actionId) : family.actionId ? actionById.get(family.actionId) : undefined;
+        // Human successors belong beside the model revision they follow. Falling straight back
+        // to the family's first action put a later Release card above the reply it revised.
+        let ancestor = version;
+        const seen = new Set<string>();
+        while (!ancestor.actionId && ancestor.parentVersionId && !seen.has(ancestor.id)) {
+          seen.add(ancestor.id);
+          const parent = versions.get(ancestor.parentVersionId);
+          if (!parent) break;
+          ancestor = parent;
+        }
+        const actionId = ancestor.actionId ?? family.actionId;
+        const action = actionId ? actionById.get(actionId) : undefined;
         // An unopened story or measured spine has the same derived revision-zero base as requestBase.
         const currentRevision = production.timeline?.status === "invalid" ? null : production.timeline?.status === "ready" ? production.timeline.timeline.revision : 0;
         const stale = currentRevision === null || currentRevision !== version.dependencies.base.revision;
