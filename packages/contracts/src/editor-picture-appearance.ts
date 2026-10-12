@@ -35,8 +35,14 @@ export function applyPictureAppearanceCommand(tracks: readonly TimelineTrack[], 
   if (command.kind === "picture-release") {
     if (authority !== "human") throw new Error("Picture protection Release requires an explicit human action");
     if (!tracks.some(track => track.clips.some(clip => clip.visual?.protection?.some(rule => rule.id === command.ruleId)))) throw new Error("That picture protection is no longer present");
-    return tracks.map(track => ({ ...track, clips: track.clips.map(clip => clip.visual?.protection?.some(rule => rule.id === command.ruleId)
-      ? { ...clip, visual: { ...clip.visual, protection: clip.visual.protection.filter(rule => rule.id !== command.ruleId) } } : clip) }));
+    return tracks.map(track => ({ ...track, clips: track.clips.map(clip => {
+      if (!clip.visual?.protection?.some(rule => rule.id === command.ruleId)) return clip;
+      const { visual, ...rest } = clip, { protection, ...appearance } = visual;
+      const remaining = protection!.filter(rule => rule.id !== command.ruleId);
+      if (remaining.length) return { ...clip, visual: { ...appearance, protection: remaining } };
+      // Releasing implicit appearance must restore the ordinary picture render path.
+      return appearance.blendMode === undefined && appearance.opacity === undefined ? rest : { ...clip, visual: appearance };
+    }) }));
   }
   const track = tracks.find(row => row.clips.some(clip => clip.id === command.clipId)), clip = track?.clips.find(row => row.id === command.clipId);
   if (track?.kind !== "picture" || !clip) throw new Error("Choose an existing picture clip for appearance");

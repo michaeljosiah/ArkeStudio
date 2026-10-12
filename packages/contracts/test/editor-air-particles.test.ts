@@ -99,7 +99,24 @@ test("picture protection follows split identity before appearance exists, while 
   assert.throws(() => applyTimelineCommands(protectedValue, [{ kind: "picture-appearance", clipId: "cl_a", patch: { opacity: .4 } }]), /protect/i);
   assert.equal(applyTimelineCommands(protectedValue, [{ kind: "picture-appearance", clipId: "cl_c", patch: { opacity: .4 } }]).tracks[0]!.clips[2]!.visual?.opacity, .4);
   const released = human(protectedValue, [{ kind: "picture-release", ruleId: "vp_split" }]);
-  assert.ok(released.tracks[0]!.clips.every(clip => !clip.visual?.protection?.length));
+  assert.ok(released.tracks[0]!.clips.every(clip => clip.visual === undefined));
+  assert.deepEqual(undoTimelineHistory(released).tracks, protectedValue.tracks);
+  assert.deepEqual(redoTimelineHistory(undoTimelineHistory(released)).tracks, released.tracks);
+});
+
+test("releasing the last picture rule preserves authored appearance and any other rule", () => {
+  for (const appearance of [{ blendMode: "screen" as const, opacity: .4 }, { blendMode: "normal" as const, opacity: 1 }, {}]) {
+    const value = base(); picture(value).visual = appearance;
+    const protectedValue = human(value, [
+      { kind: "picture-protect", clipId: "cl_a", rule: { id: "vp_blend", property: "blendMode", scope: { kind: "whole" } } },
+      { kind: "picture-protect", clipId: "cl_a", rule: { id: "vp_opacity", property: "opacity", scope: { kind: "whole" } } },
+    ]);
+    const partial = human(protectedValue, [{ kind: "picture-release", ruleId: "vp_blend" }]);
+    assert.deepEqual(picture(partial).visual, { ...appearance, protection: [picture(protectedValue).visual!.protection![1]] });
+    const released = human(partial, [{ kind: "picture-release", ruleId: "vp_opacity" }]);
+    assert.deepEqual(picture(released).visual, Object.keys(appearance).length ? appearance : undefined);
+    assert.deepEqual(undoTimelineHistory(released).tracks, partial.tracks);
+  }
 });
 test("picture proposal retains each manual property and pending protection across broad revisions", () => {
   const original = base(), model: ModelPictureProposal = { summary: "Lighten", commands: [{ kind: "picture-appearance", clipId: "cl_a", patch: { blendMode: "screen", opacity: .8 } }] };
