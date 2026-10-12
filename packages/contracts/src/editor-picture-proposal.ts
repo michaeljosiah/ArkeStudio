@@ -69,8 +69,10 @@ export function pictureStickyEdits(commands: readonly PictureAppearanceCommand[]
 export function compilePictureProposal(base: ProductionTimeline, model: ModelPictureProposal, sticky: readonly PictureSticky[], options: TrustedTimelineCompileOptions) {
   const notes: string[] = [], conflicts: string[] = [];
   const human: PictureAppearanceCommand[] = [];
-  for (const row of sticky) for (const command of row.commands) if (command.kind === "picture-release" && row.releaseBaseline !== pictureProtectionFingerprint(base, command.ruleId)) {
-    return { reduction: null, candidate: base, notes, conflicts: ["The protected picture setting changed after Release. Review this version and explicitly release the named rule again."] };
+  for (const row of sticky) for (const command of row.commands) if (command.kind === "picture-release") {
+    const currentFingerprint = pictureProtectionFingerprint(base, command.ruleId);
+    if (currentFingerprint !== null && row.releaseBaseline !== currentFingerprint) return {
+      reduction: null, candidate: base, notes, conflicts: ["The protected picture setting changed after Release. Review this version and explicitly release the named rule again."] };
   }
   for (const row of sticky) for (const command of row.commands) if (command.kind === "picture-release" && base.tracks.some(track => track.clips.some(clip => clip.visual?.protection?.some(rule => rule.id === command.ruleId)))) human.push(command);
   for (const row of sticky) if (row.baseline) for (const command of row.commands) if (command.kind === "picture-protect") {

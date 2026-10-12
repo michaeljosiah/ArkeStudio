@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { defaultEffectClip, evaluateEffectFrame, rasterizeEffectFrame, clearAirParticleCache, airParticleCacheBytes, AIR_PARTICLE_PROFILE,
   compositeRgba, addWeightedPicture, compositeWeightedTrack, moveEffect, trimEffect, restoreEffectCommands, applyTimelineCommands,
   ProductionTimelineSchema, undoTimelineHistory, redoTimelineHistory, compilePictureProposal, pictureStickyEdits, pictureAppearanceState, keepPictureAppearance,
-  effectRenderCapabilityProblem, PictureProposalVersionSchema, pictureAppearanceDelta, withPictureAppearance, type ProductionTimeline, type TimelineClipCommand, type ModelPictureProposal } from "../src/index.js";
+  effectRenderCapabilityProblem, PictureProposalVersionSchema, pictureAppearanceDelta, withPictureAppearance, finishTrustedTimelineSteps, type ProductionTimeline, type TimelineClipCommand, type ModelPictureProposal } from "../src/index.js";
 const air = () => defaultEffectClip({ id: "cl_air", lineageId: "ef_air", seed: 81273, startFrame: 0, durationFrames: 45000, preset: "air-particles" });
 const frame = (effect = air(), absoluteFrame = 240) => evaluateEffectFrame({ effect, absoluteFrame, frameRate: 25, targetAspectRatio: 16 / 9 });
 test("Air Particles cold and cached seeks, loops, moves and head trims preserve exact frames", () => {
@@ -97,7 +97,9 @@ test("picture proposal retains each manual property and pending protection acros
   sticky = pictureStickyEdits([{ kind: "picture-release", ruleId: "vp_screen" }], sticky, pictureAppearanceState(next.candidate));
   const released = compilePictureProposal(original, revised, sticky, {}); assert.equal(picture(released.candidate).visual?.blendMode, "add");
   const kept = compilePictureProposal(original, revised, keepPictureAppearance(original, "cl_a", sticky), {});
-  assert.equal(picture(kept.candidate).visual?.blendMode, "normal"); assert.equal(picture(kept.candidate).visual?.opacity, 1);
+  assert.equal(picture(kept.candidate).visual, undefined);
+  assert.deepEqual(pictureAppearanceDelta(pictureAppearanceState(original), pictureAppearanceState(kept.candidate)), []);
+  assert.equal(finishTrustedTimelineSteps(original, kept.reduction!).kind, "unchanged");
   assert.equal(original.revision, 0); assert.equal(picture(original).visual, undefined);
   assert.throws(() => pictureStickyEdits([{ kind: "picture-release", ruleId: "vp_missing" }], [], pictureAppearanceState(original)), /no longer present/);
 });
@@ -122,4 +124,22 @@ test("Pattern and physics protections survive human edits and block suggestion c
   assert.equal(manual.effectProtection?.length, rules.length);
   assert.throws(() => applyTimelineCommands(manual, [{ kind: "effect-patch", clipId: "cl_air", patch: { seed: air().seed } }]), /protect/i);
   assert.equal(undoTimelineHistory(manual).tracks[1]!.effects![0]!.seed, air().seed);
+});
+
+test("Pattern edits update a split lineage in one undoable transaction and respect protected passages", () => {
+  const value = base(); value.tracks.push({ id: "tr_fx", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [air()] });
+  const split = human(value, [{ kind: "effect-split", clipId: "cl_air", atFrame: 300, newClipId: "cl_tail" }]);
+  const commands: TimelineClipCommand[] = [{ kind: "effect-patch", clipId: "cl_tail", patch: { seed: 123 } }];
+  for (const changed of [human(split, commands), applyTimelineCommands(split, commands)]) {
+    assert.deepEqual(changed.tracks[1]!.effects!.map(effect => effect.seed), [123, 123]);
+    assert.equal(changed.revision, split.revision + 1);
+    assert.deepEqual(undoTimelineHistory(changed).tracks, split.tracks);
+  }
+  const protectedValue = human(split, [{ kind: "effect-protect", rule: { id: "pr_pattern", kind: "property", lineageId: "ef_air", property: "seed",
+    scope: { kind: "passage", startFrame: 0, endFrame: 100 } } }]);
+  assert.throws(() => applyTimelineCommands(protectedValue, commands), /protect/i, "editing the tail cannot bypass the head's protected pattern");
+  const manual = human(protectedValue, commands);
+  assert.deepEqual(manual.tracks[1]!.effects!.map(effect => effect.seed), [123, 123]);
+  assert.equal(manual.effectProtection?.length, 1);
+  assert.deepEqual(undoTimelineHistory(manual).effectProtection, protectedValue.effectProtection);
 });

@@ -1315,6 +1315,14 @@ function applyEffectCommand(working: Working, command: EffectCommand): void {
     }
   }
   working.tracks = working.tracks.map(item => item.id === track.id ? { ...item, effects: [...item.effects!.filter(item => item.id !== effect.id), ...replacements].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) } : item);
+  if (parsed.kind === "effect-patch" && parsed.patch.seed !== undefined) {
+    // Split segments share one simulation. Human and Arke Pattern edits update it atomically;
+    // the coherent-segment protection check below still checks every affected passage.
+    const seed = parsed.patch.seed;
+    working.tracks = working.tracks.map(item => !item.effects?.some(value => value.lineageId === effect.lineageId) ? item : {
+      ...item, effects: item.effects.map(value => value.lineageId === effect.lineageId ? { ...value, seed } : value),
+    });
+  }
   if (parsed.kind === "effect-duplicate") {
     let index = 0;
     const duplicated = duplicateEffectProtectionRules(working.effectProtection, effect.lineageId, parsed.newLineageId, parsed.startFrame - effect.startFrame, allEffects(working.tracks), nextRevision(working.timeline), () => `pr_${parsed.newClipId.slice(3)}-${index++}`);

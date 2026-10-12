@@ -6,7 +6,7 @@ import { storyTimelineFingerprint, pictureVersionRef, type PictureReviewOperatio
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
-import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
+import { applyHumanTimelineCommand, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { EditorEffectAnalysisService } from "../../src/productions/editor-effect-analysis.js";
 import { EditorEffectDependencies } from "../../src/productions/editor-effect-dependencies.js";
 import { stagePictureProposal, handlePictureReview, readPictureFamilies } from "../../src/productions/editor-picture-requests.js";
@@ -71,9 +71,64 @@ test("manual picture values, named protection and Keep Current remain sticky; Re
   await operate({ kind: "review", ref: release.ref });
   const keep = await operate({ kind: "keep", ref: release.ref, clipId: "cl_first" }); assert.equal(keep.outcome, "updated", keep.reason);
   const next = await stage({ ...model(.9), family: { id: ref.familyId, parentVersionId: keep.ref.versionId, candidateHash: keep.ref.candidateHash } });
-  assert.equal(next.version.pictures[0]!.visual?.opacity, 1); assert.equal(next.version.pictures[0]!.visual?.blendMode, "normal");
+  assert.equal(next.version.pictures[0]!.visual, undefined);
   assert.equal(await readTimeline(), before);
 
+});
+
+test("generic chat history cannot remove or reinstate picture protection from an applied composite", async () => {
+  const { store, stage, operate, readTimeline } = await setup();
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const edit = await operate({ kind: "edit", ref, commands: [{ kind: "picture-protect", clipId: "cl_first",
+    rule: { id: "vp_chat", property: "opacity", scope: { kind: "whole" } } }] });
+  const review = await operate({ kind: "review", ref: edit.ref });
+  const applied = await operate({ kind: "apply", ref: edit.ref, reviewId: review.reviewId! });
+  assert.equal(applied.outcome, "applied", applied.reason);
+  const protectedBytes = await readTimeline(), protectedValue = JSON.parse(protectedBytes);
+  await assert.rejects(applyTimelineCommand(store, productionId, { kind: "undo", baseRevision: protectedValue.revision }), /editor's Undo or Redo/);
+  assert.equal(await readTimeline(), protectedBytes);
+  await applyHumanTimelineCommand(store, productionId, { kind: "undo", baseRevision: protectedValue.revision });
+  const undoneBytes = await readTimeline(), undone = JSON.parse(undoneBytes);
+  assert.equal(undone.tracks[0].clips[0].visual, undefined);
+  await assert.rejects(applyTimelineCommand(store, productionId, { kind: "redo", baseRevision: undone.revision }), /editor's Undo or Redo/);
+  assert.equal(await readTimeline(), undoneBytes);
+  await applyHumanTimelineCommand(store, productionId, { kind: "redo", baseRevision: undone.revision });
+  assert.deepEqual(JSON.parse(await readTimeline()).tracks, protectedValue.tracks);
+});
+
+test("Keep Current preserves absent appearance and refuses a no-op Apply", async () => {
+  const { stage, operate, readTimeline } = await setup(), before = await readTimeline();
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const kept = await operate({ kind: "keep", ref, clipId: "cl_first" });
+  assert.equal(kept.outcome, "updated", kept.reason);
+  const review = await operate({ kind: "review", ref: kept.ref });
+  const applied = await operate({ kind: "apply", ref: kept.ref, reviewId: review.reviewId! });
+  assert.equal(applied.outcome, "refused"); assert.match(applied.reason!, /No changes/);
+  assert.equal(await readTimeline(), before);
+});
+
+test("Update accepts an already completed human Release and still requires a fresh Review", async () => {
+  const { store, stage, operate, readTimeline } = await setup();
+  const sourceFingerprint = storyTimelineFingerprint(store.getBundle().productions.find(value => value.meta.id === productionId)!);
+  let current = JSON.parse(await readTimeline());
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: current.revision, sourceFingerprint, commands: [
+    { kind: "picture-protect", clipId: "cl_first", rule: { id: "vp_released", property: "blendMode", scope: { kind: "whole" } } },
+  ] });
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const release = await operate({ kind: "edit", ref, commands: [{ kind: "picture-release", ruleId: "vp_released" }] });
+  current = JSON.parse(await readTimeline());
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: current.revision, sourceFingerprint,
+    commands: [{ kind: "picture-release", ruleId: "vp_released" }] });
+  const updated = await operate({ kind: "update", ref: release.ref });
+  assert.equal(updated.outcome, "updated", updated.reason); assert.equal(updated.reviewId, undefined);
+  const review = await operate({ kind: "review", ref: updated.ref });
+  const applied = await operate({ kind: "apply", ref: updated.ref, reviewId: review.reviewId! });
+  assert.equal(applied.outcome, "applied", applied.reason);
+  const clip = JSON.parse(await readTimeline()).tracks[0].clips[0];
+  assert.equal(clip.visual.blendMode, "screen"); assert.deepEqual(clip.visual.protection, []);
 });
 
 test("picture Apply detects changed source bytes and Update retains decisions but grants no Review", async () => {

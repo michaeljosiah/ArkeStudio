@@ -84,7 +84,7 @@ export function EffectInspector(props: EffectAuthoringProps & { children?: React
       <div className="fx-inspector__pattern"><div>Pattern<strong>{effect.seed}</strong></div><button type="button" disabled={disabled} onClick={() => {
         const random = crypto.getRandomValues(new Uint32Array(1))[0]!;
         patch({ seed: random === effect.seed ? (random + 1) >>> 0 : random }, "New effect pattern");
-      }}>New pattern</button></div><p className="fx-inspector__hint">Playback and seeking keep this pattern. New pattern is undoable.</p>
+      }}>New pattern</button></div><p className="fx-inspector__hint">Playback and seeking keep this pattern. New pattern updates all split segments together and is undoable.</p>
       {effect.preset.id === "air-particles" && <details className="fx-inspector__physics"><summary>Particle physics</summary>
         <EffectNumberField label="Airflow variation" value={(effect.motion.airflow ?? .5) * 100} min={0} max={100} step={1} suffix="%" disabled={disabled} slider resetToken={authoringRevision}
           onCommit={value => patch({ motion: { airflow: value / 100 } }, "Change airflow variation")} onPreview={value => preview(value === null ? null : { motion: { airflow: value / 100 } })} />

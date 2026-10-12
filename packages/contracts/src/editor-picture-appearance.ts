@@ -23,6 +23,13 @@ export const isPictureAppearanceCommand = (value: { kind: string }): value is Pi
 export const pictureAppearanceValue = (clip: TimelineClip, property: "blendMode" | "opacity") => property === "blendMode" ? clip.visual?.blendMode ?? "normal" : clip.visual?.opacity ?? 1;
 export const pictureAppearanceOrigin = (clip: TimelineClip): TimelineClip["id"] => clip.visualOriginId ?? clip.id;
 
+/** Generic chat history never acquires the authority to install or release picture rules. */
+export function timelineCarriesPictureAppearance(timeline: ProductionTimeline): boolean {
+  const carries = (clip: TimelineClip | null) => clip?.visual !== undefined || clip?.visualOriginId !== undefined;
+  return timeline.tracks.some(track => track.clips.some(carries)) || [...timeline.history.undo, ...timeline.history.redo]
+    .some(entry => entry.kind === "change" && entry.clips.some(change => carries(change.before) || carries(change.after)));
+}
+
 export function applyPictureAppearanceCommand(tracks: readonly TimelineTrack[], command: PictureAppearanceCommand, authority: "human" | "suggestion"): TimelineTrack[] {
   if (command.kind === "picture-release") {
     if (authority !== "human") throw new Error("Picture protection Release requires an explicit human action");
@@ -32,8 +39,13 @@ export function applyPictureAppearanceCommand(tracks: readonly TimelineTrack[], 
   }
   const track = tracks.find(row => row.clips.some(clip => clip.id === command.clipId)), clip = track?.clips.find(row => row.id === command.clipId);
   if (track?.kind !== "picture" || !clip) throw new Error("Choose an existing picture clip for appearance");
-  if (command.kind === "picture-appearance") return tracks.map(row => row.id !== track.id ? row : { ...row, clips: row.clips.map(value => value.id !== clip.id ? value :
-    { ...value, visual: PictureAppearanceSchema.parse({ ...value.visual, ...command.patch }) }) });
+  if (command.kind === "picture-appearance") {
+    // Keep Current must not materialize implicit defaults and create a spurious render layer.
+    const patch = Object.fromEntries(Object.entries(command.patch).filter(([key, value]) => value !== pictureAppearanceValue(clip, key as "blendMode" | "opacity")));
+    if (!Object.keys(patch).length) return [...tracks];
+    return tracks.map(row => row.id !== track.id ? row : { ...row, clips: row.clips.map(value => value.id !== clip.id ? value :
+      { ...value, visual: PictureAppearanceSchema.parse({ ...value.visual, ...patch }) }) });
+  }
   if (authority !== "human") throw new Error("Picture protection requires an explicit human action");
   if (tracks.some(row => row.clips.some(value => value.visual?.protection?.some(rule => rule.id === command.rule.id)))) throw new Error("Picture protection already exists; Release the named rule before replacing it");
   const origin = pictureAppearanceOrigin(clip);

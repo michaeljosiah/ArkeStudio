@@ -83,7 +83,7 @@ export type EffectReaction = z.infer<typeof EffectReactionSchema>;
 export type EffectCue = z.infer<typeof EffectCueSchema>;
 
 export const EffectPatchSchema = z.object({
-  seed: z.number().int().min(0).max(0xffffffff).optional(),
+  seed: z.number().int().min(0).max(0xffffffff).optional().describe("Pattern seed; updates every split segment sharing the effect lineage atomically."),
   preset: EffectPresetSchema.optional(), target: EffectTargetSchema.optional(), appearance: EffectAppearanceSchema.partial().strict().optional(),
   motion: EffectMotionSchema.partial().strict().optional(), fades: EffectFadesSchema.optional(),
   intensityCurve: EffectCurveSchema.optional(), reactionCurve: EffectCurveSchema.optional(),
