@@ -57,12 +57,6 @@ const SCREENS = [
   { group: "Arke · review a crossfade arrangement · proposed", screen: "Phone · editable review", frame: "219h", route: "Production / Cut", status: "drawn", checked: "2026-10-12", controls: [], notes: ["Current/Suggested and Apply remain above the picture. Changes live in the scrolling Arke sheet; Inspect opens the same transition controls. Proposed, awaiting design approval; not implemented." ] },
   // END CROSSFADE 216
 
-
-
-
-
-
-
   // BEGIN EDITOR EFFECTS 213
   { group: "The Cut · atmospheric effect layers · design approved", screen: "Effects · Effects in the Library", frame: "213a", route: "Production / Cut", status: "drawn", checked: "2026-10-11", controls: [], notes: ["Presets join the Library; Add effect chooses placement and Suggest arrangement enters the same authoring workflow. Design approved 2026-10-11; SPEC-053 proposed. Not implemented." ] },
   { group: "The Cut · atmospheric effect layers · design approved", screen: "Effects · Add a preset · target and time", frame: "213b", route: "Production / Cut", status: "drawn", checked: "2026-10-11", controls: [], notes: ["Visual target and exact time range are separate choices. Audio reaction starts off; no audio track is required. Design approved 2026-10-11; SPEC-053 proposed. Not implemented." ] },

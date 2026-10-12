@@ -84,7 +84,7 @@ const first=[...master.matchAll(/<section class="dv-turn" id="t(\d+)">/g)].find(
 if(!first)throw Error('No master turns');
 master=master.slice(0,first.index)+[...turns].reverse().map(turnHtml).join('\n')+master.slice(first.index);
 fs.writeFileSync(path.join(here,'Arke Studio.dc.html'),master);
-let build=fs.readFileSync(path.join(here,'build-review.mjs'),'utf8').replace(/\r?\n  \/\/ BEGIN CROSSFADE 216[\s\S]*?  \/\/ END CROSSFADE 216\r?\n/g,'\n');
+let build=fs.readFileSync(path.join(here,'build-review.mjs'),'utf8').replace(/\r?\n  \/\/ BEGIN CROSSFADE 216[\s\S]*?  \/\/ END CROSSFADE 216(?:\r?\n)+/g,'\n');
 const entries=turns.flatMap(t=>t.frames.map(([l,title,o,note])=>`  { group: ${JSON.stringify(t.title+' · proposed')}, screen: ${JSON.stringify(title)}, frame: "${t.id}${l}", route: "Production / Cut", status: "drawn", checked: "2026-10-12", controls: [], notes: [${JSON.stringify(note+' Proposed, awaiting design approval; not implemented.')} ] },`));
 build=build.replace('const SCREENS = [','const SCREENS = [\n  // BEGIN CROSSFADE 216\n'+entries.join('\n')+'\n  // END CROSSFADE 216\n');
 if(!build.includes('file: "crossfade-216.review.html"'))build=build.replace('const PAGES = [','const PAGES = [\n  { file: "crossfade-216.review.html", what: "Proposed crossfade designs 216–219 and isolated prototype: fixed cuts, bulk authoring, protection and Arke review.", state: "proposed · awaiting design review · not implemented" },');
