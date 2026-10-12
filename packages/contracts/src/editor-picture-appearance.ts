@@ -72,6 +72,11 @@ export function pictureAppearanceProtectionProblem(before: Pick<ProductionTimeli
   return conflicts.length ? conflicts.map(value => value.message.replaceAll("effect", "picture")).join("; ") : null;
 }
 
+/** A pending Release names the protected value/scope the person actually saw. */
+export function pictureProtectionFingerprint(timeline: Pick<ProductionTimeline, "tracks">, ruleId: string): string | null {
+  return protectionProjection(timeline.tracks).rules.find(rule => rule.id === `pr_visual_${ruleId.slice(3)}`)?.baselineFingerprint ?? null;
+}
+
 export function duplicatePictureAppearance(clip: TimelineClip, id: TimelineClip["id"], delta: number): Pick<TimelineClip, "visual" | "visualOriginId"> {
   if (!clip.visual) return {};
   return { visualOriginId: id, visual: { ...clip.visual, ...(clip.visual.protection ? { protection: clip.visual.protection.map((rule, index) => ({

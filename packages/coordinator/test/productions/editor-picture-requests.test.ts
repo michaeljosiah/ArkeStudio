@@ -86,3 +86,31 @@ test("picture Apply detects changed source bytes and Update retains decisions bu
   assert.equal((await operate({ kind: "apply", ref: update.ref, reviewId: review.reviewId! })).outcome, "refused");
 });
 
+test("a changed protected value requires a fresh named Release after Update", async () => {
+  const { store, stage, operate, readTimeline } = await setup();
+  const sourceFingerprint = storyTimelineFingerprint(store.getBundle().productions.find(value => value.meta.id === productionId)!);
+  let current = JSON.parse(await readTimeline());
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: current.revision, sourceFingerprint, commands: [
+    { kind: "picture-protect", clipId: "cl_first", rule: { id: "vp_current", property: "blendMode", scope: { kind: "whole" } } },
+  ] });
+  const first = await stage(), ref = pictureVersionRef(first.family.id, first.version);
+  await operate({ kind: "review", ref });
+  const release = await operate({ kind: "edit", ref, commands: [{ kind: "picture-release", ruleId: "vp_current" }] });
+  assert.equal(release.outcome, "updated", release.reason);
+  current = JSON.parse(await readTimeline());
+  await applyHumanTimelineCommand(store, productionId, { kind: "commands", baseRevision: current.revision, sourceFingerprint, commands: [
+    { kind: "picture-appearance", clipId: "cl_first", patch: { blendMode: "add" } },
+  ] });
+  const updated = await operate({ kind: "update", ref: release.ref }); assert.equal(updated.outcome, "updated", updated.reason);
+  const family = (await readPictureFamilies(store, productionId))[0]!;
+  assert.match(family.versions.at(-1)!.conflicts[0]!, /changed after Release/);
+  assert.equal(family.versions.at(-1)!.pictures[0]!.visual?.protection?.length, 1);
+  const review = await operate({ kind: "review", ref: updated.ref }); assert.equal(review.outcome, "reviewed", review.reason);
+  assert.equal((await operate({ kind: "apply", ref: updated.ref, reviewId: review.reviewId! })).outcome, "refused");
+  const renewed = await operate({ kind: "edit", ref: updated.ref, commands: [{ kind: "picture-release", ruleId: "vp_current" }] });
+  assert.equal(renewed.outcome, "updated", renewed.reason); assert.equal(renewed.reviewId, undefined);
+  const reviewed = await operate({ kind: "review", ref: renewed.ref });
+  const applied = await operate({ kind: "apply", ref: renewed.ref, reviewId: reviewed.reviewId! });
+  assert.equal(applied.outcome, "applied", applied.reason);
+  assert.equal(JSON.parse(await readTimeline()).tracks[0].clips[0].visual.blendMode, "screen");
+});

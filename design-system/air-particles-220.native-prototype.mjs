@@ -40,14 +40,15 @@ function render(keep=false){
 }
 function reset(){current=nativeDefaults();candidate=null;draft=null;flow=flowDefaults();undo=[];pendingUndo=[];appliedBefore=null;focus='library';panel='inspector';sheet=false;libraryOpen=false;message='';playing=false;clock=48;overlay=false;expanded=false;chatFocus='';disclosures={physics:false,advanced:false,protection:false};}
 function sample(){current={...nativeDefaults(),added:true,rules:sampleRules()};overlay=false;}
-function snapshot(){if(flow.review){pendingUndo.push({candidate:copy(candidate),adjusted:[...flow.adjusted],kept:[...flow.kept],releases:[...flow.releases]});}else undo.push(copy(current));}
-function setActive(p){if(flow.review)candidate=p;else{current=p;if(flow.ready)flow.stale=true;}}
+function snapshot(){if(flow.review){pendingUndo.push({candidate:copy(candidate),flow:copy(flow)});}else undo.push(copy(current));}
+function markStale(){flow.stale=true;if(flow.incoming)flow.incoming.rebased=false;}
+function setActive(p){if(flow.review)candidate=p;else{current=p;if(flow.ready)markStale();}}
 function protectedKey(p,k){return p.rules.some(r=>r.key===k);}
 function proposal(base,less=false){const p=copy(base);p.added=true;const changes=less?{amount:Math.max(10,p.amount-12),airflow:Math.max(0,p.airflow-10),speed:Math.max(5,p.speed-10)}:{amount:Math.min(100,p.amount+15),size:Math.min(100,p.size+15),opacity:Math.min(100,p.opacity+15)};for(const [key,v] of Object.entries(changes))if(!protectedKey(p,key)&&!flow.adjusted.includes(key))p[key]=v;return p;}
-function arrive(){if(!flow.ready){candidate=proposal(current);flow.ready=true;flow.applied=false;flow.version=1;}else incoming(proposal(candidate,true));message=flow.review?'A new card is ready. The reviewed preview stays active.':'Suggestion ready in Arke. Current stays active.';}
-function incoming(values,releases=flow.releases){flow.incoming={version:Math.max(flow.version,flow.incoming?.version||0)+1,values:copy(values),releases:[...releases],adjusted:[...flow.adjusted]};}
-function markAdjustment(key){if(flow.review&&!flow.adjusted.includes(key))flow.adjusted.push(key);if(flow.incoming){const next={...flow.incoming.values,[key]:candidate[key]};incoming(next,flow.incoming.releases);message='A fresh waiting version carries your adjustment. The active preview stays selected.';}}
-function commit(p,key){snapshot();setActive(p);if(flow.review)markAdjustment(key);}
+function arrive(){if(!flow.ready){flow=flowDefaults();pendingUndo=[];candidate=proposal(current);flow.ready=true;}else incoming(proposal(candidate,true));message=flow.review?'A new card is ready. The reviewed preview stays active.':'Suggestion ready in Arke. Current stays active.';}
+function incoming(values,releases=flow.releases,rebased=false){flow.incoming={version:Math.max(flow.version,flow.incoming?.version||0)+1,values:copy(values),releases:[...releases],adjusted:[...flow.adjusted],rebased};}
+function markAdjustment(keys){keys=Array.isArray(keys)?keys:[keys];for(const key of keys)if(flow.review&&!flow.adjusted.includes(key))flow.adjusted.push(key);if(flow.incoming){const next={...flow.incoming.values};for(const key of keys)next[key]=candidate[key]===undefined?undefined:copy(candidate[key]);incoming(next,flow.incoming.releases,flow.incoming.rebased);message='A fresh waiting version carries your adjustment. The active preview stays selected.';}}
+function commit(p,key){const before=active(),keys=Object.keys(p).filter(k=>JSON.stringify(before[k])!==JSON.stringify(p[k]));snapshot();setActive(p);if(flow.review)markAdjustment(keys.length?keys:[key]);}
 function valid(p){return p.start>=0&&p.end<=1728&&p.start<p.end&&p.fadeIn>=0&&p.fadeOut>=0&&p.fadeIn<=p.end-p.start&&p.fadeOut<=p.end-p.start;}
 function edit(el){
  if(readOnly())return;
@@ -71,7 +72,7 @@ function protect(rule){if(readOnly())return;const p=copy(active());if(p.rules.so
 function release(id,pending){
  const source=pending?(candidate||current):current,rule=source.rules.find(r=>r.id===id);if(!rule)return;
  if(pending){const p=copy(flow.incoming?.values||candidate||current);p.rules=p.rules.filter(r=>r.id!==id);incoming(p,[...new Set([...(flow.incoming?.releases||flow.releases),id])]);flow.needsReview=true;panel='arke';sheet=true;chatFocus='incoming';expanded=false;message='Named Release on Apply prepared. Review the fresh card before Apply.';}
- else{snapshot();current.rules=current.rules.filter(r=>r.id!==id);if(flow.ready)flow.stale=true;message='Named Current rule released · Undo available';}
+ else{snapshot();current.rules=current.rules.filter(r=>r.id!==id);if(flow.ready)markStale();message='Named Current rule released · Undo available';}
 }
 function act(a){
  message='';chatFocus='';
@@ -87,7 +88,7 @@ function act(a){
  case 'add':snapshot();setActive({...draft,added:true,origin:draft.start,fadeStart:draft.start,fadeEnd:draft.end});clock=Math.min(draft.end-1,draft.start+48);draft=null;focus='placement';panel='inspector';sheet=true;break;
  case 'fit-fades':if(!readOnly())commit({...active(),fadeStart:active().start,fadeEnd:active().end},'fades');break;
  case 'pattern':if(!readOnly())commit({...active(),seed:active().seed+173},'seed');break;
- case 'undo':if(flow.review&&flow.comparison==='suggested'&&pendingUndo.length){const p=pendingUndo.pop();candidate=p.candidate;Object.assign(flow,{adjusted:p.adjusted,kept:p.kept,releases:p.releases});message='Pending edit restored. Current is unchanged.';}else if(!flow.review&&undo.length){current=undo.pop();candidate=null;flow=flowDefaults();message='Previous authored arrangement and rules restored.';}break;
+ case 'undo':if(flow.review&&flow.comparison==='suggested'&&pendingUndo.length){const p=pendingUndo.pop();candidate=p.candidate;flow=p.flow;message='Pending edit restored. Current is unchanged.';}else if(!flow.review&&undo.length){current=undo.pop();candidate=null;flow=flowDefaults();message='Previous authored arrangement and rules restored.';}break;
  case 'play':playing=!playing;last=0;break;
  case 'inspect':panel='inspector';sheet=true;focus='top';break;
  case 'inspect-effect':if(flow.review&&flow.comparison==='suggested'){panel='inspector';sheet=true;focus='appearance';}break;
@@ -96,14 +97,14 @@ function act(a){
  case 'close-library':libraryOpen=false;break;
  case 'close-sheet':sheet=false;if(device()!=='desktop')panel='inspector';break;
  case 'review':if(flow.ready&&!flow.stale&&!flow.needsReview){flow.review=true;flow.comparison='suggested';if(device()!=='desktop'){sheet=false;panel='inspector';}}break;
- case 'review-incoming':if(flow.incoming){const next=flow.incoming;candidate=copy(next.values);flow.version=next.version;flow.releases=[...next.releases];flow.adjusted=[...next.adjusted];flow.incoming=null;flow.ready=true;flow.review=true;flow.comparison='suggested';flow.stale=false;flow.needsReview=false;pendingUndo=[];if(device()!=='desktop'){sheet=false;panel='inspector';}}break;
+ case 'review-incoming':if(flow.incoming&&(!flow.stale||flow.incoming.rebased)){const next=flow.incoming;candidate=copy(next.values);flow.version=next.version;flow.releases=[...next.releases];flow.adjusted=[...next.adjusted];flow.incoming=null;flow.ready=true;flow.review=true;flow.comparison='suggested';flow.stale=false;flow.needsReview=false;pendingUndo=[];if(device()!=='desktop'){sheet=false;panel='inspector';}}break;
  case 'compare-current':flow.comparison='current';break;
  case 'compare-suggested':flow.comparison='suggested';break;
  case 'close-review':flow.review=false;flow.comparison='current';break;
  case 'changes':panel='arke';sheet=true;expanded=true;if(flow.needsReview&&flow.incoming)chatFocus='incoming';break;
  case 'details':expanded=!expanded;break;
  case 'revise':panel='arke';sheet=true;message='Use the scripted “less busy” revision above to demonstrate an arriving card.';break;
- case 'update':{const p=proposal(current);for(const key of flow.adjusted)p[key]=candidate[key];p.rules=copy(current.rules);incoming(p,[]);flow.needsReview=true;panel='arke';sheet=true;chatFocus='incoming';message='Fresh card prepared. Current and the active preview stay unchanged. Changed release baselines need a new named Release.';break;}
+ case 'update':{const p=proposal(current);for(const key of flow.adjusted)p[key]=candidate[key];p.rules=copy(current.rules);incoming(p,[],true);flow.needsReview=true;panel='arke';sheet=true;chatFocus='incoming';message='Fresh card prepared. Current and the active preview stay unchanged. Changed release baselines need a new named Release.';break;}
  case 'apply':if(flow.review&&!flow.stale&&!flow.needsReview&&flow.comparison==='suggested'&&changeCount(current,candidate,flow.releases)>0){undo.push(copy(current));appliedBefore=copy(current);current=copy(candidate);flow.applied=true;flow.review=false;flow.ready=false;flow.incoming=null;flow.comparison='current';panel='arke';sheet=true;message='Applied exact reviewed arrangement · one Undo';}break;
  case 'discard':candidate=null;flow=flowDefaults();pendingUndo=[];message='Discarded pending arrangement and release decisions. Current is unchanged.';break;
  case 'protect-start':case 'protect-end':{const key=a.slice(8);protect({id:'boundary-'+key,kind:'boundary',key});break;}
@@ -122,7 +123,7 @@ document.querySelectorAll('[data-native-demo]').forEach(b=>b.addEventListener('c
  else if(a==='arke'){reset();sample();arrive();panel='arke';sheet=true;}
  else if(a==='receive'){arrive();}
  else if(a==='less-busy'){if(!candidate)arrive();else incoming(proposal(candidate,true));message='Scripted revision arrived in Arke. The active preview and selected panel are unchanged.';}
- else if(a==='stale'){undo.push(copy(current));current.opacity=Math.max(0,current.opacity-5);if(flow.ready)flow.stale=true;message='Current opacity changed. Update and Review are required.';}
+ else if(a==='stale'){undo.push(copy(current));current.opacity=Math.max(0,current.opacity-5);if(flow.ready)markStale();message='Current opacity changed. Update and Review are required.';}
  else if(a==='overlay'){reset();current={...nativeDefaults(),added:true,end:190};overlay=true;focus='appearance';sheet=true;}
  else{if(!active().added)current.added=true;panel='inspector';focus=a;sheet=true;draft=null;if(a==='motion')disclosures.physics=true;if(a==='protection'){if(!current.rules.length&&!flow.review)current.rules=sampleRules();disclosures.protection=false;}}
  render();

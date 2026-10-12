@@ -142,7 +142,8 @@ jobs:
           ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
         run: node --import tsx --test --test-timeout=240000 test/world-chat/production-acceptance.test.ts
       - name: Measure shared procedural effects
-        run: node --import tsx scripts/benchmark-editor-effects.ts --output "${{ runner.temp }}/arke-editor-effects/benchmark.json" --expect-pixels-sha256 c75a584579c4673d2fe48c54dff560c3357bcc580622898b9dea7a73d54bfb0d
+        # SPEC-055 adds 72 Air Particles fixtures. The 456 legacy fixtures retain their digest.
+        run: node --import tsx scripts/benchmark-editor-effects.ts --output "${{ runner.temp }}/arke-editor-effects/benchmark.json" --expect-pixels-sha256 5ed3c1cbf7b5498a624950134e6185d31b8f2bca9ddfdbe8088c3a70a4a041ad
       - name: Verify native effect composition
         env:
           ARKE_EFFECT_NATIVE_REQUIRED: 1

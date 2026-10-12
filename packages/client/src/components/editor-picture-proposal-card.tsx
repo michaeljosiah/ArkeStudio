@@ -27,7 +27,7 @@ export function PictureProposalCard({ world, production, familyId, versionId }: 
         onClick={() => review.operate({ kind: "keep", ref, clipId: change.clipId })}>Keep Current here</button></>}</span></div>)}
       {version.notes.map((note, index) => <p className="xf-meta" key={index}>{note}</p>)}</details>
     {pending && <div className="xf-proposal-actions">{stale ? <button type="button" disabled={!!review.pending} onClick={() => review.operate({ kind: "update", ref })}>Update proposal</button>
-      : !active && <button type="button" className="xf-primary" disabled={!review.connected || freshness.checking || !!review.pending || !!version.conflicts.length}
+      : !active && <button type="button" className="xf-primary" disabled={!review.connected || freshness.checking || !!review.pending}
         onClick={() => { review.operate({ kind: "review", ref }); navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut`); }}>Review in timeline</button>}
       <button type="button" disabled={!!review.pending} onClick={() => review.operate({ kind: "discard", ref })}>Discard proposal</button></div>}
     {review.pending && <p role="status">Preparing and checking this version…</p>}{review.error && <p role="status">{review.error}</p>}

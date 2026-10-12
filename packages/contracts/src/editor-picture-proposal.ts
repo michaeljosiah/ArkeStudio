@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ConversationActionIdSchema, ConversationIdSchema, SlugSchema, UlidSchema } from "./ids.js";
-import { PictureAppearanceSchema, PictureAppearanceCommandSchema, pictureAppearanceValue, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
+import { PictureAppearanceSchema, PictureAppearanceCommandSchema, pictureAppearanceValue, pictureProtectionFingerprint, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { TimelineClipIdSchema, compileTrustedTimelineSteps, type ProductionTimeline, type TrustedTimelineCompileOptions } from "./timeline.js";
 import { EffectProposalDependenciesSchema } from "./editor-effect-proposal.js";
 import { effectAnalysisCanonicalJson as canonical } from "./editor-effect-analysis.js";
@@ -22,7 +22,7 @@ export const ModelPictureProposalSchema = z.object({ summary: z.string().min(1).
 export type ModelPictureProposal = z.infer<typeof ModelPictureProposalSchema>;
 export const PictureVersionRefSchema = z.object({ familyId: id, versionId: id, candidateHash: hash }).strict();
 export type PictureVersionRef = z.infer<typeof PictureVersionRefSchema>;
-export const PictureStickySchema = z.object({ key: id, commands: z.array(PictureAppearanceCommandSchema).max(4), baseline: PictureAppearanceStateSchema.optional() }).strict();
+export const PictureStickySchema = z.object({ key: id, commands: z.array(PictureAppearanceCommandSchema).max(4), baseline: PictureAppearanceStateSchema.optional(), releaseBaseline: z.string().max(4_000_000).nullable().optional() }).strict();
 export type PictureSticky = z.infer<typeof PictureStickySchema>;
 export const PictureProposalVersionSchema = z.object({ id, number: z.number().int().min(1), parentVersionId: id.optional(), actionId: ConversationActionIdSchema.optional(),
   origin: z.enum(["model", "adjustment", "release", "update", "history"]), summary: z.string().min(1).max(500), createdAt: z.string(),
@@ -44,7 +44,7 @@ export function pictureAppearanceDelta(before: readonly PictureAppearanceState[]
     return canonical(left) === canonical(right) ? [] : [{ clipId, before: left, after: right }];
   });
 }
-export function pictureStickyEdits(commands: readonly PictureAppearanceCommand[], sticky: readonly PictureSticky[], candidate: readonly PictureAppearanceState[]): PictureSticky[] {
+export function pictureStickyEdits(commands: readonly PictureAppearanceCommand[], sticky: readonly PictureSticky[], candidate: readonly PictureAppearanceState[], current?: ProductionTimeline): PictureSticky[] {
   let next = [...sticky];
   for (const command of commands) {
     if (command.kind === "picture-release" && !candidate.some(row => row.visual?.protection?.some(rule => rule.id === command.ruleId))) throw new Error("The named picture protection is no longer present");
@@ -56,7 +56,8 @@ export function pictureStickyEdits(commands: readonly PictureAppearanceCommand[]
       }
     } else {
       const key = command.kind === "picture-release" ? command.ruleId : command.rule.id;
-      next = [...next.filter(row => row.key !== key), { key, commands: [command], ...(command.kind === "picture-protect" ? { baseline: candidate.find(row => row.clipId === command.clipId) } : {}) }];
+      next = [...next.filter(row => row.key !== key), { key, commands: [command], ...(command.kind === "picture-protect" ? { baseline: candidate.find(row => row.clipId === command.clipId) }
+        : { releaseBaseline: current ? pictureProtectionFingerprint(current, command.ruleId) : null }) }];
     }
   }
   return next;
@@ -65,6 +66,9 @@ export function pictureStickyEdits(commands: readonly PictureAppearanceCommand[]
 export function compilePictureProposal(base: ProductionTimeline, model: ModelPictureProposal, sticky: readonly PictureSticky[], options: TrustedTimelineCompileOptions) {
   const notes: string[] = [], conflicts: string[] = [];
   const human: PictureAppearanceCommand[] = [];
+  for (const row of sticky) for (const command of row.commands) if (command.kind === "picture-release" && row.releaseBaseline !== pictureProtectionFingerprint(base, command.ruleId)) {
+    return { reduction: null, candidate: base, notes, conflicts: ["The protected picture setting changed after Release. Review this version and explicitly release the named rule again."] };
+  }
   for (const row of sticky) for (const command of row.commands) if (command.kind === "picture-release" && base.tracks.some(track => track.clips.some(clip => clip.visual?.protection?.some(rule => rule.id === command.ruleId)))) human.push(command);
   for (const row of sticky) if (row.baseline) for (const command of row.commands) if (command.kind === "picture-protect") {
     const value = row.baseline.visual?.[command.rule.property] ?? (command.rule.property === "opacity" ? 1 : "normal");

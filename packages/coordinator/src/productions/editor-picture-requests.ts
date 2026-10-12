@@ -160,7 +160,7 @@ export async function handlePictureReview(store: WorldStore, command: PictureRev
     const updateBase = op.kind === "update" ? family.versions.find(value => value.id === family.headVersionId)! : version;
     let sticky = [...updateBase.sticky], origin: PictureProposalVersion["origin"] = "adjustment", model = updateBase.model;
     if (op.kind === "edit") {
-      sticky = pictureStickyEdits(op.commands, sticky, version.pictures);
+      sticky = pictureStickyEdits(op.commands, sticky, version.pictures, base.current);
       if (op.commands.some(value => value.kind === "picture-release")) origin = "release";
     } else if (op.kind === "keep") {
       sticky = keepPictureAppearance(base.current, op.clipId, sticky);
