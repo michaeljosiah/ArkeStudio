@@ -1,6 +1,6 @@
 import { buildRenderPlan, defaultExportPreset, effectAnalysisCanonicalJson, EDITOR_EFFECT_RENDERER_VERSION, EFFECT_ANALYSIS_PROFILE,
   EFFECT_PRESET_CATALOGUE, EFFECT_RENDER_PROFILE, type ArtifactSidecar, type EffectProposalVersion, type ProductionBundle,
-  type ProductionTimeline } from "@arke-studio/contracts";
+  type ProductionTimeline, type TransitionProposalVersion } from "@arke-studio/contracts";
 import { effectAnalysisDigest } from "./editor-effect-analysis.js";
 import { effectReviewTimeline } from "./editor-effect-review-authoring.js";
 
@@ -10,7 +10,7 @@ export interface EffectReviewFreshnessInput {
   production: ProductionBundle;
   artifacts: readonly ArtifactSidecar[];
   base: ProductionTimeline;
-  version: EffectProposalVersion;
+  version: EffectProposalVersion | TransitionProposalVersion;
 }
 export interface PreparedEffectReviewFreshness {
   candidateHash: string;
@@ -56,7 +56,7 @@ export function prepareEffectReviewFreshness(input: EffectReviewFreshnessInput):
   }
   prepared.immediateReason = observableSourceProblem(input);
   if (prepared.immediateReason) return prepared;
-  const candidate = effectReviewTimeline(base, version);
+  const candidate = "transitions" in version ? { ...base, transitions: version.transitions, history: { undo: [], redo: [] } } : effectReviewTimeline(base, version);
   const resolved = buildRenderPlan({ production, artifacts, timeline: { status: "ready", timeline: candidate },
     scope: { kind: "production" }, preset: defaultExportPreset(production.meta) });
   if (!resolved.ok) {

@@ -43,6 +43,16 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
       add(`editor:${request.id}`, request.summary.slice(0, 200) || "Editor request", "Only you can accept this timeline edit",
         { kind: "editor-request", productionId, requestId: request.id }, action, blocked ? "blocked" : "pending", blocked ? action.blockedReason : undefined);
     }
+    for (const family of (production.transitionFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      for (const version of family.versions) {
+        const ancestor = [...family.versions].reverse().find(value => value.number <= version.number && value.actionId);
+        const action = ancestor?.actionId ? actionById.get(ancestor.actionId) : undefined;
+        const stale = production.timeline?.status !== "ready" || production.timeline.timeline.revision !== version.baseRevision;
+        const detail = version.conflicts[0] ?? (stale ? "Current changed · Update proposal" : undefined);
+        add(`transitions:${family.id}:${version.id}`, `Crossfades · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",
+          { kind: "transition-proposal", productionId, familyId: family.id, versionId: version.id }, action, family.status !== "pending" ? "settled" : detail ? "blocked" : "pending", detail);
+      }
+    }
     for (const family of (production.effectFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
       const versions = new Map(family.versions.map(version => [version.id, version]));
       for (const version of family.versions) {

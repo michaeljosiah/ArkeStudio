@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { TransitionJoins } from "./editor-transitions.js";
 import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
@@ -442,6 +443,7 @@ export function TypedTrackRows({
                 <span className="fy-track__empty">{filesOver ? `Drop to add · ${track.name}` : audio ? "drop sound here" : "drop a picture here"}</span>
               )}
               {laneHover !== null && laneHover.refused && <span className="fy-track__refuse">{refuseWords}</span>}
+              {track.kind === "picture" && <TransitionJoins trackId={track.id} totalFrames={span} />}
               {laneHover !== null && !laneHover.refused && (
                 <DropTarget
                   frame={laneHover.frame}

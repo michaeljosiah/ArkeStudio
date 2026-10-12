@@ -643,6 +643,8 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   let inputIndex = 0, last = "effectGround";
   args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
   filters.push(`[${inputIndex++}:v]format=gbrap[${last}]`);
+  const blending = projection.pictureLayers.some(picture => picture.fadeIn || picture.fadeOut);
+  const tracks = new Map<string, string[]>();
   for (const [number, picture] of projection.pictureLayers.entries()) {
     const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
     if (from >= to) continue;
@@ -680,10 +682,29 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       }
     }
     const next = `ec${number}`;
+    if (blending) {
+      const weight = [picture.fadeIn ? `max(0,min(1,(N+${from}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
+        picture.fadeOut ? `1-max(0,min(1,(N+${from}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
+      // Weight alpha before premultiplying, then add the two pictures on their own track.
+      // Over-ing two faded pictures separately would dim an opaque midpoint (SPEC-054 R-4).
+      filters.push(`[${source}]geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1,pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${shiftFrames}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${next}]`);
+      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), next]);
+      continue;
+    }
     // Keep placement and half-open coverage in frames. Decimal seconds can round on opposite
     // sides of the same boundary in setpts and overlay, dropping the first or final picture.
     filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(n,${shiftFrames})*lt(n,${to - startFrame})'[${next}]`);
     last = next;
+  }
+  for (const [index, pictures] of [...tracks.values()].entries()) {
+    let track = pictures[0]!;
+    for (let number = 1; number < pictures.length; number++) {
+      const sum = `transitionSum${index}_${number}`;
+      filters.push(`[${track}][${pictures[number]}]blend=all_mode=addition:shortest=1[${sum}]`); track = sum;
+    }
+    const straight = `transitionStraight${index}`, next = `transitionTrack${index}`;
+    filters.push(`[${track}]unpremultiply=inplace=1[${straight}]`);
+    filters.push(`[${last}][${straight}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[${next}]`); last = next;
   }
   const composition = alpha.find(value => value.pictureClipId === undefined);
   if (composition) {

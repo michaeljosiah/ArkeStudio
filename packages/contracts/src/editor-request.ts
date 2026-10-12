@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
 import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema } from "./editor-request-vocabulary.js";
 import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
@@ -139,10 +140,11 @@ const EditorRequestFileV1Schema = z
   .strict();
 export const EditorRequestFileSchema = z.union([EditorRequestFileV1Schema, z.object({ schemaVersion: z.literal(2),
   requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept), effectFamilies: z.array(EffectProposalFamilySchema).max(EDITOR_REQUEST_BOUNDS.kept),
+  transitionFamilies: z.array(TransitionProposalFamilySchema).max(200).optional(),
 }).strict().superRefine((file, ctx) => {
-  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
+  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) + (file.transitionFamilies ?? []).reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "legacy requests and effect versions exceed the combined 200-record limit" });
-  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id)];
+  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id), ...(file.transitionFamilies ?? []).map(family => family.id)];
   if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "request and effect family IDs must be unique" });
 })]);
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;

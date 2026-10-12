@@ -167,7 +167,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Seventy-four adds procedural editor effects, independent audio reaction and granular
 // protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
 // 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
-export const SUPPORTED_SCHEMA_VERSION = 75;
+// 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
+export const SUPPORTED_SCHEMA_VERSION = 76;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -868,12 +869,14 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // A damaged authority is not an absent one. Bounded reads preserve pending work instead of
     // allowing a later writer to replace unreadable families with an empty v1 file.
     let editorRequests: ProductionBundle["editorRequests"] = [], effectFamilies: NonNullable<ProductionBundle["effectFamilies"]> = [];
+    let transitionFamilies: NonNullable<ProductionBundle["transitionFamilies"]> = [];
     let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
     try {
       const { raw, file } = await readEditorRequestFileAt(dir, id);
       if (raw !== null) { manifest[`productions/${id}/editor-requests.json`] = sha256(raw); editorRequestState = { status: "ready" }; }
       editorRequests = file.requests;
       if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
+      if (file.schemaVersion === 2) transitionFamilies = file.transitionFamilies ?? [];
     } catch (error) {
       const message = (error instanceof Error ? error.message : "Editor requests are unavailable").slice(0, 500);
       editorRequestState = { status: "invalid", message };
@@ -962,6 +965,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       timeline,
       editorRequests,
       effectFamilies,
+      transitionFamilies,
       editorRequestState,
       takeMediaInfo,
     });

@@ -1,5 +1,6 @@
 import type { EffectClip } from "./editor-effects.js";
 import type { ProductionTimeline } from "./timeline.js";
+import { crossfadeWindow, transitionInactiveReason, transitionJoin, crossfadeWeight } from "./editor-transitions.js";
 
 /** Slate pixels are delivery content, independent of the application's colour theme. */
 export const EFFECT_SLATE_STYLE = Object.freeze({ background: "#000000", colour: "#ffffff", fontFamily: "Geist Sans", fontSize: 48 });
@@ -20,6 +21,29 @@ export interface RenderPictureLayer {
   sourceSize?: { width: number; height: number };
   fit: "contain";
   matte: "source-alpha";
+  /** SPEC-054 R-4: source coverage extends; authored clip boundaries remain unchanged. */
+  fadeIn?: { startFrame: number; durationFrames: number };
+  fadeOut?: { startFrame: number; durationFrames: number };
+}
+
+export function projectPictureTransitions(record: ProductionTimeline, pictures: readonly RenderPictureLayer[]): RenderPictureLayer[] {
+  const result = pictures.map(picture => ({ ...picture }));
+  for (const value of record.transitions ?? []) {
+    if (transitionInactiveReason(record.tracks, record.transitions ?? [], value)) continue;
+    const join = transitionJoin(record.tracks, value)!;
+    const left = result.find(picture => picture.clipId === value.leftClipId && picture.trackId === value.trackId);
+    const right = result.find(picture => picture.clipId === value.rightClipId && picture.trackId === value.trackId);
+    if (!left?.still || !right?.still || left.kind !== "media" || right.kind !== "media") continue;
+    const window = crossfadeWindow(join.cutFrame, value.durationFrames);
+    const fade = { startFrame: window.startFrame, durationFrames: value.durationFrames };
+    left.endFrame = window.endFrame; left.fadeOut = fade;
+    right.startFrame = window.startFrame; right.fadeIn = fade;
+  }
+  return result;
+}
+export function pictureTransitionWeight(picture: RenderPictureLayer, frame: number): number {
+  return (picture.fadeIn ? crossfadeWeight(frame, picture.fadeIn.startFrame, picture.fadeIn.durationFrames) : 1) *
+    (picture.fadeOut ? 1 - crossfadeWeight(frame, picture.fadeOut.startFrame, picture.fadeOut.durationFrames) : 1);
 }
 
 export interface RenderEffectLayer {

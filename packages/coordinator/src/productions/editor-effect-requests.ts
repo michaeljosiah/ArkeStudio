@@ -122,6 +122,7 @@ function priorReceipt(file: EditorRequestFile, input: EffectApplyRequest): Effec
 function replaceFamily(file: EditorRequestFile, family: EffectProposalFamily): EditorRequestFile {
   const families = file.schemaVersion === 2 ? file.effectFamilies : [];
   return { schemaVersion: 2, requests: file.requests,
+    ...(file.schemaVersion === 2 && file.transitionFamilies ? { transitionFamilies: file.transitionFamilies } : {}),
     effectFamilies: families.some(row => row.id === family.id) ? families.map(row => row.id === family.id ? family : row) : [...families, family] };
 }
 

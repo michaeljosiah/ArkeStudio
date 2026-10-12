@@ -38,6 +38,7 @@ import { productionFrameRate, type FrameRate } from "./world.js";
 import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleOutputMode, type SubtitleStyle } from "./subtitles.js";
 import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
+import { projectPictureTransitions } from "./editor-effect-render-plan.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -349,11 +350,11 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
 /** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
 function effectProjection(record: ProductionTimeline, pictures: RenderPictureLayer[], preset: ExportPreset,
   frameRate: FrameRate, totalSec: number): EffectRenderProjection | undefined {
-  if (!record.tracks.some(track => track.effects?.length)) return undefined;
+  if (!record.tracks.some(track => track.effects?.length) && !record.transitions?.length) return undefined;
   const { effectLayers, issues } = projectEffectLayers(record);
   const dimensions = PRESETS[preset];
   return { rendererVersion: "software-rgba-v1", width: dimensions.width, height: dimensions.height, frameRate,
-    startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: pictures.map((picture, order) => ({ ...picture, order })),
+    startFrame: 0, endFrame: secondsToFrames(totalSec, frameRate), pictureLayers: projectPictureTransitions(record, pictures).map((picture, order) => ({ ...picture, order })),
     effectLayers, issues };
 }
 

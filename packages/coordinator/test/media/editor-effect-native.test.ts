@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { buildFfmpegArgs, compositeRgba, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
+import { buildFfmpegArgs, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, prepareEffectReactions, renderEffectLayersRgba, type ExportPlan } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
 import { createNodeMediaProcessRunner, createNodeFfmpegRunner } from "../../src/media/node-media-host.js";
@@ -36,6 +36,39 @@ async function processBytes(args: string[], input?: Uint8Array): Promise<Buffer>
 async function alphaFile(path: string, pixels: Uint8Array | Uint8ClampedArray, count = 4) {
   await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-framerate", "24", "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", "-f", "matroska", path], Buffer.concat(Array.from({ length: count }, () => Buffer.from(pixels))));
 }
+
+test("native odd-frame crossfade with transparent stills, scoped effects and upper tracks matches preview at every cropped frame", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("crossfade"), count = 5;
+  try {
+    const a = new Uint8ClampedArray([255, 0, 0, 255, 255, 0, 0, 128, 255, 0, 0, 0, 255, 0, 0, 64]);
+    const b = new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 128, 0, 0, 255, 0]);
+    const scoped = new Uint8ClampedArray(Array.from({ length: 4 }, () => [240, 160, 10, 64]).flat());
+    const upper = new Uint8ClampedArray(Array.from({ length: 4 }, () => [20, 210, 80, 64]).flat());
+    const composition = new Uint8ClampedArray(Array.from({ length: 4 }, () => [220, 220, 250, 32]).flat());
+    for (const [name, pixels] of [["a", a], ["b", b]] as const) await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-i", "pipe:0", "-frames:v", "1", join(dir, `${name}.png`)], Buffer.from(pixels));
+    await alphaFile(join(dir, "scoped.mkv"), scoped, count); await alphaFile(join(dir, "upper.mkv"), upper, count); await alphaFile(join(dir, "composition.mkv"), composition, count);
+    const fade = { startFrame: 48, durationFrames: 5 };
+    const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+      effectRender: { rendererVersion: "software-rgba-v1", width: 2, height: 2, frameRate: 24, startFrame: 48, endFrame: 53, effectLayers: [], issues: [], pictureLayers: [
+        { clipId: "a", trackId: "picture", order: 0, kind: "media", label: "A", path: "a.png", still: true, startFrame: 0, endFrame: 53, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha", fadeOut: fade },
+        { clipId: "b", trackId: "picture", order: 1, kind: "media", label: "B", path: "b.png", still: true, startFrame: 48, endFrame: 100, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha", fadeIn: fade },
+        { clipId: "upper", trackId: "upper", order: 2, kind: "media", label: "Upper", path: "upper.mkv", still: false, startFrame: 48, endFrame: 53, sourceInSec: 0, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha" },
+      ] } };
+    const output = join(dir, "crossfade.mkv"), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", [
+      { pictureClipId: "a", path: join(dir, "scoped.mkv"), startFrame: 48, endFrame: 53 }, { path: join(dir, "composition.mkv"), startFrame: 48, endFrame: 53 }]);
+    args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1"); await processBytes(args);
+    const pixels = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]); assert.equal(pixels.length, count * 16);
+    let maxError = 0;
+    for (let frame = 0; frame < count; frame++) {
+      const expected = new Uint8ClampedArray(Array.from({ length: 4 }, () => [0, 0, 0, 255]).flat()), track = new Float32Array(16);
+      addWeightedPicture(track, compositeRgba(a.slice(), scoped, "atop"), 1 - frame / count, { x: 0, y: 0, width: 2, height: 2 }, 2);
+      addWeightedPicture(track, b, frame / count, { x: 0, y: 0, width: 2, height: 2 }, 2);
+      compositeWeightedTrack(expected, track); compositeRgba(expected, upper); compositeRgba(expected, composition);
+      for (let channel = 0; channel < 16; channel++) maxError = Math.max(maxError, Math.abs(pixels[frame * 16 + channel]! - expected[channel]!));
+    }
+    assert.ok(maxError <= 4, `crossfade channel error ${maxError}`); report.crossfade = { maxChannelError: maxError, frames: count, absoluteStartFrame: 48, durationFrames: 5 };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
 
 test("real FFmpeg source-atop alpha, picture order, composition order and absolute window agree with the integer compositor", { skip: !hasFfmpeg }, async () => {
   const dir = await fixtureDir("parity"), start = performance.now();

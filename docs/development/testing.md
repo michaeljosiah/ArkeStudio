@@ -107,6 +107,21 @@ remote/model refusal. Run the client dev-session tests from `packages/client`, p
 and `node apps/desktop/scripts/smoke-editor-import.mjs` after building. The latter opens a real
 sandboxed Electron file page and verifies the native File courier and private session capability.
 
+For fixed-cut crossfades (SPEC-054), run client `test/editor-transitions.test.tsx`, contracts `test/editor-transitions.test.ts` and
+coordinator `test/productions/editor-transition-requests.test.ts`. These cover exact ordered
+pairs, short adjacent joins, independent protection, retained manual adjustments, fresh Review
+after release/update, one-step Apply/Undo, source invalidation and schema 76. Coordinator regression
+coverage also requires the derived-write gate to remain available while preparing audio-reactive
+dependencies, then refuses changed Current or pending decisions on re-entry. The real FFmpeg
+crossfade case in `test/media/editor-effect-native.test.ts` compares every frame of an odd-length
+blend with source alpha, scoped effects and an upper picture track against the preview compositor.
+Use `ARKE_EFFECT_NATIVE_REQUIRED=1` and `ARKE_EFFECT_EVIDENCE_DIR` to require and retain it.
+Application acceptance additionally uses an isolated scratch world through the normal join,
+batch, protection, Arke composite and export controls. Compare matching states with approved
+designs 216–219 at desktop, Fold and phone sizes; the design fixture alone is not acceptance.
+For resource-limited local runs, put `--test-concurrency=4` **before the file globs** in each
+workspace's Node test command. Client tests still require `packages/client` as their cwd.
+
 For editor effects T-1 (SPEC-053 accepted), run contracts `test/editor-effects.test.ts`,
 `test/editor-effect-protection.test.ts`, `test/editor-request.test.ts`, `test/timeline.test.ts`
 and `test/render-plan.test.ts`, together with coordinator `test/productions/timeline-effects.test.ts`,

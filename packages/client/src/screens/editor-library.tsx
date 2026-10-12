@@ -154,6 +154,7 @@ export function ArtifactPanel({
   panelRef,
   foot,
   effects,
+  transitions,
 }: {
   worldId: string | undefined;
   artifacts: readonly ArtifactSidecar[];
@@ -197,8 +198,9 @@ export function ArtifactPanel({
   panelRef: RefObject<HTMLElement | null>;
   foot?: React.ReactNode;
   effects?: React.ReactNode;
+  transitions?: React.ReactNode;
 }) {
-  const [section, setSection] = useState<"media" | "effects">("media");
+  const [section, setSection] = useState<"media" | "effects" | "transitions">("media");
   const navigate = useNavigate();
   const { phone } = useCutLayout();
   const touch = useMediaQuery("(pointer: coarse)");
@@ -545,8 +547,9 @@ export function ArtifactPanel({
       {effects && <div className="fx-library-tabs" role="group" aria-label="Library section">
         <button type="button" aria-pressed={section === "media"} onClick={() => setSection("media")}>Media</button>
         <button type="button" aria-pressed={section === "effects"} onClick={() => setSection("effects")}>Effects</button>
+        {transitions && <button type="button" aria-pressed={section === "transitions"} onClick={() => setSection("transitions")}>Transitions</button>}
       </div>}
-      {section === "effects" && effects ? effects : <>
+      {section === "effects" && effects ? effects : section === "transitions" && transitions ? transitions : <>
       <div className="fy-artpanel__find" data-find-open={!phone || findOpen || undefined}>
         <label className="fy-artpanel__search" hidden={phone && !findOpen}>
           <Search size={12} />

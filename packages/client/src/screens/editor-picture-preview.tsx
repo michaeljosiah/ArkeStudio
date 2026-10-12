@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { effectsForPicture, pictureStackAtFrame, type EffectRenderProjection } from "@arke-studio/contracts";
+import { effectsForPicture, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
 import { PreviewMediaPool } from "../lib/editor-preview-media.js";
 import { PreviewFrameQueue, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
 import type { Transport } from "./editor-transport.js";
@@ -129,7 +129,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
             if (layer.kind === "slate") {
               const captured = pool.captureSlate(layer.label, width, height, resolution);
               if (!captured) { waiting = true; continue; }
-              pictures.push({ id: layer.clipId, ...captured, effects: [] });
+              pictures.push({ id: layer.clipId, ...captured, effects: [], trackId: layer.trackId, weight: pictureTransitionWeight(layer, at) });
               continue;
             }
             if (!layer.path) throw new Error(`Picture ${layer.label} has no media.`);
@@ -138,7 +138,7 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
               ...(layer.sourceOutSec === undefined ? {} : { sourceOutSec: layer.sourceOutSec }),
             }, width, height, live.current.playing, nowMs, projection.frameRate);
             if (!captured) { waiting = true; continue; }
-            pictures.push({ id: layer.clipId, ...captured, effects: effectsForPicture(projection, layer, at).map(row => row.effect) });
+            pictures.push({ id: layer.clipId, ...captured, effects: effectsForPicture(projection, layer, at).map(row => row.effect), trackId: layer.trackId, weight: pictureTransitionWeight(layer, at) });
           }
         } catch (failure) { setError(failure instanceof Error ? failure.message : "The picture could not be captured."); return null; }
         if (waiting) return null;

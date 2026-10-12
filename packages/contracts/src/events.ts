@@ -21,6 +21,7 @@ import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
 import { EffectReviewResultSchema } from "./editor-effect-review.js";
+import { TransitionReviewResultSchema } from "./editor-transition-proposal.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
@@ -381,6 +382,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
 
   /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
   EffectReviewResultSchema,
+  TransitionReviewResultSchema,
   z
     .object({
       ...base,

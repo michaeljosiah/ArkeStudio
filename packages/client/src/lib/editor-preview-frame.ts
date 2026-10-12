@@ -1,4 +1,4 @@
-import { assertEffectRasterSize, compositeRgba, effectReactionFingerprintMaterial, prepareEffectReactions, renderEffectLayersRgba, type EffectClip,
+import { assertEffectRasterSize, compositeRgba, addWeightedPicture, compositeWeightedTrack, effectReactionFingerprintMaterial, prepareEffectReactions, renderEffectLayersRgba, type EffectClip,
   type EffectFeatureManifest, type PreparedEffectReaction } from "@arke-studio/contracts";
 import type { PreviewPicturePixels } from "./editor-preview-media.js";
 
@@ -9,7 +9,7 @@ export interface PreviewFrameRequest {
   frameRate: number;
   width: number;
   height: number;
-  pictures: Array<PreviewPicturePixels & { id: string; effects: EffectClip[] }>;
+  pictures: Array<PreviewPicturePixels & { id: string; effects: EffectClip[]; trackId?: string; weight?: number }>;
   composition: EffectClip[];
   analysisEpoch?: number;
 }
@@ -24,6 +24,8 @@ export function renderPreviewFrame(request: PreviewFrameRequest, preparedByEffec
   assertEffectRasterSize(width, height);
   const output = new Uint8ClampedArray(width * height * 4);
   for (let index = 3; index < output.length; index += 4) output[index] = 255;
+  let trackId: string | undefined, trackPixels: Float32Array | undefined;
+  const flush = () => { if (trackPixels) compositeWeightedTrack(output, trackPixels); trackPixels = undefined; };
   for (const picture of request.pictures) {
     const { rect, pixels } = picture;
     if (rect.x < 0 || rect.y < 0 || rect.width < 1 || rect.height < 1 || rect.x + rect.width > width || rect.y + rect.height > height || pixels.length !== rect.width * rect.height * 4) throw new Error("The picture matte is outside the preview frame.");
@@ -31,12 +33,20 @@ export function renderPreviewFrame(request: PreviewFrameRequest, preparedByEffec
       const effects = renderEffectLayersRgba(picture.effects, absoluteFrame, frameRate, rect.width, rect.height, preparedByEffectId);
       compositeRgba(pixels, effects, "atop");
     }
+    if (picture.weight !== undefined) {
+      if (picture.trackId !== trackId) { flush(); trackId = picture.trackId; }
+      trackPixels ??= new Float32Array(output.length);
+      addWeightedPicture(trackPixels, pixels, picture.weight, rect, width);
+      continue;
+    }
+    flush(); trackId = undefined;
     // Rows avoid allocating a full-frame padded copy for every contained picture.
     for (let row = 0; row < rect.height; row++) {
       const at = ((rect.y + row) * width + rect.x) * 4;
       compositeRgba(output.subarray(at, at + rect.width * 4), pixels.subarray(row * rect.width * 4, (row + 1) * rect.width * 4));
     }
   }
+  flush();
   if (request.composition.length) compositeRgba(output, renderEffectLayersRgba(request.composition, absoluteFrame, frameRate, width, height, preparedByEffectId));
   return output;
 }
