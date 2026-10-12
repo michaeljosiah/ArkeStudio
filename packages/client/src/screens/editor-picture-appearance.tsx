@@ -23,7 +23,7 @@ export function PictureAppearanceInspector({ clip, frameRate, disabled, onComman
       onCommit={value => onCommands([{ kind: "picture-appearance", clipId: clip.id, patch: { opacity: value / 100 } }], "Change picture opacity")} />
     <p className="fx-inspector__hint">Screen lightens over lower picture tracks. Add gives a brighter glow. Clip timing and sound remain independent.</p>
     <section className="fx-protection" aria-label="Picture protection from AI suggestions"><h3>Protection from AI suggestions</h3>
-      <p className="fx-audio__note">You can still edit protected settings yourself. Release removes only the named rule.</p>
+      <p className="fx-audio__note">You can still edit protected settings yourself. Whole clip protection follows its split segments. Release removes only the named rule.</p>
       <details><summary>Add setting protection</summary>
         <label className="fx-audio__select">Setting<select value={property} disabled={disabled} onChange={event => setProperty(event.currentTarget.value as typeof property)}><option value="blendMode">Blend mode</option><option value="opacity">Opacity</option></select></label>
         <label className="fx-audio__select">Setting scope<select value={scope} disabled={disabled} onChange={event => setScope(event.currentTarget.value as typeof scope)}><option value="whole">Whole clip</option><option value="passage">Fixed passage</option></select></label>

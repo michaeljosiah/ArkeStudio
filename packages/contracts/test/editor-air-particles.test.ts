@@ -87,6 +87,20 @@ test("fixed picture passage stays on production time; only the intersecting segm
   assert.equal(outside.tracks[0]!.clips[1]!.visual?.opacity, .5);
   assert.throws(() => applyTimelineCommands(value, [{ kind: "delete", clipId: "cl_a" }]), /protect/i);
 });
+
+test("picture protection follows split identity before appearance exists, while duplicates remain independent", () => {
+  const original = base();
+  const split = human(original, [{ kind: "split", clipId: "cl_a", atFrame: 50, newClipId: "cl_b" }]);
+  assert.deepEqual(split.tracks[0]!.clips.map(clip => clip.visualOriginId), ["cl_a", "cl_a"]);
+  assert.deepEqual(undoTimelineHistory(split).tracks, original.tracks);
+  const duplicated = human(split, [{ kind: "duplicate", clipId: "cl_b", newClipId: "cl_c" }]);
+  assert.equal(duplicated.tracks[0]!.clips[2]!.visualOriginId, "cl_c");
+  const protectedValue = human(duplicated, [{ kind: "picture-protect", clipId: "cl_b", rule: { id: "vp_split", property: "opacity", scope: { kind: "whole" } } }]);
+  assert.throws(() => applyTimelineCommands(protectedValue, [{ kind: "picture-appearance", clipId: "cl_a", patch: { opacity: .4 } }]), /protect/i);
+  assert.equal(applyTimelineCommands(protectedValue, [{ kind: "picture-appearance", clipId: "cl_c", patch: { opacity: .4 } }]).tracks[0]!.clips[2]!.visual?.opacity, .4);
+  const released = human(protectedValue, [{ kind: "picture-release", ruleId: "vp_split" }]);
+  assert.ok(released.tracks[0]!.clips.every(clip => !clip.visual?.protection?.length));
+});
 test("picture proposal retains each manual property and pending protection across broad revisions", () => {
   const original = base(), model: ModelPictureProposal = { summary: "Lighten", commands: [{ kind: "picture-appearance", clipId: "cl_a", patch: { blendMode: "screen", opacity: .8 } }] };
   const first = compilePictureProposal(original, model, [], {}); assert.deepEqual(first.conflicts, []);

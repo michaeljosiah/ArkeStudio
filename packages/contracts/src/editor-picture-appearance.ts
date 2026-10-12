@@ -90,7 +90,7 @@ export function pictureProtectionFingerprint(timeline: Pick<ProductionTimeline, 
 }
 
 export function duplicatePictureAppearance(clip: TimelineClip, id: TimelineClip["id"], delta: number): Pick<TimelineClip, "visual" | "visualOriginId"> {
-  if (!clip.visual) return {};
+  if (!clip.visual) return clip.visualOriginId ? { visualOriginId: id } : {};
   return { visualOriginId: id, visual: { ...clip.visual, ...(clip.visual.protection ? { protection: clip.visual.protection.map((rule, index) => ({
     ...rule, id: `vp_${id.slice(3)}_${index}`, scope: rule.scope.kind === "whole" ? rule.scope : {
       ...rule.scope, startFrame: Math.max(0, rule.scope.startFrame + delta), endFrame: Math.max(1, rule.scope.endFrame + delta),

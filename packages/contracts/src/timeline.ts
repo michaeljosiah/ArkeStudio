@@ -1573,9 +1573,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         throw new TimelineOperationRefused(`frame ${command.atFrame} is not inside ${clip.id}`);
       }
       const offset = command.atFrame - clip.startFrame;
-      const left: TimelineClip = { ...clip, durationFrames: offset };
+      const visualIdentity = track.kind === "picture" ? { visualOriginId: clip.visualOriginId ?? clip.id } : {};
+      const left: TimelineClip = { ...clip, ...visualIdentity, durationFrames: offset };
       const right: TimelineClip = {
         ...clip,
+        ...visualIdentity,
         id: command.newClipId,
         startFrame: command.atFrame,
         durationFrames: clip.durationFrames - offset,
