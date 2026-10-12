@@ -4,13 +4,15 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { applyTimelineCommands, defaultEffectClip, type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
+import { applyTimelineCommands, createEffectProposalFamily, defaultEffectClip, effectProposalFamilyView, type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, importEditorMedia } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest, __stateForTest, importEditorMedia } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { startClipGesture, type GestureUpdate } from "../src/screens/editor-gesture.js";
 import { cutLayoutFixture } from "./cut-layout-fixture.js";
 import { AddToLibraryDialog } from "../src/screens/editor-library.js";
+import { useEffectProposalReview } from "../src/screens/editor-effect-review.js";
+import { appendEffectProposalTestModel, effectProposalTestFence, grantEffectProposalTestReview, EFFECT_REVIEW_TEST_AT } from "./effect-proposal-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
 let width = 390;
@@ -34,7 +36,9 @@ let root: Root | null = null;
 let sent: ClientMessage[] = [];
 const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
-async function mount(size = 390, remote = false, tail?: number, withEffect = false) {
+let review: ReturnType<typeof useEffectProposalReview> | null = null;
+function ReviewProbe() { review = useEffectProposalReview(fixture.world!.meta.worldId, "saltlight"); return null; }
+async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
@@ -51,15 +55,68 @@ async function mount(size = 390, remote = false, tail?: number, withEffect = fal
       { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 9 }) },
     ], { effectAuthority: "human" });
   }
-  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App /></MemoryRouter>); });
+  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App />{withReview && <ReviewProbe />}</MemoryRouter>); });
   return state;
 }
-afterEach(async () => { await act(async () => root?.unmount()); root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
+afterEach(async () => { await act(async () => { review?.close(); root?.unmount(); }); review = null; root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
 const find = (selector: string) => dom.document.querySelector<HTMLElement>(selector)!;
 const click = async (element: HTMLElement) => { assert.ok(element); await act(async () => element.click()); };
 function props(element: HTMLElement): Record<string, (event: never) => void> { const key = Object.keys(element).find(name => name.startsWith('__reactProps$'))!; return (element as unknown as Record<string, Record<string, (event: never) => void>>)[key]!; }
 function pointer(target: EventTarget, type: string, x: number, y = 20) { const event = new dom.Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, pointerType: "touch", clientX: x, clientY: y }); target.dispatchEvent(event); }
 const timelineCommands = () => sent.filter((m): m is Extract<ClientMessage, { kind: "timeline-command" }> => m.kind === "timeline-command").flatMap(m => m.commands);
+
+for (const viewport of [320, 390, 984, 1360]) it(`proposal and Inspector navigation returns to the same review at ${viewport}px`, async () => {
+  const state = await mount(viewport, false, undefined, true, true);
+  const production = state.world!.productions[0]!, timeline = production.timeline;
+  assert.ok(timeline?.status === "ready");
+  let family = createEffectProposalFamily({ id: "req_01J8G000000000000000000001", productionId: "saltlight", conversationId: "cv_01J8G0000000000000000000C1",
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" },
+      palette: [{ id: "dust", version: 1 }], direction: "Quiet dust" }, base: timeline.timeline,
+    timelineHash: effectProposalTestFence(timeline.timeline).base.timelineHash, baseId: "base_first", at: EFFECT_REVIEW_TEST_AT });
+  family = appendEffectProposalTestModel(family, timeline.timeline, { summary: "Quiet dust", identities: [], commands: [
+    { kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { amount: 0.15 } } },
+  ] });
+  const reviewed = grantEffectProposalTestReview(family), savedTimeline = JSON.stringify(timeline.timeline);
+  production.effectFamilies = [effectProposalFamilyView(reviewed.family)];
+  await act(async () => __setStateForTest(structuredClone(state)));
+  await act(async () => { assert.equal(review!.review(reviewed.ref), true); });
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "editor-effect-proposal"); if (command.kind !== "editor-effect-proposal") return;
+  await act(async () => __applyEventForTest({ type: "editor-effect.proposal-result", worldId: state.world!.meta.worldId, productionId: "saltlight",
+    at: EFFECT_REVIEW_TEST_AT, requestId: command.requestId, outcome: "reviewed", ref: reviewed.ref, grant: reviewed.grant }));
+  assert.deepEqual(review!.active!.ref, reviewed.ref);
+  await act(async () => { const event = new dom.Event("keydown", { bubbles: true, cancelable: true }); Object.assign(event, { key: "ArrowRight" }); find('[aria-label="Seek"]').dispatchEvent(event); });
+  await click(find('[aria-label="Loop whole video"]'));
+  const clock = find('[aria-label="Seek"]').getAttribute("aria-valuetext"), serial = review!.active!.activationSerial, sentCount = sent.length;
+  assert.equal(find('[aria-label="Seek"]').getAttribute("aria-valuenow"), "1", "hold a nonzero clock during navigation");
+  const changes = [...document.querySelectorAll<HTMLElement>(".fy-effect-review-bar button")].find(button => /\d+ changes?$/.test(button.textContent!))!;
+  await click(changes);
+  for (let round = 0; round < 2; round++) {
+    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Changes/Back must show Arke");
+    else assert.equal(find("#cut-arke-panel").hidden, false);
+    // Exercise the exact controller operation used by the connected card's Inspect effect button.
+    await act(async () => { assert.equal(review!.inspect(reviewed.ref, "cl_dust"), true); });
+    assert.equal(!!find(".fy-cut-arke-sheet[open]"), false, "Inspect must leave Arke rather than cover an open sheet");
+    assert.ok(find(".fx-inspector"));
+    if (viewport < 600) assert.ok(find(".fy-cut-trim-sheet[open]"));
+    const back = [...document.querySelectorAll<HTMLElement>("#cut-inspector-panel button")].find(button => button.textContent === "Back to proposal · Version 1")!;
+    await click(back);
+    assert.equal(!!find(".fy-cut-trim-sheet[open]"), false, "Back must close the newer Inspector sheet");
+    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Back must uncover the same proposal sheet");
+    else assert.equal(find("#cut-arke-panel").hidden, false);
+    assert.deepEqual(review!.state.cardFocus!.ref, reviewed.ref);
+    assert.deepEqual(review!.active!.ref, reviewed.ref);
+    assert.equal(review!.active!.comparison, "suggested");
+    assert.equal(review!.active!.activationSerial, serial);
+    assert.equal(find('[aria-label="Seek"]').getAttribute("aria-valuetext"), clock);
+    assert.equal(find('[aria-label="Loop whole video"]').getAttribute("aria-pressed"), "true");
+    assert.ok(find('[aria-label="Play"]'), "panel navigation must not start playback");
+    assert.equal(sent.length, sentCount, "navigation must not write, reactivate Review or author an edit");
+    const current = __stateForTest().state?.world?.productions[0]?.timeline;
+    assert.ok(current?.status === "ready");
+    assert.equal(JSON.stringify(current.timeline), savedTimeline);
+  }
+});
 
 for (const viewport of [320, 390, 900, 1360]) it(`Loop is reachable at ${viewport}px without moving the playhead or authoring edits`, async () => {
   await mount(viewport);

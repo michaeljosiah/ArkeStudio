@@ -597,10 +597,15 @@ function CutEditorScreen() {
   useEffect(() => {
     const inspection = effectReview.state.inspect;
     if (!inspection || inspection.ref.versionId !== effectReview.active?.ref.versionId) return;
+    setArkeOpen(false);
     selectEffect(inspection.effectId);
   }, [effectReview.state.inspect?.serial]);
   useEffect(() => {
     if (!effectReview.state.cardFocus) return;
+    // Review navigation replaces the phone sheet; an already-open Arke sheet otherwise stays
+    // covered by the newer Inspector in the overlay stack (SPEC-053 R-31, R-39).
+    if (phone) setRightOpen(false);
+    setLibraryOpen(false);
     setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true);
   }, [effectReview.state.cardFocus?.serial]);
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
