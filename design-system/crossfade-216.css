@@ -1,4 +1,38 @@
 /* Proposed turns 216–219. These styles belong only to HTML drawings and the fixture prototype. */
+/* Revised turn 216: direct choice at the cut and Library drag placement. */
+.xf216.entry-flow .transition-collection{margin-top:24px;display:grid;gap:14px}
+.xf216.entry-flow .transition-tile{display:flex;flex-direction:column;gap:10px;width:100%;padding:10px;text-align:left}
+.xf216.entry-flow .transition-tile[draggable=true]{cursor:grab}.xf216.entry-flow .transition-tile[draggable=true]:active{cursor:grabbing}
+.xf216.entry-flow .transition-tile small{display:block;font:var(--type-meta);color:var(--muted-foreground);margin-top:4px}
+.xf216.entry-flow .transition-art{position:relative;display:block;width:100%;height:76px;border-radius:5px;overflow:hidden;background:#222}
+.xf216.entry-flow .transition-art i{position:absolute;inset:0;background-size:cover;background-position:center}
+.xf216.entry-flow .transition-art i:first-child{background-image:url('assets/launch-harbour.webp')}
+.xf216.entry-flow .transition-art i:nth-child(2){background-image:url('assets/scene4-shot13.png');opacity:.5}
+.xf216.entry-flow .transition-art b{position:absolute;inset:0;display:grid;place-items:center;color:white;font:var(--type-h2);text-shadow:0 1px 5px #000}
+.xf216.entry-flow .picture-strip .join-trigger{width:44px;min-height:44px;top:15px;z-index:5}
+.xf216.entry-flow .picture-strip .join-trigger.empty{background:transparent;border-color:transparent;box-shadow:none}
+.xf216.entry-flow .join-trigger.empty span{opacity:0}
+.xf216.entry-flow .join-trigger.empty:hover,.xf216.entry-flow .join-trigger.empty:focus,.xf216.entry-flow .join-trigger.revealed{background:var(--background);border:1px solid var(--xf-gold);box-shadow:0 1px 6px #0003}
+.xf216.entry-flow .join-trigger.empty:hover span,.xf216.entry-flow .join-trigger.empty:focus span,.xf216.entry-flow .join-trigger.revealed span{opacity:1}
+.xf216.entry-flow .picture-strip .join-trigger.empty.revealed,.xf216.entry-flow.dragging .picture-strip .join-trigger.empty{background:var(--background);border:1px solid var(--xf-gold);box-shadow:0 1px 6px #0003}
+.xf216.entry-flow .join-trigger.focus-drawn{outline:2px solid var(--ring);outline-offset:3px}
+.xf216.entry-flow .join-hint{position:absolute;bottom:calc(100% + 4px);left:33.333333%;transform:translateX(-50%);padding:6px 9px;background:var(--foreground);color:var(--background);border-radius:5px;font:var(--type-meta);z-index:6;white-space:nowrap}
+.xf216.entry-flow .transition-picker{position:absolute;bottom:calc(100% + 12px);left:max(0px,calc(33.333333% - 150px));width:300px;max-width:100%;z-index:9;border:1px solid var(--border);border-radius:10px;background:var(--background);box-shadow:0 8px 30px #0004;padding:14px;display:grid;gap:12px}
+.xf216.entry-flow .transition-picker h3{font:var(--type-h3)}.xf216.entry-flow .picker-foot{font:var(--type-meta);color:var(--muted-foreground);border-top:1px solid var(--border);padding-top:10px}
+.xf216.entry-flow .replacement-summary{display:grid;gap:12px;font:var(--type-ui)}.xf216.entry-flow .replacement-summary b{display:block;margin-top:4px}
+.xf216.entry-flow .mobile-picker,.xf216.entry-flow .mobile-join{display:none}
+.xf216.entry-flow .drag-feedback{font:var(--type-meta);color:var(--muted-foreground);margin-top:10px}.xf216.entry-flow .drag-feedback:empty{display:none}
+.xf216.entry-flow .drop-ghost{display:none;position:absolute;left:33.333333%;transform:translateX(-50%);bottom:calc(100% + 5px);border:1px dashed var(--xf-gold);background:var(--background);padding:8px;border-radius:5px;font:var(--type-ui);z-index:6;white-space:nowrap}
+.xf216.entry-flow.dragging .join-trigger{outline:3px dashed var(--xf-gold);outline-offset:4px}.xf216.entry-flow.dragging .join-trigger span{opacity:1}
+.xf216.entry-flow.dragging[data-drag-target=join] .drop-ghost{display:block}.xf216.entry-flow.dragging[data-drag-target=join] .join-trigger{outline-style:solid}
+.xf216.entry-flow.dragging[data-drag-target=gap] .clip.gap,.xf216.entry-flow.dragging[data-drag-target=video] .clip.video{outline:3px solid #b94747;outline-offset:2px}
+.xf216.entry-flow.dragging .transition-tile[draggable=true]{opacity:.65;outline:2px solid var(--xf-gold)}
+.xf216.entry-flow.phone .mobile-join{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--border);border-radius:7px;padding:8px;margin:8px 0;font:var(--type-ui)}
+.xf216.entry-flow .mobile-join small{display:block;font:var(--type-meta);color:var(--muted-foreground);margin-top:4px}
+.xf216.entry-flow.phone .mobile-picker{position:absolute;inset:0;display:flex;align-items:flex-end;background:#0003;z-index:10}
+.xf216.entry-flow.phone .mobile-picker .transition-picker{position:relative;inset:auto;width:100%;max-height:80%;overflow:auto;border-radius:14px 14px 0 0;padding:18px}
+@media(hover:none){.xf216.entry-flow .join-trigger.empty span{opacity:1}}
+@media(max-width:650px){.xf216.entry-flow.live .mobile-join{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--border);border-radius:7px;padding:8px;margin:8px 0;font:var(--type-ui)}.xf216.entry-flow.live .mobile-picker{position:absolute;inset:0;display:flex;align-items:flex-end;background:#0003;z-index:10}.xf216.entry-flow.live .mobile-picker .transition-picker{position:relative;inset:auto;width:100%;max-height:80%;overflow:auto;border-radius:14px 14px 0 0;padding:18px}}
 /* Keep the picture and timeline together; ruler, clips and join markers share a clock. */
 .xf216 .preview{max-width:600px;margin-inline:auto}
 .xf216 .timeline .picture-strip{gap:0}

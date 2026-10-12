@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url));
-const roots=new Set(['crossfade-216.review.html','crossfade-216.css','crossfade-216.prototype.mjs','crossfade-216.view.mjs','Arke Studio.dc.html','design-review.html','support.js','theme-switch.js','image-slot.js']);
+const roots=new Set(['crossfade-216.review.html','crossfade-216.css','crossfade-216.prototype.mjs','crossfade-216.view.mjs','crossfade-216.entry.mjs','Arke Studio.dc.html','design-review.html','support.js','theme-switch.js','image-slot.js']);
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.jpg':'image/jpeg','.svg':'image/svg+xml','.woff2':'font/woff2'};
 export function createDesignServer(){
   return http.createServer((req,res)=>{

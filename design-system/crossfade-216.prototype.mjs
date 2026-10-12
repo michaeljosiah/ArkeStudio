@@ -4,7 +4,8 @@ const storageKey='arke-crossfade-216-design-v1';
 const fresh=()=>({current:{hasTransition:false,duration:1,protectJoin:false,protectDuration:false,joinDurations:{ab:.75}},
   proposal:null,incoming:null,reviewed:false,view:'current',panel:'inspect',version:1,adjusted:false,stale:false,
   applied:false,phase:50,scope:'All still images',replace:false,acceptShort:false,skipShort:false,phonePanel:true,
-  batchDuration:1,rangeStart:12,rangeEnd:36,status:'',undo:null,releasePending:false,excluded:false});
+  batchDuration:1,rangeStart:12,rangeEnd:36,status:'',undo:null,releasePending:false,excluded:false,
+  picker:false,replacePrompt:false,dragging:false,dragTarget:''});
 let state=fresh(),playTimer;
 try {const saved=JSON.parse(localStorage.getItem(storageKey));if(saved?.current&&saved.schema===1)state={...fresh(),...saved};}catch{}
 const copy=value=>structuredClone(value);
@@ -13,14 +14,14 @@ function save(){localStorage.setItem(storageKey,JSON.stringify({...state,schema:
 function render(){
   const shown=state.reviewed&&state.view==='suggested'?state.proposal:state.current;
   const o={...base(),...shown,...state,hasTransition:shown.hasTransition,duration:state.panel==='batch'?state.batchDuration:shown.duration,
-    protectJoin:shown.protectJoin,protectDuration:shown.protectDuration,live:true,details:true,incoming:!!state.incoming,
+    protectJoin:shown.protectJoin,protectDuration:shown.protectDuration,live:true,entryFlow:true,details:true,incoming:!!state.incoming,
     joinDurations:state.current.joinDurations,proposalDuration:state.proposal?.duration,
     proposalHasTransition:state.proposal?.hasTransition,proposalReady:!!state.proposal,
     cardRows:state.proposal?joins.filter(j=>(state.applied?state.undo:state.current)?.joinDurations[j.id]!==state.proposal.joinDurations[j.id]).map(j=>({name:j.name,id:j.id,before:(state.applied?state.undo:state.current)?.joinDurations[j.id]||0,after:state.proposal.joinDurations[j.id]||0})):[]};
   const scroll=host.querySelector('.panel-scroll')?.scrollTop||0;
   host.innerHTML=screen(o);
   if(state.reviewed&&state.view==='current'){
-    for(const e of host.querySelectorAll('.inspector input,.inspector select,[data-act="remove"],[data-act="add"],[data-act="protect"],[data-act="release"]'))e.disabled=true;
+    for(const e of host.querySelectorAll('.inspector input,.inspector select,[data-act="open-picker"],[data-act="remove"],[data-act="add"],[data-act="protect"],[data-act="release"]'))e.disabled=true;
   }
   host.querySelector('.panel-scroll').scrollTop=scroll;
   save();
@@ -52,12 +53,31 @@ function runPreview(){
   },35);
 }
 function action(act){
+  let focusSelector;
   switch(act){
-    case 'inspect':state.panel='inspect';state.phonePanel=true;break;
-    case 'chat':state.panel='chat';state.phonePanel=true;break;
+    case 'inspect':state.picker=false;state.replacePrompt=false;state.panel='inspect';state.phonePanel=true;break;
+    case 'chat':state.picker=false;state.replacePrompt=false;state.panel='chat';state.phonePanel=true;break;
+    case 'open-picker':if(state.reviewed&&state.view==='current')return;state.picker=true;state.replacePrompt=false;focusSelector='[data-act="add"]';break;
+    case 'close-picker':state.picker=false;state.replacePrompt=false;focusSelector='.join-trigger,.mobile-join button';break;
     case 'batch':if(state.reviewed){status('Return to Current editing before starting a separate batch. Pending transitions can be adjusted in the Inspector.');break;}state.panel='batch';state.phonePanel=true;state.acceptShort=false;break;
     case 'close-panel':state.phonePanel=false;break;
-    case 'add':if(state.reviewed&&state.view==='current')return;if(!state.reviewed)remember();currentEdit().hasTransition=true;currentEdit().joinDurations.bc=currentEdit().duration;state.panel='inspect';status('Crossfade added at 0:24. Film still ends at 1:12.');break;
+    case 'add':{
+      if(state.reviewed&&state.view==='current')return;
+      state.picker=false;
+      if(currentEdit().hasTransition){
+        if(currentEdit().duration===1){status('Crossfade at 1.00s is already here. Nothing changed.');break;}
+        state.replacePrompt=true;focusSelector='[data-act="close-picker"]';break;
+      }
+      if(!state.reviewed)remember();Object.assign(currentEdit(),{hasTransition:true,duration:1});currentEdit().joinDurations.bc=1;
+      if(state.reviewed)state.adjusted=true;state.panel='inspect';state.phonePanel=true;focusSelector='[data-key="duration"]';status('Crossfade added at 0:24. Film still ends at 1:12.');break;
+    }
+    case 'replace-transition':{
+      if(!state.replacePrompt||state.reviewed&&state.view==='current')return;
+      state.replacePrompt=false;
+      if(state.reviewed&&currentEdit().protectDuration){status('Protected duration retained. Release it explicitly before proposing a different value.');break;}
+      if(!state.reviewed)remember();currentEdit().duration=1;currentEdit().joinDurations.bc=1;
+      if(state.reviewed)state.adjusted=true;state.panel='inspect';state.phonePanel=true;focusSelector='[data-key="duration"]';status('Transition replaced at the same cut. Protection retained · one Undo.');break;
+    }
     case 'remove':if(state.reviewed&&state.view==='current')return;if(!state.reviewed)remember();Object.assign(currentEdit(),{hasTransition:false,protectJoin:false,protectDuration:false});delete currentEdit().joinDurations.bc;if(state.reviewed)state.adjusted=true;status('Hard cut restored. Clip positions unchanged.');break;
     case 'protect':state.panel='protect';break;
     case 'release':state.releaseKey='protectDuration';state.panel='release';break;
@@ -93,8 +113,36 @@ function action(act){
     default:return;
   }
   render();
+  if(focusSelector)[...host.querySelectorAll(focusSelector)].find(e=>e.getClientRects().length)?.focus({preventScroll:true});
 }
 host.addEventListener('click',e=>{const button=e.target.closest('[data-act]');if(button&&!button.disabled)action(button.dataset.act);});
+const dragType='application/x-arke-design-transition';
+function showDrag(target=''){
+  state.dragTarget=target;const root=host.querySelector('.xf216');root.classList.toggle('dragging',state.dragging);root.dataset.dragTarget=target;
+  const feedback=host.querySelector('.drag-feedback');feedback.textContent=!state.dragging?'':target==='gap'?'Cannot add across empty space. Clips and gap stay where they are.':target==='video'?'This first version supports touching still images. Video joins stay unchanged.':target==='join'?'Release to place Crossfade at 0:24. Existing transitions ask before replacement.':'Drop Crossfade on the highlighted boundary. Cut positions stay fixed.';
+}
+host.addEventListener('dragstart',e=>{
+  if(!e.target.closest('[data-transition="crossfade"]'))return;
+  if(state.reviewed&&state.view==='current'){e.preventDefault();return;}
+  state.dragging=true;e.dataTransfer.setData(dragType,'crossfade');e.dataTransfer.effectAllowed='copy';showDrag();
+});
+host.addEventListener('dragover',e=>{
+  if(!state.dragging||!e.dataTransfer.types.includes(dragType))return;
+  const target=e.target.closest('[data-drop]')?.dataset.drop||'';
+  if(target==='join'){e.preventDefault();e.dataTransfer.dropEffect='copy';}else e.dataTransfer.dropEffect='none';showDrag(target);
+});
+host.addEventListener('drop',e=>{
+  if(!state.dragging||e.dataTransfer.getData(dragType)!=='crossfade')return;
+  e.preventDefault();const target=e.target.closest('[data-drop]')?.dataset.drop;
+  state.dragging=false;showDrag();
+  if(target==='join')action('add');else{status('Drop cancelled. Only a touching still-image boundary can accept this transition.');render();}
+});
+host.addEventListener('dragend',()=>{state.dragging=false;showDrag();});
+host.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  if(state.dragging){state.dragging=false;showDrag();e.preventDefault();}
+  if(state.picker||state.replacePrompt){e.preventDefault();e.stopPropagation();action('close-picker');}
+});
 host.addEventListener('change',e=>{
   const key=e.target.dataset.key;if(!key)return;
   if(key==='duration'){changeDuration(e.target.value);return;}

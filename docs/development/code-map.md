@@ -38,11 +38,12 @@ Client, coordinator and integrations ──> shared contracts
 ## Change entry points
 
 Crossfade designs (proposed 2026-10-12, awaiting owner review): turns 216–219 draw fixed-cut
-still-image transitions, batch scopes and explicit short-clip exceptions, separate join and
+still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
+batch scopes and explicit short-clip exceptions, separate join and
 duration protection, and Arke composite review. The [focused review](../../design-system/crossfade-216.review.html)
 and [notes](../../design-system/crossfade-216.notes.md) describe the decisions and fixture limits.
 `design-system/crossfade-216.mjs` generates the master drawings and review index entries;
-`crossfade-216.view.mjs`, `.css` and `.prototype.mjs` own the isolated fixture.
+`crossfade-216.view.mjs`, `.entry.mjs`, `.css` and `.prototype.mjs` own the isolated fixture.
 Run `node design-system/crossfade-216.check.mjs` for browser checks or
 `node design-system/crossfade-216.serve.mjs` for the read-only review URL. This is proposed
 design work; it does not extend SPEC-053 or implement picture transitions in Studio.

@@ -5,18 +5,27 @@ specification or application implementation is included. The owner has agreed to
 existing cut positions and total production duration.
 
 Open the [focused review](crossfade-216.review.html) for the interactive example and all
-26 HTML drawings. The [design master](Arke%20Studio.dc.html#t219) holds the same turns;
+33 HTML drawings. The [design master](Arke%20Studio.dc.html#t219) holds the same turns;
 the [review index](design-review.html) records their proposed status.
 
 | Turn | Review focus | Frames |
 | --- | --- | --- |
-| [216](crossfade-216.review.html#turn-216) | Select a join, add, edit duration, preview, remove; Fold and phone | a–f |
+| [216](crossfade-216.review.html#turn-216) | Hover/focus discovery, picker, direct insertion, Library drag, replacement, duration; Fold and phone | a–m |
 | [217](crossfade-216.review.html#turn-217) | All still images, selected images, time range, exceptions and one Undo | a–f |
 | [218](crossfade-216.review.html#turn-218) | Separate join/duration protection, named release, broken adjacency | a–f |
 | [219](crossfade-216.review.html#turn-219) | Arke composite cards, explicit Review, sticky edits, incoming versions, stale bases and Apply | a–h |
 
 ## Decisions proposed for approval
 
+- Turn 216 revision 2 replaces the preliminary Inspector step with a picker at the cut.
+  Hover or focus reveals a generous + target; touch has a named join row. Click +, then
+  choose Crossfade to insert immediately. The Inspector is for subsequent adjustments.
+  Escape dismisses and restores focus without editing. Only available types appear.
+- The Library's Transitions collection offers equivalent drag placement. Eligible
+  boundaries highlight; a ghost previews placement and default duration. Empty gaps,
+  unsupported video targets and cancelled drags leave the edit unchanged. Dropping on an
+  occupied join asks before replacing, showing old/new values and retained protection.
+  Identical replacement makes no new Undo entry. Future types share these entry points.
 - A transition belongs to an ordered pair of touching still clips on one picture track.
   Its blend straddles the existing cut symmetrically. Audio timing, cues and total duration
   stay fixed. Video joins and gaps are skipped in this first scope.
@@ -57,7 +66,7 @@ transitions are outside its accepted implementation scope.
 ## Isolated prototype
 
 The example is a 72-second fixture with public design artwork. It supports adding/removing
-the selected transition, typed duration, symmetric handles, preview, batch scope and
+the selected transition through the picker or a Library drag, typed duration, symmetric handles, preview, batch scope and
 short-join decisions, independent protection, named releases, composite review, Keep
 Current, revisions, stale-base recovery, Apply, discard, Undo and local resume.
 
@@ -85,6 +94,6 @@ node design-system/crossfade-216.serve.mjs
 ```
 
 The last command prints a read-only loopback review URL. The focused check writes its
-report and screenshots to `.dev/crossfade-design/`, covering 26 drawings, images, fonts,
+report and screenshots to `.dev/crossfade-design/`, covering 33 drawings, images, fonts,
 review and protection boundaries, batch exceptions, Undo, resume, and 984/390/320 layouts.
 These checks verify the design fixture, not application acceptance.

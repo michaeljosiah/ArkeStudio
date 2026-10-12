@@ -1,4 +1,5 @@
 // Shared HTML drawings for the design master and isolated review. No Studio runtime imports.
+import {transitionPicker,transitionLibrary,joinEntry,mobileJoin} from './crossfade-216.entry.mjs';
 export const esc = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
 export const btn = (text, act='', cls='', extra='') => `<button type="button" class="${cls}" ${act ? `data-act="${act}"` : ''} ${extra}>${text}</button>`;
 const tag = (text, cls='') => `<span class="tag ${cls}">${text}</span>`;
@@ -35,6 +36,7 @@ export function durationControl(o={}) {
   <p class="meta">${Math.round((o.duration??1)*24)} frames · centred on the cut</p>`;
 }
 function inspector(o) {
+  if(o.entryFlow&&!o.hasTransition&&!['protect','release','invalid'].includes(o.panel))return `<div class="panel-heading"><h3>Picture cut</h3><p>Harbour → Coast · 0:24</p></div>${note('Add at the boundary','Use + to choose a transition, or drag Crossfade from the Library onto this join.')}<div class="section"><p class="meta">Duration controls appear here after a transition is added. Opening the picker changes nothing.</p></div>`;
   if(o.panel==='protect') return `<div class="panel-heading">${btn('‹ Crossfade','inspect','plain')}<h3>Protect from Arke</h3><p>Harbour → Coast · at 0:24</p></div>
     <div class="section">${check('Keep a crossfade at this join',o.protectJoin,'protectJoin')}<p class="meta">Arke cannot remove or replace this transition.</p>
     ${check('Keep this duration',o.protectDuration,'protectDuration')}<p class="meta">${o.duration.toFixed(2)}s · Arke can adjust other unprotected settings.</p></div>
@@ -51,7 +53,7 @@ function inspector(o) {
     ${o.adjusted?tag('Adjusted by you · retained'):''}${o.protectDuration?`<p class="meta">Duration protected · ${o.duration.toFixed(2)}s</p>`:''}
     ${o.short?note('Maximum here: 0.50s','The neighbouring transition leaves room for 12 frames. Cut positions stay fixed.',true):''}
     <div class="blend-window"><span>${(24-o.duration/2).toFixed(2)}s</span><b>24.00s cut</b><span>${(24+o.duration/2).toFixed(2)}s</span></div>
-    ${btn('▶ Preview transition','preview','wide')}${o.previewing?tag('Preview loop · soundtrack clock retained'):''}</div>
+    ${btn('▶ Preview transition','preview','wide')}${o.entryFlow?btn('Change transition…','open-picker','wide'):''}${o.previewing?tag('Preview loop · soundtrack clock retained'):''}</div>
     <div class="section"><h4>Protection</h4><p class="meta">${o.protectJoin?'Join protected':'Join open'} · ${o.protectDuration?'Duration protected':'Duration open'}</p>
     ${btn('Protect settings…','protect','wide')}${o.protectDuration?btn('Release duration…','release','plain'):''}</div>
     <div class="section">${btn('Remove crossfade','remove','wide')}<p class="meta">Restores a hard cut. Clip positions stay fixed.</p></div>`}
@@ -100,28 +102,28 @@ export function chatPanel(o) {
 function timeline(o) {
   return `<section class="timeline"><div class="row between"><b>Timeline</b><span class="meta">24 fps · 1:12 total</span></div>
   <div class="ruler"><span>0:00</span><span>0:12</span><span class="cut-time">0:24</span><span>0:36</span><span>0:48</span><span>1:00</span><span>1:12</span></div>
-  <div class="picture-strip"><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Dawn</div><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Harbour</div><div class="clip" style="--pic:url('assets/scene4-shot13.png')">Coast</div><div class="clip video">▶ Boat</div><div class="clip" style="--pic:url('assets/scene4-shot12.png')">Window</div><div class="clip short">Detail</div><div class="clip" style="--pic:url('assets/scene4-shot13.png')">Evening</div><div class="clip gap">gap</div><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Lights</div>
+  <div class="picture-strip"><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Dawn</div><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Harbour</div><div class="clip" style="--pic:url('assets/scene4-shot13.png')">Coast</div><div class="clip video" data-drop="video">▶ Boat</div><div class="clip" style="--pic:url('assets/scene4-shot12.png')">Window</div><div class="clip short">Detail</div><div class="clip" style="--pic:url('assets/scene4-shot13.png')">Evening</div><div class="clip gap" data-drop="gap">gap</div><div class="clip" style="--pic:url('assets/launch-harbour.webp')">Lights</div>
   <span class="join existing" title="Opening crossfade · protected duration">⋈</span>
-  ${btn(o.hasTransition?'⋈':'＋',o.hasTransition?'inspect':'add',`join selected ${o.hasTransition?'has':''}`,'aria-label="Harbour to Coast transition"')}
+  ${o.entryFlow?joinEntry(o):btn(o.hasTransition?'⋈':'＋',o.hasTransition?'inspect':'add',`join selected ${o.hasTransition?'has':''}`,'aria-label="Harbour to Coast transition"')}
   ${o.hasTransition?'<span class="handle left" role="slider" tabindex="0" aria-label="Crossfade left duration handle" data-handle="left"></span><span class="handle right" role="slider" tabindex="0" aria-label="Crossfade right duration handle" data-handle="right"></span>':''}
   <i class="cut-line" aria-hidden="true"></i></div>
   <div class="audio-strip"><b>♫</b><span>Harbour lights.wav · original timing</span><i aria-hidden="true"></i></div>
   <div class="effects-strip">✦ Floating lights · continuous across transitions</div>
-  <div class="row timeline-actions">${btn('Apply across images…','batch')}${btn('Ask Arke','chat','plain')}</div></section>`;
+  <div class="row timeline-actions">${btn('Apply across images…','batch')}${btn('Ask Arke','chat','plain')}</div>${o.entryFlow?`<p class="drag-feedback" role="status">${o.dragTarget==='gap'?'Cannot add across empty space. Clips and gap stay where they are.':o.dragging?'Drop Crossfade on a highlighted boundary · cut positions stay fixed.':''}</p>`:''}</section>`;
 }
 export function screen(options={}) {
   const o={...base(),...options};
   const panel=o.panel==='batch'?batchPanel(o):o.panel==='chat'?chatPanel(o):inspector(o);
-  return `<div class="xf216 ${o.device||'desktop'} ${o.live?'live':''}" data-screen-label="${esc(o.label||'Crossfades')}" ${o.live?'id="crossfade-prototype"':''}>
+  return `<div class="xf216 ${o.device||'desktop'} ${o.live?'live':''} ${o.entryFlow?'entry-flow':''} ${o.dragging?'dragging':''}" data-drag-target="${o.dragTarget||''}" data-screen-label="${esc(o.label||'Crossfades')}" ${o.live?'id="crossfade-prototype"':''}>
   <header class="app-head"><span>‹ World</span><b>Harbour lights</b><span class="grow"></span><b>Arke <span class="muted">Studio</span></b><span class="head-tail">◉　⚙</span></header>
-  <div class="editor-body"><aside class="library"><h3>Library</h3><div class="row">${tag('Media')}${tag('Effects')}</div><p class="meta">8 pictures · 1 audio</p>
-  <img src="assets/launch-harbour.webp" alt="Harbour still"><p>Harbour</p><img src="assets/scene4-shot13.png" alt="Coast still"><p>Coast</p><div class="library-help"><b>Transitions</b><p>Select a cut between two stills to add a crossfade.</p>${btn('Apply across images…','batch','wide')}</div></aside>
+  <div class="editor-body"><aside class="library"><h3>Library</h3><div class="row">${tag('Media')}${tag('Effects')}${o.entryFlow?tag('Transitions','on'):''}</div><p class="meta">${o.entryFlow?'1 transition':'8 pictures · 1 audio'}</p>
+  ${o.entryFlow?transitionLibrary():`<img src="assets/launch-harbour.webp" alt="Harbour still"><p>Harbour</p><img src="assets/scene4-shot13.png" alt="Coast still"><p>Coast</p><div class="library-help"><b>Transitions</b><p>Select a cut between two stills to add a crossfade.</p>${btn('Apply across images…','batch','wide')}</div>`}</aside>
   <main class="cut"><div class="cut-head row between"><div><h2>The cut</h2><span class="meta">Still-picture film · fixed picture timing</span></div>${tag(o.reviewed?'Reviewing':'Current')}</div>
   ${o.reviewed?`<div class="review-bar"><b>Review · Version ${o.version}</b><div class="row">${btn('Current','current',o.view==='current'?'on':'')}${btn('Suggested','suggested',o.view==='suggested'?'on':'')}${btn(`${o.cardRows?.length??3} changes`,'chat')}</div><div class="row">${btn('Return to Current editing','leave')}${btn('Apply reviewed version','apply','primary',o.stale||o.releasePending?'disabled':'')}</div>${o.releasePending?`<span>Release on Apply · review required</span>${btn('Review release version','review-release')}`:''}</div>`:''}
   <div class="preview"><img src="assets/launch-harbour.webp" alt="Outgoing Harbour still"><img class="incoming-picture" src="assets/scene4-shot13.png" alt="Incoming Coast still" style="opacity:${o.hasTransition?o.phase/100:0}"><span class="preview-label">${o.reviewed?o.view==='suggested'?'Suggested':'Current':'Current'} · ${o.hasTransition?'Crossfade':'Hard cut'}</span><div class="preview-caption">Harbour <span>→</span> Coast</div><div class="preview-time">0:24 / 1:12</div></div>
   <div class="transport">${btn(o.previewing?'Ⅱ Pause':'▶ Preview join','preview','plain')}<input type="range" min="0" max="100" value="${o.phase}" aria-label="Transition preview position" data-key="phase"><span class="meta">${o.hasTransition?`${o.duration.toFixed(2)}s blend`:'Hard cut'}</span></div>
-  ${timeline(o)}${o.status?`<div class="status" role="status">${esc(o.status)}${o.undo?btn('Undo','undo','plain'):''}</div>`:''}
+  ${o.entryFlow?mobileJoin(o):''}${timeline(o)}${o.status?`<div class="status" role="status">${esc(o.status)}${o.undo?btn('Undo','undo','plain'):''}</div>`:''}
   <div class="mobile-tools">${btn('Join','inspect')}${btn('Apply across','batch')}${btn('Arke','chat')}</div></main>
   <aside class="inspector ${o.phonePanel?'shown':''}"><div class="panel-tabs">${btn('Inspector','inspect',o.panel==='chat'?'':'on')}${btn('Arke','chat',o.panel==='chat'?'on':'')}${btn('Done','close-panel','touch-only')}</div><div class="panel-scroll">${panel}</div></aside></div>
-  <footer><span>${o.reviewed?'Pending review · Current unchanged':'Saved cut · 1:12'}</span><span>Cut positions preserved</span></footer></div>`.replace(/[ \t]+$/gm,'');
+  <footer><span>${o.reviewed?'Pending review · Current unchanged':'Saved cut · 1:12'}</span><span>Cut positions preserved</span></footer>${o.entryFlow&&(o.picker||o.replacePrompt)?`<div class="mobile-picker">${transitionPicker(o)}</div>`:''}</div>`.replace(/[ \t]+$/gm,'');
 }
