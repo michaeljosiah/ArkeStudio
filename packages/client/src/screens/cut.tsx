@@ -89,7 +89,8 @@ import { SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
 import { CutLoopControl } from "./editor-loop.js";
-import { TransitionProvider, TransitionLibrary, TransitionInspector, TransitionTouchJoins } from "./editor-transitions.js";
+import { TransitionProvider, TransitionLibrary, TransitionInspector, TransitionTouchJoins, TransitionPhoneNavigation } from "./editor-transitions.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { isTransitionCommand, type TransitionPair } from "@arke-studio/contracts";
 import { useTransitionReview } from "../lib/editor-transition-review.js";
 import { TransitionReviewBar } from "./editor-transition-review-bar.js";
@@ -236,6 +237,7 @@ export function CutScreen() {
 function CutEditorScreen() {
   const navigate = useNavigate();
   const { phone, compact } = useCutLayout();
+  const portraitPhone = useMediaQuery("(max-width: 599px) and (orientation: portrait)");
   const remote = isRemoteSession();
   const [arkeOpen, setArkeOpen] = useState(false);
   const [laneOpen, setLaneOpen] = useState<TimelineTrackId | null>(null);
@@ -300,6 +302,7 @@ function CutEditorScreen() {
   const [selectedTransition, setSelectedTransition] = useState<TransitionPair | null>(null);
   useEffect(() => { setSelectedTransition(null); }, [worldId, prodId]);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [transitionBatchOpen, setTransitionBatchOpen] = useState(false);
   const [sceneLabels, setSceneLabels] = useState<boolean | null>(null);
   const showScenes = sceneLabels ?? compact;
   const [importing, setImporting] = useState(false);
@@ -1161,10 +1164,10 @@ function CutEditorScreen() {
 
   return (
     <TransitionProvider timeline={shownTimeline} artifacts={world?.artifacts ?? []} disabled={currentCommandsDisabled || !!effectReview.active || !!transitionReview.pending || !!transitionReview.stale || transitionReview.active?.comparison === "current"} pending={!!transitionReview.active}
-      selected={selectedTransition} select={setSelectedTransition} send={sendCommands} transport={transport} adjustedKeys={transitionReview.active?.version.sticky.map(value => value.key)}
+      selected={selectedTransition} select={setSelectedTransition} send={sendCommands} transport={transport} adjustedKeys={transitionReview.active?.version.sticky.map(value => value.key)} onBatchChange={setTransitionBatchOpen}
       onInspect={(openingPicker) => { setSelected(null); setDetailTab("inspector"); if (!openingPicker || !phone) { revealDetails(); setRightOpen(true); } }}>
     <CutTouchContext.Provider value={{ snap, toggleSnap: () => setSnap(value => !value), openLane: setLaneOpen }}>
-    <div className="fy-cutcols" data-screen="cut" data-phone={phone || undefined} data-compact={compact || undefined}
+    <div className="fy-cutcols" data-screen="cut" data-phone={phone || undefined} data-compact={compact || undefined} data-transition-panel={portraitPhone && rightOpen && (!!selectedTransition || transitionBatchOpen) || undefined}
       style={{ "--cut-aspect": (production?.meta.aspect ?? "16:9").replace(":", "/"), "--cut-zoom": zoom } as CSSProperties}
       // A lane or the Library that took or refused the drag has spoken (issue 1035): its
       // dropEffect stands. What is left is a file over the chrome, which appends — while the
@@ -1732,6 +1735,7 @@ function CutEditorScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
+        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => setArkeOpen(true)} onDone={() => setRightOpen(false)} />}
         <div className="fy-cutside__head">
           <EditorPanelTabs value={detailTab} onChange={setDetailTab} />
           <button
@@ -1746,7 +1750,7 @@ function CutEditorScreen() {
             &times;
           </button>
         </div>
-        <EditorSheetSlot sheet={phone} open={rightOpen} title={selectedTransition ? "Transition" : selectedLabel || "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
+        <EditorSheetSlot sheet={phone && !(portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen))} open={rightOpen} title={selectedTransition ? "Transition" : selectedLabel || "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
           footer={<><span>± one frame · {frameRate} fps</span><Button variant="primary" onClick={() => setRightOpen(false)}>Done</Button></>}>
         <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && detailTab !== "inspector"}>
             {effectReview.active && <button type="button" onClick={backToEffectProposal}>Back to proposal · Version {effectReview.active.version.number}</button>}

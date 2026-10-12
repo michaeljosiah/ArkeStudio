@@ -14,8 +14,8 @@ const pairOf = (join: TransitionPair): TransitionPair => ({ trackId: join.trackI
 const seconds = (frames: number, fps: number) => `${(frames / fps).toFixed(2)}s`;
 const name = (join: PictureJoin) => `${join.left.source.label} → ${join.right.source.label}`;
 
-export function TransitionProvider({ children, transport, onInspect, ...input }: Omit<Context, "open" | "batch" | "dragging" | "setDragging" | "preview" | "previewing"> & {
-  children: ReactNode; transport: CutTransport; onInspect: (openingPicker?: boolean) => void;
+export function TransitionProvider({ children, transport, onInspect, onBatchChange, ...input }: Omit<Context, "open" | "batch" | "dragging" | "setDragging" | "preview" | "previewing"> & {
+  children: ReactNode; transport: CutTransport; onInspect: (openingPicker?: boolean) => void; onBatchChange?: (open: boolean) => void;
 }) {
   const [picker, setPicker] = useState<{ join: PictureJoin; anchor: HTMLElement; replace: boolean } | null>(null);
   const [batch, setBatch] = useState(false), [dragging, setDragging] = useState(false);
@@ -32,7 +32,7 @@ export function TransitionProvider({ children, transport, onInspect, ...input }:
   const dismiss = () => { const anchor = picker?.anchor; setPicker(null); requestAnimationFrame(() => anchor?.isConnected && anchor.focus()); };
   const context: Context = { ...input, select: pair => { input.select(pair); if (pair) onInspect(); },
     open: (join, anchor, replace = false) => { if (!input.disabled) { input.select(pairOf(join)); onInspect(true); setPicker({ join, anchor, replace }); } },
-    batch: () => { batchAnchor.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; onInspect(); setBatch(true); }, dragging, setDragging,
+    batch: () => { batchAnchor.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; onBatchChange?.(true); onInspect(); setBatch(true); }, dragging, setDragging,
     previewing: !!loop && transport.playing,
     preview: (join, value) => { const window = crossfadeWindow(join.cutFrame, value.durationFrames), fps = input.timeline!.frameRate;
       if (loop && transport.playing) { setLoop(null); transport.setPlaying(false); return; }
@@ -41,7 +41,7 @@ export function TransitionProvider({ children, transport, onInspect, ...input }:
       setLoop(range); transport.seek(range.start); transport.setPlaying(true);
     } };
   return <Transitions.Provider value={context}>{children}{picker && input.timeline && <TransitionPicker picker={picker} close={dismiss} />}
-    {batch && input.timeline && <TransitionBatch close={() => { setBatch(false); requestAnimationFrame(() => batchAnchor.current?.isConnected && batchAnchor.current.focus()); }} />}</Transitions.Provider>;
+    {batch && input.timeline && <TransitionBatch close={() => { setBatch(false); onBatchChange?.(false); requestAnimationFrame(() => batchAnchor.current?.isConnected && batchAnchor.current.focus()); }} />}</Transitions.Provider>;
 }
 
 function Tile({ onClick, draggable = false }: { onClick: (event: React.MouseEvent<HTMLButtonElement>) => void; draggable?: boolean }) {
@@ -212,4 +212,15 @@ export function TransitionTouchJoins() {
     return <div key={transitionKey(join)} className="xf-row"><span><b>{name(join)}</b><small>Join at {formatFrames(join.cutFrame, context.timeline!.frameRate)}</small></span><button type="button" disabled={context.disabled}
       aria-label={value ? `Inspect ${name(join)} crossfade` : `Add transition at ${formatFrames(join.cutFrame, context.timeline!.frameRate)}`}
       onClick={event => value ? context.select(pairOf(join)) : context.open(join, event.currentTarget)}>{value ? "⋈ Crossfade" : "＋"}</button></div>; })}</div>;
+}
+
+/** The approved phone flow keeps the picture visible above the inline transition controls. */
+export function TransitionPhoneNavigation({ onJoin, onArke, onDone }: { onJoin: () => void; onArke: () => void; onDone: () => void }) {
+  const context = useContext(Transitions)!;
+  const join = context.timeline && pictureJoins(context.timeline.tracks, clip => transitionStill(clip, context.artifacts)).find(row => context.selected && sameTransitionPair(row, context.selected));
+  return <div className="xf-phone-navigation">
+    {join && <div className="xf-phone-selected"><span><b>{name(join)}</b><small>Join at {formatFrames(join.cutFrame, context.timeline!.frameRate)}</small></span><button type="button" onClick={() => context.select(pairOf(join))}>⋈ Crossfade</button></div>}
+    <nav aria-label="Transition actions"><button type="button" onClick={onJoin}>Join</button><button type="button" disabled={context.disabled} onClick={context.batch}>Apply across</button><button type="button" onClick={onArke}>Arke</button></nav>
+    <nav aria-label="Transition panel"><button type="button" aria-pressed="true">Inspector</button><button type="button" onClick={onArke}>Arke</button><button type="button" onClick={onDone}>Done</button></nav>
+  </div>;
 }

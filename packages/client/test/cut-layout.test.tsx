@@ -38,13 +38,23 @@ const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
 let review: ReturnType<typeof useEffectProposalReview> | null = null;
 function ReviewProbe() { review = useEffectProposalReview(fixture.world!.meta.worldId, "saltlight"); return null; }
-async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false) {
+async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false, withTransition = false) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
   const bridge = { connect() {}, subscribe() { return () => {}; }, send(raw: string) { sent.push(JSON.parse(raw)); } } as unknown as ArkeBridge;
   Object.assign(dom.window, { arke: remote ? undefined : bridge });
   const state = cutLayoutFixture(), timeline = state.world!.productions[0]!.timeline;
+  if (withTransition && timeline?.status === "ready") {
+    Object.getPrototypeOf(document.createElement("canvas")).getContext = () => null;
+    Object.assign(globalThis, { requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
+    const track = timeline.timeline.tracks.find(track => track.kind === "picture")!;
+    const still = { ...state.world!.artifacts[0]!, id: "ar_01J8G0000000000000000000ZX", kind: "image" as const, file: "harbour.png" };
+    state.world!.artifacts.push(still);
+    for (const clip of track.clips.slice(0, 2)) clip.source = { kind: "artifact", artifactId: still.id, label: "Harbour" };
+    timeline.timeline.transitions = [{ type: "crossfade", trackId: track.id, leftClipId: track.clips[0]!.id, rightClipId: track.clips[1]!.id, durationFrames: 24, protectJoin: false, protectDuration: true }];
+    timeline.timeline.history = { undo: [], redo: [] };
+  }
   if (tail !== undefined && timeline?.status === "ready") timeline.timeline.tracks[0]!.endFrame = tail;
   if (withEffect && timeline?.status === "ready") {
     // Canvas/worker pixels have separate browser parity coverage; this fixture exercises real Cut event ownership.
@@ -64,6 +74,23 @@ const click = async (element: HTMLElement) => { assert.ok(element); await act(as
 function props(element: HTMLElement): Record<string, (event: never) => void> { const key = Object.keys(element).find(name => name.startsWith('__reactProps$'))!; return (element as unknown as Record<string, Record<string, (event: never) => void>>)[key]!; }
 function pointer(target: EventTarget, type: string, x: number, y = 20) { const event = new dom.Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, pointerType: "touch", clientX: x, clientY: y }); target.dispatchEvent(event); }
 const timelineCommands = () => sent.filter((m): m is Extract<ClientMessage, { kind: "timeline-command" }> => m.kind === "timeline-command").flatMap(m => m.commands);
+
+it("phone transition controls stay inline below the picture and retain their draft across Fold resizing", async () => {
+  await mount(390, false, undefined, false, false, true);
+  await click(find(".xf-join-trigger.has"));
+  assert.ok(find(".fy-cutcols[data-transition-panel] .xf-phone-navigation"));
+  assert.equal(document.querySelector(".fy-cut-trim-sheet[open]"), null);
+  const inspector = find(".xf-inspector");
+  await click([...inspector.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Protect settings…")!);
+  await act(async () => { width = 984; listeners.forEach(listener => listener()); });
+  assert.equal(find(".xf-inspector"), inspector);
+  assert.match(inspector.textContent!, /Protect from Arke/);
+  await act(async () => { width = 390; listeners.forEach(listener => listener()); });
+  assert.equal(find(".xf-inspector"), inspector);
+  await click([...document.querySelectorAll<HTMLElement>(".xf-phone-navigation button")].find(button => button.textContent === "Done")!);
+  assert.equal(document.querySelector(".fy-cutcols[data-transition-panel]"), null);
+  assert.deepEqual(timelineCommands(), []);
+});
 
 for (const viewport of [320, 390, 984, 1360]) it(`proposal and Inspector navigation returns to the same review at ${viewport}px`, async () => {
   const state = await mount(viewport, false, undefined, true, true);
