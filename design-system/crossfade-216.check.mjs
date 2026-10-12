@@ -68,6 +68,7 @@ try{
   await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
   await ok('Escape closes picker and restores join focus','!crossfadeDesignState().picker&&document.activeElement.classList.contains("join-trigger")');
   check('Dismissal leaves Current unchanged',JSON.stringify((await state()).current)===beforePlacement);
+  await click('open-picker');await click('close-picker');await ok('Library picker returns focus to its invoking tile','document.activeElement.dataset.transition==="crossfade"');
   await add();await ok('Choosing tile inserts directly and selects duration','crossfadeDesignState().current.hasTransition&&crossfadeDesignState().current.duration===1&&!crossfadeDesignState().picker&&document.activeElement.dataset.key==="duration"');
   await click('undo');check('Picker insertion is one Undo',JSON.stringify((await state()).current)===beforePlacement);
   await dragStart();await dragTo('dragover','join');

@@ -52,13 +52,13 @@ function runPreview(){
     const slider=host.querySelector('[data-key=phase]');if(slider)slider.value=state.phase;
   },35);
 }
-function action(act){
+function action(act,source){
   let focusSelector;
   switch(act){
     case 'inspect':state.picker=false;state.replacePrompt=false;state.panel='inspect';state.phonePanel=true;break;
     case 'chat':state.picker=false;state.replacePrompt=false;state.panel='chat';state.phonePanel=true;break;
-    case 'open-picker':if(state.reviewed&&state.view==='current')return;state.picker=true;state.replacePrompt=false;focusSelector='[data-act="add"]';break;
-    case 'close-picker':state.picker=false;state.replacePrompt=false;focusSelector='.join-trigger,.mobile-join button';break;
+    case 'open-picker':if(state.reviewed&&state.view==='current')return;state.pickerOrigin=source?.matches('[data-transition]')?'library':source?.closest('.inspector')?'inspector':source?.closest('.mobile-join')?'mobile':'join';state.picker=true;state.replacePrompt=false;focusSelector='[data-act="add"]';break;
+    case 'close-picker':state.picker=false;state.replacePrompt=false;focusSelector={library:'[data-transition]',inspector:'.inspector [data-act="open-picker"]',mobile:'.mobile-join button',join:'.join-trigger'}[state.pickerOrigin||'join'];break;
     case 'batch':if(state.reviewed){status('Return to Current editing before starting a separate batch. Pending transitions can be adjusted in the Inspector.');break;}state.panel='batch';state.phonePanel=true;state.acceptShort=false;break;
     case 'close-panel':state.phonePanel=false;break;
     case 'add':{
@@ -115,7 +115,7 @@ function action(act){
   render();
   if(focusSelector)[...host.querySelectorAll(focusSelector)].find(e=>e.getClientRects().length)?.focus({preventScroll:true});
 }
-host.addEventListener('click',e=>{const button=e.target.closest('[data-act]');if(button&&!button.disabled)action(button.dataset.act);});
+host.addEventListener('click',e=>{const button=e.target.closest('[data-act]');if(button&&!button.disabled)action(button.dataset.act,button);});
 const dragType='application/x-arke-design-transition';
 function showDrag(target=''){
   state.dragTarget=target;const root=host.querySelector('.xf216');root.classList.toggle('dragging',state.dragging);root.dataset.dragTarget=target;
@@ -135,7 +135,7 @@ host.addEventListener('drop',e=>{
   if(!state.dragging||e.dataTransfer.getData(dragType)!=='crossfade')return;
   e.preventDefault();const target=e.target.closest('[data-drop]')?.dataset.drop;
   state.dragging=false;showDrag();
-  if(target==='join')action('add');else{status('Drop cancelled. Only a touching still-image boundary can accept this transition.');render();}
+  if(target==='join'){state.pickerOrigin='join';action('add');}else{status('Drop cancelled. Only a touching still-image boundary can accept this transition.');render();}
 });
 host.addEventListener('dragend',()=>{state.dragging=false;showDrag();});
 host.addEventListener('keydown',e=>{
