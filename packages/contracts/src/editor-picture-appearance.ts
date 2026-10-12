@@ -25,7 +25,8 @@ export const pictureAppearanceOrigin = (clip: TimelineClip): TimelineClip["id"] 
 
 /** Generic chat history never acquires the authority to install or release picture rules. */
 export function timelineCarriesPictureAppearance(timeline: ProductionTimeline): boolean {
-  const carries = (clip: TimelineClip | null) => clip?.visual !== undefined || clip?.visualOriginId !== undefined;
+  // Split identity alone carries no appearance or rule; ordinary chat Undo stays available.
+  const carries = (clip: TimelineClip | null) => clip?.visual !== undefined;
   return timeline.tracks.some(track => track.clips.some(carries)) || [...timeline.history.undo, ...timeline.history.redo]
     .some(entry => entry.kind === "change" && entry.clips.some(change => carries(change.before) || carries(change.after)));
 }
