@@ -14,8 +14,8 @@ import {
   type TimelineTrack,
   type TimelineTrackId,
 } from "@arke-studio/contracts";
-import { cx } from "../components/ui.js";
-import { TextMark as Captions } from "../components/icons.js";
+import { cx, IconButton } from "../components/ui.js";
+import { TextMark as Captions, Eye, EyeOff, Plus } from "../components/icons.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { pointerIsTouch, armClipMenu } from "./editor-gesture.js";
 import { ClipMenu } from "./editor-clip-menu.js";
@@ -65,20 +65,20 @@ export function SubtitleTrackRow({
           {track.name}
         </span>
         <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
-          <button
+          <IconButton
             type="button"
             aria-pressed={track.muted}
-            aria-label={`Hide ${track.name}`}
+            label={`${track.muted ? "Show" : "Hide"} ${track.name}`}
             disabled={disabled}
             onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], track.muted ? `Show ${track.name}` : `Hide ${track.name}`)}
           >
-            M
-          </button>
-          <button
+            {track.muted ? <EyeOff size={14} /> : <Eye size={14} />}
+          </IconButton>
+          <IconButton
             type="button"
             className="fy-trackbtns__add"
             disabled={disabled || (track.cues ?? []).some((cue) => playheadFrame >= cue.startFrame && playheadFrame < cue.endFrame)}
-            aria-label={`Add subtitle at ${formatFrames(playheadFrame, frameRate)}`}
+            label={`Add subtitle at ${formatFrames(playheadFrame, frameRate)}`}
             onClick={() => {
               const next = cues.find((cue) => cue.startFrame > playheadFrame);
               const endFrame = Math.min(playheadFrame + frameRate * 2, next?.startFrame ?? Number.MAX_SAFE_INTEGER);
@@ -88,8 +88,8 @@ export function SubtitleTrackRow({
               );
             }}
           >
-            +
-          </button>
+            <Plus size={14} />
+          </IconButton>
         </span>
       </span>
       <div className="fy-track__lane fy-typedlane fy-cuelane">

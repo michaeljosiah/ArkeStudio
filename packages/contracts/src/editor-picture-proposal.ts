@@ -12,8 +12,9 @@ export function pictureAppearanceState(timeline: Pick<ProductionTimeline, "track
   return timeline.tracks.filter(track => track.kind === "picture").flatMap(track => track.clips.map(clip => ({ clipId: clip.id, visual: clip.visual, visualOriginId: clip.visualOriginId })));
 }
 export function withPictureAppearance(timeline: ProductionTimeline, pictures: readonly PictureAppearanceState[]): ProductionTimeline {
+  const byId = new Map(pictures.map(row => [row.clipId, row]));
   return { ...timeline, tracks: timeline.tracks.map(track => ({ ...track, clips: track.clips.map(clip => {
-    const value = pictures.find(row => row.clipId === clip.id); return value ? { ...clip, visual: value.visual, visualOriginId: value.visualOriginId } : clip;
+    const value = byId.get(clip.id); return value ? { ...clip, visual: value.visual, visualOriginId: value.visualOriginId } : clip;
   }) })) };
 }
 export const ModelPictureProposalSchema = z.object({ summary: z.string().min(1).max(500),
@@ -27,7 +28,8 @@ export type PictureSticky = z.infer<typeof PictureStickySchema>;
 export const PictureProposalVersionSchema = z.object({ id, number: z.number().int().min(1), parentVersionId: id.optional(), actionId: ConversationActionIdSchema.optional(),
   origin: z.enum(["model", "adjustment", "release", "update", "history"]), summary: z.string().min(1).max(500), createdAt: z.string(),
   baseRevision: z.number().int().nonnegative(), baseHash: hash, candidateHash: hash, model: ModelPictureProposalSchema, sticky: z.array(PictureStickySchema).max(200),
-  before: z.array(PictureAppearanceStateSchema).max(4000), pictures: z.array(PictureAppearanceStateSchema).max(4000),
+  // Snapshots span all picture tracks; the timeline's 4,000-clip limit is per track.
+  before: z.array(PictureAppearanceStateSchema), pictures: z.array(PictureAppearanceStateSchema),
   conflicts: z.array(z.string().max(500)).max(100), notes: z.array(z.string().max(500)).max(100), dependencies: EffectProposalDependenciesSchema,
 }).strict();
 export type PictureProposalVersion = z.infer<typeof PictureProposalVersionSchema>;
@@ -39,8 +41,9 @@ export const PictureProposalFamilySchema = z.object({ id, productionId: SlugSche
 export type PictureProposalFamily = z.infer<typeof PictureProposalFamilySchema>;
 export const pictureVersionRef = (familyId: string, version: PictureProposalVersion): PictureVersionRef => ({ familyId, versionId: version.id, candidateHash: version.candidateHash });
 export function pictureAppearanceDelta(before: readonly PictureAppearanceState[], after: readonly PictureAppearanceState[]) {
+  const beforeById = new Map(before.map(row => [row.clipId, row])), afterById = new Map(after.map(row => [row.clipId, row]));
   return [...new Set([...before, ...after].map(value => value.clipId))].flatMap(clipId => {
-    const left = before.find(value => value.clipId === clipId), right = after.find(value => value.clipId === clipId);
+    const left = beforeById.get(clipId), right = afterById.get(clipId);
     return canonical(left) === canonical(right) ? [] : [{ clipId, before: left, after: right }];
   });
 }

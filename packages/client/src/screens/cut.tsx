@@ -1374,7 +1374,13 @@ function CutEditorScreen() {
               </span>
             )}
             <span className="fy-h1row__push" />
-            {!compact && <CutLoopControl transport={transport} />}
+            {!compact && <span className="fy-timeline__group" role="group" aria-label="Playback">
+              <button type="button" className="fy-tlbtn fy-tip" aria-label={transport.playing ? "Pause" : "Play"} data-tip={`${transport.playing ? "Pause" : "Play"} · Space`} onClick={() => {
+                if (!transport.playing && transport.timeRef.current >= filmSec) transport.seek(0);
+                transport.setPlaying(value => !value);
+              }}>{transport.playing ? <Pause size={14} /> : <Play size={14} />}</button>
+              <CutLoopControl transport={transport} />
+            </span>}
             <span className="fy-timeline__group" role="group" aria-label="History">
               <button type="button" className="fy-tlbtn fy-tip" data-tip="Undo · Ctrl+Z" aria-label="Undo" disabled={!canUndo} onClick={() => sendHistory("undo")}>
                 <RotateCcw size={12} />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cueAtSec, type EffectRenderProjection, type RenderPlan } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
-import { PauseSolid, Play } from "../components/icons.js";
+import { Play } from "../components/icons.js";
 import { clock } from "../components/player.js";
 import { mediaUrl } from "../lib/media.js";
 import { EditorPicturePreview, previewProductionFrame } from "./editor-picture-preview.js";
@@ -70,10 +70,10 @@ export function EffectCutPreview({ slug, plan, projection, transport, totalSec, 
       </span>)}
       {otherIssues.map(issue => <span key={issue.effectId}>{issue.reason}</span>)}
     </span>}
-    {!areaActive && <button type="button" className="fy-playbtn" aria-label={transport.playing ? "Pause" : "Play"} onClick={() => {
-      if (!transport.playing && transport.timeRef.current >= totalSec) transport.seek(0);
-      transport.setPlaying(value => !value);
-    }}>{transport.playing ? <PauseSolid size={22} /> : <Play size={22} />}</button>}
+    {!areaActive && !transport.playing && <button type="button" className="fy-playbtn" aria-label="Play" onClick={() => {
+      if (transport.timeRef.current >= totalSec) transport.seek(0);
+      transport.setPlaying(true);
+    }}><Play size={22} /></button>}
     <span className="fy-viewer__tag">{clock(transport.time)}{!compact && <> / {clock(totalSec)}</>}</span>
   </div>;
 }

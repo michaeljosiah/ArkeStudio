@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ulid, formatFrames, type FrameRate, type TimelineClip, type TimelineCommand, type PictureBlendMode } from "@arke-studio/contracts";
 import { EffectNumberField, EffectTimeField } from "./editor-effect-fields.js";
 
@@ -8,6 +8,10 @@ export function PictureAppearanceInspector({ clip, frameRate, disabled, onComman
 }) {
   const [property, setProperty] = useState<"blendMode" | "opacity">("blendMode"), [scope, setScope] = useState<"whole" | "passage">("whole");
   const [start, setStart] = useState(clip.startFrame), [end, setEnd] = useState(clip.startFrame + clip.durationFrames);
+  useEffect(() => {
+    setStart(clip.startFrame); setEnd(clip.startFrame + clip.durationFrames);
+  }, [clip.id, clip.startFrame, clip.durationFrames, resetToken]);
+  const passageReset = `${clip.id}/${clip.startFrame}/${clip.durationFrames}/${resetToken ?? ""}`;
   const label = property === "blendMode" ? "Blend mode" : "Opacity";
   return <section className="fx-inspector picture-appearance" aria-label="Picture appearance">
     <h3>Appearance</h3>
@@ -23,7 +27,7 @@ export function PictureAppearanceInspector({ clip, frameRate, disabled, onComman
       <details><summary>Add setting protection</summary>
         <label className="fx-audio__select">Setting<select value={property} disabled={disabled} onChange={event => setProperty(event.currentTarget.value as typeof property)}><option value="blendMode">Blend mode</option><option value="opacity">Opacity</option></select></label>
         <label className="fx-audio__select">Setting scope<select value={scope} disabled={disabled} onChange={event => setScope(event.currentTarget.value as typeof scope)}><option value="whole">Whole clip</option><option value="passage">Fixed passage</option></select></label>
-        {scope === "passage" && <div className="fx-protection__passage"><EffectTimeField label="Passage Start" value={start} frameRate={frameRate} disabled={disabled} onCommit={setStart} /><EffectTimeField label="Passage End" value={end} frameRate={frameRate} disabled={disabled} onCommit={setEnd} /></div>}
+        {scope === "passage" && <div className="fx-protection__passage"><EffectTimeField label="Passage Start" value={start} frameRate={frameRate} disabled={disabled} resetToken={passageReset} onCommit={setStart} /><EffectTimeField label="Passage End" value={end} frameRate={frameRate} disabled={disabled} resetToken={passageReset} onCommit={setEnd} /></div>}
         <button type="button" disabled={disabled || scope === "passage" && end <= start} onClick={() => onCommands([{ kind: "picture-protect", clipId: clip.id,
           rule: { id: `vp_${ulid()}`, property, scope: scope === "whole" ? { kind: "whole" } : { kind: "passage", startFrame: start, endFrame: end } } }], `Protect ${label}`)}>Protect {label}</button>
       </details>

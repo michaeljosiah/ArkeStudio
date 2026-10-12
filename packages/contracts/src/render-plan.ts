@@ -675,7 +675,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     items.push({ type: "slate", label: slateLabel, durationSec: entry.durationSec });
     if (clip !== undefined && base !== null) basePictures.push({ clipId: clip.id, trackId: base.id, order: base.order,
       kind: "slate", label: slateLabel, still: true, startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames,
-      sourceInSec: 0, fit: "contain", matte: "source-alpha" });
+      sourceInSec: 0, fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}) });
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];

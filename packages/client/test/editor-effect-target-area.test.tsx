@@ -84,5 +84,10 @@ describe("preview emitting area target placement", () => {
     value.effect = { ...value.effect, id: "cl_second", lineageId: "ef_second" };
     await act(async () => render()); assert.equal(container.querySelector(".fx-target-area"), null);
     assert.equal(toggle.getAttribute("aria-expanded"), "false"); assert.equal(seeks, 0); assert.equal(playbackChanges, 0); assert.equal(transport.timeRef.current, 1);
+    assert.ok(container.querySelector(".fy-playbtn"), "paused preview offers Play");
+    transport.playing = true;
+    await act(async () => render()); assert.equal(container.querySelector(".fy-playbtn"), null, "playing effects leave the picture unobscured");
+    transport.playing = false;
+    await act(async () => render()); assert.ok(container.querySelector(".fy-playbtn"), "Play returns after pausing");
   });
 });

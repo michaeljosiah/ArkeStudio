@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { defaultEffectClip, evaluateEffectFrame, rasterizeEffectFrame, clearAirParticleCache, airParticleCacheBytes, AIR_PARTICLE_PROFILE,
   compositeRgba, addWeightedPicture, compositeWeightedTrack, moveEffect, trimEffect, restoreEffectCommands, applyTimelineCommands,
   ProductionTimelineSchema, undoTimelineHistory, redoTimelineHistory, compilePictureProposal, pictureStickyEdits, pictureAppearanceState, keepPictureAppearance,
-  effectRenderCapabilityProblem, type ProductionTimeline, type TimelineClipCommand, type ModelPictureProposal } from "../src/index.js";
+  effectRenderCapabilityProblem, PictureProposalVersionSchema, pictureAppearanceDelta, withPictureAppearance, type ProductionTimeline, type TimelineClipCommand, type ModelPictureProposal } from "../src/index.js";
 const air = () => defaultEffectClip({ id: "cl_air", lineageId: "ef_air", seed: 81273, startFrame: 0, durationFrames: 45000, preset: "air-particles" });
 const frame = (effect = air(), absoluteFrame = 240) => evaluateEffectFrame({ effect, absoluteFrame, frameRate: 25, targetAspectRatio: 16 / 9 });
 test("Air Particles cold and cached seeks, loops, moves and head trims preserve exact frames", () => {
@@ -47,6 +47,20 @@ const base = (): ProductionTimeline => ProductionTimelineSchema.parse({ schemaVe
 ], history: { undo: [], redo: [] } });
 const human = (timeline: ProductionTimeline, commands: TimelineClipCommand[]) => applyTimelineCommands(timeline, commands, { effectAuthority: "human" });
 const picture = (timeline: ProductionTimeline) => timeline.tracks[0]!.clips[0]!;
+
+test("picture proposal snapshots cover multiple full tracks without a global 4000-clip ceiling", () => {
+  const value = base(), template = picture(value);
+  value.tracks = [0, 1].map(track => ({ ...value.tracks[0]!, id: `tr_picture${track}`, order: track,
+    clips: Array.from({ length: 2100 }, (_, index) => ({ ...template, id: `cl_${track}_${index}`, startFrame: index * 100 })) }));
+  const timeline = ProductionTimelineSchema.parse(value), before = pictureAppearanceState(timeline);
+  const pictures = before.map((row, index) => index === 4199 ? { ...row, visual: { blendMode: "screen" as const, opacity: .5 } } : row);
+  const snapshot = PictureProposalVersionSchema.pick({ before: true, pictures: true }).parse({ before, pictures });
+  assert.equal(snapshot.before.length, 4200);
+  assert.deepEqual(pictureAppearanceDelta(snapshot.before, snapshot.pictures).map(row => row.clipId), ["cl_1_2099"]);
+  const applied = withPictureAppearance(timeline, snapshot.pictures);
+  assert.deepEqual(applied.tracks[1]!.clips[2099]!.visual, { blendMode: "screen", opacity: .5 });
+  assert.equal(JSON.stringify(applied.tracks[0]), JSON.stringify(timeline.tracks[0]));
+});
 test("picture rules survive splits and duplicates; human edits update the baseline and history restores it", () => {
   const original = base();
   const protectedBase = human(original, [{ kind: "picture-appearance", clipId: "cl_a", patch: { blendMode: "screen", opacity: .7 } },

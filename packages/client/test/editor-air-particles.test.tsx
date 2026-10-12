@@ -41,3 +41,41 @@ test("picture protection uses a named rule and explicit Release; read-only compa
   assert.equal(button("Release Blend mode").disabled, true);
   assert.equal(document.querySelector<HTMLSelectElement>('[aria-label="Picture blend mode"]')!.disabled, true);
 });
+
+test("picture passage defaults follow clip moves, trims and review resets without losing edits on appearance changes", async () => {
+  let clip = { id: "cl_a" as const, startFrame: 0, durationFrames: 240, sourceInFrames: 0,
+    source: { kind: "artifact" as const, artifactId: "ar_example", label: "Overlay" } };
+  let resetToken = 0;
+  const sent: TimelineCommand[][] = [];
+  const view = () => <PictureAppearanceInspector clip={clip} frameRate={24} disabled={false} resetToken={resetToken} onCommands={commands => sent.push(commands)} />;
+  await mount(view());
+  const scope = document.querySelectorAll<HTMLSelectElement>("select")[2]!;
+  const key = Object.keys(scope).find(name => name.startsWith("__reactProps$"))!;
+  await act(async () => (scope as unknown as Record<string, { onChange: (event: unknown) => void }>)[key]!.onChange({ currentTarget: { value: "passage" } }));
+  const protect = async () => {
+    await act(async () => button("Protect Blend mode").click());
+    const command = sent.at(-1)![0]!; assert.equal(command.kind, "picture-protect");
+    return command.kind === "picture-protect" ? command.rule.scope : null;
+  };
+  const passageStart = () => {
+    const label = [...document.querySelectorAll("label")].find(row => row.textContent === "Passage Start")!;
+    return document.getElementById(label.getAttribute("for")!) as HTMLInputElement;
+  };
+  const editStart = async (seconds: string) => {
+    const input = passageStart();
+    await act(async () => { input.value = seconds; input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => { const event = new Event("keydown", { bubbles: true }); Object.assign(event, { key: "Enter" }); input.dispatchEvent(event); });
+  };
+  await editStart("1");
+  clip = { ...clip };
+  await act(async () => root!.render(view()));
+  assert.deepEqual(await protect(), { kind: "passage", startFrame: 24, endFrame: 240 });
+  clip = { ...clip, startFrame: 480, durationFrames: 120 };
+  await act(async () => root!.render(view()));
+  assert.deepEqual(await protect(), { kind: "passage", startFrame: 480, endFrame: 600 });
+  await editStart("21");
+  resetToken++;
+  await act(async () => root!.render(view()));
+  assert.deepEqual(await protect(), { kind: "passage", startFrame: 480, endFrame: 600 });
+  assert.equal(passageStart().value, "00:00:20:00");
+});
