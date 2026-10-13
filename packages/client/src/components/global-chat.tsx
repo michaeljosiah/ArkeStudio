@@ -77,6 +77,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   owner.setCurrent(chatSurfaceForPage(state, path)); const current = owner.forPage();
   const selected = snapshot.selected;
   const world = state?.world;
+  useLayoutEffect(() => { if (world) owner.reconcileConversations(world.meta.worldId, new Set(world.conversations.map(row => row.id))); }, [owner, world?.meta.worldId, world?.conversations]);
   const sameWorld = !!selected && selected.worldId === world?.meta.worldId && current?.worldId === selected.worldId;
   const home = sameWorld ? owner.host() : null;
   const inPanel = snapshot.open && sameWorld;

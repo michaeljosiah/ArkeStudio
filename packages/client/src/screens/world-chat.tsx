@@ -481,14 +481,14 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
   const [draft, setDraft] = useConversationState("draft", "");
   /**
-   * Chips taken off the composer, for this visit only.
+   * Chips taken off the composer, retained with this conversation's unsent state.
    *
    * Removing a chip means "stop referring to this", not "delete it" — the file stays in the
    * conversation and anything already said about it stays checkable (§13.1). Held locally rather
    * than durably because the store's unlink is scoped to a message, and these have not been sent
    * with one yet; the same local dismissal the canon composer uses.
    */
-  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [dismissed, setDismissed] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   /** Whether the history is shown. Kept for the visit, as the rail itself is. */
   const [historyOpen, setHistoryOpen] = useState(!fold);
   useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
@@ -736,7 +736,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
    * suggest otherwise (§13.2).
    */
   const chips = (loaded?.attachments ?? [])
-    .filter((a) => !dismissed.includes(a.id))
+    .filter((a) => !dismissed.has(a.id))
     .map((a) => ({
       id: a.id,
       file: attachmentChipLabel(a),
@@ -1009,7 +1009,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
                     },
                   }
                 : {})}
-              onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
+              onRemoveAttachment={(id) => setDismissed((prev) => new Set([...prev, id]))}
               {...(worldId && conversationId
                 ? {
                     onPromoteAttachment: (attachmentId: string) =>

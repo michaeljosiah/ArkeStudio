@@ -48,7 +48,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const [failure, setFailure] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [tab, setTab] = useState<"conversation" | "outline">("conversation");
-  const [modelId, setModelId] = useState("");
+  const [modelId, setModelId] = useConversationState("languageModel", "");
   const pendingRef = useRef<{ requestId: string; operation: string } | null>(null);
   const opened = useRef<string | null>(null);
   useEffect(() => { if (setupId) presentation?.owner.reportConversation(presentation.key, setupId); }, [presentation?.owner, presentation?.key, setupId]);

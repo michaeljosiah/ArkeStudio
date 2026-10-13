@@ -87,13 +87,19 @@ it('uses the styled Shot control and a named Add reference on the phone bench',a
   await click(find('.fy-gen__model-row')); assert.ok(find('.fy-page-sheet[open]'));
 });
 it('opens the bench assistant on request and keeps its draft while resizing',async()=>{
-  await mount('/generate?view=bench&shot=sh_12'); assert.equal(find('.fy-scene-dock'),null);
-  await click(find('.fy-gen__arke')); const editor=find('.fy-scene-dock [role="textbox"]'); assert.ok(editor); editor.textContent='Keep this direction';
+  await mount('/generate?view=bench&shot=sh_12'); assert.equal(find('.fy-global-chat[open]'),null);
+  await click(find('.fy-gen__arke')); const editor=find('.fy-global-chat [role="textbox"]'); assert.ok(editor); editor.textContent='Keep this direction';
   await act(async()=>props(editor).onInput!({currentTarget:editor} as never));
   await act(async()=>{width=1360;for(const listener of listeners)listener();});
-  assert.equal(find('.fy-scene-dock[open]'),null); assert.equal(find('.fy-scene-dock [role="textbox"]'),editor);
+  assert.equal(find('.fy-scene-dock[open]'),null); assert.equal(find('.fy-global-chat [role="textbox"]'),editor);
   await act(async()=>{width=390;for(const listener of listeners)listener();});
-  assert.equal(find('.fy-scene-dock [role="textbox"]'),editor); assert.equal(editor.textContent,'Keep this direction');
+  assert.equal(find('.fy-global-chat [role="textbox"]'),editor); assert.equal(editor.textContent,'Keep this direction');
+});
+for(const size of [390,1360]) it('titlebar Chat captures the selected Generate shot before the local Arke button at '+size,async()=>{
+  await mount('/generate?view=bench&shot=sh_12',size); await click(find('[data-global-chat-trigger]'));
+  const editor=find('.fy-global-chat [role="textbox"]');editor.textContent='Keep this shot';await act(async()=>props(editor).onInput!({currentTarget:editor} as never));
+  await click(find('.fy-global-chat [aria-label="Send"]'));
+  const creation=sent.find(m=>m.kind==='world-chat-create');assert.ok(creation);assert.deepEqual(creation.entryContext,{kind:'generate',productionId:'saltlight',sceneId:'sc_04',shotId:'sh_12'});
 });
 for (const size of [390,1360]) it('steps the review with arrow keys and horizontal swipes at '+size,async()=>{
   await mount('/scenes/sc_04',size,'completed'); await click(find('.fy-swrun__review'));

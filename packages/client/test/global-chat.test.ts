@@ -17,6 +17,8 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.ok(shot);
     for (const view of ["shot", "stage", "takes"]) assert.equal(chatSurfaceForPage(state, `${root}/p/saltlight/scenes/${scene.id}?shot=${shot.id}&view=${view}`)?.entry.kind, view);
     assert.equal(chatSurfaceForPage(state, `${root}/p/saltlight/generate`)?.entry.kind, "generate");
+    const generated = chatSurfaceForPage(state, `${root}/p/saltlight/generate?shot=${shot.id}`)!;
+    assert.deepEqual(generated.entry, { kind: "generate", productionId: "saltlight", sceneId: scene.id, shotId: shot.id });
     assert.equal(cut.entry.kind, "cut");
     assert.equal(chatSurfaceForPage(state, `${root}/artifacts/bench/session-one`)?.entry.kind, "bench");
     assert.equal(chatSurfaceForPage(state, `${root}/productions/setup/${CHAT_ID}`)?.kind, "setup");
@@ -44,6 +46,19 @@ describe("global Chat keeps presentation separate from conversation authority (2
     const history = { ...production, key: chatKey(production.worldId, production.entry, CHAT_ID), conversationId: CHAT_ID };
     owner.open(history);
     assert.equal(owner.value(history.key, "draft", ""), "A retained draft");
+  });
+  it("closed workspace registration preserves a restored selected conversation", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID); owner.close();
+    owner.setCurrent(cut); owner.register(cut, {} as HTMLElement);
+    assert.equal(owner.getSnapshot().selected?.conversationId, CHAT_ID); assert.equal(owner.getSnapshot().selected?.key, production.key);
+    owner.open(); assert.equal(owner.getSnapshot().selected?.key, cut.key, "opening from a page explicitly chooses its context");
+  });
+  it("deletion forgets all aliases and returns to a clean World conversation", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID); owner.setValue(production.key, "draft", "Deleted words");
+    const history = { ...production, key: chatKey(production.worldId, production.entry, CHAT_ID), conversationId: CHAT_ID };
+    owner.open(history); owner.reconcileConversations(production.worldId, new Set([CHAT_ID])); owner.reconcileConversations(production.worldId, new Set());
+    assert.equal(owner.getSnapshot().selected?.entry.kind, "world"); assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
+    assert.equal(owner.value(history.key, "draft", ""), ""); assert.equal(owner.value(production.key, "draft", ""), "");
   });
   it("an explicit new conversation leaves the old thread's draft recoverable", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID);
@@ -91,11 +106,13 @@ describe("global Chat keeps presentation separate from conversation authority (2
     let value = ""; const storage = { getItem: () => value, setItem: (_key: string, next: string) => { value = next; } };
     const owner = new GlobalChatController(storage); owner.open(production); owner.reportConversation(production.key, CHAT_ID); owner.setValue(production.key, "draft", "Reload me");
     owner.setValue(production.key, "languageModel", "openai/gpt-5.4"); owner.setValue(production.key, "variants", { "openai/gpt-5.4": "high" });
+    owner.setValue(production.key, "omittedAttachments", new Set(["wca_1"]));
     const restored = new GlobalChatController(storage);
     assert.equal(restored.getSnapshot().open, true); assert.equal(restored.getSnapshot().selected?.conversationId, CHAT_ID);
     assert.equal(restored.value(production.key, "draft", ""), "Reload me");
     assert.equal(restored.value(production.key, "languageModel", ""), "openai/gpt-5.4");
     assert.deepEqual(restored.value(production.key, "variants", {}), { "openai/gpt-5.4": "high" });
+    assert.deepEqual([...restored.value<ReadonlySet<string>>(production.key, "omittedAttachments", new Set())], ["wca_1"]);
     const broken = new GlobalChatController({ getItem: () => "invalid", setItem: () => { throw Error("quota"); } });
     broken.open(production); broken.setValue(production.key, "draft", "Still editable"); assert.equal(broken.value(production.key, "draft", ""), "Still editable");
   });

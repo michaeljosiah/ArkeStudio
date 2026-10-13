@@ -30,7 +30,13 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
     const shotId = route[6] === "shots" ? route[7] : query.get("shot") ?? undefined;
     const shot = scene ? orderedShots(scene).find(s => s.id === shotId) : undefined;
     if (route[4] === "cut") { entry = { kind: "cut", productionId: production.meta.id }; label += " / Cut"; }
-    else if (route[4] === "generate") { entry = { kind: "generate", productionId: production.meta.id }; label += " / Generate"; }
+    else if (route[4] === "generate") {
+      const shots = production.scenes.flatMap(s => orderedShots(s));
+      const generatedShot = shots.find(s => s.id === query.get("shot")) ?? shots[0];
+      const generatedScene = generatedShot ? production.scenes.find(s => orderedShots(s).some(shot => shot.id === generatedShot.id)) : undefined;
+      entry = { kind: "generate", productionId: production.meta.id, ...(generatedScene && generatedShot ? { sceneId: generatedScene.id, shotId: generatedShot.id } : {}) };
+      label += ` / Generate${generatedShot ? " / Shot " + generatedShot.number : ""}`;
+    }
     else if (scene && shot) {
       const kind = query.get("view") === "stage" || route[8] === "stage" ? "stage" : query.get("view") === "takes" ? "takes" : "shot";
       entry = { kind, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id };
@@ -72,6 +78,7 @@ export class GlobalChatController {
   private registrations = new Map<string, { surface: ChatSurface; host: HTMLElement }>();
   private values = new Map<string, Map<string, unknown>>();
   private conversationIds = new Map<string, string>();
+  private listedConversations = new Map<string, ReadonlySet<string>>();
   private pending: ChatSurface | null = null;
   private dictations = new Map<string, { key: string; deliver(text: string): void }>();
   current: ChatSurface | null = null;
@@ -121,7 +128,7 @@ export class GlobalChatController {
   register(surface: ChatSurface, host: HTMLElement) {
     this.registrations.set(surface.key, { surface, host });
     if (this.snapshot.selected?.key === surface.key) this.changed({ selected: { ...surface, conversationId: this.snapshot.selected.conversationId, newThread: this.snapshot.selected.newThread } });
-    else if (!this.snapshot.open && this.snapshot.phase === "idle") this.select(surface);
+    else if (!this.snapshot.selected && this.snapshot.phase === "idle") this.select(surface);
     return () => { if (this.registrations.get(surface.key)?.host === host) { this.registrations.delete(surface.key); this.changed(); } };
   }
   refresh(surface: ChatSurface, host: HTMLElement) {
@@ -136,6 +143,21 @@ export class GlobalChatController {
   }
   close() { this.pending = null; this.changed({ open: false, stopCapture: this.snapshot.stopCapture + 1, switching: false }); }
   stopDictation() { this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); }
+  reconcileConversations(worldId: string, ids: ReadonlySet<string>) {
+    const before = this.listedConversations.get(worldId);
+    this.listedConversations.set(worldId, ids);
+    // A workspace can arrive before its summary. Only a removed known row proves deletion.
+    if (!before) return;
+    const removed = new Set([...before].filter(id => !ids.has(id)));
+    for (const [key, id] of this.conversationIds) if (key.startsWith(worldId + ":") && removed.has(id)) {
+      this.conversationIds.delete(key); this.values.delete(`${worldId}:conversation:${id}`);
+    }
+    const selected = this.snapshot.selected;
+    if (!selected || selected.worldId !== worldId || !selected.conversationId || !removed.has(selected.conversationId)) return;
+    const entry = { kind: "world" as const };
+    this.select({ key: chatKey(worldId, entry), worldId, worldName: selected.worldName, label: selected.worldName,
+      title: "World Chat", kind: "world", entry, path: selected.path, newThread: true });
+  }
   startNew(surface: ChatSurface) {
     if (this.snapshot.phase !== "idle") { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
     const key = chatKey(surface.worldId, surface.entry);

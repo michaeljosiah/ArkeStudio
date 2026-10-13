@@ -20,6 +20,9 @@ try {
  await page('w.nativeDesignSetMode("proposed")');await delay(200);
  await check('One actual mounted production conversation','d.querySelectorAll(".fy-production-studio-chat").length===1');
  await check('Header names the production','d.querySelector(".fy-global-chat header").textContent.includes("Saltlight")');
+ await page('(()=>{w.nativeDesignFixture.worldChat.attachments=[{id:"wca_excluded",fileName:"private-note.md",kind:"document",readability:"text-readable",promoted:false}];w.nativeDesignSetState(structuredClone(w.nativeDesignFixture));})()');await delay(80);
+ await page('d.querySelector(`[aria-label="Stop referring to private-note.md"]`).click()');await delay(80);
+ await check('Stopping reference persists the attachment exclusion','!d.querySelector(`[aria-label="Stop referring to private-note.md"]`)&&Object.values(JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).choices).some(c=>c.omitted?.includes("wca_excluded"))');
  await page('(()=>{w.testChatNode=d.querySelector(".fy-production-studio-chat");w.testDraft="Keep the bells quiet.";d.querySelector(".fy-global-chat .fy-cx__editor").focus();})()');
  await send('Input.insertText',{text:'Keep the bells quiet.'});await delay(100);
  await check('Native typing updates the controlled draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText===w.testDraft&&Object.values(JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).drafts).includes(w.testDraft)');
@@ -40,6 +43,7 @@ try {
  await check('Finished dictation switches to World without auto-sending','d.querySelector(".fy-global-chat header h2").textContent==="World Chat"&&!w.nativeDesignCommands.some(e=>e.kind==="world-chat-send")');
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(80);await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(200);
  await check('Returning to the durable thread retains typed plus dictated draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await check('Returning to the thread does not reattach the excluded file','!d.querySelector(`[aria-label="Stop referring to private-note.md"]`)');
  await page('w.nativeDesignSetMode("closed")');await check('Closing hides the sheet without cancelling the run','!d.querySelector(".fy-global-chat[open]")&&!w.nativeDesignCommands.some(e=>e.kind==="world-chat-cancel")');
  await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`)');await delay(250);await page('w.nativeDesignSetMode("proposed")');
  await check('Reopening the same context resumes the draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
@@ -60,6 +64,8 @@ try {
  await page('w.location.reload()');await delay(300);
  for(let i=0;i<80;i++){if(await page('typeof w.nativeDesignReady==="function" ? w.nativeDesignReady().then(()=>true) : false').catch(()=>false))break;await delay(100);}await delay(200);
  await check('Refresh restores selected thread, open panel and unsent draft','d.querySelector("[data-global-chat-trigger]").getAttribute("aria-expanded")==="true"&&d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('(()=>{w.nativeDesignFixture.worldChat.attachments=[{id:"wca_excluded",fileName:"private-note.md",kind:"document",readability:"text-readable",promoted:false}];w.nativeDesignSetState(structuredClone(w.nativeDesignFixture));})()');await delay(80);
+ await check('Refresh keeps the restored file excluded','!d.querySelector(`[aria-label="Stop referring to private-note.md"]`)');
  await page('w.nativeDesignAllowTestInput()');
  await page('(()=>{const state=structuredClone(w.nativeDesignFixture);state.world.meta.worldId="01J8F3K2QW9VZX4N7M0RTYB6HD";state.world.meta.name="The Stillwater";w.nativeDesignSetState(state);w.nativeDesignNavigate(`/w/${state.world.meta.worldId}`);})()');await delay(250);
  await check('World switching pauses the prior live conversation','d.querySelector(".fy-global-chat").textContent.includes("another world")&&!d.querySelector(".fy-global-chat .fy-cx")');
@@ -88,6 +94,8 @@ try {
  await check('The first line creates a scoped conversation before sending','(()=>{const create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");return create?.worldId===w.nativeDesignFixture.world.meta.worldId&&create?.entryContext?.productionId==="saltlight"&&w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send").length===1;})()');
  await page('(()=>{const state=structuredClone(w.nativeDesignFixture),create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");const id="cv_01J8F0000000000000000000C9";state.world.conversations.push({...state.world.conversations[0],id,title:"A new ending",entryContext:create.entryContext});state.worldChat={...state.worldChat,conversationId:id,turns:[],runStatus:"idle"};w.testNewConversation=id;w.nativeDesignSetState(state);})()');await delay(180);
  await check('Creation delivers the held first line once to the new conversation','(()=>{const sends=w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send");return sends.length===2&&sends[1].conversationId===w.testNewConversation&&sends[1].text==="Give the bells a new ending."&&JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.conversationId===w.testNewConversation;})()');
+ await page('w.nativeDesignSetState(structuredClone(w.nativeDesignFixture))');await delay(100);
+ await check('Deleting the selected row leaves a clean World conversation','d.querySelector(".fy-global-chat header h2").textContent==="World Chat"&&!JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.conversationId');
  await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await delay(100);
  await check('Escape closes Chat and returns focus to its titlebar control','!d.querySelector(".fy-global-chat[open]")&&d.activeElement?.hasAttribute("data-global-chat-trigger")');
  await page('w.nativeDesignSetMode("closed")');
