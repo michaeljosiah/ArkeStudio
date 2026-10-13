@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { chatKey, chatSurfaceForPage, GlobalChatController, type ChatSurface } from "../src/lib/global-chat.js";
 import { developLayoutFixture, CHAT_ID } from "./develop-layout-fixture.js";
+import { parseHTML } from "linkedom";
 
 const state = developLayoutFixture(), world = state.world!, root = `/w/${world.meta.worldId}`;
 const production = chatSurfaceForPage(state, `${root}/p/saltlight/story`)!;
@@ -222,6 +223,22 @@ describe("global Chat keeps presentation separate from conversation authority (2
     const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
     owner.register(chapter, {} as HTMLElement); assert.equal(owner.host(), null);
     owner.open(chapter); assert.ok(owner.host());
+  });
+  it("a hidden or disconnected registered host cannot release a viewport composer", () => {
+    const { document } = parseHTML('<html><body><div hidden><div id="host"></div></div></body></html>');
+    const host = document.getElementById("host") as unknown as HTMLElement, owner = new GlobalChatController();
+    owner.open(production); owner.register(production, host); assert.equal(owner.host(), null);
+    host.parentElement!.removeAttribute("hidden"); assert.equal(owner.host(), host);
+    host.remove(); assert.equal(owner.host(), null);
+  });
+  for (const kind of ["files", "note"] as const) it(`a failed deferred ${kind} act answers its attachment callback and retains named feedback`, () => {
+    const owner = new GlobalChatController(); owner.startNew(worldChat); let answer: readonly { name: string; reason: string }[] = [];
+    owner.setValue(worldChat.key, "opening", { act: kind === "files" ? { kind, files: [{ name: "dropped.txt" }] } : { kind, text: "pasted words" }, wasOpen: null, onAttached: (refused: typeof answer) => { answer = refused; } });
+    owner.holdOpening(worldChat.key, true); owner.trackCreateRequest(worldChat.key, "attachment-create");
+    owner.deliverCreateResult({ requestId: "attachment-create", worldId: worldChat.worldId, detail: "Disconnected; attach again." });
+    assert.equal(answer[0]?.name, kind === "files" ? "dropped.txt" : "pasted-note.txt");
+    assert.equal(answer[0]?.reason, "Disconnected; attach again.");
+    assert.deepEqual(owner.value(worldChat.key, "worldAttachmentTrouble", []), answer); assert.equal(owner.opening(), false);
   });
   it("finishes dictation into the original draft before switching and never sends", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Typed words");

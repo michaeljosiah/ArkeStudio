@@ -139,5 +139,14 @@ try {
  await check('The canonical production setup route is not redirected as a missing chat','w.nativeDesignPath.includes("/productions/setup/")');
  await page('(()=>{const state=structuredClone(w.nativeDesignFixture);state.world.conversations[0].entryContext={kind:"sheet",sheetKind:"character",sheetId:"maren-kest"};w.nativeDesignSetState(state);w.nativeDesignNavigate(`/w/${state.world.meta.worldId}/chat/${state.worldChat.conversationId}`);})()');await delay(120);await page('w.nativeDesignSetMode("proposed")');
  await check('A sheet conversation retains World Chat and its read-only model display','d.querySelector(".fy-global-chat header h2").textContent==="World Chat"&&!d.querySelector(".fy-global-chat .fy-mchip__btn:not(.fy-mchip__btn--fixed)")');
+ await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(50);await page('[...d.querySelectorAll(".fy-global-chat-history button")].find(e=>e.textContent==="New conversation").click()');await delay(100);
+ await page('(()=>{w.arke.attachDropped=async()=>({refusals:[]});w.arke.attachBytes=async()=>({refusals:[]});w.nativeDesignConnection("open");})()');await delay(100);
+ await page('(()=>{const transfer=new w.DataTransfer();transfer.items.add(new w.File(["local notes"],"dropped.txt",{type:"text/plain"}));d.querySelector(".fy-global-chat .fy-cx").dispatchEvent(new w.DragEvent("drop",{bubbles:true,cancelable:true,dataTransfer:transfer}));})()');await delay(150);
+ await page('w.nativeDesignConnection("closed")');await delay(100);
+ await check('A disconnected deferred file reports its name instead of disappearing','d.querySelector(".fy-global-chat").textContent.includes("dropped.txt")&&d.querySelector(".fy-global-chat").textContent.toLowerCase().includes("disconnected")');
+ await page('w.nativeDesignConnection("open")');await delay(100);
+ await page('(()=>{const transfer=new w.DataTransfer();transfer.setData("text/plain","a long pasted note ".repeat(1500));d.querySelector(".fy-global-chat .fy-cx__editor").dispatchEvent(new w.ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:transfer}));})()');await delay(150);
+ await page('(()=>{const create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");w.nativeDesignEvent({type:"world-chat.create-result",at:new Date().toISOString(),worldId:create.worldId,requestId:create.requestId,detail:"The conversation could not be started. Paste again."});})()');await delay(100);
+ await check('A disconnected deferred note returns an explicit paste refusal','d.querySelector(".fy-global-chat").textContent.includes("pasted-note.txt")');
  if(report.errors.length)throw Error(report.errors.join('\n'));console.log(`${report.checks.length} application lifecycle checks passed (${touch?'coarse':'fine'} pointer)`);
 } finally {fs.writeFileSync(path.join(out,'application-'+(touch?'touch':'mouse')+'.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

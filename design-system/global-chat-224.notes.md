@@ -54,7 +54,9 @@ commands; it uses deterministic fake microphone/transcription data only for the 
 checks. Ordinary review media actions remain disabled. Application checks cover native typing,
 one transcript through navigation and an active run, explicit switching, microphone release,
 no auto-send, original-draft delivery, world boundaries, overlay coexistence, scoped send,
-refresh recovery and a simulated on-screen keyboard. Installed microphone/codec/Voxa behavior
+refresh recovery, named refusals for failed first-file/long-paste creation, and a simulated
+on-screen keyboard. Hidden or detached registrations are not homes for viewport composers.
+Installed microphone/codec/Voxa behavior
 and physical-device keyboard behavior still require host acceptance; no paid provider is used.
 
 Client tests include global-chat.test.ts and the existing composer/model/conversation suites.

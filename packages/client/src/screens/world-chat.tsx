@@ -521,10 +521,10 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const mediaRequests = useRef(new Map<string, { candidateId: string; path: string }>());
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The act waiting on a conversation to exist, and what was open when it was asked for. */
-  const [opening, setOpening] = useConversationState<{ act: Opening; wasOpen: string | null } | null>("opening", null);
+  const [opening, setOpening] = useConversationState<{ act: Opening; wasOpen: string | null; onAttached?: (refusals: readonly { name: string; reason: string }[]) => void } | null>("opening", null);
   useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
-  /** What a deferred attach would not take, since the composer's own call answered before it ran. */
-  const [deferredTrouble, setDeferredTrouble] = useState<readonly { name: string; reason: string }[]>([]);
+  /** Named refusals survive remounting while a first attachment waits for its conversation. */
+  const [deferredTrouble, setDeferredTrouble] = useConversationState<readonly { name: string; reason: string }[]>("worldAttachmentTrouble", []);
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
@@ -589,6 +589,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     if (!opening || !worldId) return;
     if (connection !== "open") {
       // Nothing was transmitted, or the answer went with the socket. The draft is still here.
+      const names = opening.act.kind === "files" ? opening.act.files.map(file => file.name) : opening.act.kind === "note" ? ["pasted-note.txt"] : [];
+      const refused = names.map(name => ({ name, reason: "The studio is disconnected. Attach or paste again after reconnecting." }));
+      setDeferredTrouble(refused); opening.onAttached?.(refused);
       setOpening(null);
       return;
     }
@@ -601,10 +604,10 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     } else if (act.kind === "pick") {
       worldChatAttachFiles(worldId, opened);
     } else if (act.kind === "files") {
-      void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(setDeferredTrouble);
+      void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(refusals => { setDeferredTrouble(refusals); opening.onAttached?.(refusals); });
     } else if (act.kind === "note") {
       void attachHostText(worldChatAttachTarget(worldId, opened), act.text, "pasted-note.txt").then(
-        setDeferredTrouble,
+        refusals => { setDeferredTrouble(refusals); opening.onAttached?.(refusals); },
       );
     }
     setOpening(null);
@@ -616,12 +619,17 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
    * Start one. No title is asked for: nobody knows what a conversation is about before having
    * it, and the coordinator names it from the opening sentence anyway.
    */
-  const hold = (act: Opening) => {
-    if (!worldId || opening) return;
-    setOpening({ act, wasOpen: opened });
+  const hold = (act: Opening, onAttached?: (refusals: readonly { name: string; reason: string }[]) => void) => {
+    const refuse = (reason: string) => {
+      const names = act.kind === "files" ? act.files.map(file => file.name) : act.kind === "note" ? ["pasted-note.txt"] : [];
+      const refused = names.map(name => ({ name, reason })); setDeferredTrouble(refused); onAttached?.(refused);
+    };
+    if (!worldId || opening) { refuse("Wait for the conversation to finish starting, then attach or paste again."); return; }
+    setOpening({ act, wasOpen: opened, onAttached });
     const requestId = (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
     presentation?.owner.trackCreateRequest(presentation.key, requestId);
     if (!createWorldChat(worldId, "New conversation", requestId, presentation?.owner.getSnapshot().selected?.entry)) {
+      refuse("The studio is disconnected. Attach or paste again after reconnecting.");
       setOpening(null);
       presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
     }
@@ -1012,11 +1020,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
                       if (conversationId) {
                         return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
                       }
-                      // Held until the conversation exists, so this call has no refusals to
-                      // report yet; the ones the deferred attach earns reach the composer
-                      // through `deferredTrouble`.
-                      hold({ kind: "files", files });
-                      return Promise.resolve([]);
+                      return new Promise<readonly { name: string; reason: string }[]>(resolve => hold({ kind: "files", files }, resolve));
                     },
                     onAttachText: (text: string) => {
                       if (conversationId) {
@@ -1026,8 +1030,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
                           "pasted-note.txt",
                         );
                       }
-                      hold({ kind: "note", text });
-                      return Promise.resolve([]);
+                      return new Promise<readonly { name: string; reason: string }[]>(resolve => hold({ kind: "note", text }, resolve));
                     },
                   }
                 : {})}

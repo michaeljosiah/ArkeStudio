@@ -196,7 +196,8 @@ export class GlobalChatController {
   forPage = () => this.current ? [...this.registrations.values()].findLast(row => row.surface.path === this.current!.path)?.surface ?? this.registrations.get(this.current.key)?.surface ?? this.current : null;
   host = () => {
     const selected = this.snapshot.selected, registered = selected ? this.registrations.get(selected.key) : undefined;
-    return selected && registered?.surface.path === selected.path && chatSubjectKey(registered.surface) === chatSubjectKey(selected) ? registered.host : null;
+    return selected && registered?.surface.path === selected.path && chatSubjectKey(registered.surface) === chatSubjectKey(selected) &&
+      registered.host.isConnected !== false && !registered.host.closest?.("[hidden]") ? registered.host : null;
   };
   open(surface = this.forPage()) {
     if (surface) this.select(surface);
@@ -296,9 +297,12 @@ export class GlobalChatController {
     this.changed(this.snapshot.selected?.key === request.key ? { selected: surface } : {});
   }
   private failCreate(key: string, detail?: string) {
-    const opening = this.value<{ files?: readonly { name: string }[]; onAttached?: (refusals: readonly { name: string; reason: string }[]) => void } | null>(key, "opening", null);
+    const opening = this.value<{ files?: readonly { name: string }[]; act?: { kind: string; files?: readonly { name: string }[] }; onAttached?: (refusals: readonly { name: string; reason: string }[]) => void } | null>(key, "opening", null);
     const reason = detail ?? "The connection ended before creation returned. Your draft is retained; send again after reconnecting.";
-    opening?.onAttached?.((opening.files ?? []).map(file => ({ name: file.name, reason })));
+    const refusals = (opening?.files ?? opening?.act?.files ?? []).map(file => ({ name: file.name, reason }));
+    if (opening?.act?.kind === "note") refusals.push({ name: "pasted-note.txt", reason });
+    if (opening?.act) this.setValue(key, "worldAttachmentTrouble", refusals);
+    opening?.onAttached?.(refusals);
     this.setValue(key, "opening", null); this.setValue(key, "creationTrouble", reason); this.holdOpening(key, false);
   }
   loseCreates() {
