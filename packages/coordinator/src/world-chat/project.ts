@@ -318,6 +318,9 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       break;
   }
   switch (receipt.tool) {
+    case "inspect-media": return "read verified media metadata only";
+    case "sample-video": return `inspected ${receipt.media?.frames?.length ?? 0} timestamped still frames; gaps unreviewed`;
+    case "analyze-audio-signal": return "measured original audio channels; no listening judgment";
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":
@@ -431,6 +434,7 @@ export function projectWorkspace(
     ...(options.humanDecisionProblems?.length ? { humanDecisionProblems: options.humanDecisionProblems } : {}),
     ...(loaded.imageDisclosures ? { imageDisclosures: loaded.imageDisclosures } : {}),
     ...(loaded.imageReceipts ? { imageReceipts: loaded.imageReceipts } : {}),
+    ...(loaded.mediaReceipts ? { mediaReceipts: loaded.mediaReceipts } : {}),
     attachments: loaded.attachments.map((a) => ({
       ...(loaded.imageReceipts?.some(receipt => receipt.image?.id === a.id && receipt.image.sourceHash.startsWith(a.contentHash))
         ? { imageInspection: "prepared" as const } : {}),

@@ -169,7 +169,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
 // 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
 // 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
-export const SUPPORTED_SCHEMA_VERSION = 77;
+export const SUPPORTED_SCHEMA_VERSION = 78;
 
 export class WorldOpenError extends Error {
   constructor(

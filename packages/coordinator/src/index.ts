@@ -381,6 +381,7 @@ export { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
 
 export * from "./audio/media-tools.js";
+export * from "./media/agent-media-tools.js";
 export * from "./audio/qc.js";
 export * from "./audio/storage.js";
 export * from "./audio/rights.js";

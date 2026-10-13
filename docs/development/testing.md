@@ -1,5 +1,12 @@
 # Running and validating changes
 
+Shared media evidence: from `packages/coordinator`, run
+`node --import tsx --test test/media/agent-media-tools.test.ts test/world-chat/media-inspection.test.ts`.
+The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`
+to fail when FFmpeg is unavailable, and optionally set `ARKE_FFMPEG`/`ARKE_FFPROBE` to host binaries.
+Contract coverage and original-channel arithmetic live in `packages/contracts/test/agent-media.test.ts`.
+Existing image, leased MCP, replay and take-review suites remain required regressions.
+
 Production Chat end-to-end acceptance (#1427, SPEC-051 R-1..R-3) uses coordinator
 `test/world-chat/production-acceptance.test.ts`. The same thirteen-step scenario runs with
 stub providers and either an injected encoder or real FFmpeg/FFprobe; CI retains the native

@@ -54,6 +54,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   related: "related",
   get_attachment_text: "get-attachment-text",
   view_image: "view-image",
+  inspect_media: "inspect-media", sample_video: "sample-video", analyze_audio_signal: "analyze-audio-signal",
   fetch_url: "fetch-url",
   get_production: "get-production",
   describe_action: "describe-action",
@@ -94,6 +95,7 @@ function summarise(text: string): string {
 
 export interface RetrievalDeps extends TargetReadDeps {
   readImage?: (lease: QueryLease, args: Record<string, unknown>) => Promise<RetrievalOutcome>;
+  readMedia?: (lease: QueryLease, name: "inspect_media" | "sample_video" | "analyze_audio_signal", args: Record<string, unknown>) => Promise<RetrievalOutcome>;
   leases: QueryLeaseRegistry;
   getBundle: () => WorldBundle | null;
   getIndex: () => WorldIndex | null;
@@ -210,6 +212,9 @@ export class WorldChatRetrieval {
       case "view_image":
         if (!this.deps.readImage) throw new RetrievalError("unavailable", "view_image: image inspection is unavailable for this adapter.");
         return this.deps.readImage(lease, args);
+      case "inspect_media": case "sample_video": case "analyze_audio_signal":
+        if (!this.deps.readMedia) throw new RetrievalError("unavailable", "Local media inspection is unavailable on this host.");
+        return this.deps.readMedia(lease, toolName, args);
       case "describe_action": {
         const kind = String(args["kind"] ?? "");
         const described = describeAction(kind);
