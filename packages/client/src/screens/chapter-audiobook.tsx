@@ -1,16 +1,15 @@
-import { castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
+  PERFORMANCE_NOTE_MAX,
   audiobookBeatAt,
   audiobookActivityLive,
   audiobookActivityStage,
   audiobookBeatCount,
-  CADENCE_PHRASE_MAX,
-  NOTE_TAG_HOLD,
   hasReadingNotes,
   readingNotesLead,
   type AudiobookReadingNotes,
@@ -331,7 +330,8 @@ export function directionView(
 
 /** A held book or chapter note in Sent as's words (design turn 184d): `book note · 94 characters · Eleven v3 takes 60 as a tag`. */
 export function readingHeldWords(held: HeldReadingNote, model: ManifestModel | null): string {
-  const why = held.reason === NOTE_TAG_HOLD ? `${model?.displayName ?? "this reader"} takes ${CADENCE_PHRASE_MAX} as a tag` : "held";
+  const limit = /^a tag takes (\d+) characters$/.exec(held.reason)?.[1];
+  const why = limit !== undefined ? `${model?.displayName ?? "this reader"} takes ${limit} as a tag` : held.reason;
   return `${held.which} note · ${held.length} characters · ${why}`;
 }
 
@@ -540,18 +540,30 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       const speakerModel = modelOf(speaker);
       const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block, narrations);
       const led = hasReadingNotes(readingNotes) ? readingNotes : undefined;
-      const view = (direction === null && note === undefined && led === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note, led);
+      let view = (direction === null && note === undefined && led === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note, led);
+      if (speakerModel !== null) {
+        try {
+          const performed = compileAudiobookPerformance(block, { reading, notes: { ...narrations, ...notes } }, direction === null ? null : viewPlan(direction.input), speakerModel, led);
+          if (performed !== null) view = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
+        } catch { view = null; }
+      }
       // Under the proposal: its direction, the speaker notes and the chapter note it drafted
       // where none stands, as the coordinator would send them once it is accepted.
       const proposedInput = proposal?.proposed?.[block.key];
       const proposedNote = note ?? (reading === "performed" && block.speaker !== undefined ? proposal?.speakerNotes?.[block.sheet ?? block.speaker] : undefined);
       const proposedReading = proposal?.chapterNote !== undefined ? { ...led, chapter: proposal.chapterNote } : led;
-      const proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
+      let proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
+      if (proposedInput !== undefined && speakerModel !== null) {
+        try {
+          const performed = compileAudiobookPerformance(block, { reading, notes: { ...proposal?.speakerNotes, ...narrations, ...notes } }, viewPlan(proposedInput), speakerModel, proposedReading);
+          if (performed !== null) proposedView = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
+        } catch { proposedView = null; }
+      }
       return {
         block,
         turns: view?.turns ?? { parts: [{ text: normalizeSpeechText(block.text) }] },
         split: recordOrNull?.flags[block.key]?.split ?? null,
-        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led),
+        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led, reading === "performed"),
         readingHeld: view?.readingHeld ?? [],
         proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
         ...(note !== undefined ? { note } : {}),
@@ -622,6 +634,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         const row = rows.find((candidate) => candidate.block.key === block.key);
         return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
       },
+      reading === "performed",
     );
     // Reactions are read when the chapter is (design turn 187, R-83): the press counts them with
     // the blocks, so it stands while one is left to read. The chapter's own totals stay its blocks'.
@@ -642,7 +655,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         if (model === null) return sum;
         const label = speechPlanLabel(model);
         return label !== null ? { ...sum, plan: sum.plan ?? label }
-          : { ...sum, estimate: sum.estimate + estimateSpeechMicroUsd(model, row.block.text), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
+          : { ...sum, estimate: sum.estimate + soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
       }, { estimate: 0, plan: null, tokenPriced: false }),
     [rows, modelOf],
   );
@@ -666,7 +679,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       rows.map((row) => {
         if (!toRead(row) || !grouped(row)) return null;
         const breakAfter = breaks.get(row.block.key);
-        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+        return { key: row.block.key, reader: `${row.speaker.provider}/${row.speaker.model}/${row.speaker.voiceId}`, maxCharacters: modelOf(row.speaker)?.limits.maxPromptChars, ...row.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
       }),
       DEFAULT_GROUP_PACKING,
     ).filter((group) => group.keys.length >= 2);
@@ -698,7 +711,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (group === undefined || row.state === "made" || row.state === "awaiting") continue;
       const model = modelOf(row.speaker);
       if (model === null || speechPlanLabel(model) !== null) continue;
-      estimate_ -= estimateSpeechMicroUsd(model, row.block.text);
+      estimate_ -= soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0);
     }
     return estimate_ + grouping.groups.reduce((sum, group) => sum + group.estimatedMicroUsd, 0);
   }, [rows, modelOf, grouping]);
@@ -1199,6 +1212,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // request, Google's free day where it is known, the estimate.
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
+        ...(run.price.previews !== undefined ? { previews: run.price.previews } : {}),
         token: run.price.confirmationToken,
         recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
         title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
@@ -1922,6 +1936,12 @@ export function ReadSheet({ sheet, headless = false, footer = true }: { sheet: R
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
         {row("Estimate", sheet.estimate)}</>}
       </div>
+      {(sheet.previews ?? []).map((preview) => <details key={preview.request}>
+        <summary>Request {preview.request} · preview</summary>
+        <p className="fy-mono">POST {preview.endpoint}</p>
+        <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflow: "auto" }}>{JSON.stringify(preview.body, null, 2)}</pre>
+        <p>Preview before generation. Activity records the request actually sent.</p>
+      </details>)}
       {sheet.recovery !== null && <p>The {sheet.recovery.ready} current takes stay as they are.</p>}
       {sheet.freeDay !== undefined && <p className="fy-mono" data-testid="audiobook-free-plan">{freePlanAskCopy(sheet.freeDay).line}</p>}
       {sheet.notices.map((notice) => <p key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</p>)}
@@ -2500,7 +2520,7 @@ export function markerAtSelection(rows: readonly BlockRow[]): MarkerAt | null {
 
 /**
  * A speaker the narrator performs (design turn 155g, SPEC-047 R-44, R-45): the note on how the
- * narrator plays them, 60 characters, written when the field is left. The focused row adds
+ * narrator plays them, up to 300 characters, written when the field is left. The focused row adds
  * `Hear <name>` — the selected line if it is theirs, else their first in the chapter, as it
  * would be read, priced on the button for a cloud narrator — and what that line is sent as.
  */
@@ -2534,7 +2554,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
     const trimmed = draft.trim();
     setDraft(null);
     if (trimmed === (note ?? "")) return;
-    setAudiobookNote(worldId, productionId, speakerKey, trimmed === "" ? null : trimmed.slice(0, 60));
+    setAudiobookNote(worldId, productionId, speakerKey, trimmed === "" ? null : trimmed.slice(0, PERFORMANCE_NOTE_MAX));
   };
   const [hearId, setHearId] = useState<string | null>(null);
   const heard = useHeardLines()[hearId ?? ""];
@@ -2567,7 +2587,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
           <input
             className="fy-ab__note-input"
             value={value}
-            maxLength={60}
+            maxLength={PERFORMANCE_NOTE_MAX}
             placeholder="note"
             aria-label={`Note · ${name}`}
             autoFocus={noteOpen && note === undefined}
@@ -2582,7 +2602,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
               if (event.key === "Enter") (event.target as HTMLInputElement).blur();
             }}
           />
-          <span className="fy-ab__note-count fy-mono">{`${value.length}/60${source !== undefined ? ` · ${source}` : ""}`}</span>
+          <span className="fy-ab__note-count fy-mono">{`${value.length}/${PERFORMANCE_NOTE_MAX}${source !== undefined ? ` · ${source}` : ""}`}</span>
         </div>
       )}
       {focused && line !== null && (
@@ -2753,7 +2773,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     ...(row.sentAs.some((part) => part.style !== undefined) ? ["style"] : []),
     `${row.sentAs.length} ${row.sentAs.length === 1 ? "part" : "parts"}`,
   ];
-  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, estimateSpeechMicroUsd(model, row.block.text), creditLeft) : null;
+  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), creditLeft) : null;
   // The Voice tab (design turn 194, rule 12; 194g): Delivery, Note, Speed and Markers as rows, the
   // takes each with its play, Sent as folded with its parts named, and Upload and Make again at
   // the foot. A held proposal is drawn in the direction's place until it is accepted (184b).
@@ -3549,7 +3569,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
         <div key={speaker.key} className="fy-ab__who" data-testid="book-reading-speaker">
           <b>{speaker.name}</b>
           <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
-          <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
+          <small className="fy-mono">{`${speaker.note?.length ?? 0} / ${PERFORMANCE_NOTE_MAX}${speaker.note === undefined ? "" : speaker.source === "sheet" ? " · sheet" : " · you"}`}</small>
         </div>
       ))}
       {ask?.state === "refused" && <p className="fy-mono fy-ch__who-where--warn">{ask.refused}</p>}
@@ -3574,7 +3594,7 @@ export function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: {
   const value = draft ?? speaker.note ?? "";
   const commit = () => {
     if (draft === null) return;
-    const trimmed = draft.trim().slice(0, CADENCE_PHRASE_MAX);
+    const trimmed = draft.trim().slice(0, PERFORMANCE_NOTE_MAX);
     setDraft(null);
     if (trimmed === (speaker.note ?? "")) return;
     setAudiobookNote(worldId, productionId, speaker.key, trimmed === "" ? null : trimmed);
@@ -3583,7 +3603,7 @@ export function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: {
     <input
       className="fy-ab__note-input"
       value={value}
-      maxLength={CADENCE_PHRASE_MAX}
+      maxLength={PERFORMANCE_NOTE_MAX}
       disabled={disabled}
       aria-label={`Note · ${speaker.name}`}
       onChange={(event) => setDraft(event.target.value)}

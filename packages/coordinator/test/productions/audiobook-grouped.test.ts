@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   ChapterAudiobookSchema,
+  audiobookTextHash,
   GOOGLE_FREE_LIMIT,
   soloTurns,
   SPLIT_DID_NOT_MATCH,
@@ -14,17 +15,18 @@ import {
   type SpeechTurn,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
-import { geminiSpeechModel } from "@arke-studio/providers";
+import { geminiSpeechModel, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { dropRunawayTail, integratedLoudness, normaliseSpeech, readSpeechWav, trimSpeech, writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
 import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "../../src/productions/audiobook-split.js";
-import { keepSplitTake, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
-import { directionEntry, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
+import { keepSplitTake, priorPartJob, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
+import { directionEntry, updateAudiobook, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
 import { directionPlan } from "../../src/voice/direction.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { speechStretches, timeWords, type TimedWord } from "../../src/voice/word-times.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 
 /**
  * Grouped reads (design turn 185): a chapter's blocks sent a few requests at a time and split
@@ -387,8 +389,9 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { heardFor?: (text: string) => string; fail?: string; actual?: number; tail?: number } = {}): Promise<RunHarness> {
-  const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+async function harness(store: WorldStore, opts: { heardFor?: (text: string) => string; fail?: string; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
+  const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
+  const plan = await planAudiobook(store, LEDGER, "neap", { narrator: reader });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
   const events: AudiobookRunEvent[] = [];
   const activity: AudiobookActivityUpdate[] = [];
@@ -402,9 +405,9 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
       worldId: WORLD_ID,
       productionId: LEDGER,
       chapterId: "neap",
-      models: [GROUPABLE],
-      narrator: READER,
-      catalogue: [KORE],
+      models: [opts.model ?? GROUPABLE],
+      narrator: reader,
+      catalogue: [{ ...KORE, ...reader }],
       signal: new AbortController().signal,
       activity: async update => { activity.push(update); },
       ...(extra.confirmationToken !== undefined ? { confirmationToken: extra.confirmationToken } : {}),
@@ -447,6 +450,62 @@ const recordOf = async (worldDir: string) => ChapterAudiobookSchema.parse(JSON.p
 const priced = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "priced" }> => event.type === "priced");
 const finished = (events: AudiobookRunEvent[]) => events.find((event): event is Extract<AudiobookRunEvent, { type: "finished" }> => event.type === "finished");
 
+it("Eleven v4 prices one continuous request and keeps durable cuts for its blocks", async () => {
+  const w = await world();
+  try {
+    const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+    const h = await harness(w.store, { model });
+    await h.run();
+    const quote = priced(h.events)!;
+    assert.ok(quote.requests !== undefined && quote.requests < quote.characters);
+    await h.run({ confirmationToken: quote.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    assert.equal(quote.previews?.[0]?.body.text, h.sent[0]!.params["text"]);
+    assert.match(String(h.sent[0]!.params["text"]), /\n\n/);
+    assert.equal(h.sent[0]!.params["audioFormat"], "wav");
+    assert.equal(h.sent[0]!.estimatedMicroUsd, String(h.sent[0]!.params["text"]).length * 80);
+    const record = await recordOf(w.worldDir);
+    assert.ok(Object.values(record.takes).length > 1);
+    assert.ok(Object.values(record.takes).every(t => t.grouped?.request !== undefined));
+  } finally { await w.close(); }
+});
+
+it("long character notes raise the reader boundary before saving and survive reread", async () => {
+  const w = await world();
+  try {
+    const note = "male narrator imitating a British woman, slight pitch lift, retain male timbre";
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", notes: { Mag: note } });
+    assert.equal((await readWorldMeta(w.worldDir)).schemaVersion, 78);
+    await assert.rejects(readWorldMeta(w.worldDir, { supports: 77 }), /newer|schema|version/i);
+  } finally { await w.close(); }
+});
+
+it("performed v4 keeps delivery provenance and a stable recovery hash even without authored direction", async () => {
+  const w = await world();
+  try {
+    const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+    const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed" });
+    const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
+    const block = plan.blocks[0]!.block;
+    const room = { narrator, models: [model], catalogue: [], transcriber: true };
+    const now = () => "2026-10-03T09:00:00.000Z";
+    const override = { cast: { version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: now(), passes: 1, dropped: 0, omitted: 0, lines: [] } };
+    const plain = await prepareChapter(w.store, LEDGER, "neap", room, now, [block.key], override);
+    assert.equal(plain.kind, "ready", plain.kind === "refused" ? plain.reason : "");
+    if (plain.kind !== "ready") return;
+    const speaking = plain.prepared.speaking.find(part => part.block.key === block.key)!;
+    assert.ok(speaking.takeHash);
+    assert.equal(speaking.direction?.hash, speaking.takeHash, "queued and recovered parts share the take's identity");
+    await writeBlockDirection(w.store, LEDGER, plan.chapter, plan.blocks.map(item => item.block), block.key,
+      directionEntry(block.text, directionPlan(block.text, { delivery: "measured", speed: 1, cues: [] }), now()));
+    const directed = await prepareChapter(w.store, LEDGER, "neap", room, now, [block.key], override);
+    assert.equal(directed.kind, "ready");
+    if (directed.kind !== "ready") return;
+    assert.equal(directed.prepared.speaking.find(part => part.block.key === block.key)!.direction?.delivery, "measured");
+  } finally { await w.close(); }
+});
+
 describe("a chapter read grouped (design turn 185)", () => {
   it("prices the chapter as requests, reads it as one request of turns, and files every block's cut as its take", async () => {
     const { store, worldDir, close } = await world();
@@ -466,7 +525,7 @@ describe("a chapter read grouped (design turn 185)", () => {
       await h.run({ confirmationToken: card.confirmationToken });
       assert.equal(h.sent.length, 1, "one request for every block");
       const turns = h.sent[0]!.params["turns"] as SpeechTurn[];
-      assert.equal(h.sent[0]!.params["text"], turns.map((turn) => turn.text).join(" "));
+      assert.equal(h.sent[0]!.params["text"], turns.map((turn) => turn.text).join("\n\n"));
       assert.equal(finished(h.events)?.outcome, "read", finished(h.events)?.reason);
       const started = h.events.filter((event) => event.type === "started").at(-1) as Extract<AudiobookRunEvent, { type: "started" }>;
       assert.equal(started.requests, 1);
@@ -559,12 +618,14 @@ describe("a chapter read grouped (design turn 185)", () => {
     try {
       const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
       const middle = plan.blocks[2]!.block.key;
-      const h = await harness(store);
+      const h = await harness(store, { model: SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")! });
       await h.run({ only: [middle] });
       const card = priced(h.events)!;
       assert.equal(card.requests, 1);
       await h.run({ only: [middle], confirmationToken: card.confirmationToken });
       assert.deepEqual(h.sent[0]!.params["blocks"], [plan.blocks[1]!.block.key, middle, plan.blocks[3]!.block.key]);
+      assert.equal(card.previews?.length, 1);
+      assert.equal(card.previews[0]!.body.text, h.sent[0]!.params["text"], "the preview includes the paid neighbours");
       const record = await recordOf(worldDir);
       assert.deepEqual(Object.keys(record.takes), [middle]);
       assert.equal(record.takes[middle]?.costMicroUsd, 1_000, "the request is the kept block's");
@@ -612,3 +673,34 @@ describe("a chapter read grouped (design turn 185)", () => {
   });
 });
 
+
+it("a paid performed-v4 sound reaction retains the identity needed for crash recovery", async () => {
+  const w = await world();
+  try {
+    const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+    const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", requests: "per-paragraph" });
+    const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
+    const host = plan.blocks[1]!.block;
+    await mkdir(join(w.worldDir, "productions", LEDGER, ".voices"), { recursive: true });
+    await writeFile(join(w.worldDir, "productions", LEDGER, ".voices", "01-neap.json"), JSON.stringify({ version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: "2026-10-03T09:00:00.000Z", passes: 1, dropped: 0, omitted: 0, lines: [] }));
+    await updateAudiobook(w.store, LEDGER, plan.chapter, current => ({ ...current, reactions: { x1: {
+      host: { key: host.key, textHash: audiobookTextHash(host.text) }, speaker: "narrator", sound: "laughs", offset: 0, by: "author", at: "2026-10-03T09:00:00.000Z" } } }));
+    const h = await harness(w.store, { model });
+    await h.run({ only: ["x1"] });
+    const quote = priced(h.events)!;
+    assert.ok(quote, JSON.stringify(h.events));
+    await h.run({ only: ["x1"], confirmationToken: quote.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    const input = h.sent[0]!;
+    assert.equal(input.params.text, "[laughs]");
+    assert.ok(input.params.directionHash);
+    const prepared = await prepareChapter(w.store, LEDGER, "neap", { narrator, models: [model], catalogue: [], transcriber: true }, () => "2026-10-03T09:00:00.000Z", ["x1"]);
+    assert.equal(prepared.kind, "ready"); if (prepared.kind !== "ready") return;
+    const block = prepared.prepared.speaking.find(b => b.block.key === "x1")!;
+    assert.equal(input.params.directionHash, block.takeHash);
+    const job = { ...input, id: "jb_reaction", status: "succeeded", landedFiles: ["reaction.wav"] } as unknown as Job;
+    assert.equal(priorPartJob([job], { productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
+      provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
+  } finally { await w.close(); }
+});

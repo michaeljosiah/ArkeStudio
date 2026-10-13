@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, estimateMicroUsd, legacyVoiceModel, normalizeSpeechText, orderedShots, voiceSourceFor,
+  EXPRESSIVE_DIRECTION_SCHEMA_VERSION, needsExpressiveDirection, PRODUCTION_AUDIO_CHAT_SCHEMA_VERSION, estimateMicroUsd, legacyVoiceModel, normalizeSpeechText, orderedShots, voiceSourceFor,
   PerformanceGenerationQuoteSchema, VoiceSampleReviewSchema,
   type AppSettings, type ArkeGenerationBody, type ManifestModel, type ModelManifest, type ProviderStatus,
 } from "@arke-studio/contracts";
@@ -105,6 +105,8 @@ export function productionAudioGenerationSource(store: WorldStore, ports: {
           expectedVoiceId: line.sheet.voice.voiceId, modelId: model.id,
           cadencePlan: { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))),
             speed: 1, cues: [], ...request.direction } }, { operationId: productionAudioOperationId(actionId), createdAt: at });
+        // Fence the sealed conversation quote before it can retain the new plan or enqueue paid work.
+        if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "voice-direction");
         inputs = [performanceGenerationJob(store, quote, actionId.slice(4), { voiceReference: source.kind === "cloned" })];
         authority = { quote, model };
         references.push({ id: line.sheet.id, role: `Speaker: ${line.sheet.name}` });

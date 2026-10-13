@@ -5,6 +5,8 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookDirectionFor,
+  compileAudiobookPerformance,
+  sheetNarrations,
   audiobookTakeDirectionHash,
   performanceNote,
   readingNotesLead,
@@ -30,6 +32,7 @@ import {
   type Job,
   type ManifestModel,
   type VoiceCandidate,
+  type VoiceAudioFormat,
 } from "@arke-studio/contracts";
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
@@ -72,7 +75,7 @@ class FreePlanEnded extends Error {
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number; requests?: number; groups?: string[][] }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
   | { type: "request"; index: number; of: number; keys: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
@@ -222,6 +225,7 @@ class RecordWriteError extends Error {}
 
 /** What names one part's job, frozen into its params so a later run can find it (R-16). */
 export interface PartIdentity {
+  audioFormat?: VoiceAudioFormat;
   productionId: string;
   chapterId: string;
   block: string;
@@ -260,6 +264,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["voiceId"] === identity.voiceId &&
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
+      (identity.audioFormat === undefined || job.params["audioFormat"] === identity.audioFormat) &&
       (identity.compiledSpeechHash === undefined || job.params["compiledSpeechHash"] === identity.compiledSpeechHash) &&
       (identity.reference === undefined || (job.params["voiceClipHash"] ?? null) === identity.reference) &&
       (job.params["directionHash"] ?? null) === identity.directionHash,
@@ -408,7 +413,7 @@ export async function prepareChapter(
     // take, so changing it makes every line of the speaker's stale.
     const note = planned.note;
     const playing = note === undefined ? null : performanceNote(note, model, language);
-    const noteHeld = playing?.mode === "unsupported";
+    let noteHeld = playing?.mode === "unsupported";
     // The book note and the chapter note (design turn 184, R-53) lead every block before its
     // own direction and the speaker's note, so a chapter of separate requests sounds like one
     // reader: sentences in the style on an instruction row, a tag each on a tag row while
@@ -432,7 +437,8 @@ export async function prepareChapter(
       text: leadTags.length > 0 ? `${leadTags.join(" ")} ${part.text}` : part.text,
       ...(leadStyle !== "" ? { instructions: part.instructions === undefined ? leadStyle : `${leadStyle} ${part.instructions}` } : {}),
     });
-    const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading);
+    const performedTurns = plan.reading === "performed" && model.provider === "elevenlabs" && model.id === "eleven_v4" ? planned.block : undefined;
+    const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading, performedTurns);
     // Each part's own style apart from the notes the whole chapter shares (design turn 185): a
     // grouped request sends the notes once and each later turn only this.
     const playedNote = playing?.mode === "instruction" ? note! : undefined;
@@ -473,6 +479,15 @@ export async function prepareChapter(
         parts = rendered.map((part) => part.text);
         own = words.map(() => playedNote);
       } else parts = piecesFor(text, model, voiceFormatForModel(model));
+      const performance = compileAudiobookPerformance(planned.block, { reading: plan.reading,
+        notes: { ...override?.speakerNotes, ...sheetNarrations(store.getBundle().sheets), ...plan.book?.notes } }, held?.plan ?? null, model, reading);
+      if (performance !== null) {
+        parts = performance.parts;
+        noteHeld = performance.noteHeld;
+        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text,
+          ...(held?.plan.delivery !== undefined ? { delivery: held.plan.delivery } : {}), voiceSettings: {}, perPart: parts.map(() => ({ voiceSettings: {} })) };
+        own = [];
+      }
       if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
         throw new Error("The words and direction exceed this reader's request limit.");
       }
@@ -645,7 +660,8 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     if (near.length === 0) return [];
     const order = plan.blocks.map((planned) => planned.block.key);
     const members = [...near, block].sort((a, b) => order.indexOf(a.block.key) - order.indexOf(b.block.key));
-    return [make(members, [block])];
+    const packed = make(members, [block]);
+    return speechInputFits(groupedText(packed.turns), block.model.limits) ? [packed] : [];
   }
   const byKey = new Map(speaking.map((block) => [block.block.key, block]));
   const breaks = readBreaks(plan);
@@ -653,7 +669,7 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     const block = byKey.get(planned.block.key);
     if (block === undefined || !misses.includes(block) || !groupable(block, room, plan.book)) return null;
     const breakAfter = breaks.get(planned.block.key);
-    return { key: planned.block.key, reader: readerKey(block), ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+    return { key: planned.block.key, reader: readerKey(block), maxCharacters: block.model.limits.maxPromptChars, ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
   });
   return groupReads(candidates, packing)
     .filter((group) => group.keys.length >= 2)
@@ -755,6 +771,21 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  const previews: NonNullable<Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"]> = [];
+  const previewGroups = new Map(groups.flatMap(group => group.kept.map(block => [block, group] as const)));
+  let previewRequest = 0;
+  for (const block of misses) {
+    const group = previewGroups.get(block);
+    if (group && group.kept[0] !== block) continue;
+    const texts = group ? [groupedText(group.turns)] : block.parts;
+    for (const [index, text] of texts.entries()) {
+      previewRequest++;
+      if (block.model.provider !== "elevenlabs" || block.model.id !== "eleven_v4") continue;
+      const settings = group ? undefined : block.direction?.perPart[index]?.voiceSettings ?? block.direction?.voiceSettings;
+      previews.push({ request: previewRequest, endpoint: `/v1/text-to-speech/${encodeURIComponent(block.reader.voiceId)}?output_format=pcm_24000`,
+        body: { model_id: block.model.id, text, ...(settings && Object.keys(settings).length ? { voice_settings: settings } : {}) } });
+    }
+  }
   // Cast first (design turn 198, R-69): the price is asked as the cast stands, saying what will be
   // cast; once answered — or where nothing is asked — the paragraphs are cast and the read is
   // prepared again from the new cast, so it reads what the cast now says.
@@ -762,7 +793,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
     const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
     if (asks && deps.confirmationToken !== asked) {
-      emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
       return;
     }
     const refused = await deps.castFirst();
@@ -811,7 +842,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
     return;
   }
 
@@ -1190,6 +1221,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         let firstJob: string | undefined;
         const textHash = audiobookTextHash(block.text);
         const identity: PartIdentity = {
+          audioFormat: block.format,
           productionId,
           chapterId: plan.chapter.id,
           block: block.block.key,
@@ -1198,7 +1230,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           model: block.model.id,
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
-          directionHash: block.takeHash ?? null,
+          directionHash: block.direction?.hash ?? block.takeHash ?? null,
           ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
           reference: block.reference,
         };
@@ -1253,10 +1285,11 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 // The direction rides as the performance path's does (R-8): the words already
                 // decorated, the settings beside them, the sentence where the row takes one, and
                 // the direction's name so the job is this direction's and no other's.
+                ...((block.direction?.hash ?? block.takeHash) !== undefined ? { directionHash: block.direction?.hash ?? block.takeHash } : {}),
                 ...(block.direction !== null
                   ? {
-                      voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings,
-                      directionHash: block.direction.hash,
+                      ...(Object.keys(block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings).length > 0
+                        ? { voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings } : {}),
                       ...((block.direction.perPart[index]?.instructions ?? block.direction.instructions) !== undefined
                         ? { instructions: block.direction.perPart[index]?.instructions ?? block.direction.instructions }
                         : {}),

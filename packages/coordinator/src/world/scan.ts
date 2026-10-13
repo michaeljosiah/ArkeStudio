@@ -169,7 +169,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
 // 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
 // 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
-export const SUPPORTED_SCHEMA_VERSION = 78;
+// 78: expressive audiobook direction: longer character briefs, phrases and vocalizations.
+// 79: immutable, leased agent media evidence and durable coverage receipts.
+export const SUPPORTED_SCHEMA_VERSION = 79;
 
 export class WorldOpenError extends Error {
   constructor(

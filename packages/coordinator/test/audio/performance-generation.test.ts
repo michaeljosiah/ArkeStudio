@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { billableCharacters, ulid, orderedShots, resolvePerformanceLine, normalizeSpeechText, CLONED_VOICES_PATH,
   type PerformanceGenerationQuote } from "@arke-studio/contracts";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { VoiceService } from "../../src/voice/service.js";
 import { preparePerformanceGeneration, validatePerformanceGeneration, finalizeGeneratedPerformance, readPerformanceGenerationQuote, generatedVoiceCloudBasis, performanceGenerationJob } from "../../src/audio/performance-generation.js";
@@ -65,7 +66,9 @@ it("quotes exact decorated wording and keeps paid output with unknown duration t
   const quote = await preparePerformanceGeneration(store, model, { kind: "prepare-performance-generation", requestId: ulid(), worldId: store.worldId,
     productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, expectedVoiceId: "v_8Kq2", modelId: model.id,
     cadencePlan: { schemaVersion: 1, sourceTextHash: audioHash(Buffer.from(normalizeSpeechText(line.text))), delivery: "whispered", speed: 1,
-      cues: [{ kind: "pause", at: 0, length: "short" }] } });
+      cues: [{ kind: "pause", at: 0, length: "short" }, { kind: "sound", at: 0, sound: "snorts" }] } });
+  assert.equal((await readWorldMeta(dir)).schemaVersion, 78);
+  await assert.rejects(readWorldMeta(dir, { supports: 77 }), /newer|schema|version/i);
   assert.equal(quote.mapping.providerModel, "eleven_v3");
   assert.equal(quote.estimatedMicroUsd, quote.mapping.providerText.length * 80);
   assert.deepEqual(await readPerformanceGenerationQuote(store, quote.operationId), quote);

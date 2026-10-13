@@ -130,13 +130,16 @@ export class ElevenLabsClient implements ProviderClient {
     const remoteId = `elevenlabs-${++this.counter}-${Date.now()}`;
     const voiceId = String(request.params["voiceId"] ?? "");
     if (!voiceId) throw new Error("elevenlabs: params.voiceId is required");
-    const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-speech/${voiceId}`, {
+    const wav = request.params["audioFormat"] === "wav";
+    const text = String(request.params["text"] ?? "");
+    if (request.model === "eleven_v4" && text.length > 10000) throw new ProviderRequestRejectedError("elevenlabs: text exceeds the v4 request limit");
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/text-to-speech/${encodeURIComponent(voiceId)}${wav ? "?output_format=pcm_24000" : ""}`, {
       method: "POST",
       headers: this.headers(key),
       body: JSON.stringify({
         model_id: request.model === "eleven-v3" ? "eleven_v3" : request.model,
-        text: String(request.params["text"] ?? ""),
-        ...(request.params["voiceSettings"] !== undefined ? { voice_settings: request.params["voiceSettings"] } : {}),
+        text,
+        ...(request.params["voiceSettings"] !== undefined && Object.keys(request.params["voiceSettings"] as object).length > 0 ? { voice_settings: request.params["voiceSettings"] } : {}),
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
@@ -145,7 +148,7 @@ export class ElevenLabsClient implements ProviderClient {
     return {
       remoteId,
       acceptedAt: new Date().toISOString(),
-      artifacts: [{ name: "speech.mp3", contentType: "audio/mpeg", data }],
+      artifacts: [wav ? { name: "speech.wav", contentType: "audio/wav", data: pcmWav(data) } : { name: "speech.mp3", contentType: "audio/mpeg", data }],
     };
   }
 
@@ -247,4 +250,15 @@ export class ElevenLabsClient implements ProviderClient {
         createdAt: h.date_unix !== undefined ? new Date(h.date_unix * 1000).toISOString() : "",
       }));
   }
+}
+
+/** Eleven's 24 kHz signed 16-bit mono PCM, wrapped losslessly for local block alignment. */
+function pcmWav(data: Uint8Array): Uint8Array {
+  if (!data.length || data.length % 2) throw new Error("elevenlabs: malformed PCM audio");
+  const out = Buffer.alloc(44 + data.length);
+  out.write("RIFF", 0); out.writeUInt32LE(36 + data.length, 4); out.write("WAVEfmt ", 8);
+  out.writeUInt32LE(16, 16); out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
+  out.writeUInt32LE(24000, 24); out.writeUInt32LE(48000, 28); out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
+  out.write("data", 36); out.writeUInt32LE(data.length, 40); out.set(data, 44);
+  return out;
 }

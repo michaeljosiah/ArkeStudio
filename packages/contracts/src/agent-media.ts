@@ -3,7 +3,7 @@ import { FullSha256Schema } from "./audio.js";
 import { SessionIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { ImageObservationSchema } from "./world-chat-images.js";
 
-export const AGENT_MEDIA_SCHEMA_VERSION = 78;
+export const AGENT_MEDIA_SCHEMA_VERSION = 79;
 export const AGENT_MEDIA_PROFILE = "arke-media-evidence-v1";
 export const AGENT_MEDIA_LIMITS = Object.freeze({ frames: 8, intervalSeconds: 60, edge: 1024,
   streams: 16, channels: 8, sampleRate: 192000, pcmBytes: 64 * 1024 * 1024, calls: 16 });

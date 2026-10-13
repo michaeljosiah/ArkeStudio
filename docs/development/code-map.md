@@ -9,6 +9,9 @@ ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.t
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
 
+ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and
+coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
 Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
 chapter identity. `AudiobookScope` travels through listening/player commands and video options
 to coordinator `productions/audiobook-listening`, `audiobook-export` and `audiobook-video`.

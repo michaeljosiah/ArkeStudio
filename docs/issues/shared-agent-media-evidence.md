@@ -26,7 +26,7 @@ identification and listening/performance judgments are explicitly unmeasured. Ra
 local; these tools do not send an audio attachment to a model.
 
 Receipts persist as `media.receipt`, replay into the bounded workspace projection, and raise
-the world reader boundary to schema 78. Each observation records the profile and both ffprobe
+the world reader boundary to schema 79. Each observation records the profile and both ffprobe
 and ffmpeg versions, including when the host resolves them to different installations.
 There is no cross-run evidence cache: every call verifies current source bytes. A later cache
 must key probe/decoder/profile/source/stream/interval and revalidate identity before reuse.

@@ -53,8 +53,8 @@ async function harness(options: { local?: boolean; allowed?: boolean; supported?
 test("metadata receipts replay and raise the reader boundary without claiming pixels or listening", async () => {
   const h = await harness(), outcome = await h.retrieval.call(h.lease.token, "inspect_media", { source: h.source });
   assert.equal(outcome.receipt.media!.coverage, "metadata-only"); assert.equal(outcome.imageContent, undefined);
-  assert.equal((await h.loaded())!.mediaReceipts!.length, 1); assert.equal(h.store.getBundle().meta.schemaVersion, 78);
-  await assert.rejects(readWorldMeta(h.store.dir, { supports: 77 }), /newer|version|schema/i);
+  assert.equal((await h.loaded())!.mediaReceipts!.length, 1); assert.equal(h.store.getBundle().meta.schemaVersion, 79);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 78 }), /newer|version|schema/i);
 });
 test("sampled frames deliver actual pixels, source times, source/rendition hashes and cloud disclosures", async () => {
   const h = await harness(), outcome = await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 1, endSec: 3 }, count: 2 });

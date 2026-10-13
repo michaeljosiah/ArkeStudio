@@ -43,25 +43,26 @@ export const FISH_DELIVERY: Record<Delivery, { settings: Record<string, number>;
  * the text is a verbatim transcript and only these, in angle brackets, are performed rather than
  * spoken.
  */
-export const GEMINI_SOUNDS: Record<Sound, string> = {
+export const GEMINI_SOUNDS: Partial<Record<Sound, string>> = {
   laughs: "laugh", chuckles: "chuckle", sighs: "sigh", gasps: "gasp", sobs: "sob",
   "clears throat": "throat-clearing", coughs: "cough", groans: "groan", yawns: "yawn",
 };
 
 /** Eleven v3's audio tags (free-form; these are the documented spellings). */
-export const ELEVEN_V3_SOUNDS: Record<Sound, string> = {
+export const ELEVEN_V3_SOUNDS: Partial<Record<Sound, string>> = {
+  snorts: "snorts", wheezing: "wheezing", "laughs harder": "laughs harder", "starts laughing": "starts laughing",
   laughs: "laughs", chuckles: "chuckles", sighs: "sighs", gasps: "gasps", sobs: "sobs",
   "clears throat": "clears throat", coughs: "coughs", groans: "groans", yawns: "yawns",
 };
 
 /** Breeze TTS 2's English audio tags, in parentheses. */
-export const BREEZE_SOUNDS: Record<Sound, string> = {
+export const BREEZE_SOUNDS: Partial<Record<Sound, string>> = {
   laughs: "laugh", chuckles: "chuckle", sighs: "sigh", gasps: "gasp", sobs: "sob",
   "clears throat": "clear throat", coughs: "cough", groans: "groan", yawns: "yawn",
 };
 
 /** Fish S2.1's effect tags (free-form; the documented ones are present participles). */
-export const FISH_SOUNDS: Record<Sound, string> = {
+export const FISH_SOUNDS: Partial<Record<Sound, string>> = {
   laughs: "laughing", chuckles: "chuckling", sighs: "sighing", gasps: "gasping", sobs: "sobbing",
   "clears throat": "clear throat", coughs: "coughing", groans: "groaning", yawns: "yawning",
 };
