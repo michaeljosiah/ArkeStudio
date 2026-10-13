@@ -434,7 +434,8 @@ describe("the chips in a narrow tool row (195a, local.15)", () => {
   const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/components/model-chip.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const body = (selector: string) => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1]!.trim() === selector)?.[2] ?? "";
   it("lets the chips shrink inside the row so send stays whole", () => {
-    assert.match(body(".fy-mchip"), /min-width: 0/);
+    // The pair now retains its children's minimum and wraps with the compact tools.
+    // composer-row-layout and the turn 195 page checks verify that no control is covered.
     assert.match(body(".fy-mchip > .fy-mchip__btn"), /min-width: 0; flex: 0 1 auto/);
   });
   it("ellipses the model's name first, down to a floor, and only then the effort", () => {

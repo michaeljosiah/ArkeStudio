@@ -5,9 +5,10 @@
 .gc224-native-panel>header>button{width:28px;height:28px;border:0;background:none;color:inherit;border-radius:6px;font-size:22px;cursor:pointer}
 .gc224-native-panel>header>button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .gc224-native-conversation{flex:1;min-height:0;overflow:hidden;display:flex}.gc224-native-conversation>.fy-production-studio-chat{width:100%;height:100%;display:flex;min-height:0}
-.gc224-native-conversation .fy-story__chat{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0;height:100%;padding:0 18px 16px}.gc224-native-conversation .fy-story__log{flex:1;min-height:0;overflow:auto}
+.gc224-native-conversation .fy-story__chat{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0;height:100%;padding:0 12px 16px}.gc224-native-conversation .fy-story__log{flex:1;min-height:0;overflow:auto}
 .gc224-native-conversation .fy-story__chathead{display:none}.gc224-native-conversation .fy-story__side{display:none}.gc224-native-conversation .fy-production-studio-understanding{display:none}
 .gc224-native-conversation .fy-story__log{padding:16px 0}.gc224-native-conversation :is(.fy-develop-composer,.fy-story-composer){position:static;flex:none;padding:12px 0 0}
 body[data-global-design="open"] .fy-prodwrap{margin-right:400px}body[data-global-design="open"] .fy-production-studio__thread,body[data-global-design="open"] .fy-production-studio__divider{display:none}body[data-global-design="open"] .fy-production-studio{grid-template-columns:minmax(0,1fr)}body[data-global-design="open"] .fy-production-studio__canvas{flex:1}
 @media(max-width:1099px){body[data-global-design="open"] .fy-prodwrap{margin-right:0}.gc224-native-panel{box-shadow:-16px 0 50px #0002}}
 @media(max-width:599px){.gc224-native-panel{top:48px;width:100%}.gc224-native-panel>header>button{width:44px;height:44px}.gc224-native-conversation .fy-story__chat{padding:0 12px 12px}}
+@media(max-width:599px){body[data-global-design="open"] .fy-held-bar{z-index:80}.gc224-native-conversation{padding-bottom:var(--global-composer-height,180px)}.gc224-native-conversation .fy-develop-model{display:none}}

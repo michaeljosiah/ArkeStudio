@@ -378,6 +378,8 @@ export function Composer(props: ComposerProps) {
             <button
               type="button"
               className={cx("fy-cx__tool", readReplies.on && "fy-cx__tool--on")}
+              aria-label="Read replies"
+              title="Read replies"
               aria-pressed={readReplies.on}
               onClick={readReplies.onToggle}
             >

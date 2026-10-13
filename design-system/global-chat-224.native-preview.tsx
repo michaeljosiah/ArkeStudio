@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router";
 import { App } from "../packages/client/src/App";
 import { __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "../packages/client/src/lib/store";
 import { developLayoutFixture } from "../packages/client/test/develop-layout-fixture";
+import { ModelChip } from "../packages/client/src/components/model-chip";
 
 const state = developLayoutFixture();
 // Illustrative catalogue, taken from the existing model-picker test fixture, not live availability.
@@ -22,9 +23,16 @@ for (const name of ["mousedown", "wheel", "keydown"]) document.addEventListener(
 new MutationObserver(() => { const count=document.querySelectorAll('.fy-mchip__menu').length; if ((designEvents.at(-1) as {menus?:number})?.menus!==count) designEvents.push({menus:count,at:performance.now()}); }).observe(document.body,{subtree:true,childList:true});
 // Preserve their native appearance without invoking actual media capabilities in a design file.
 document.addEventListener("click", event => {
+ const target=event.target as Element;
+ const anyButton=target.closest('button');
+ const allowed=anyButton?.closest('.fy-cx,.fy-mchip__menu,.fy-msheet,.gc224-native-panel>header')||anyButton?.matches('[data-native-chat-trigger]');
+ // Keep this comparison on its measured page. Settings/default persistence and route changes
+ // are application actions; the separate context fixture demonstrates the proposed navigation.
+ if(target.closest('a')||(anyButton&&(!allowed||anyButton.matches('.fy-mpick__manage,.fy-mpick__quiet')))){event.preventDefault();event.stopImmediatePropagation();return;}
  const b = (event.target as Element).closest('button[aria-label="Attach images, documents and audio"],button[aria-label="Dictate"],button[aria-label="Send"]');
  if (b) { event.preventDefault(); event.stopImmediatePropagation(); }
 }, true);
+document.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&(event.target as Element).matches('.fy-cx__editor')){event.preventDefault();event.stopImmediatePropagation();}},true);
 document.addEventListener("drop", event => { event.preventDefault(); event.stopImmediatePropagation(); }, true);
 document.addEventListener("paste", event => { if (event.clipboardData?.files.length) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
 const bridge = { connect() {}, send(raw: string) { commands.push(JSON.parse(raw)); }, subscribe() { return () => {}; }, coordinatorHttpBase: () => location.origin };
@@ -37,8 +45,22 @@ flushSync(() => renderer.render(<MemoryRouter initialEntries={[`/w/${state.world
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 const ready = async () => { await wait(450); await document.fonts.ready; };
+// HeldBar owns one body portal on phones. The proposed sheet keeps it visible and reserves its space.
+const measureComposer = () => {
+ const bar=document.querySelector('.fy-held-bar') as HTMLElement | null;
+ document.documentElement.style.setProperty('--global-composer-height', `${bar?.getBoundingClientRect().height ?? 180}px`);
+};
+const composerObserver=new ResizeObserver(measureComposer);composerObserver.observe(document.body);
+let observedBar: Element | null=null;
+new MutationObserver(()=>{
+ const bar=document.querySelector('.fy-held-bar');
+ if(bar!==observedBar){if(observedBar)composerObserver.unobserve(observedBar);observedBar=bar;if(bar)composerObserver.observe(bar);}
+}).observe(document.body,{childList:true,subtree:true});
 let host: HTMLElement | null = null, slot: Comment | null = null, original: HTMLElement | null = null;
 let trigger: HTMLButtonElement | null = null;
+new MutationObserver(()=>{
+ if(host&&original){const owner=host.querySelector('.gc224-native-conversation');if(owner&&original.parentElement!==owner)owner.append(original);}
+}).observe(document.body,{childList:true,subtree:true});
 async function setMode(mode: string) {
  await ready();
  if (mode === "existing") {
@@ -71,9 +93,19 @@ async function setMode(mode: string) {
  host.querySelector("button")!.onclick = () => setMode("closed");
  host.querySelector(".gc224-native-conversation")!.append(original);
  document.body.append(host); document.body.setAttribute("data-global-design", "open");
+ measureComposer();
  trigger.setAttribute("aria-expanded", "true");
- (original.querySelector('[contenteditable="true"],textarea') as HTMLElement)?.focus();
+ ((original.querySelector('[contenteditable="true"],textarea') ?? document.querySelector('.fy-held-bar [contenteditable="true"]')) as HTMLElement)?.focus();
 }
 Object.assign(window, { nativeDesignSetMode: setMode, nativeDesignReady: ready });
+// Comparison-only specimen. World Chat's proposed host hides a model with no Settings name (195f).
+let specimen: ReturnType<typeof createRoot> | null = null, specimenHost: HTMLElement | null = null;
+Object.assign(window, { nativeDesignWorldSpecimen: (value?: string, remove=false) => {
+ specimen?.unmount(); specimenHost?.remove(); specimen=null; specimenHost=null;
+ if(remove)return;
+ specimenHost=document.createElement('div');specimenHost.className='gc224-world-specimen';
+ specimenHost.style.cssText='position:fixed;left:40px;top:180px;z-index:150';document.body.append(specimenHost);
+ specimen=createRoot(specimenHost);flushSync(()=>specimen!.render(value===undefined?null:<ModelChip readOnly state={state} value={value} set={false} onPick={()=>{}} />));
+} });
 window.addEventListener("message", event => { if (event.source === parent && event.data?.arkeChatDesign) setMode(event.data.arkeChatDesign); });
 document.addEventListener("keydown", event => { if (event.key === "Escape" && host && !document.querySelector(".fy-mchip__menu,.fy-msheet")) setMode("closed"); });
