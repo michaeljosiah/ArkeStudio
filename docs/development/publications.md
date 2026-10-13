@@ -10,7 +10,9 @@ fixtures and reader evidence; it does not add supported application profiles.
 
 The [private story publishing design review](../../design-system/publish-private-review.html)
 records proposed turn 224: a unified edition with EPUB, Arke-narrated audio and private delivery.
-It is a design proposal, not implemented book/audio publication support.
+Revision 2 adds a Formatting & style review, optional em-dash avoidance, explicit manuscript-edit
+approval and rechecking of affected narration. It is a design proposal, not implemented book/audio
+publication support.
 
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
 portable asset path rules and dependency receipt/fingerprint helpers. The owning tests are
