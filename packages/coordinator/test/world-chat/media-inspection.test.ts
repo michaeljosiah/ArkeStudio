@@ -26,7 +26,7 @@ const inventory: AgentMediaInventory = { durationSec: 10, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 3, height: 2, durationSec: 10, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: 4, channels: 2, durationSec: 10, startTimeSec: 0 },
 ] };
-async function harness(options: { local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void> } = {}) {
+async function harness(options: { local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), id = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-10-13T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Media", entryContext: { kind: "world" } });
@@ -39,11 +39,11 @@ async function harness(options: { local?: boolean; allowed?: boolean; supported?
   const stop = new AbortController();
   const adapter = { imageInput: true, imageInputForSession: () => options.supported !== false, imageDestinationForSession: () => ({ provider: "test-provider", local: options.local === true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => allowed, publish: async () => {} }); images.start(runId, "session", stop.signal);
-  const tools = { version: async () => "ffmpeg version fixture", probe: async (path: string) => { snapshots++; assert.deepEqual(await readFile(path), Buffer.from(png)); await options.duringProbe?.(); return options.inventory ?? inventory; },
+  const tools = { version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture", probe: async (path: string) => { snapshots++; assert.deepEqual(await readFile(path), Buffer.from(png)); await options.duringProbe?.(); return options.inventory ?? inventory; },
     frame: async (_path: string, _stream: number, at: number) => { frames++; await options.duringFrame?.(); return { bytes: png, width: 3, height: 2, sourceTimeSec: at }; },
     audio: async (_path: string, stream: AgentMediaInventory["streams"][number], start: number, end: number) => {
       const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); }, };
-  const media = new ConversationMediaInspection(store, leases, { images, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
+  const media = new ConversationMediaInspection(store, leases, { images, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, leases, lease, cv, images, media, retrieval, source: { kind: "artifact" as const, id }, stop,
@@ -68,6 +68,16 @@ test("audio sample evidence retains rate and separate channels and never disclos
   const h = await harness(), outcome = await h.retrieval.call(h.lease.token, "analyze_audio_signal", { source: h.source, range: { startSec: 0, endSec: 1 } });
   assert.equal(outcome.receipt.media!.audio!.channels.length, 2); assert.equal(outcome.receipt.media!.audio!.sampleRate, 4);
   assert.equal(outcome.imageContent, undefined); assert.equal((await h.loaded())!.imageDisclosures, undefined);
+});
+test("cloud image revocation during publication withholds every frame block", async () => {
+  let h: Awaited<ReturnType<typeof harness>>; h = await harness({ duringPublish: async () => { h.forbid(); } });
+  const result = await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.equal(result.receipt.status, "unavailable"); assert.equal(result.imageContent, undefined);
+});
+test("portrait footage uses the same pixel and edge limits as landscape footage", async () => {
+  const h = await harness({ inventory: { ...inventory, streams: [{ ...inventory.streams[0]!, width: 2160, height: 3840 }] } });
+  const result = await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 0, endSec: 1 }, count: 1 });
+  assert.equal(result.receipt.status, "complete"); assert.equal(result.receipt.media!.probeVersion, "ffprobe version fixture");
 });
 test("the shared leased MCP catalog serves frame images as image blocks and records the matching receipt", async () => {
   const h = await harness(), server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
@@ -161,9 +171,9 @@ test("take-review coverage requires served evidence in its completed run and sti
   const chat = new WorldChatStore(conversationDir(h.store.dir, h.cv));
   await chat.append({ type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "Review", attachmentIds: [], createdAt: at },
     run: { id: h.lease.runId, turnId, basedOnConversationSeq: 1, status: "completed", adapter: "fixture", harnessCleanup: "not-required", contextDigest: hash(png), startedAt: at, endedAt: at },
-    receipts: [frames.receipt, audio.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
+    receipts: [frames.receipt, frames.receipt, audio.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
   const reason = await takeReviewInspectionReason(h.store, intent, production, take);
-  assert.match(reason, /1 timestamped still frames/); assert.match(reason, /Original-channel audio sample measurements/); assert.match(reason, /no listening or performance judgment/);
+  assert.match(reason, /1 unique timestamped still frames/); assert.match(reason, /Original-channel audio sample measurements/); assert.match(reason, /no listening or performance judgment/);
   await writeFile(join(h.store.dir, path), "changed");
   assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /Metadata-only/);
 });

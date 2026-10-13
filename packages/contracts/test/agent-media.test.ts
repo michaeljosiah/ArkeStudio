@@ -28,7 +28,7 @@ test("media inputs refuse paths, arbitrary extras, excessive sampling and invali
   assert.equal(AnalyzeAudioArgsSchema.safeParse({ source, range: { startSec: -1, endSec: 1 } }).success, false);
 });
 test("typed receipts cannot confuse metadata, frame inspection and audio measurements", () => {
-  const media = { profile: "arke-media-evidence-v1", decoderVersion: "ffmpeg version fixture", source: { kind: "artifact", id: "ar-one" },
+  const media = { profile: "arke-media-evidence-v1", decoderVersion: "ffmpeg version fixture", probeVersion: "ffprobe version fixture", source: { kind: "artifact", id: "ar-one" },
     sourceHash: hash, byteLength: 3, sourceStartSec: 0, sourceEndSec: 1, inventory: { durationSec: 1, streams: [] }, coverage: "metadata-only", limitations: ["Metadata only"] };
   assert.ok(AgentMediaObservationSchema.safeParse(media).success);
   assert.equal(AgentMediaObservationSchema.safeParse({ ...media, coverage: "sampled-frames-only" }).success, false);

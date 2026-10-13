@@ -46,12 +46,13 @@ export const AudioSignalSchema = z.object({ streamIndex: z.number().int().min(0)
 export type AudioSignal = z.infer<typeof AudioSignalSchema>;
 export const AgentMediaFrameSchema = z.object({ requestedSourceTimeSec: time, sourceTimeSec: time,
   viewTimeSec: time, streamIndex: z.number().int().min(0), image: ImageObservationSchema }).strict();
-export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; source: AgentMediaSource; decoderVersion: string;
+export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; source: AgentMediaSource; decoderVersion: string; probeVersion: string;
   sourceHash: string; byteLength: number; sourceStartSec: number; sourceEndSec: number | null; inventory: AgentMediaInventory;
   range?: { startSec: number; endSec: number }; frames?: Array<z.infer<typeof AgentMediaFrameSchema>>; audio?: AudioSignal;
   coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples"; limitations: string[] };
 export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.object({ profile: z.literal(AGENT_MEDIA_PROFILE), source: AgentMediaSourceSchema,
   decoderVersion: z.string().min(1).max(200),
+  probeVersion: z.string().min(1).max(200),
   sourceHash: FullSha256Schema, byteLength: z.number().int().positive(),
   sourceStartSec: time, sourceEndSec: time.nullable(), inventory: AgentMediaInventorySchema,
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),

@@ -72,11 +72,12 @@ export class ConversationMediaInspection {
     const source = await agentMediaSource(this.store, args.source);
     if (name === "sample_video") await this.deps.images.validate(lease);
     const decoderVersion = await tools.version(signal);
+    const probeVersion = await tools.probeVersion(signal);
     const prepared = await withContainedProductionMedia(this.store.dir, source.path, source.expectedHash, signal, async snapshot => {
       const inventory = await tools.probe(snapshot.path, signal);
       const end = source.endSec ?? inventory.durationSec;
       if (source.endSec !== null && (inventory.durationSec === null || source.endSec > inventory.durationSec + 0.000001)) throw new RetrievalError("unavailable", "The source no longer covers this take segment.");
-      const base = { profile: AGENT_MEDIA_PROFILE, decoderVersion, source: args.source, sourceHash: snapshot.sourceHash, byteLength: snapshot.byteLength,
+      const base = { profile: AGENT_MEDIA_PROFILE, decoderVersion, probeVersion, source: args.source, sourceHash: snapshot.sourceHash, byteLength: snapshot.byteLength,
         sourceStartSec: source.startSec, sourceEndSec: end, inventory };
       if (name === "inspect_media") return { observation: AgentMediaObservationSchema.parse({ ...base, coverage: "metadata-only",
         limitations: ["Stream metadata only; no pixels, motion, audio performance or transcript was reviewed."] }), frames: [] };
@@ -93,7 +94,7 @@ export class ConversationMediaInspection {
             "Decoded sample duration is measured; discontinuous packet timestamps were not audited.",
             "No speech recognition, semantic sound identification or audiovisual sync was performed."] }), frames: [] };
       }
-      if (!selected.width || !selected.height || selected.width > 3840 || selected.height > 2160) throw new RetrievalError("unavailable", "Video dimensions exceed the bounded decode profile.");
+      if (!selected.width || !selected.height || Math.max(selected.width, selected.height) > 3840 || selected.width * selected.height > 3840 * 2160) throw new RetrievalError("unavailable", "Video dimensions exceed the bounded decode profile.");
       const samples = args.count ?? 3, frames = [];
       for (let i = 0; i < samples; i++) {
         this.access(lease, name);
@@ -133,6 +134,7 @@ export class ConversationMediaInspection {
       await chat.append({ type: "media.receipt", receipt });
     });
     await this.deps.publish?.(lease.conversationId); this.access(lease, name);
+    if (pixels.length) await this.deps.images.validate(lease);
     return { result: observation, receipt, ...(pixels.length ? { imageContent: pixels.map(value => value.content) } : {}) };
   }
 }

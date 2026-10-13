@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { createAgentMediaTools, parseAgentMediaProbe } from "../../src/media/agent-media-tools.js";
 import { createNodeMediaProcessRunner } from "../../src/media/node-media-process.js";
 import { decodePng } from "../../src/references/png.js";
@@ -27,6 +28,10 @@ test("decoder bounds, aborts and raw diagnostics fail without leaking their cont
   await assert.rejects(fail.probe("private", signal()), error => error instanceof Error && !error.message.includes("PRIVATE"));
   const stop = new AbortController(); stop.abort(); await assert.rejects(tools.version(stop.signal));
 });
+test("separately configured decoder and probe versions remain distinct", async () => {
+  const versions = createAgentMediaTools({ run: async tool => ({ code: 0, stdout: Buffer.from(`${tool} version ${tool === "ffmpeg" ? "8-fixture" : "7-fixture"}\n`), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }) });
+  assert.equal(await versions.version(signal()), "ffmpeg version 8-fixture"); assert.equal(await versions.probeVersion(signal()), "ffprobe version 7-fixture");
+});
 test("native original-rate stereo stays distinct, including a silent channel and full-scale samples", { skip: !available }, async () => {
   const folder = await tempDir("arke-media-native-"), raw = join(folder, "source.f32"), wav = join(folder, "stereo.wav");
   const rate = 32000, bytes = Buffer.alloc(rate * 2 * 4);
@@ -50,4 +55,11 @@ test("native VFR frames carry actual decoded source times after seeking, distinc
   assert.ok(Math.abs(frame.sourceTimeSec - .6) < .000001, String(frame.sourceTimeSec));
   assert.notEqual(frame.sourceTimeSec, .55); assert.equal(decodePng(frame.bytes).width, 1024);
   await assert.rejects(tools.frame(video, 0, .55, .59, signal()), /inside the requested interval/);
+});
+test("native high-entropy RGBA footage fits the 1024px frame profile before rendition downsizing", { skip: !available }, async () => {
+  const folder = await tempDir("arke-noisy-frame-"), raw = join(folder, "noise.rgba"), video = join(folder, "noise.mov");
+  await writeFile(raw, randomBytes(1024 * 1024 * 4));
+  await generate(["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "1024x1024", "-framerate", "1", "-i", raw, "-frames:v", "1", "-pix_fmt", "rgba", "-c:v", "png", video]);
+  const frame = await tools.frame(video, 0, 0, 1, signal());
+  assert.ok(frame.bytes.length > 3_000_000); assert.ok(frame.bytes.length <= 5 * 1024 * 1024); assert.equal(decodePng(frame.bytes).width, 1024);
 });

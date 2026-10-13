@@ -5,6 +5,7 @@ import { decodePng } from "../references/png.js";
 
 export interface AgentMediaTools {
   version(signal: AbortSignal): Promise<string>;
+  probeVersion(signal: AbortSignal): Promise<string>;
   probe(path: string, signal: AbortSignal): Promise<AgentMediaInventory>;
   frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal): Promise<{
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
@@ -42,13 +43,15 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     if (result.cancelled || result.timedOut || result.outputLimitExceeded || result.code !== 0) throw new Error("Bounded media decoder failed or was stopped");
     return result;
   };
-  return {
-    async version(signal) {
-      const result = await run("ffmpeg", ["-version"], signal, 16_384);
+  const version = async (tool: "ffmpeg" | "ffprobe", signal: AbortSignal) => {
+      const result = await run(tool, ["-version"], signal, 16_384);
       const first = new TextDecoder().decode(result.stdout).split(/\r?\n/)[0] ?? "";
-      if (!first.startsWith("ffmpeg version ") || first.length > 200) throw new Error("Media decoder version is unavailable");
+      if (!first.startsWith(`${tool} version `) || first.length > 200) throw new Error("Media tool version is unavailable");
       return first;
-    },
+  };
+  return {
+    version: signal => version("ffmpeg", signal),
+    probeVersion: signal => version("ffprobe", signal),
     async probe(path, signal) {
       const result = await run("ffprobe", ["-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
         "-show_entries", "format=duration:stream=index,codec_type,codec_name,width,height,sample_rate,channels,time_base,avg_frame_rate,duration,start_time",
@@ -63,7 +66,7 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
         "-ss", String(atSec), "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS, "-i", path,
         "-map", `0:${streamIndex}`, "-an", "-sn", "-frames:v", "1", "-vf",
         `select=gte(t\\,${atSec}),scale=${AGENT_MEDIA_LIMITS.edge}:${AGENT_MEDIA_LIMITS.edge}:force_original_aspect_ratio=decrease,showinfo`,
-        "-fps_mode", "passthrough", "-map_metadata", "-1", "-pix_fmt", "rgba", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], signal, 3_000_000);
+        "-fps_mode", "passthrough", "-map_metadata", "-1", "-pix_fmt", "rgba", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], signal, 5 * 1024 * 1024);
       const value = result.stderr.match(/\bpts_time:([+-]?[\d.]+(?:e[+-]?\d+)?)/i)?.[1], actual = value === undefined ? null : finite(value);
       if (actual === null || actual < atSec - 0.000001 || actual >= endSec) throw new Error("No timestamped frame exists inside the requested interval");
       const image = decodePng(result.stdout, AGENT_MEDIA_LIMITS.edge ** 2);
