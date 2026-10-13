@@ -700,7 +700,7 @@ it("a paid performed-v4 sound reaction retains the identity needed for crash rec
     const block = prepared.prepared.speaking.find(b => b.block.key === "x1")!;
     assert.equal(input.params.directionHash, block.takeHash);
     const job = { ...input, id: "jb_reaction", status: "succeeded", landedFiles: ["reaction.wav"] } as unknown as Job;
-    assert.equal(priorPartJob([job], { worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
+    assert.equal(priorPartJob([job], { productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
       provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
   } finally { await w.close(); }
 });
