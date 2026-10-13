@@ -1244,7 +1244,7 @@ export class JobQueue {
     };
     await this.transition(submitting);
     if (this.disposed) return;
-    if (!this.stillSubmitting(submitting)) return;
+    if (this.cancelling.has(job.id) || !this.stillSubmitting(submitting)) return;
 
     const submitAbort = new AbortController();
     this.submitAborts.set(job.id, submitAbort);
@@ -2672,11 +2672,13 @@ export class JobQueue {
 
   private stillQueued(job: Job): boolean {
     const current = this.jobs.get(job.id);
-    return current?.status === "queued" && this.engineRunKey(current) === this.engineRunKey(job);
+    return !this.cancelling.has(job.id) && current?.status === "queued" && this.engineRunKey(current) === this.engineRunKey(job);
   }
 
   private stillSubmitting(job: Job): boolean {
     const current = this.jobs.get(job.id);
+    // Accepted responses still need their remote cancellation and usage recorded while the
+    // cancel row is flushing. Pending cancellation gates new I/O, not response identity.
     return current?.status === "submitting" && current.attempt === job.attempt && this.engineRunKey(current) === this.engineRunKey(job);
   }
 

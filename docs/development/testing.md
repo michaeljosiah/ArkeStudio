@@ -468,7 +468,7 @@ For an OpenCode v2 pin change, stage the exact runtime and qualify the actual bi
 ```powershell
 npm run prepare:opencode2 --workspace @arke-studio/desktop
 $env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
-node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-image-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
 $env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
 $env:ARKE_LIVE_HARNESS = '1'
 node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
@@ -485,6 +485,18 @@ confirmation, and durable key add/restart/removal. They make no paid requests an
 live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
 fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
 native steering.
+
+OpenCode image changes also run `packages/adapter-opencode/test/v2-images.test.ts` and the
+coordinator's `test/world-chat/images.test.ts`. Verify that cloud aliases exposed through a
+loopback Ollama server remain cloud destinations: only bounded read-only model metadata
+with local architecture and no upstream route can qualify local inspection. Redirects,
+unknown/oversized metadata and cancellation must never send media or authorize locality.
+The exact-binary image probe above uses an
+isolated scripted vision provider and MCP server to verify decoded pixels from both inline
+PNG attachments and direct `view_image` results. Native MCP registration is asynchronous;
+the probe allows bounded ordinary reads while the direct tool catalogue settles, without
+enabling Code Mode or widening the agent's permissions. It asserts the measured local
+Ollama endpoint and does not establish image comprehension, video motion or audio quality.
 
 Discovery/launcher regressions also reject older and newer v2 versions with no fallback,
 retain the installed version and required pin in the unavailable reason, and create no child.
