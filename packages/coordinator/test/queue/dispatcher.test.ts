@@ -184,6 +184,32 @@ function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
 }
 
+it("cancellation in a slow journal prevents submission when authorization finishes meanwhile", async () => {
+  const fake = new FakeProvider({});
+  let authorized!: () => void, releaseCancel!: () => void, preparing = false, cancelling = false;
+  const authorization = new Promise<void>(resolve => { authorized = resolve; });
+  const cancellation = new Promise<void>(resolve => { releaseCancel = resolve; });
+  const h = await makeHarness({ fake }, { beforeSubmit: async () => { preparing = true; await authorization; } });
+  const internals = h.queue as unknown as { journal: { append(job: Job): Promise<void> }; activeRuns: Set<Promise<void>> };
+  const append = internals.journal.append.bind(internals.journal);
+  internals.journal.append = async job => {
+    if (job.status === "cancelled") { cancelling = true; await cancellation; }
+    await append(job);
+  };
+  let stopped: Promise<void> | undefined;
+  try {
+    await h.queue.start(); const job = await h.queue.enqueue(INPUT);
+    await until(() => preparing, "authorization to start", FOLD_MS);
+    stopped = h.queue.cancel(job.id);
+    await until(() => cancelling, "cancellation to reach the journal", FOLD_MS);
+    authorized(); await Promise.all(internals.activeRuns);
+    assert.equal(fake.submitCount, 0, "the pending cancel is authority even before its row is durable");
+    releaseCancel(); await stopped;
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+  } finally { authorized(); releaseCancel(); await stopped; await h.queue.dispose(); }
+});
+
 it("rechecks authorization immediately before submit and never calls the provider after revocation", async () => {
   const fake = new FakeProvider({});
   let checks = 0;
