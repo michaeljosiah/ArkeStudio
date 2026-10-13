@@ -86,7 +86,11 @@ function restoreScope(worldId: string, entry: WorldChatContext, raw: unknown): P
   if (subject.success) props.subject = subject.data;
   if (value.dock && typeof value.dock === "object" && typeof value.dock.title === "string" && typeof value.dock.subject === "string") {
     props.dock = { title: value.dock.title.slice(0, 500), subject: value.dock.subject.slice(0, 500), conversationFirst: true };
-    for (const field of ["subjectPrefix", "about", "subjectLine"] as const) if (typeof value.dock[field] === "string") props.dock[field] = value.dock[field].slice(0, 500);
+    for (const field of ["subjectPrefix", "about", "subjectLine"] as const) {
+      const text = value.dock[field];
+      if (text !== undefined && (typeof text !== "string" || text.length > 5_000)) return undefined;
+      if (typeof text === "string") props.dock[field] = text;
+    }
   }
   return props;
 }

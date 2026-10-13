@@ -106,11 +106,12 @@ describe("global Chat keeps presentation separate from conversation authority (2
   });
   it("retains a validated structured subject and its send prefix after reload", () => {
     let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
-    const surface: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never }, dock: { title: "Clip", subject: "Clip one", subjectPrefix: "About clip one:", about: "clip one" } } };
+    const prefix = "About clip one: " + "selected words ".repeat(50);
+    const surface: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never }, dock: { title: "Clip", subject: "Clip one", subjectPrefix: prefix, about: "clip one" } } };
     const first = new GlobalChatController(storage); first.open(surface); first.setValue(surface.key, "draft", "These exact words");
     const restored = new GlobalChatController(storage);
     assert.deepEqual(restored.getSnapshot().selected?.props?.subject, surface.props?.subject);
-    assert.equal(restored.getSnapshot().selected?.props?.dock?.subjectPrefix, "About clip one:");
+    assert.equal(restored.getSnapshot().selected?.props?.dock?.subjectPrefix, prefix);
     assert.equal(restored.value(surface.key, "draft", ""), "These exact words");
     restored.register(cut, {} as HTMLElement); restored.refresh(cut, {} as HTMLElement);
     assert.deepEqual(restored.getSnapshot().selected?.props?.subject, surface.props?.subject, "a generic page cannot overwrite the restored scope");
