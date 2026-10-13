@@ -42,7 +42,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const { state, connection } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const onSetupPage = !embedded || location.pathname === `/w/${worldId}/productions/setup/${setupId}`;
+  const onSetupPage = !embedded || location.pathname === `/w/${worldId}/productions/setup/${setupId}` || location.pathname === `/w/${worldId}/chat/${setupId}`;
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
   const readReplies = useReadReplies(workspace);

@@ -83,6 +83,16 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  for (const status of ["created", "discarded"] as const) it(`a direct embedded setup chat follows its ${status} result`, async () => {
+    const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    function Direct() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><ProductionSetupView embedded={{ worldId: FIXTURE_WORLD_ID, setupId: ID }} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${ID}`]}><Direct /></MemoryRouter>); });
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "production-setup" }> => message.kind === "production-setup"); assert.ok(request);
+    await answer(request, { ...draft(), status, ...(status === "created" ? { productionId: "the-crossing-2" } : {}) });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, status === "created" ? `/w/${FIXTURE_WORLD_ID}/p/the-crossing-2` : `/w/${FIXTURE_WORLD_ID}/productions`);
+  });
   for (const status of ["created", "discarded"] as const) it(`a retained embedded setup cannot redirect the Bible after ${status}`, async () => {
     const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
     dom.document.body.append(container); root = createRoot(container);

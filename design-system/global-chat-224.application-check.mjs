@@ -85,6 +85,11 @@ try {
  await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
  await check('Send captures the visible conversation rather than a previously viewed world','(()=>{const sent=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-send");return sent?.worldId===w.nativeDesignFixture.world.meta.worldId&&sent?.conversationId===w.nativeDesignFixture.worldChat.conversationId&&sent?.text==="Keep the bells quiet. Add a pause.";})()');
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);
+ if(!touch){
+  await page('d.querySelector(".fy-global-chat-history-row>button+button").click()');await delay(60);
+  await check('Desktop history menu is visible above Chat and receives pointer hits','(()=>{const menu=d.querySelector(".fy-chatnav__menu"),button=menu?.querySelector("button"),b=button?.getBoundingClientRect();return !!b&&button.contains(d.elementFromPoint(b.x+b.width/2,b.y+b.height/2));})()');
+  await page('d.querySelector(".fy-chatnav__scrim").click()');await delay(40);
+ }
  await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(100);
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);
  await page('[...d.querySelectorAll(".fy-global-chat-history button")].find(e=>e.textContent==="New conversation").click()');await delay(120);

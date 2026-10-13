@@ -1174,16 +1174,19 @@ describe("selection survives a view switch (T-18)", () => {
     assert.equal(back?.querySelector(".fy-swrow__band")?.getAttribute("data-selected"), "true");
   });
 
-  it("Arke's subject follows the selection without being asked", async () => {
+  it("Arke retains its subject until the author uses the newly selected subject", async () => {
     const mounted = await mount();
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Scene /);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Scene /);
     const row = all(mounted, '[data-testid^="workspace-row-"]')[0]!;
     await click(row.querySelector(".fy-swrow__band") as unknown as HTMLElement);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot /);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Scene /);
+    await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Shot /);
 
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     await click(q(mounted, ".fy-swboard")!);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Board /);
+    await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Board /);
   });
 
   it("a node chosen in Flow is the row Storyboard shows as current", async () => {
@@ -1675,7 +1678,8 @@ describe("Preview plays the accepted scene on its authored clock (R-28)", () => 
 
     await click(shots[1]!);
     assert.match(q(mounted, ".fy-swpreview__stage")?.textContent ?? "", /shot 13/);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+    await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Shot 13/);
     assert.match(q(mounted, ".fy-swpreview__transport")?.textContent ?? "", /4\.0s \/ 10\.0s/);
   });
 
@@ -2039,7 +2043,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       const survivor = q(mounted, '[data-testid="workspace-row-sh_13"] .fy-swrow__band')!;
       assert.equal(focused, survivor);
       assert.equal(survivor.getAttribute("data-selected"), "true");
-      assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+      await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+      assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Shot 13/);
     } finally {
       proto.focus = originalFocus;
       if (active === undefined) Reflect.deleteProperty(dom.document, "activeElement");
@@ -2089,7 +2094,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       const survivor = q(mounted, '[data-testid="workspace-row-sh_12"] .fy-swrow__band')!;
       assert.equal(focused, survivor, "the previous surviving row receives focus");
       assert.equal(survivor.getAttribute("data-selected"), "true");
-      assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 12/);
+      await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+      assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Shot 12/);
     } finally {
       proto.focus = originalFocus;
       if (active === undefined) Reflect.deleteProperty(dom.document, "activeElement");
@@ -2180,7 +2186,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
 
       const root = q(mounted, "[data-testid=workspace-empty]")!;
       assert.equal(focused, root);
-      assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Scene 4/);
+      assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Scene 4/);
     } finally {
       proto.focus = originalFocus;
     }
@@ -2284,7 +2290,8 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     assert.equal(command.command.kind, "move-shot");
 
     await click(all(mounted, '[data-testid="workspace-flow-alt"] button')[0]!);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Edge /);
+    await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Edge /);
   });
 
   it("reconnects a shot to Entry as the start of the canonical path", async () => {
@@ -2306,7 +2313,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shot = orderedShots(scene)[1]!;
     const mounted = await mount(`${SCENE_PATH}?shot=${shot.id}`);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
   });
 
   it("opens the chosen shot and navigates only for its matching answer", async () => {

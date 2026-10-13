@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
-import { chatKey, chatTitle, chatSurfaceForPage, conversationProps, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
+import { chatKey, chatSubjectKey, chatTitle, chatSurfaceForPage, conversationProps, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
 import { isSettingsPath, settingsReturnPath } from "../lib/settings-return.js";
 import { useDictation, useStore } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -155,7 +155,9 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
       ...(entry.kind !== "world" ? { props: conversationProps(world.meta.worldId, entry) } : {}) };
     owner.open(surface); setHistory(false);
   };
-  const mismatch = !!selected && !!current && (JSON.stringify(selected.entry) !== JSON.stringify(current.entry) || !!current.conversationId && current.conversationId !== selected.conversationId);
+  const page = owner.forPage() ?? current;
+  const mismatch = !!selected && !!page && (chatSubjectKey(selected) !== chatSubjectKey(page) ||
+    !!page.conversationId && page.conversationId !== selected.conversationId);
   const presentation = selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,
     panelHost: inPanel ? panelHost : null, hasHome: !!home, conversationId: selected.conversationId, newThread: selected.newThread } : null;
   const menuConversation = rowMenu ? world?.conversations.find(row => row.id === rowMenu.id) : undefined;
@@ -188,7 +190,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
           onPointerMove={event => { if (drag.current) resize(drag.current.width + drag.current.x - event.clientX); }} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} />
       </div>
     </PageSheet>
-    {rowMenu && menuConversation && world && <RowMenuPanel worldId={world.meta.worldId} row={menuConversation} menu={rowMenu} onOpenMenu={setRowMenu} onCloseMenu={() => setRowMenu(null)} />}
+    {rowMenu && menuConversation && world && <RowMenuPanel layer={71} worldId={world.meta.worldId} row={menuConversation} menu={rowMenu} onOpenMenu={setRowMenu} onCloseMenu={() => setRowMenu(null)} />}
     {client && bodyHost && selected && sameWorld && presentation && createPortal(<ConversationPresentationContext.Provider value={presentation}>
       <RouteErrorBoundary key={selected.key}>
       {selected.kind === "world" ? <WorldChatView key={selected.key} embedded={{ worldId: selected.worldId, conversationId: selected.conversationId,

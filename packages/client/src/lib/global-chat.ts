@@ -8,6 +8,8 @@ export type ChatSurface = {
 };
 export const chatKey = (worldId: string, entry: WorldChatContext, conversationId?: string) =>
   `${worldId}:${JSON.stringify(entry)}${conversationId ? ":" + conversationId : ""}`;
+export const chatSubjectKey = (value: ChatSurface) => JSON.stringify([value.entry, value.props?.subject,
+  value.props?.dock?.subjectPrefix, value.props?.dock?.about]);
 export const chatTitle = (entry: WorldChatContext) => entry.kind === "world" ? "World Chat" : entry.kind === "bench" ? "Bench Chat"
   : entry.kind === "shot" ? "Shot Chat" : entry.kind === "stage" ? "Stage Chat" : entry.kind === "takes" ? "Takes Chat" : "Builder Chat";
 
@@ -127,13 +129,19 @@ export class GlobalChatController {
   setCurrent(surface: ChatSurface | null) { this.current = surface; }
   register(surface: ChatSurface, host: HTMLElement) {
     this.registrations.set(surface.key, { surface, host });
-    if (this.snapshot.selected?.key === surface.key) this.changed({ selected: { ...surface, conversationId: this.snapshot.selected.conversationId, newThread: this.snapshot.selected.newThread } });
-    else if (!this.snapshot.selected && this.snapshot.phase === "idle") this.select(surface);
+    if (!this.snapshot.selected && this.snapshot.phase === "idle") this.select(surface);
+    else this.changed();
     return () => { if (this.registrations.get(surface.key)?.host === host) { this.registrations.delete(surface.key); this.changed(); } };
   }
   refresh(surface: ChatSurface, host: HTMLElement) {
+    const previous = this.registrations.get(surface.key)?.surface;
     this.registrations.set(surface.key, { surface, host });
-    if (this.snapshot.selected?.key === surface.key) this.changed({ selected: { ...surface, conversationId: this.snapshot.selected.conversationId, newThread: this.snapshot.selected.newThread } });
+    const selected = this.snapshot.selected;
+    // Revisions/decisions for the retained context remain live. A page candidate cannot
+    // replace its route, entry, structured subject or the subject prefixed to a send.
+    if (selected?.key === surface.key && selected.path === surface.path && chatSubjectKey(selected) === chatSubjectKey(surface) && selected.props !== surface.props) {
+      this.changed({ selected: { ...selected, props: surface.props } });
+    } else if (!previous || previous.path !== surface.path || chatSubjectKey(previous) !== chatSubjectKey(surface)) this.changed();
   }
   forPage = () => this.current ? [...this.registrations.values()].findLast(row => row.surface.path === this.current!.path)?.surface ?? this.registrations.get(this.current.key)?.surface ?? this.current : null;
   host = () => this.snapshot.selected ? this.registrations.get(this.snapshot.selected.key)?.host ?? null : null;

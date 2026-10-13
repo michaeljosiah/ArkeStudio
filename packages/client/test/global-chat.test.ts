@@ -93,6 +93,17 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.open(); assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip"); stop();
     assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip", "leaving the page freezes its selected context");
   });
+  it("same-key page candidates cannot replace the retained subject through registration or refresh", () => {
+    const owner = new GlobalChatController(); owner.setCurrent(production); owner.open(production);
+    owner.setValue(production.key, "draft", "Keep these words");
+    const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "clip-one" as never } } };
+    owner.setCurrent(chapter); const host = {} as HTMLElement; owner.register(chapter, host); owner.refresh(chapter, host);
+    assert.equal(owner.getSnapshot().selected?.props?.subject, production.props?.subject);
+    assert.equal(owner.getSnapshot().selected?.path, production.path);
+    assert.equal(owner.value(production.key, "draft", ""), "Keep these words");
+    assert.equal(owner.forPage()?.props?.subject?.kind, "timeline-clip");
+    owner.open(); assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip");
+  });
   it("finishes dictation into the original draft before switching and never sends", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Typed words");
     owner.phase("listening"); owner.select(cut);

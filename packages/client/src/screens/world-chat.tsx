@@ -206,12 +206,14 @@ function ConversationRow({
  * the scrim that dismisses it to the width of the rail.
  */
 export function RowMenuPanel({
+  layer,
   worldId,
   row,
   menu,
   onOpenMenu,
   onCloseMenu,
 }: {
+  layer?: number;
   worldId: string;
   row: WorldChatSummary;
   menu: RowMenu;
@@ -280,8 +282,8 @@ export function RowMenuPanel({
   </div>;
   if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}</PageSheet>;
   return <BodyLayer>
-    <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
-    <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">{actions}</div>
+    <div className="fy-chatnav__scrim" style={layer === undefined ? undefined : { zIndex: layer }} onClick={onCloseMenu} />
+    <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y, ...(layer === undefined ? {} : { zIndex: layer + 1 }) }} role="menu">{actions}</div>
   </BodyLayer>;
 
 }
