@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, open, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, open, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { relative, sep } from "node:path";
 import { buildFfmpegArgs, containedPictureRect, effectCapabilityProblem, effectRenderCapabilityProblem, ulid, EFFECT_ANALYSIS_PROFILE, EffectFeatureManifestSchema, effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, prepareEffectReactions, type EffectFeatureManifest, type EffectAlphaInput, type EffectClip, type ExportPlan } from "@arke-studio/contracts";
 import { runExport, type ExportHandle, type ExportSidecar, type FfmpegRunner } from "../takes/export.js";
@@ -40,7 +40,8 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
   const remember = async (path: string) => { const info = await lstat(path); ownedFiles.set(path, { dev: info.dev, ino: info.ino }); };
   const discard = async (path: string) => {
     try {
-      await ownedPath(relative(store.dir, path).split(sep).join("/"));
+      // ownedPath returns a canonical path even when the world was opened through a junction.
+      await ownedPath(relative(await realpath(store.dir), path).split(sep).join("/"));
       const current = await lstat(path), owned = ownedFiles.get(path);
       if (owned && current.dev === owned.dev && current.ino === owned.ino) await unlink(path);
     } catch { /* A disappeared or redirected cache path is no longer ours to remove. */ }

@@ -221,7 +221,7 @@ describe("Listen (turn 186)", () => {
     const doorAsk0 = none.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk0.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
     assert.equal(q(none, '[data-testid="audiobook-listen"]'), null, "nothing to hear: no Listen");
-    assert.equal(q(none, '[data-testid="audiobook-export-open"]'), null, "and no Export");
+    assert.equal(q(none, '[data-testid="audiobook-export-open"]')?.textContent?.trim(), "Publish", "book-only publishing is available before narration");
     assert.ok(q(none, '[data-testid="read-book"]')?.classList.contains("fy-abshow__btn--pri"), "Read the book leads");
     await act(async () => none.root.unmount());
     open.splice(0);

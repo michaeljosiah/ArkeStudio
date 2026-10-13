@@ -1,4 +1,6 @@
 import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { StoryPublicationService } from "./publications/story.js";
+import type { StoryPublishResult } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
 import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
@@ -3299,7 +3301,9 @@ export class Coordinator {
   private shippedManifest: ModelManifest | undefined;
   private plannedManifest: { base: ModelManifest; plans: ProviderPlans; manifest: ModelManifest } | null = null;
 
+  private readonly storyPublications: StoryPublicationService;
   constructor(private readonly opts: CoordinatorOptions) {
+    this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
@@ -3822,6 +3826,10 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
+        if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
+        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
+        if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
         const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
@@ -4155,6 +4163,9 @@ export class Coordinator {
    * `/media/<world>/<file>` is served by — asks the owner rather than keeping a second reference
    * that would outlive it (issue 503).
    */
+  storyPublicationFile(id: string, name: string) { return this.storyPublications.serve(id, name); }
+  restoreStoryPublicationFile(id: string, name: string, source: string) { return this.storyPublications.restoreFile(id, name, source); }
+
   get worldProvider(): WorldProvider {
     return this.opts.provider;
   }
@@ -14071,6 +14082,38 @@ export class Coordinator {
         }
         return;
       }
+      case "list-story-publications": {
+        try { this.emit({ at: this.nowIso(), type: "story.editions", requestId: msg.requestId, editions: (await this.storyPublications.list()).map(edition => ({ ...edition, ...(edition.error ? { error: scrubAbsolutePaths(this.secrets.scrub(edition.error)) } : {}) })) }); }
+        catch { this.emit({ at: this.nowIso(), type: "story.editions", requestId: msg.requestId, editions: [], error: "The editions could not be read." }); }
+        return;
+      }
+      case "publish-story": {
+        const answer = (result: StoryPublishResult) => this.emit({ at: this.nowIso(), type: "story.published",
+          requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId,
+          result: { ...result, ...(result.editions ? { editions: result.editions.map(edition => ({ ...edition, ...(edition.error ? { error: scrubAbsolutePaths(this.secrets.scrub(edition.error)) } : {}) })) } : {}), ...(result.error ? { error: scrubAbsolutePaths(this.secrets.scrub(result.error)) } : {}), ...(result.edition ? { edition: { ...result.edition, ...(result.edition.error ? { error: scrubAbsolutePaths(this.secrets.scrub(result.edition.error)) } : {}) } } : {}) } });
+        const store = this.opts.provider.openStore?.();
+        try {
+          const input = msg.input;
+          if (input.action === "list") {
+            const settings = await this.storyPublications.settings(msg.worldId, msg.productionId);
+            answer({ editions: await this.storyPublications.list(msg.worldId, msg.productionId), ...(settings ? { settings } : {}) }); return;
+          }
+          if (input.action === "preview-page") { answer({ preview: await this.storyPublications.previewPage(input.editionId, input.chapter) }); return; }
+          if (input.action === "cancel") { this.storyPublications.cancel(input.editionId); return; }
+          if (input.action === "retry") { answer({ edition: await this.storyPublications.retry(input.editionId, edition => answer({ edition })) }); return; }
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the source world to continue.");
+          await Promise.all(this.chapterSaves);
+          switch (input.action) {
+            case "review": answer({ review: await this.storyPublications.review(store, msg.productionId, input.settings) }); break;
+            case "decide":
+              answer({ review: await this.storyPublications.decide(store, msg.productionId, input.settings, input.finding, input.decision, input.replacement) });
+              await this.refreshWorldSnapshot(msg.worldId); break;
+            case "preview": answer({ edition: await this.storyPublications.preview(store, msg.productionId, input.settings, input.fingerprint, edition => answer({ edition })) }); break;
+            case "create": answer({ edition: await this.storyPublications.create(store, msg.productionId, input.editionId) }); break;
+          }
+        } catch (error) { answer({ error: describeCoordinatorError(error) }); }
+        return;
+      }
       case "export-manuscript": {
         // A manuscript out (turn 131, SPEC-012 R-49): built whole from the saved chapters, after
         // every save in hand has landed, staged and renamed under exports/ as a cut export is,
@@ -21402,6 +21445,7 @@ export class Coordinator {
       for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
+      this.storyPublications.stop();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.

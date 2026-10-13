@@ -184,7 +184,7 @@ describe("the audiobook hero never clips its presses (design turn 199, rule 2)",
     it(`lays every press inside the hero at ${what}`, { skip: chrome === null ? "no Chrome to lay the page out" : false }, async () => {
       const measured = await measure(chrome!, width, height);
       assert.equal(measured.maxHeight, "none");
-      assert.deepEqual(measured.presses.map((press) => press.label), ["Listen", "Export", "Read the book · 1 chapter · up to $0.0008 · 2 no voice", "More"]);
+      assert.deepEqual(measured.presses.map((press) => press.label), ["Listen", "Publish", "Read the book · 1 chapter · up to $0.0008 · 2 no voice", "More"]);
       for (const press of measured.presses) {
         const inside = press.box.l >= measured.hero.l - 0.5 && press.box.r <= measured.hero.r + 0.5 && press.box.t >= measured.hero.t - 0.5 && press.box.b <= measured.hero.b + 0.5;
         assert.ok(inside, `${what}: ${press.label} at ${JSON.stringify(press.box)} lies inside the hero ${JSON.stringify(measured.hero)}`);

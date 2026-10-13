@@ -1016,3 +1016,24 @@ or `--frame 209o --text-scale 2` in a separate output directory for supplementar
 captures. Retained detailed destinations and known schematic differences are labelled explicitly
 in `paired.html`; screenshots alone do not establish universal visual parity. Chrome runs headless
 with a dedicated profile; this test never attaches to the installed app or a private world.
+
+### Private story Publish (turn 224)
+
+Contracts test/story-publication.test.ts, coordinator test/publications/story.test.ts, and
+client test/manuscript.test.tsx cover optional style rules, explicit approval, stale proposals,
+version restoration, dependent narration, frozen files, cancellation and retry. Run client
+tests from packages/client. Transport and desktop authentication regressions remain required.
+
+Run node scripts/smoke-story-publish.mjs to build the real component and sandboxed preload,
+open an Electron file page, and check desktop/Fold/phone layouts, approval/preview/create controls,
+the native save IPC bridge and authenticated media. Its save dialog and coordinator responses
+are fixtures, so it does not prove a real OS file-picker interaction. Set
+ARKE_STORY_LAYOUT_OUTPUT to retain screenshots.
+
+From packages/coordinator, set ARKE_STORY_CODEC_SMOKE=1 and run
+node --import tsx --test --test-name-pattern="real AAC M4B" test/publications/story.test.ts
+with FFmpeg/ffprobe on PATH (or ARKE_FFMPEG/ARKE_FFPROBE). This opt-in test builds two actual
+chapter mixes, verifies AAC, chapter order, author metadata, cover art and packaged EPUB text.
+ARKE_STORY_SMOKE_OUTPUT retains the EPUB, M4B and probe report. Test tones replace provider
+speech; no generation is charged. External EPUB validation and physical phone import/playback
+are separate acceptance checks and must be reported separately.

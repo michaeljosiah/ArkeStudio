@@ -1,3 +1,4 @@
+import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
@@ -1549,6 +1550,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
+  z.object({ ...base, type: z.literal("story.editions"), requestId: UlidSchema, editions: z.array(StoryEditionSchema), error: z.string().optional() }).strict(),
+  z.object({ ...base, type: z.literal("story.published"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, result: StoryPublishResultSchema }).strict(),
   z.object({ ...base, type: z.literal("audiobook.listening"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, listening: AudiobookListeningSchema.nullable(), refused: z.string().min(1).optional() }).strict(),
   /** Arke's timing for a chapter (design turn 187b, R-86), answered to the window that asked; or none, and why. */
   z

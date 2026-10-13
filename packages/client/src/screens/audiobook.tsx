@@ -1,3 +1,4 @@
+import { StoryPublishSheet } from "../components/story-publish.js";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -297,6 +298,7 @@ export function AudiobookScreen() {
   // The player (186): `{}` opens the book where this device left it, a chapter starts there.
   const [listening, setListening] = useState<{ chapterId?: string } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   // A phone's bar over the page once the hero has scrolled away (199f).
   const [scrolled, setScrolled] = useState(false);
   const dock = useRef<HTMLDivElement>(null);
@@ -405,11 +407,11 @@ export function AudiobookScreen() {
   // Export (186e) once a block anywhere is made. What is whole is the listening plan's to say, by
   // the words (codex on PR 1498): a chapter the door calls stale after a narrator changed still
   // says its words, and still goes in — the sheet counts it.
-  const exportPress = made ? (
-    <button type="button" className="fy-abshow__btn" onClick={() => setExporting(true)} data-testid="audiobook-export-open">
-      Export
+  const exportPress = (
+    <button type="button" className="fy-abshow__btn" onClick={() => setPublishing(true)} data-testid="audiobook-export-open">
+      Publish
     </button>
-  ) : null;
+  );
   // Read the book's place (rule 4): the consent the vendor asks, the run while the book reads, or
   // the press while something is left — absent, not disabled, when nothing is.
   const readSlot: ReactNode = (() => {
@@ -648,6 +650,7 @@ export function AudiobookScreen() {
         />
       )}
       {listening !== null && <AudiobookPlayerView worldId={worldId} production={production} {...(listening.chapterId !== undefined ? { chapterId: listening.chapterId } : {})} onClose={() => setListening(null)} />}
+      {publishing && <StoryPublishSheet worldId={worldId} production={production} onClose={() => setPublishing(false)} onOtherExports={() => { setPublishing(false); setExporting(true); }} />}
       {exporting && <AudiobookExportSheet worldId={worldId} production={production} onClose={() => setExporting(false)} onReviewChapters={() => { setExporting(false); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} />}
       {book?.state === "priced" && book.price !== undefined && (
         <BookPriceSheet
