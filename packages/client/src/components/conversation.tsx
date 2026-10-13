@@ -1090,7 +1090,11 @@ export function ProductionConversationBody({
       return;
     }
     const prefix = dock?.subjectPrefix;
-    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
+    // Creating the thread is not sending its first turn. Keep the persisted draft until
+    // sendWorldChat accepts it, so a refresh during creation cannot lose the author's words.
+    const submitted = message;
+    say(prefix === undefined ? text : `${prefix} ${text}`, false, subject,
+      () => setMessage(current => current === submitted ? "" : current));
   };
 
   /*

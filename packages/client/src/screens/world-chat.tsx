@@ -3,7 +3,7 @@ import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -483,6 +483,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   useOpenWorldGuard(worldId);
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const onChatPage = !embedded || location.pathname === `/w/${worldId}/chat` || location.pathname === `/w/${worldId}/chat/${conversationId}`;
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [understoodOpen, setUnderstoodOpen] = useState(false);
@@ -700,17 +702,17 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
        * can answer — and that is worth going to, because it is the one thing this press could
        * not decide for them.
        */
-      if ((row?.openProposalCount ?? 0) > 0) {
+      if (onChatPage && (row?.openProposalCount ?? 0) > 0) {
         if (rippleNotice) proposalsAfterNews.current = true;
         else navigate(`/w/${worldId}/proposals`);
       }
     } else if (proposalsAfterNews.current && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
       proposalsAfterNews.current = false;
-      navigate(`/w/${worldId}/proposals`);
+      if (onChatPage) navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice]);
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice, onChatPage]);
 
   const rows = useMemo(
     () => [...(world?.conversations ?? [])].sort(byPendingConsequence),

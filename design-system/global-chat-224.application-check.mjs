@@ -98,6 +98,7 @@ try {
  await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.insertText',{text:'Give the bells a new ending.'});await delay(70);
  await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
  await check('The first line creates a scoped conversation before sending','(()=>{const create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");return create?.worldId===w.nativeDesignFixture.world.meta.worldId&&create?.entryContext?.productionId==="saltlight"&&w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send").length===1;})()');
+ await check('The submitted first line remains a persisted draft until sent','Object.values(JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).drafts).includes("Give the bells a new ending.")');
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(50);await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(80);
  await check('Switching during first-message creation retains the pending composer','JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.newThread===true&&d.querySelector(".fy-global-chat-boundary[role=status]").textContent.includes("opening message")');
  await page('(()=>{const state=structuredClone(w.nativeDesignFixture),create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");const id="cv_01J8F0000000000000000000C9";state.world.conversations.push({...state.world.conversations[0],id,title:"A new ending",entryContext:create.entryContext});state.worldChat={...state.worldChat,conversationId:id,turns:[],runStatus:"idle"};w.testNewConversation=id;w.nativeDesignSetState(state);})()');await delay(180);
@@ -115,5 +116,11 @@ try {
  await check('A shot opens its exact context without a model selector','d.querySelector(".fy-global-chat header h2").textContent==="Shot Chat"&&!d.querySelector(".fy-global-chat .fy-mchip")');
  await page('w.nativeDesignSetMode("closed")');await page('w.nativeDesignNavigate(w.testShotPath+"?view=stage")');await delay(150);await page('w.nativeDesignSetMode("proposed")');
  await check('Stage opens its matching context','d.querySelector(".fy-global-chat header h2").textContent==="Stage Chat"');
+ await page('w.nativeDesignSetMode("closed")');await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`)');await delay(120);await page('w.nativeDesignSetMode("proposed")');
+ await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(40);await page('[...d.querySelectorAll(".fy-global-chat-history button")].find(e=>e.textContent==="New conversation").click()');await delay(100);
+ await page('w.nativeDesignAllowTestInput()');await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.insertText',{text:'Retain this first line across refresh.'});await delay(70);await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
+ await page('w.location.reload()');await delay(300);for(let i=0;i<80;i++){if(await page('typeof w.nativeDesignReady==="function" ? w.nativeDesignReady().then(()=>true) : false').catch(()=>false))break;await delay(100);}await delay(150);
+ await check('Refreshing during creation retains the unsent first line','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Retain this first line across refresh."');
+ await check('Restoring an uncertain first turn does not submit or create automatically','!w.nativeDesignCommands.some(e=>e.kind==="world-chat-send"||e.kind==="world-chat-create")');
  if(report.errors.length)throw Error(report.errors.join('\n'));console.log(`${report.checks.length} application lifecycle checks passed (${touch?'coarse':'fine'} pointer)`);
 } finally {fs.writeFileSync(path.join(out,'application-'+(touch?'touch':'mouse')+'.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

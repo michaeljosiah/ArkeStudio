@@ -55,8 +55,12 @@ function ChatPageCanvas({ owner, surface, props }: { owner: GlobalChatController
 }
 
 export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: string; conversationId?: string }) {
-  const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), host = useRef<HTMLDivElement>(null);
+  const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), navigate = useNavigate(), host = useRef<HTMLDivElement>(null);
   const surface = chatSurfaceForPage(state, location.pathname + location.search);
+  useEffect(() => {
+    if (conversationId && state?.world?.meta.worldId === worldId && surface && !surface.conversationId)
+      void navigate(`/w/${worldId}/chat`, { replace: true });
+  }, [conversationId, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });

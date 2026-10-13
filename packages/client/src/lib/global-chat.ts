@@ -56,6 +56,7 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
     entry = { kind: "production-setup", setupId: route[4]! }; title = "Builder Chat"; label += " / New production";
   }
   const row = conversationId ? world.conversations.find(c => c.id === conversationId) : undefined;
+  if (conversationId && !row) { conversationId = undefined; path = `/w/${world.meta.worldId}/chat`; }
   if (row?.entryContext) { entry = row.entryContext; title = chatTitle(entry); label = `${world.meta.name} / ${row.title}`; }
   const kind = entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production";
   return { key: chatKey(world.meta.worldId, entry, conversationId), worldId: world.meta.worldId,
@@ -214,7 +215,7 @@ export class GlobalChatController {
     if (!selected || selected.worldId !== worldId || !selected.conversationId || !removed.has(selected.conversationId)) return;
     const entry = { kind: "world" as const };
     this.select({ key: chatKey(worldId, entry), worldId, worldName: selected.worldName, label: selected.worldName,
-      title: "World Chat", kind: "world", entry, path: selected.path, newThread: true });
+      title: "World Chat", kind: "world", entry, path: `/w/${worldId}/chat`, newThread: true });
   }
   startNew(surface: ChatSurface) {
     if (this.snapshot.phase !== "idle" || this.openings.has(this.snapshot.selected?.key ?? "")) { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }

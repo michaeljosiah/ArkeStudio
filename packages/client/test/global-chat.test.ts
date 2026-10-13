@@ -69,6 +69,15 @@ describe("global Chat keeps presentation separate from conversation authority (2
     arriving.reconcileConversations(production.worldId, new Set(), CHAT_ID);
     assert.equal(arriving.getSnapshot().selected?.conversationId, CHAT_ID);
   });
+  it("a deleted direct route cannot recreate a missing conversation", () => {
+    const missing = { ...state, world: { ...world, conversations: [] } };
+    const surface = chatSurfaceForPage(missing, `${root}/chat/${CHAT_ID}`)!;
+    assert.equal(surface.conversationId, undefined); assert.equal(surface.path, `${root}/chat`);
+    const owner = new GlobalChatController(); owner.open({ ...production, path: `${root}/chat/${CHAT_ID}` });
+    owner.reportConversation(production.key, CHAT_ID); owner.reconcileConversations(production.worldId, new Set());
+    assert.equal(owner.getSnapshot().selected?.path, `${root}/chat`);
+    owner.setCurrent(surface); owner.open(); assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
+  });
   it("an explicit new conversation leaves the old thread's draft recoverable", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID);
     owner.setValue(production.key, "draft", "Keep this in the old conversation"); owner.startNew(production);
