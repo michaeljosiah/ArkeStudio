@@ -5,7 +5,7 @@ Proposed 2026-10-13. No global Chat UI is implemented in the OpenCode image-hand
 One persistent Chat icon in the application's right-hand titlebar controls can make Arke easier
 to reach. It should open the existing conversation for the current context, preserving the
 world/production authorities, tool leases and ordinary approval cards. SPEC-051 records this
-proposal. [Design turn 224](../../design-system/global-chat-224.review.html) supplies nine
+proposal. [Design turn 224](../../design-system/global-chat-224.review.html) revision 2 supplies fourteen
 HTML drawings and an interactive fixture. Application implementation must wait for the
 author's explicit design approval, followed by responsive browser validation.
 
@@ -47,6 +47,18 @@ the prior world's live tool access and leaves its durable conversation history w
 Use a resizable side panel on desktop and the existing sheet pattern on phones. Closing it hides
 the view and does not cancel generation. Give the button an accessible name/expanded state,
 restore focus on close, support Escape, and retain clear pending-decision/running-work signals.
+
+## Shared composer parity
+
+Reuse `components/composer.tsx` and `ComposerMic` from `dictation.tsx`. Retain upload by
+picker/drop/paste, private attachment chips with kind/readability/refusals, Stop referring to
+and explicit File in world, microphone dictation, existing context-specific model controls
+and optional Read replies. Dictation uses the current local transcription path, appends
+editable words to the typed draft and never sends automatically. Distinguish Listening,
+Transcribing locally and unavailable/denied states, preserving ordinary typing. Keep capture,
+transcription and attachment operations bound to the original conversation; switching waits
+for dictation to finish and closing stops capture while retaining the result in that draft.
+These lifecycle bindings require application acceptance after author design approval.
 
 ## Acceptance scenarios
 
