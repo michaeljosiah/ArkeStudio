@@ -3,13 +3,14 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, measureAudioSignal, type HarnessAdapter, type AgentMediaInventory, type Take } from "@arke-studio/contracts";
+import { newId, measureAudioSignal, LOCAL_ACTOR_ID, type ConversationActionPrepareIntent, type HarnessAdapter, type AgentMediaInventory, type Take } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { ConversationMediaInspection } from "../../src/world-chat/media-inspection.js";
+import { takeReviewInspectionReason } from "../../src/world-chat/take-review-inspection.js";
 import { QueryLeaseRegistry, LeaseDeniedError } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
@@ -72,9 +73,9 @@ test("the shared leased MCP catalog serves frame images as image blocks and reco
   const h = await harness(), server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
-  const listed = await rpc("tools/list");
+  const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
   for (const name of ["inspect_media", "sample_video", "analyze_audio_signal"]) assert.ok(listed.result.tools.some((tool: { name: string }) => tool.name === name));
-  const reply = await rpc("tools/call", { name: "sample_video", arguments: { source: h.source, range: { startSec: 0, endSec: 1 }, count: 2 } });
+  const reply = await rpc("tools/call", { name: "sample_video", arguments: { source: h.source, range: { startSec: 0, endSec: 1 }, count: 2 } }) as { result: { content: Array<{ type: string }> } };
   assert.equal(reply.result.content.filter((block: { type: string }) => block.type === "image").length, 2); assert.equal(served, "sample-video");
   assert.equal((await h.loaded())!.mediaReceipts!.length, 1);
 });
@@ -141,4 +142,28 @@ test("a trimmed segment reports both take-relative and actual source times", asy
   ] });
   const outcome = await h.retrieval.call(h.lease.token, "sample_video", { source: { kind: "production-take", productionId: "saltlight", takeId: segmentId }, range: { startSec: .5, endSec: 1.5 }, count: 1 });
   assert.equal(outcome.receipt.media!.frames![0]!.sourceTimeSec, 2.5); assert.equal(outcome.receipt.media!.frames![0]!.viewTimeSec, .5);
+});
+test("take-review coverage requires served evidence in its completed run and still-current source bytes", async () => {
+  const h = await harness(), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
+  const take: Take = { ...base, id: newId("tk"), media: "review.mp4", mediaHash: hash(png) }, path = `productions/saltlight/takes/${take.id}/review.mp4`;
+  await h.store.commit({ kind: "review-media-fixture", source: "test", files: [
+    { path, action: "create", baseHash: null, encoding: "base64", content: Buffer.from(png).toString("base64") },
+    { path: `productions/saltlight/takes/${take.id}/take.json`, action: "create", baseHash: null, content: JSON.stringify(take) },
+  ] });
+  const source = { kind: "production-take", productionId: "saltlight", takeId: take.id }, range = { startSec: 0, endSec: 1 };
+  const frames = await h.retrieval.call(h.lease.token, "sample_video", { source, range, count: 1 }), audio = await h.retrieval.call(h.lease.token, "analyze_audio_signal", { source, range });
+  const at = "2026-10-13T00:00:00Z", turnId = newId("turn"), intent: ConversationActionPrepareIntent = {
+    actionId: newId("act"), conversationId: h.cv, turnId, worldId: h.store.worldId, productionId: "saltlight", actorId: LOCAL_ACTOR_ID,
+    scope: "production", actionKind: "production-take-review", authorityKind: "take-review", cardFamily: "take-review", targets: [{ kind: "take", id: take.id }],
+    payloadDigest: hash(png), baseObservations: [], dependencies: [], createdAt: at,
+  };
+  assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /Metadata-only/);
+  const chat = new WorldChatStore(conversationDir(h.store.dir, h.cv));
+  await chat.append({ type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "Review", attachmentIds: [], createdAt: at },
+    run: { id: h.lease.runId, turnId, basedOnConversationSeq: 1, status: "completed", adapter: "fixture", harnessCleanup: "not-required", contextDigest: hash(png), startedAt: at, endedAt: at },
+    receipts: [frames.receipt, audio.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
+  const reason = await takeReviewInspectionReason(h.store, intent, production, take);
+  assert.match(reason, /1 timestamped still frames/); assert.match(reason, /Original-channel audio sample measurements/); assert.match(reason, /no listening or performance judgment/);
+  await writeFile(join(h.store.dir, path), "changed");
+  assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /Metadata-only/);
 });
