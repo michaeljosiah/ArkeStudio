@@ -210,6 +210,32 @@ it("cancellation in a slow journal prevents submission when authorization finish
   } finally { authorized(); releaseCancel(); await stopped; await h.queue.dispose(); }
 });
 
+it("a remote ID accepted during cancellation is cancelled and its charge is retained", async () => {
+  const fake = new FakeProvider({ reportsCost: true });
+  let accept!: () => void, releaseCancel!: () => void, submitted = false, cancelling = false;
+  const accepted = new Promise<void>(resolve => { accept = resolve; });
+  const cancellation = new Promise<void>(resolve => { releaseCancel = resolve; });
+  const cancelledIds: string[] = [];
+  fake.submit = async () => { submitted = true; await accepted; return { remoteId: "late-accepted", costMicroUsd: 17 }; };
+  fake.cancel = async (_key, remoteId) => { cancelledIds.push(remoteId); };
+  const h = await makeHarness({ fake });
+  const internals = h.queue as unknown as { journal: { append(job: Job): Promise<void> }; activeRuns: Set<Promise<void>> };
+  const append = internals.journal.append.bind(internals.journal);
+  internals.journal.append = async job => { if (job.status === "cancelled") { cancelling = true; await cancellation; } await append(job); };
+  let stopped: Promise<void> | undefined;
+  try {
+    await h.queue.start(); const job = await h.queue.enqueue(INPUT);
+    await until(() => submitted, "provider submission to start", FOLD_MS);
+    stopped = h.queue.cancel(job.id); await until(() => cancelling, "cancellation to reach the journal", FOLD_MS);
+    accept(); await Promise.all(internals.activeRuns);
+    assert.deepEqual(cancelledIds, ["late-accepted"]);
+    releaseCancel(); await stopped;
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.providerJobId, "late-accepted");
+    assert.equal(h.ledger.entries[0]?.actualMicroUsd, 17);
+  } finally { accept(); releaseCancel(); await stopped; await h.queue.dispose(); }
+});
+
 it("rechecks authorization immediately before submit and never calls the provider after revocation", async () => {
   const fake = new FakeProvider({});
   let checks = 0;
