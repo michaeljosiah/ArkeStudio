@@ -15,7 +15,7 @@ import { PageSheet } from "./page-sheet.js";
 import { More, X } from "./icons.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
-import { setWorldChatInitiative } from "../lib/store.js";
+import { setWorldChatInitiative, subscribeProductionSetupResults } from "../lib/store.js";
 
 function afterPaint(action: () => void): () => void {
   if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
@@ -67,7 +67,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const client = useClientRender();
   const [owner] = useState(createGlobalChatController);
   const snapshot = useSyncExternalStore(owner.subscribe, owner.getSnapshot, owner.getSnapshot);
-  const { state } = useStore(), location = useLocation(), navigate = useNavigate(), dictation = useDictation();
+  const { state, connection } = useStore(), location = useLocation(), navigate = useNavigate(), dictation = useDictation();
   const phone = useMediaQuery("(max-width: 599px)"), keyboard = useKeyboardInset();
   const [width, setWidth] = useState(400), [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null), [history, setHistory] = useState(false);
   const [rowMenu, setRowMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
@@ -88,6 +88,8 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     return () => { delete document.body.dataset.globalChatEnabled; };
   }, [client]);
   useEffect(() => { for (const [id, result] of Object.entries(dictation)) owner.deliverDictation(id, result); }, [owner, dictation]);
+  useEffect(() => { if (connection !== "open") owner.loseDictations(); }, [owner, connection]);
+  useEffect(() => subscribeProductionSetupResults(result => owner.deliverSetupResult(result)), [owner]);
   useLayoutEffect(() => {
     if (!bodyHost) return;
     const into = selected?.kind === "world" && inPanel ? panelHost : home ?? parked.current;
@@ -132,10 +134,11 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     document.addEventListener("keydown", trap);
     return () => { original.forEach(([element, inert]) => { element.inert = inert; }); document.removeEventListener("keydown", trap); };
   }, [phone, snapshot.open, panelHost, path]);
-  const close = () => { owner.close(); setHistory(false); afterPaint(() => { if (typeof document !== "undefined") document.querySelector<HTMLElement>('[data-global-chat-trigger]')?.focus(); }); };
+  const close = () => { owner.close(); setHistory(false); setRowMenu(null); afterPaint(() => { if (typeof document !== "undefined") document.querySelector<HTMLElement>('[data-global-chat-trigger]')?.focus(); }); };
   useEffect(() => {
     if (!inPanel || !panelHost) return;
     const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && rowMenu) { event.preventDefault(); setRowMenu(null); return; }
       const dialog = panelHost.closest("dialog");
       // Native modal sheets cover this view; anchored pickers consume Escape first.
       if (event.key !== "Escape" || event.defaultPrevented || !dialog?.open || !(event.target instanceof Node) || !dialog.contains(event.target)) return;
@@ -144,7 +147,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
-  }, [owner, inPanel, panelHost, history]);
+  }, [owner, inPanel, panelHost, history, rowMenu]);
   const adopt = () => { const page = owner.forPage(); if (page) owner.open(page); setHistory(false); };
   const choose = (conversationId: string) => {
     const row = world?.conversations.find(c => c.id === conversationId); if (!world || !row) return;
@@ -153,7 +156,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
       kind: entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production", title: chatTitle(entry),
       label: `${world.meta.name} / ${row.title}`, entry, conversationId: row.id, path,
       ...(entry.kind !== "world" ? { props: conversationProps(world.meta.worldId, entry) } : {}) };
-    owner.open(surface); setHistory(false);
+    owner.history(surface); setHistory(false); setRowMenu(null);
   };
   const page = owner.forPage() ?? current;
   const mismatch = !!selected && !!page && (chatSubjectKey(selected) !== chatSubjectKey(page) ||

@@ -94,6 +94,16 @@ function restoreScope(worldId: string, entry: WorldChatContext, raw: unknown): P
   }
   return props;
 }
+function restoredSurface(raw: unknown): ChatSurface | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as ChatSurface & { scope?: unknown }, parsed = WorldChatContextSchema.safeParse(value.entry);
+  if (typeof value.worldId !== "string" || !parsed.success || ![chatKey(value.worldId, parsed.data), chatKey(value.worldId, parsed.data, value.conversationId)].includes(value.key)) return null;
+  if (value.conversationId !== undefined && !ConversationIdSchema.safeParse(value.conversationId).success) return null;
+  const props = restoreScope(value.worldId, parsed.data, value.scope);
+  return { key: value.key, worldId: value.worldId, worldName: String(value.worldName ?? "World"), title: String(value.title ?? "Chat"), label: String(value.label ?? ""), path: String(value.path ?? ""),
+    entry: parsed.data, kind: parsed.data.kind === "world" ? "world" : parsed.data.kind === "production-setup" ? "setup" : "production",
+    conversationId: value.conversationId, props, scopeMissing: value.scopeMissing === true || parsed.data.kind !== "world" && parsed.data.kind !== "production-setup" && !props };
+}
 
 /** Presentation only. Coordinator identities, workspace state and decision authorities stay in the store. */
 export class GlobalChatController {
@@ -106,6 +116,8 @@ export class GlobalChatController {
   private pending: ChatSurface | null = null;
   private openings = new Set<string>();
   private dictations = new Map<string, { key: string; deliver(text: string): void }>();
+  private retained = new Map<string, ChatSurface>();
+  private setupRequests = new Map<string, { key: string; operation: string; text?: string }>();
   current: ChatSurface | null = null;
   constructor(private storage?: ChatStorage) {
     try {
@@ -123,6 +135,11 @@ export class GlobalChatController {
           kind: entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production",
           ...(conversationId.success ? { conversationId: conversationId.data } : {}), newThread: saved.selected.newThread === true } };
         if (conversationId.success) this.conversationIds.set(saved.selected.key, conversationId.data);
+        for (const raw of Object.values(saved.retained ?? {})) {
+          const surface = restoredSurface(raw);
+          if (surface?.conversationId) this.retained.set(`${surface.worldId}:${surface.conversationId}`, surface);
+        }
+        if (this.snapshot.selected?.conversationId) this.retained.set(`${this.snapshot.selected.worldId}:${this.snapshot.selected.conversationId}`, this.snapshot.selected);
         for (const [key, id] of Object.entries(saved.conversationIds ?? {})) if (typeof id === "string" && ConversationIdSchema.safeParse(id).success) this.conversationIds.set(key, id);
         for (const [key, draft] of Object.entries(saved.drafts ?? {})) if (typeof draft === "string") this.values.set(key, new Map([["draft", draft]]));
         for (const [key, fields] of Object.entries(saved.choices ?? {})) {
@@ -141,12 +158,15 @@ export class GlobalChatController {
   getSnapshot = () => this.snapshot;
   private changed(patch: Partial<Snapshot> = {}) {
     this.snapshot = { ...this.snapshot, ...patch, revision: this.snapshot.revision + 1 };
+    const selected = this.snapshot.selected;
+    if (selected?.conversationId) this.retained.set(`${selected.worldId}:${selected.conversationId}`, selected);
     this.persist(); for (const listener of this.listeners) listener();
   }
   private persist() {
     const selected = this.snapshot.selected;
     try { this.storage?.setItem(STORAGE_KEY, JSON.stringify({ version: 1, open: this.snapshot.open,
       selected: selected ? { ...selected, props: undefined, scope: savedScope(selected) } : null,
+      retained: Object.fromEntries([...this.retained].map(([key, surface]) => [key, { ...surface, props: undefined, scope: savedScope(surface) }])),
       conversationIds: Object.fromEntries(this.conversationIds),
       choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), variants: fields.get("variants"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
       drafts: Object.fromEntries([...this.values].map(([key, values]) => [key, values.get("draft") ?? ""])) })); } catch { /* Disk-full/private browsing must not drop an in-memory draft. */ }
@@ -186,6 +206,7 @@ export class GlobalChatController {
     // currently loaded workspace may precede its new summary, so retain that arrival.
     const known = before ?? new Set([...this.conversationIds].filter(([key]) => key.startsWith(worldId + ":")).map(([, id]) => id));
     const removed = new Set([...known].filter(id => !ids.has(id) && (before !== undefined || id !== loadedId)));
+    for (const id of removed) this.retained.delete(`${worldId}:${id}`);
     for (const [key, id] of this.conversationIds) if (key.startsWith(worldId + ":") && removed.has(id)) {
       this.conversationIds.delete(key); this.values.delete(`${worldId}:conversation:${id}`);
     }
@@ -206,12 +227,17 @@ export class GlobalChatController {
     if (surface.newThread) { this.startNew(surface); return; }
     const selected = this.snapshot.selected;
     if (selected && (selected.key !== surface.key || chatSubjectKey(selected) !== chatSubjectKey(surface)) &&
-      (this.snapshot.phase !== "idle" || this.openings.has(this.snapshot.selected?.key ?? ""))) {
+      (this.snapshot.phase !== "idle" || selected.worldId === surface.worldId && this.openings.has(selected.key))) {
       this.pending = surface; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return;
     }
     const conversationId = surface.conversationId ?? this.conversationIds.get(surface.key);
     if (conversationId) this.conversationIds.set(surface.key, conversationId);
     this.pending = null; this.changed({ selected: { ...surface, ...(conversationId ? { conversationId } : {}) }, switching: false });
+  }
+  history(surface: ChatSurface, open = true) {
+    const previous = surface.conversationId ? this.retained.get(`${surface.worldId}:${surface.conversationId}`) : undefined;
+    this.select(previous ? { ...previous, key: surface.key, conversationId: surface.conversationId, newThread: false } : surface);
+    if (open) this.changed({ open: true });
   }
   reportConversation(key: string, conversationId: string | null) {
     const selected = this.snapshot.selected;
@@ -249,6 +275,28 @@ export class GlobalChatController {
     this.dictations.delete(requestId); if (result.text) pending.deliver(result.text);
     if (result.error) this.setValue(pending.key, "dictationTrouble", result.error);
     if (!this.dictations.size) this.phase("idle");
+  }
+  loseDictations() {
+    if (!this.dictations.size && this.snapshot.phase === "idle") return;
+    for (const pending of this.dictations.values()) this.setValue(pending.key, "dictationTrouble", "The connection ended before dictation returned. Your typed draft is retained; dictate again.");
+    this.dictations.clear(); this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); this.phase("idle");
+  }
+  trackSetupRequest(key: string, requestId: string, operation: string, text?: string) {
+    this.setupRequests.set(requestId, { key, operation, text });
+    this.setValue(key, "setupLastRequestId", requestId);
+    if (operation === "send") this.setValue(key, "setupLastSendId", requestId);
+    this.setValue(key, "setupPendingRequest", { requestId, operation }); this.holdOpening(key, true);
+  }
+  deliverSetupResult(result: { requestId?: string; detail?: string }) {
+    if (!result.requestId) return;
+    const request = this.setupRequests.get(result.requestId); if (!request) return;
+    this.setupRequests.delete(result.requestId);
+    if (this.value(request.key, request.operation === "send" ? "setupLastSendId" : "setupLastRequestId", "") !== result.requestId) return;
+    if (!result.detail && request.operation === "send" && this.value(request.key, "draft", "") === request.text) this.setValue(request.key, "draft", "");
+    this.setValue(request.key, "setupFailure", result.detail ?? null);
+    if (this.value<{ requestId: string } | null>(request.key, "setupPendingRequest", null)?.requestId === result.requestId) {
+      this.setValue(request.key, "setupPendingRequest", null); this.holdOpening(request.key, false);
+    }
   }
 }
 

@@ -6,7 +6,7 @@ import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   ADAPTATION_KINDS, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
@@ -47,11 +47,13 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const setup = workspace?.productionSetup;
   const readReplies = useReadReplies(workspace);
   const [message, setMessage] = useConversationState("draft", "");
-  const [failure, setFailure] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
+  const [failure, setFailure] = useConversationState<string | null>("setupFailure", null);
+  const [pendingRequest, setPendingRequest] = useConversationState<{ requestId: string; operation: string } | null>("setupPendingRequest", null);
+  const pending = pendingRequest?.operation ?? null;
   const [tab, setTab] = useState<"conversation" | "outline">("conversation");
   const [modelId, setModelId] = useConversationState("languageModel", "");
-  const pendingRef = useRef<{ requestId: string; operation: string } | null>(null);
+  const pendingRef = useRef(pendingRequest); pendingRef.current = pendingRequest;
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, pendingRequest !== null); }, [presentation?.owner, presentation?.key, pendingRequest]);
   const opened = useRef<string | null>(null);
   useEffect(() => { if (setupId) presentation?.owner.reportConversation(presentation.key, setupId); }, [presentation?.owner, presentation?.key, setupId]);
   useEffect(() => { if (presentation?.inPanel) setTab("outline"); }, [presentation?.inPanel]);
@@ -69,25 +71,28 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     if (!worldId || !setupId) return;
     const requestId = ulid();
     pendingRef.current = { requestId, operation: action.operation };
-    setPending(action.operation);
+    setPendingRequest(pendingRef.current);
+    presentation?.owner.trackSetupRequest(presentation.key, requestId, action.operation, action.operation === "send" ? action.text : undefined);
     setFailure(null);
     if (!send({ kind: "production-setup", worldId, setupId, requestId, action })) {
-      setPending(null);
+      presentation?.owner.deliverSetupResult({ requestId, detail: "The studio is disconnected. Reconnect to continue this setup." });
+      setPendingRequest(null);
       pendingRef.current = null;
       setFailure("The studio is disconnected. Reconnect to continue this setup.");
     }
   }
   useEffect(() => subscribeProductionSetupResults(result => {
     if (result.worldId !== worldId || result.setupId !== setupId) return;
-    if (result.requestId === pendingRef.current?.requestId) {
+    if (presentation) presentation.owner.deliverSetupResult(result);
+    else if (result.requestId === pendingRef.current?.requestId) {
       if (!result.detail && pendingRef.current.operation === "send") setMessage("");
       pendingRef.current = null;
-      setPending(null);
+      setPendingRequest(null);
     }
     setFailure(result.detail ?? null);
     if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
     if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
-  }), [worldId, setupId, navigate, onSetupPage]);
+  }), [worldId, setupId, navigate, onSetupPage, presentation?.owner]);
   useEffect(() => {
     if (!world || !worldId || !setupId || connection !== "open") return;
     const key = `${worldId}/${setupId}`;
@@ -99,7 +104,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     if (connection !== "open") {
       opened.current = null;
       pendingRef.current = null;
-      setPending(null);
+      setPendingRequest(null); presentation?.owner.holdOpening(presentation.key, false);
     }
   }, [connection]);
   useEffect(() => {

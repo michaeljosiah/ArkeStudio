@@ -166,7 +166,7 @@ function ConversationRow({
       <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item" onClick={event => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         const surface = chatSurfaceForPage(state, `/w/${worldId}/chat/${row.id}`);
-        if (global && surface) global.select(surface);
+        if (global && surface) global.history(surface, false);
       }}>
         <span className={cx("fy-chatnav__title", row.status === "closed" && "fy-chatnav__title--closed")}>
           {row.title}

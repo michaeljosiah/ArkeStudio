@@ -88,7 +88,8 @@ try {
  if(!touch){
   await page('d.querySelector(".fy-global-chat-history-row>button+button").click()');await delay(60);
   await check('Desktop history menu is visible above Chat and receives pointer hits','(()=>{const menu=d.querySelector(".fy-chatnav__menu"),button=menu?.querySelector("button"),b=button?.getBoundingClientRect();return !!b&&button.contains(d.elementFromPoint(b.x+b.width/2,b.y+b.height/2));})()');
-  await page('d.querySelector(".fy-chatnav__scrim").click()');await delay(40);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await delay(50);
+  await check('Escape closes the history menu before hiding history','!d.querySelector(".fy-chatnav__scrim")&&!!d.querySelector(".fy-global-chat-history")');
  }
  await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(100);
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);

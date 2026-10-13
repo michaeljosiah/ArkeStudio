@@ -124,6 +124,33 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.holdOpening(production.key, false); assert.equal(owner.getSnapshot().selected?.key, cut.key);
     owner.select(production); assert.deepEqual(owner.value(production.key, "opening", null), { text: "The submitted first line" });
   });
+  it("history restores each thread's structured scope and prefix in memory and after reload", () => {
+    let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
+    const scoped: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never }, dock: { title: "Clip", subject: "Clip", subjectPrefix: "About this clip:" } } };
+    const owner = new GlobalChatController(storage); owner.open(scoped); owner.reportConversation(cut.key, CHAT_ID); owner.setValue(cut.key, "draft", "Clip-specific words");
+    owner.open(worldChat);
+    const history = { ...cut, key: chatKey(cut.worldId, cut.entry, CHAT_ID), conversationId: CHAT_ID };
+    owner.history(history); assert.deepEqual(owner.getSnapshot().selected?.props?.subject, scoped.props?.subject);
+    assert.equal(owner.getSnapshot().selected?.props?.dock?.subjectPrefix, "About this clip:"); assert.equal(owner.value(history.key, "draft", ""), "Clip-specific words");
+    owner.open(worldChat); const restored = new GlobalChatController(storage); restored.history(history);
+    assert.deepEqual(restored.getSnapshot().selected?.props?.subject, scoped.props?.subject); assert.equal(restored.value(history.key, "draft", ""), "Clip-specific words");
+  });
+  it("setup replies remain correlated while a switch is pending and can clear the origin draft across worlds", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Sent setup words");
+    owner.trackSetupRequest(production.key, "request", "send", "Sent setup words"); owner.select(cut);
+    assert.equal(owner.getSnapshot().selected?.key, production.key);
+    owner.deliverSetupResult({ requestId: "request" }); assert.equal(owner.value(production.key, "draft", ""), ""); assert.equal(owner.getSnapshot().selected?.key, cut.key);
+    owner.open(production); owner.setValue(production.key, "draft", "Another setup line"); owner.trackSetupRequest(production.key, "other", "send", "Another setup line");
+    owner.select({ ...worldChat, worldId: "another-world", key: "another-world:world" }); owner.deliverSetupResult({ requestId: "other" });
+    assert.equal(owner.value(production.key, "draft", ""), "");
+  });
+  it("a lost transcription releases queued switching and cannot deliver a stale result after reconnect", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Typed words");
+    owner.queueDictation(production.key, "lost", text => owner.setValue(production.key, "draft", text)); owner.select(cut); owner.loseDictations();
+    assert.equal(owner.getSnapshot().selected?.key, cut.key); assert.equal(owner.getSnapshot().phase, "idle");
+    owner.deliverDictation("lost", { text: "Late result" }); assert.equal(owner.value(production.key, "draft", ""), "Typed words");
+    assert.match(owner.value(production.key, "dictationTrouble", ""), /connection ended/);
+  });
   it("an old saved draft with unknown scope waits for explicit page adoption", () => {
     const saved = JSON.stringify({ version: 1, open: true, selected: { ...cut, props: undefined }, drafts: { [cut.key]: "Words from before the upgrade" } });
     const owner = new GlobalChatController({ getItem: () => saved, setItem() {} });
