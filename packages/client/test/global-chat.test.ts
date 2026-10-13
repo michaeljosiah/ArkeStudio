@@ -86,7 +86,7 @@ describe("global Chat keeps presentation separate from conversation authority (2
   });
   it("a workspace registration supplies the exact selection without rebinding an open chat", () => {
     const owner = new GlobalChatController(); owner.setCurrent(cut); owner.open(production);
-    const selection: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "clip-one" as never } } };
+    const selection: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
     const stop = owner.register(selection, {} as HTMLElement);
     assert.equal(owner.forPage()?.props?.subject?.kind, "timeline-clip");
     assert.equal(owner.getSnapshot().selected?.key, production.key);
@@ -96,13 +96,38 @@ describe("global Chat keeps presentation separate from conversation authority (2
   it("same-key page candidates cannot replace the retained subject through registration or refresh", () => {
     const owner = new GlobalChatController(); owner.setCurrent(production); owner.open(production);
     owner.setValue(production.key, "draft", "Keep these words");
-    const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "clip-one" as never } } };
+    const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
     owner.setCurrent(chapter); const host = {} as HTMLElement; owner.register(chapter, host); owner.refresh(chapter, host);
     assert.equal(owner.getSnapshot().selected?.props?.subject, production.props?.subject);
     assert.equal(owner.getSnapshot().selected?.path, production.path);
     assert.equal(owner.value(production.key, "draft", ""), "Keep these words");
     assert.equal(owner.forPage()?.props?.subject?.kind, "timeline-clip");
     owner.open(); assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip");
+  });
+  it("retains a validated structured subject and its send prefix after reload", () => {
+    let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
+    const surface: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never }, dock: { title: "Clip", subject: "Clip one", subjectPrefix: "About clip one:", about: "clip one" } } };
+    const first = new GlobalChatController(storage); first.open(surface); first.setValue(surface.key, "draft", "These exact words");
+    const restored = new GlobalChatController(storage);
+    assert.deepEqual(restored.getSnapshot().selected?.props?.subject, surface.props?.subject);
+    assert.equal(restored.getSnapshot().selected?.props?.dock?.subjectPrefix, "About clip one:");
+    assert.equal(restored.value(surface.key, "draft", ""), "These exact words");
+    restored.register(cut, {} as HTMLElement); restored.refresh(cut, {} as HTMLElement);
+    assert.deepEqual(restored.getSnapshot().selected?.props?.subject, surface.props?.subject, "a generic page cannot overwrite the restored scope");
+  });
+  it("pending conversation creation holds a switch until the original opening act is delivered", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.holdOpening(production.key, true);
+    owner.setValue(production.key, "opening", { text: "The submitted first line" }); owner.select(cut);
+    assert.equal(owner.getSnapshot().selected?.key, production.key); assert.equal(owner.getSnapshot().switching, true);
+    owner.phase("idle"); assert.equal(owner.getSnapshot().selected?.key, production.key);
+    owner.holdOpening(production.key, false); assert.equal(owner.getSnapshot().selected?.key, cut.key);
+    owner.select(production); assert.deepEqual(owner.value(production.key, "opening", null), { text: "The submitted first line" });
+  });
+  it("a same-key page with another subject has no home for the retained composer", () => {
+    const owner = new GlobalChatController(); owner.open(production);
+    const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
+    owner.register(chapter, {} as HTMLElement); assert.equal(owner.host(), null);
+    owner.open(chapter); assert.ok(owner.host());
   });
   it("finishes dictation into the original draft before switching and never sends", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Typed words");

@@ -1,4 +1,5 @@
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -158,10 +159,15 @@ function ConversationRow({
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
 }) {
+  const global = useGlobalChat(), { state } = useStore();
   const waiting = whatItIsWaitingOn(row);
   return (
     <div className={cx("fy-chatnav__row", current && "fy-chatnav__row--on")}>
-      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item">
+      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item" onClick={event => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const surface = chatSurfaceForPage(state, `/w/${worldId}/chat/${row.id}`);
+        if (global && surface) global.select(surface);
+      }}>
         <span className={cx("fy-chatnav__title", row.status === "closed" && "fy-chatnav__title--closed")}>
           {row.title}
         </span>
@@ -512,7 +518,8 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const mediaRequests = useRef(new Map<string, string>());
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The act waiting on a conversation to exist, and what was open when it was asked for. */
-  const [opening, setOpening] = useState<{ act: Opening; wasOpen: string | null } | null>(null);
+  const [opening, setOpening] = useConversationState<{ act: Opening; wasOpen: string | null } | null>("opening", null);
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
   /** What a deferred attach would not take, since the composer's own call answered before it ran. */
   const [deferredTrouble, setDeferredTrouble] = useState<readonly { name: string; reason: string }[]>([]);
 
@@ -858,7 +865,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           currentId={conversationId}
           open={historyOpen}
           onToggle={() => setHistoryOpen((v) => !v)}
-          onNew={() => navigate(`/w/${worldId}/chat`)}
+          onNew={() => {
+            const surface = chatSurfaceForPage(state, `/w/${worldId}/chat`);
+            if (presentation && surface) presentation.owner.startNew(surface);
+            navigate(`/w/${worldId}/chat`);
+          }}
           menu={menu}
           onOpenMenu={setMenu}
           onCloseMenu={() => setMenu(null)}

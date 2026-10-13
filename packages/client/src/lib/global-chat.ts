@@ -1,10 +1,11 @@
-import { ConversationIdSchema, orderedShots, WorldChatContextSchema, type ClientState, type WorldChatContext } from "@arke-studio/contracts";
+import { ConversationIdSchema, orderedShots, WorldChatContextSchema, WorldChatSubjectSchema, type ClientState, type WorldChatContext } from "@arke-studio/contracts";
 import type { ProductionConversationProps } from "../components/conversation.js";
 
 export type ChatSurface = {
   key: string; worldId: string; worldName: string; title: string; label: string;
   kind: "world" | "production" | "setup"; entry: WorldChatContext; path: string;
   conversationId?: string; newThread?: boolean; props?: ProductionConversationProps;
+  scopeMissing?: boolean;
 };
 export const chatKey = (worldId: string, entry: WorldChatContext, conversationId?: string) =>
   `${worldId}:${JSON.stringify(entry)}${conversationId ? ":" + conversationId : ""}`;
@@ -72,6 +73,23 @@ export function conversationProps(worldId: string, entry: WorldChatContext): Pro
 type Snapshot = { open: boolean; selected: ChatSurface | null; revision: number; stopCapture: number; phase: "idle" | "listening" | "transcribing"; switching: boolean };
 type ChatStorage = Pick<Storage, "getItem" | "setItem">;
 const STORAGE_KEY = "arke.global-chat.v1";
+function savedScope(surface: ChatSurface) {
+  const props = surface.props;
+  return props ? { subject: props.subject, dock: props.dock ? { title: props.dock.title, subject: props.dock.subject,
+    subjectPrefix: props.dock.subjectPrefix, about: props.dock.about, subjectLine: props.dock.subjectLine } : undefined } : undefined;
+}
+function restoreScope(worldId: string, entry: WorldChatContext, raw: unknown): ProductionConversationProps | undefined {
+  if (!raw || typeof raw !== "object" || entry.kind === "world" || entry.kind === "production-setup") return undefined;
+  const value = raw as { subject?: unknown; dock?: Record<string, unknown> };
+  const subject = WorldChatSubjectSchema.safeParse(value.subject), props = conversationProps(worldId, entry);
+  if (value.subject !== undefined && !subject.success) return undefined;
+  if (subject.success) props.subject = subject.data;
+  if (value.dock && typeof value.dock === "object" && typeof value.dock.title === "string" && typeof value.dock.subject === "string") {
+    props.dock = { title: value.dock.title.slice(0, 500), subject: value.dock.subject.slice(0, 500), conversationFirst: true };
+    for (const field of ["subjectPrefix", "about", "subjectLine"] as const) if (typeof value.dock[field] === "string") props.dock[field] = value.dock[field].slice(0, 500);
+  }
+  return props;
+}
 
 /** Presentation only. Coordinator identities, workspace state and decision authorities stay in the store. */
 export class GlobalChatController {
@@ -82,6 +100,7 @@ export class GlobalChatController {
   private conversationIds = new Map<string, string>();
   private listedConversations = new Map<string, ReadonlySet<string>>();
   private pending: ChatSurface | null = null;
+  private openings = new Set<string>();
   private dictations = new Map<string, { key: string; deliver(text: string): void }>();
   current: ChatSurface | null = null;
   constructor(private storage?: ChatStorage) {
@@ -95,7 +114,9 @@ export class GlobalChatController {
         this.snapshot = { ...this.snapshot, open: saved.open, selected: {
           key: saved.selected.key, worldId: saved.selected.worldId, worldName: String(saved.selected.worldName ?? "World"),
           title: String(saved.selected.title ?? "Chat"), label: String(saved.selected.label ?? ""), path: String(saved.selected.path ?? ""),
-          entry, kind: entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production",
+          entry, props: restoreScope(saved.selected.worldId, entry, saved.selected.scope),
+          scopeMissing: entry.kind !== "world" && entry.kind !== "production-setup" && (saved.selected.scopeMissing === true || !restoreScope(saved.selected.worldId, entry, saved.selected.scope)),
+          kind: entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production",
           ...(conversationId.success ? { conversationId: conversationId.data } : {}), newThread: saved.selected.newThread === true } };
         if (conversationId.success) this.conversationIds.set(saved.selected.key, conversationId.data);
         for (const [key, id] of Object.entries(saved.conversationIds ?? {})) if (typeof id === "string" && ConversationIdSchema.safeParse(id).success) this.conversationIds.set(key, id);
@@ -121,7 +142,7 @@ export class GlobalChatController {
   private persist() {
     const selected = this.snapshot.selected;
     try { this.storage?.setItem(STORAGE_KEY, JSON.stringify({ version: 1, open: this.snapshot.open,
-      selected: selected ? { ...selected, props: undefined } : null,
+      selected: selected ? { ...selected, props: undefined, scope: savedScope(selected) } : null,
       conversationIds: Object.fromEntries(this.conversationIds),
       choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), variants: fields.get("variants"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
       drafts: Object.fromEntries([...this.values].map(([key, values]) => [key, values.get("draft") ?? ""])) })); } catch { /* Disk-full/private browsing must not drop an in-memory draft. */ }
@@ -144,7 +165,10 @@ export class GlobalChatController {
     } else if (!previous || previous.path !== surface.path || chatSubjectKey(previous) !== chatSubjectKey(surface)) this.changed();
   }
   forPage = () => this.current ? [...this.registrations.values()].findLast(row => row.surface.path === this.current!.path)?.surface ?? this.registrations.get(this.current.key)?.surface ?? this.current : null;
-  host = () => this.snapshot.selected ? this.registrations.get(this.snapshot.selected.key)?.host ?? null : null;
+  host = () => {
+    const selected = this.snapshot.selected, registered = selected ? this.registrations.get(selected.key) : undefined;
+    return selected && registered?.surface.path === selected.path && chatSubjectKey(registered.surface) === chatSubjectKey(selected) ? registered.host : null;
+  };
   open(surface = this.forPage()) {
     if (surface) this.select(surface);
     this.changed({ open: true });
@@ -168,7 +192,7 @@ export class GlobalChatController {
       title: "World Chat", kind: "world", entry, path: selected.path, newThread: true });
   }
   startNew(surface: ChatSurface) {
-    if (this.snapshot.phase !== "idle") { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
+    if (this.snapshot.phase !== "idle" || this.openings.has(this.snapshot.selected?.key ?? "")) { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
     const key = chatKey(surface.worldId, surface.entry);
     this.conversationIds.delete(key); this.values.delete(key);
     this.pending = null;
@@ -176,7 +200,9 @@ export class GlobalChatController {
   }
   select(surface: ChatSurface) {
     if (surface.newThread) { this.startNew(surface); return; }
-    if (this.snapshot.selected?.key !== surface.key && this.snapshot.phase !== "idle") {
+    const selected = this.snapshot.selected;
+    if (selected && (selected.key !== surface.key || chatSubjectKey(selected) !== chatSubjectKey(surface)) &&
+      (this.snapshot.phase !== "idle" || this.openings.has(this.snapshot.selected?.key ?? ""))) {
       this.pending = surface; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return;
     }
     const conversationId = surface.conversationId ?? this.conversationIds.get(surface.key);
@@ -202,8 +228,15 @@ export class GlobalChatController {
   phase(phase: Snapshot["phase"]) {
     if (phase === this.snapshot.phase) return;
     this.changed({ phase });
-    if (phase === "idle" && this.pending) this.select(this.pending);
+    if (phase === "idle" && this.pending && !this.openings.has(this.snapshot.selected?.key ?? "")) this.select(this.pending);
   }
+  holdOpening(key: string, held: boolean) {
+    if (this.openings.has(key) === held) return;
+    if (held) this.openings.add(key); else this.openings.delete(key);
+    this.changed();
+    if (!held && this.pending && this.snapshot.phase === "idle") this.select(this.pending);
+  }
+  opening = () => this.openings.has(this.snapshot.selected?.key ?? "");
   queueDictation(key: string, requestId: string, deliver: (text: string) => void) {
     this.dictations.set(requestId, { key, deliver }); this.phase("transcribing");
   }
@@ -215,7 +248,7 @@ export class GlobalChatController {
   }
 }
 
-/** Non-secret window-local presentation cache; no credentials, world entities or file bytes. */
+/** Window-local presentation cache for drafts and selected subjects; no credentials or media bytes. */
 export function createGlobalChatController(): GlobalChatController {
   let storage: Storage | undefined;
   try { storage = typeof window === "undefined" ? undefined : window.sessionStorage; } catch { /* Optional tab storage. */ }

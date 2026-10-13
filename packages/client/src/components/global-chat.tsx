@@ -159,7 +159,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   const mismatch = !!selected && !!page && (chatSubjectKey(selected) !== chatSubjectKey(page) ||
     !!page.conversationId && page.conversationId !== selected.conversationId);
   const presentation = selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,
-    panelHost: inPanel ? panelHost : null, hasHome: !!home, conversationId: selected.conversationId, newThread: selected.newThread } : null;
+    panelHost: inPanel ? panelHost : null, hasHome: !!home, scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null;
   const menuConversation = rowMenu ? world?.conversations.find(row => row.id === rowMenu.id) : undefined;
   return <GlobalChatContext.Provider value={owner}>
     {children}
@@ -182,7 +182,8 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
         {!sameWorld && <div className="fy-global-chat-boundary" role="status"><p>{selected ? "This conversation belongs to another world. Its draft is retained there." : "Open a world to begin chatting with Arke."}</p>
           <button type="button" onClick={() => current ? adopt() : navigate("/worlds")}>{current ? "Open this world’s chat" : "Open world"}</button></div>}
         {sameWorld && mismatch && <div className="fy-global-chat-boundary"><p>You’re viewing {current?.label}. This conversation stays about {selected?.label}.</p><button type="button" onClick={adopt}>Use this page</button></div>}
-        {snapshot.switching && <p className="fy-global-chat-boundary" role="status">Finishing dictation before switching conversations…</p>}
+        {sameWorld && selected.scopeMissing && <div className="fy-global-chat-boundary" role="status"><p>This saved draft’s subject could not be restored. Choose this page before sending; your words are retained.</p><button type="button" onClick={adopt}>Use this page</button></div>}
+        {snapshot.switching && <p className="fy-global-chat-boundary" role="status">{owner.opening() ? "Waiting for the opening message before switching conversations…" : "Finishing dictation before switching conversations…"}</p>}
         <div ref={setPanelHost} className="fy-global-chat-conversation" />
         <div role="separator" aria-label="Chat width" aria-orientation="vertical" aria-valuemin={360} aria-valuemax={560} aria-valuenow={width} tabIndex={0} className="fy-global-chat-resize"
           onKeyDown={event => { if (["ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); resize(width + (event.key === "ArrowLeft" ? 20 : -20)); } }}

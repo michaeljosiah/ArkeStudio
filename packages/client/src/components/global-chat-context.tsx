@@ -4,7 +4,7 @@ import { useClientRender } from "./production-studio-context.js";
 import type { GlobalChatController } from "../lib/global-chat.js";
 export const GlobalChatContext = createContext<GlobalChatController | null>(null);
 export const useGlobalChat = () => useContext(GlobalChatContext);
-export const ConversationPresentationContext = createContext<{ owner: GlobalChatController; key: string; stopCapture: number; inPanel: boolean; panelHost: HTMLElement | null; hasHome: boolean; conversationId?: string; newThread?: boolean } | null>(null);
+export const ConversationPresentationContext = createContext<{ owner: GlobalChatController; key: string; stopCapture: number; inPanel: boolean; panelHost: HTMLElement | null; hasHome: boolean; scopeMissing?: boolean; conversationId?: string; newThread?: boolean } | null>(null);
 export const useConversationPresentation = () => useContext(ConversationPresentationContext);
 /** Values belong to their selected subject, including an async dictation finishing after world navigation. */
 export function useConversationState<T>(name: string, initial: T): [T, Dispatch<SetStateAction<T>>] {

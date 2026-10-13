@@ -16,7 +16,7 @@ import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
 import { effectCompositeReplacesAction } from "../lib/editor-effect-proposal-presentation.js";
 import { useEffectReviewNavigation } from "../screens/editor-effect-review.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
   ConversationActionCard,
@@ -820,7 +820,7 @@ export function ProductionConversationBody({
    */
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
-  const [opening, setOpening] = useState<{
+  const [opening, setOpening] = useConversationState<{
     text: string;
     attach?: boolean;
     files?: readonly File[];
@@ -833,7 +833,8 @@ export function ProductionConversationBody({
     replyOnly?: boolean;
     /** Told the request id once the line is sent into the thread this opened. */
     onSent?: (requestId: string) => void;
-  } | null>(null);
+  } | null>("opening", null);
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
@@ -1028,7 +1029,7 @@ export function ProductionConversationBody({
     /** The request a line lost on the way goes again under — or, opening a thread, its create. */
     again?: string,
   ): boolean => {
-    if (!text || !worldId || !hasContext) return false;
+    if (!text || !worldId || !hasContext || presentation?.scopeMissing) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1486,7 +1487,7 @@ export function ProductionConversationBody({
             busy={running || opening !== null || echo !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
-            disabledReason={languageUnavailableReason}
+            disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
             {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
@@ -1520,7 +1521,7 @@ export function ProductionConversationBody({
         </button>}
         {modelStatus}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
-          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
+          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}
