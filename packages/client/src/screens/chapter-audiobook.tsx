@@ -507,7 +507,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (speakerModel !== null) {
         try {
           const performed = compileAudiobookPerformance(block, { reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, direction === null ? null : viewPlan(direction.input), speakerModel, led);
-          if (performed !== null) view = { held: performed.held, readingHeld: performed.readingHeld, sentAs: [{ text: performed.text }], turns: { parts: [{ text: performed.text }] } };
+          if (performed !== null) view = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
         } catch { view = null; }
       }
       // Under the proposal: its direction, the speaker notes and the chapter note it drafted
@@ -519,7 +519,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (proposedInput !== undefined && speakerModel !== null) {
         try {
           const performed = compileAudiobookPerformance(block, { reading, notes: { ...proposal?.speakerNotes, ...notes } }, viewPlan(proposedInput), speakerModel, proposedReading);
-          if (performed !== null) proposedView = { held: performed.held, readingHeld: performed.readingHeld, sentAs: [{ text: performed.text }], turns: { parts: [{ text: performed.text }] } };
+          if (performed !== null) proposedView = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
         } catch { proposedView = null; }
       }
       return {

@@ -473,9 +473,9 @@ export async function prepareChapter(
       } else parts = piecesFor(text, model, voiceFormatForModel(model));
       const performance = compileAudiobookPerformance(planned.block, plan.book, held?.plan ?? null, model, reading);
       if (performance !== null) {
-        parts = [performance.text];
+        parts = performance.parts;
         noteHeld = performance.noteHeld;
-        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text, voiceSettings: {}, perPart: [{ voiceSettings: {} }] };
+        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text, voiceSettings: {}, perPart: parts.map(() => ({ voiceSettings: {} })) };
         own = [];
       }
       if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {

@@ -55,6 +55,16 @@ test("emotions become structured span direction, not spoken bracket text", () =>
   assert.ok(parsed.cues.some(c => c.kind === "sound" && c.sound === "snorts"));
 });
 
+test("an oversized character turn splits source words and restores its identity in each request", () => {
+  const text = "Hold position. ".repeat(1000).trim();
+  const result = compileAudiobookPerformance({ key: "p0.0", paragraph: 0, text, speaker: "Jace" },
+    { reading: "performed", notes: { Jace: "quiet, controlled" } }, null,
+    { ...model, limits: { ...model.limits, maxPromptChars: 1200 } })!;
+  assert.ok(result.parts.length > 1);
+  assert.ok(result.parts.every(part => part.length <= 1200 && part.startsWith("[same narrator, preserve narrator timbre] [quiet, controlled]")));
+  assert.equal(result.parts.map(part => part.replace(/\[[^\]]*\]\s*/g, "")).join(" "), text);
+});
+
 test("grouping accounts for every compiled tag and paragraph separator", () => {
   const blocks = Array.from({ length: 6 }, (_, n) => ({ key: String(n), reader: "calen", parts: [{ text: `[curious] ${"x".repeat(3000)}` }], maxCharacters: 10000 }));
   const groups = groupReads(blocks);

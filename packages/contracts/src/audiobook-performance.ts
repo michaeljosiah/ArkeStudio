@@ -2,6 +2,7 @@ import type { AudiobookBlock, AudiobookBook } from "./audiobook.js";
 import { audiobookNoteKey } from "./audiobook.js";
 import { isPointCue, normalizeSpeechText, performanceNote, readingNotesLead, sentAs, type CadenceCue, type CadencePlan, type HeldControl } from "./cadence.js";
 import type { ManifestModel } from "./manifest.js";
+import { speechInputFits, splitSpeechInput } from "./speech-input.js";
 
 /** Single-performer v4 direction. Speaker boundaries are resolved in clean source coordinates,
  * before tags are inserted, so repeated dialogue and inline delivery do not move attribution.
@@ -9,13 +10,21 @@ import type { ManifestModel } from "./manifest.js";
  */
 export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<AudiobookBook, "reading" | "notes"> | null,
   plan: CadencePlan | null, model: ManifestModel, reading?: { book?: string; chapter?: string }):
-  { text: string; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
+  { text: string; parts: string[]; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
   if (model.provider !== "elevenlabs" || model.id !== "eleven_v4" || book?.reading !== "performed") return null;
   const whole = normalizeSpeechText(block.text);
   const rows = block.rows ?? [block];
   const context = readingNotesLead(reading ?? {}, model);
   const held: HeldControl[] = [];
   const parts: string[] = [];
+  const lead = context.tags.join(" ");
+  let request = lead;
+  const append = (text: string) => {
+    const next = [request, text].filter(Boolean).join(" ");
+    if (speechInputFits(next, model.limits)) { request = next; return; }
+    if (request !== lead) parts.push(request);
+    request = [lead, text].filter(Boolean).join(" ");
+  };
   let offset = 0;
   let noteHeld = false;
   for (const row of rows) {
@@ -28,32 +37,45 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
     const play = note === undefined ? null : performanceNote(note, model);
     noteHeld ||= play?.mode === "unsupported";
     if (play?.mode === "unsupported") held.push({ control: "note", reason: play.reason });
-    const cues: CadenceCue[] = [];
-    const cueIndices: number[] = [];
-    for (const cue of plan?.cues ?? []) {
-      const before = cues.length;
-      if (isPointCue(cue)) {
-        // A pause at a speaker boundary belongs to the preceding words; breath to the next.
-        const owns = cue.kind === "breath" ? cue.at >= from && (cue.at < to || to === whole.length && cue.at === to)
-          : (cue.at > from || from === 0 && cue.at === 0) && cue.at <= to;
-        if (owns) cues.push({ ...cue, at: cue.at - from });
-      } else {
-        const a = Math.max(from, cue.span.from), b = Math.min(to, cue.span.to);
-        if (b > a) cues.push({ ...cue, span: { from: a - from, to: b - from, text: whole.slice(a, b) } });
-      }
-      if (cues.length > before) cueIndices.push(plan!.cues.indexOf(cue));
-    }
-    const hash = plan?.sourceTextHash ?? `sha256:${"0".repeat(64)}`;
-    const local: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, speed: plan?.speed ?? 1, cues,
-      ...(plan?.delivery !== undefined ? { delivery: plan.delivery } : {}), ...(plan?.note !== undefined ? { note: plan.note } : {}) };
-    const mapped = sentAs(words, local, model);
-    held.push(...mapped.held.map(control => control.cueIndex === undefined ? control : { ...control, cueIndex: cueIndices[control.cueIndex]! }));
     const identity = key === null || play?.mode !== "tag"
       ? "[same narrator, natural narration, original voice and accent]"
       : `[same narrator, preserve narrator timbre] ${play.tag}`;
-    parts.push(`${identity} ${mapped.text}`);
+    const render = (from: number, to: number): void => {
+      const words = whole.slice(from, to);
+      const cues: CadenceCue[] = [];
+      const cueIndices: number[] = [];
+      for (const cue of plan?.cues ?? []) {
+        const before = cues.length;
+        if (isPointCue(cue)) {
+          // A pause at a speaker boundary belongs to the preceding words; breath to the next.
+          const owns = cue.kind === "breath" ? cue.at >= from && (cue.at < to || to === whole.length && cue.at === to)
+            : (cue.at > from || from === 0 && cue.at === 0) && cue.at <= to;
+          if (owns) cues.push({ ...cue, at: cue.at - from });
+        } else {
+          const a = Math.max(from, cue.span.from), b = Math.min(to, cue.span.to);
+          if (b > a) cues.push({ ...cue, span: { from: a - from, to: b - from, text: whole.slice(a, b) } });
+        }
+        if (cues.length > before) cueIndices.push(plan!.cues.indexOf(cue));
+      }
+      const hash = plan?.sourceTextHash ?? `sha256:${"0".repeat(64)}`;
+      const local: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, speed: plan?.speed ?? 1, cues,
+        ...(plan?.delivery !== undefined ? { delivery: plan.delivery } : {}), ...(plan?.note !== undefined ? { note: plan.note } : {}) };
+      const mapped = sentAs(words, local, model);
+      const tagged = `${identity} ${mapped.text}`;
+      if (!speechInputFits([lead, tagged].filter(Boolean).join(" "), model.limits)) {
+        // Split source words, never bracket syntax, then rebase their direction and repeat
+        // the speaker identity. Re-rendering also counts the tags added at each new seam.
+        if (words.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
+        for (const piece of splitSpeechInput(words, { maxPromptChars: Math.floor(words.length / 2) })) render(from + piece.from, from + piece.to);
+        return;
+      }
+      held.push(...mapped.held.map(control => control.cueIndex === undefined ? control : { ...control, cueIndex: cueIndices[control.cueIndex]! }));
+      append(tagged);
+    };
+    render(from, to);
     offset = to;
   }
   if (whole.slice(offset).trim() !== "") throw new Error("Character turns no longer match this paragraph; cast it again.");
-  return { text: [...context.tags, ...parts].join(" "), held, readingHeld: context.held, noteHeld };
+  if (request !== lead) parts.push(request);
+  return { text: parts.join(" "), parts, held, readingHeld: context.held, noteHeld };
 }
