@@ -1,3 +1,4 @@
+import { StoryPublishSheet } from "../components/story-publish.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ArkeEdge } from "../components/arke-edge.js";
 import { ProductionConversation } from "../components/conversation.js";
@@ -527,7 +528,7 @@ export function ChapterTreeScreen() {
    * film export dialog's shape. The import's request is the sheet's; what came of it is the
    * session's line under the band.
    */
-  const [sheet, setSheet] = useState<"export" | "import" | null>(null);
+  const [sheet, setSheet] = useState<"publish" | "export" | "import" | null>(null);
   const [importRequest, setImportRequest] = useState<string | null>(null);
   const [imported, setImported] = useState<{ fileName: string; created: number; after: number } | null>(null);
   const manuscripts = useManuscripts();
@@ -613,9 +614,9 @@ export function ChapterTreeScreen() {
         <span className="fy-h1row__push" />
         {isStory && (
           <>
-            <Button className="fy-chapters-wide-action" onClick={() => setSheet("export")} data-testid="export-manuscript">
+            <Button className="fy-chapters-wide-action" onClick={() => setSheet("publish")} data-testid="export-manuscript">
               <Download size={13} />
-              Export
+              Publish
             </Button>
             <Button className="fy-chapters-wide-action" onClick={beginImport} data-testid="import-manuscript">
               <Upload size={13} />
@@ -629,12 +630,13 @@ export function ChapterTreeScreen() {
       </div>
       {phone && isStory && <button type="button" className="fy-chapters-more" aria-label="Manuscript actions" onClick={() => setMenu("manuscript")}><More size={20} /></button>}
       <PageSheet open={menu === "manuscript" || menuChapter !== undefined} title={menu === "manuscript" ? "Manuscript" : menuChapter?.title ?? "Chapter"} onClose={() => setMenu(null)} className="fy-chapter-menu">
-        {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("export"); }}>Export</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
+        {menu === "manuscript" ? <><Button onClick={() => { setMenu(null); setSheet("publish"); }}>Publish</Button><Button onClick={() => { setMenu(null); beginImport(); }}>Import</Button></> : menuChapter && <><Button disabled={menuIndex === 0} onClick={() => { move(menuChapter, -1); setMenu(null); }}>Move up</Button><Button disabled={menuIndex === chapters.length - 1} onClick={() => { move(menuChapter, 1); setMenu(null); }}>Move down</Button><Button onClick={() => { if (worldId && prodId) setChapterRetired(worldId, prodId, menuChapter.file, true); setMenu(null); }}>Retire</Button></>}
       </PageSheet>
       {compact && <ArkeEdge>{putAway => <ProductionConversation worldId={worldId} productionId={prodId} placeholder="Ask about the chapters" emptyLine="Nothing written with Arke about the chapters yet." entry={{ kind: "production", productionId: prodId ?? "" }} dock={{ title: "Arke · Chapters", subject: production?.meta.title ?? "Chapters", conversationFirst: true, onPutAway: putAway }} />}</ArkeEdge>}
-      {isStory && production && (
+      {isStory && production && (<>
+        {sheet === "publish" && worldId && <StoryPublishSheet worldId={worldId} production={production} onClose={() => setSheet(null)} onOtherExports={() => setSheet("export")} />}
         <ManuscriptExportSheet open={sheet === "export"} onClose={() => setSheet(null)} worldId={worldId} prodId={prodId} production={production} chapters={chapters} />
-      )}
+      </>)}
       {isStory && (
         <ManuscriptImportSheet
           open={sheet === "import"}

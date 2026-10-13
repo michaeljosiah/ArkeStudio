@@ -202,6 +202,7 @@ export function createExportFfmpegRunner(
 
   return {
     slateFont,
+    identity: async signal => { signal.throwIfAborted(); const value = await digest(ffmpeg); signal.throwIfAborted(); return "sha256:" + value; },
     graphFileOption: signal => probeFfmpegGraphFileOption(createMediaProcessRunner({ ffmpeg, ffprobe: "" }, spawn), signal),
     run: async (args, onProgress, signal, onSeconds) => {
       const drawsText = usesDrawtext(args);

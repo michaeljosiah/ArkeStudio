@@ -105,6 +105,7 @@ describe("a manuscript out (turn 131)", () => {
   it("Export opens the sheet with the format, the counts and what is left out, and the press exports by format", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
+    await act(async () => button(m, /^Other exports$/)!.click());
     assert.match(text(m), /Export manuscript/);
     assert.match(text(m), /Inkbound · 1 of 2 chapters · 3,120 words/);
     assert.match(text(m), /1 chapter with prose, in order · 1 planned left out/);
@@ -135,6 +136,7 @@ describe("a manuscript out (turn 131)", () => {
   it("lists what was delivered as it progresses, with Cancel while running", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");
+    await act(async () => button(m, /^Other exports$/)!.click());
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:01Z", type: "export.progress", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", exportId: "ms_01J8F3K2QW9VZX4N7M0RTYB6H", status: "running", percent: 0, output: null, error: null });
     });
@@ -153,6 +155,7 @@ describe("a manuscript out (turn 131)", () => {
   it("with no prose the sheet says so and the press stays live (codex on PR 916)", async () => {
     const m = await mount(inkbound([CHAPTERS[1]!]));
     await press(m, "export-manuscript");
+    await act(async () => button(m, /^Other exports$/)!.click());
     assert.match(text(m), /nothing to export · no chapter has prose yet/);
     assert.equal(button(m, /^Export \.docx$/)!.disabled, false);
   });
@@ -259,4 +262,74 @@ describe("a manuscript in (turn 131)", () => {
     assert.match(row.textContent ?? "", /imported/);
     assert.doesNotMatch([...m.container.querySelectorAll(".fy-row")].find((node) => node.textContent?.includes("Neap"))?.textContent ?? "", /imported/);
   });
+});
+
+describe("Publish review (turn 224)", () => {
+  it("opens private reading and listening with the optional dash rule off, then sends a read-only review", async () => {
+    const m = await mount(inkbound());
+    await press(m, "export-manuscript");
+    assert.match(text(m), /Private reading & listening/);
+    assert.match(text(m), /Read · EPUB/);
+    assert.match(text(m), /Listen · M4B/);
+    await act(async () => button(m, /^Review chapters$/)!.click());
+    await act(async () => button(m, /^Formatting & style$/)!.click());
+    const request = m.sent.find(message => message.kind === "publish-story" && message.input.action === "review");
+    assert.ok(request && request.kind === "publish-story" && request.input.action === "review");
+    assert.equal(request.input.settings.avoidEmDashes, false);
+    assert.deepEqual(request.input.settings.chapterIds, ["neap", "her-own-hand"], "planned chapters are not silently omitted");
+    assert.deepEqual(request.input.settings.outputs, ["epub"]);
+    assert.equal(m.sent.some(message => message.kind === "save-chapter" || message.kind === "read-audiobook-chapter"), false);
+  });
+  it("shows exact text and narration impact before an explicit apply, and keeps a refused suggestion visible", async () => {
+    const m = await mount(inkbound());
+    await press(m, "export-manuscript");
+    await act(async () => button(m, /^Review chapters$/)!.click());
+    await act(async () => button(m, /^Formatting & style$/)!.click());
+    const request = m.sent.find(message => message.kind === "publish-story" && message.input.action === "review");
+    assert.ok(request && request.kind === "publish-story" && request.input.action === "review");
+    const finding = { id: "a".repeat(64), chapterId: "neap", chapterTitle: "Neap", chapterFile: "01-neap", baseHash: "old-source",
+      paragraph: 0, start: 0, end: 20, before: "Maren turned—she knew.", suggestion: "Maren turned. She knew.", reason: "Review the sentence break.", narration: ["p0.0"], kept: false };
+    await act(async () => __applyEventForTest({ at: "2026-10-13T12:00:00Z", type: "story.published", worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", requestId: request.requestId, result: { review: { fingerprint: "b".repeat(64), settings: request.input.action === "review" ? request.input.settings : {} as never,
+        chapters: [{ id: "neap", title: "Neap", words: 10, audioProblems: [] }], findings: [finding], warnings: [], blockers: [] } } }));
+    await act(async () => button(m, /^Review change$/)!.click());
+    assert.match(text(m), /Before/); assert.match(text(m), /recording in this paragraph/);
+    assert.equal(m.sent.some(message => message.kind === "publish-story" && message.input.action === "decide"), false);
+    await act(async () => button(m, /^Apply to manuscript$/)!.click());
+    const decision = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "decide");
+    assert.ok(decision && decision.kind === "publish-story" && decision.input.action === "decide");
+    assert.equal(decision.input.decision, "apply"); assert.equal(decision.input.finding.baseHash, "old-source");
+    assert.equal(decision.input.replacement, finding.suggestion);
+    await act(async () => __applyEventForTest({ at: "2026-10-13T12:00:01Z", type: "story.published", worldId: FIXTURE_WORLD_ID,
+      productionId: "inkbound", requestId: decision.requestId, result: { error: "The source changed. Recheck before applying." } }));
+    assert.match(text(m), /The source changed/);
+    assert.ok(button(m, /^Apply to manuscript$/), "a refused write leaves the proposal visible");
+    assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter"), false, "applying text never generates narration");
+  });
+  it("reopens a running edition and follows its original operation through completion", async () => {
+    const m = await mount(inkbound()); await press(m, "export-manuscript");
+    const list = m.sent.find(message => message.kind === "list-story-publications");
+    assert.ok(list && list.kind === "list-story-publications");
+    const edition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      createdAt: "2026-10-13T12:00:00Z", fingerprint: "c".repeat(64), status: "creating" as const, phase: "Preparing EPUB", files: [],
+      settings: { title: "Inkbound", author: "", language: "en", description: "", label: "Private edition", cover: null, chapterIds: ["neap"], outputs: ["epub"] as "epub"[], avoidEmDashes: false } };
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.editions", requestId: list.requestId, editions: [edition] }));
+    await act(async () => button(m, /^View preparation$/)!.click());
+    assert.ok(button(m, /^Cancel preparation$/), "reopened work retains cancellation");
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      requestId: list.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready", files: [{ format: "epub", name: "story.epub", bytes: 42, sha256: "d".repeat(64) }] } } }));
+    assert.ok(button(m, /^Create edition$/), "completion from the original request updates the reopened view");
+    assert.equal(button(m, /^Cancel preparation$/), undefined);
+    assert.doesNotMatch(text(m), /Save EPUB/);
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    const refreshed = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "list");
+    assert.ok(refreshed && refreshed.kind === "publish-story");
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      requestId: refreshed.requestId, result: { editions: [{ ...edition, status: "ready", phase: "Files ready",
+        files: [{ format: "epub", name: "story.epub", bytes: 42, sha256: "d".repeat(64) }] }] } }));
+    assert.match(text(m), /Save EPUB/, "reconnect recovers completion even when the final event was missed");
+
+  });
+
 });

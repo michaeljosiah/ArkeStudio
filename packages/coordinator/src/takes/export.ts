@@ -12,6 +12,8 @@ import { toExtendedLength } from "../world/paths.js";
 export interface FfmpegRunner {
   /** Host path to the redistributed font every generated slate uses. */
   slateFont: string;
+  /** Stable encoder build identity retained by retryable private editions. */
+  identity?(signal: AbortSignal): Promise<string>;
   /** Resolve the installed encoder's supported graph-file option before preparing effects. */
   graphFileOption?(signal: AbortSignal): Promise<"-/filter_complex" | "-filter_complex_script">;
   /**

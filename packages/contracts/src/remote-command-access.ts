@@ -34,6 +34,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "attach-files-correlated": "host",
   // payload
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",
+  "publish-story": "studio", "list-story-publications": "studio",
   // studio
   "catalogue-voice-preview": "studio", "stop-catalogue-voice-preview": "studio",
   "production-setup": "studio", "save-production-narrative": "studio", "stage-construct": "studio",

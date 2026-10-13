@@ -51,7 +51,7 @@ export interface TransportOptions {
    * `/media/<world-slug>/<world-relative-file>` to an absolute file, or null to 404. The
    * resolver owns path-traversal guarding; the transport owns nothing but the plumbing.
    */
-  serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string } | null>;
+  serveFile?: (urlPath: string) => Promise<{ path: string; contentType: string; downloadName?: string } | null>;
 }
 
 /**
@@ -148,6 +148,7 @@ export class Transport {
           // Kit grids and boards are overwritten in place on recompile — never cache.
           const headers: Record<string, string> = {
             "Content-Type": hit.contentType,
+            ...(hit.downloadName ? { "Content-Disposition": "attachment; filename*=UTF-8" + String.fromCharCode(39, 39) + encodeURIComponent(hit.downloadName) } : {}),
             "Cache-Control": "no-store",
             "Accept-Ranges": "bytes",
           };

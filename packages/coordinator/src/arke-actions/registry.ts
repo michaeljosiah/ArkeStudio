@@ -615,6 +615,8 @@ const CLIENT_COMMAND_METADATA = {
   "stop-audiobook-book": action("production", "command", "voice", "external-network-action", ["chapters"]),
   "accept-direction": action("production", "command", "voice", "external-network-action", ["chapters"]),
   // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
+  "list-story-publications": readOnly(QUERY),
+  "publish-story": humanOnly("Publication source changes and edition creation require the author’s explicit review."),
   "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),
   "open-exports-folder": globalOnly(GLOBAL_OPERATION),
   "pick-manuscript": humanOnly("Opening the manuscript picker is a human evidence-control gesture."),

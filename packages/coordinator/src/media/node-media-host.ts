@@ -14,7 +14,11 @@ import { probeFfmpegGraphFileOption } from "./ffmpeg-graph-probe.js";
 export function createNodeFfmpegRunner(ffmpeg: string, slateFont: string): FfmpegRunner {
   let fontVerified = false;
   const mediaProcess = createNodeMediaProcessRunner({ ffmpeg, ffprobe: "" });
-  return { slateFont, graphFileOption: signal => probeFfmpegGraphFileOption(mediaProcess, signal), async run(args, onProgress, signal, onSeconds) {
+  return { slateFont, identity: async signal => {
+    const result = await mediaProcess.run("ffmpeg", ["-version"], { signal, timeoutMs: 10000, maxStdoutBytes: 65536, maxStderrBytes: 16384 });
+    if (result.code !== 0) throw new Error("The audio encoder could not identify its build.");
+    return new TextDecoder().decode(result.stdout).trim();
+  }, graphFileOption: signal => probeFfmpegGraphFileOption(mediaProcess, signal), async run(args, onProgress, signal, onSeconds) {
     if (signal.aborted) throw new Error("export cancelled");
     if (!fontVerified && (args.includes("-/filter_complex") || args.includes("-filter_complex_script") || args.some(arg => arg.includes("drawtext=")))) {
       const hash = await hashMediaFile(slateFont, signal);

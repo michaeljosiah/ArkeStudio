@@ -257,6 +257,14 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const media = await get(port, "/media/world/a.png?token=ignored", { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
     assert.equal(media.status, 206); assert.equal(media.headers["content-range"], "bytes 0-2/10");
     assert.match(String(media.headers["content-security-policy"]), /sandbox/);
+    for (const prefix of ["story-edition-media", "story-preview-media"]) {
+      const path = "/" + prefix + "/00000000-0000-4000-8000-000000000001/story.m4b";
+      assert.equal((await get(port, path)).status, 401);
+      const response = await get(port, path, { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
+      assert.equal(response.status, 206);
+      assert.equal(response.headers["content-range"], "bytes 0-2/10");
+    }
+
     const rejected = connect(port); sockets.push(rejected);
     await new Promise<void>(resolve => rejected.once("error", () => resolve()));
     const foreign = connect(port, proof, "https://evil.example"); sockets.push(foreign);
