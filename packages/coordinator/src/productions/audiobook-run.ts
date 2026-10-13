@@ -407,6 +407,7 @@ export async function prepareChapter(
     let direction: Speaking["direction"] = null;
     let refusal: string | undefined;
     let parts: string[];
+    let performancePassages: NonNullable<ReturnType<typeof compileAudiobookPerformance>>["passages"] | undefined;
     // The speaker's note under `performed` (R-45): the line's leading phrase through the row's
     // phrase path, ahead of the line's own direction. A row that takes no phrase cannot play
     // it, so the line is read without it and the take records that; the note still names the
@@ -483,6 +484,7 @@ export async function prepareChapter(
         notes: { ...override?.speakerNotes, ...sheetNarrations(store.getBundle().sheets), ...plan.book?.notes } }, held?.plan ?? null, model, reading);
       if (performance !== null) {
         parts = performance.parts;
+        performancePassages = performance.passages;
         noteHeld = performance.noteHeld;
         direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text,
           ...(held?.plan.delivery !== undefined ? { delivery: held.plan.delivery } : {}), voiceSettings: {}, perPart: parts.map(() => ({ voiceSettings: {} })) };
@@ -494,6 +496,7 @@ export async function prepareChapter(
     } catch (error) {
       refusal = error instanceof Error ? error.message : String(error);
       parts = [text];
+      performancePassages = undefined;
     }
     // A reaction that is a sound (R-83) is sent as the reader's own tag for it, alone: the take
     // still names what the reaction says (`[laughs]`), and a reader that makes no such sound is
@@ -504,6 +507,7 @@ export async function prepareChapter(
       if (how.mode === "unsupported") refusal = `${model.displayName} makes no ${sound}`;
       else {
         parts = [how.tag];
+        performancePassages = undefined;
         direction = null;
       }
     }
@@ -546,7 +550,7 @@ export async function prepareChapter(
       format,
       remake,
       ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
-      turns: { ...(context.instructions !== undefined ? { shared: context.instructions } : {}), parts: parts.map((part, index) => ({ text: part, ...(own[index] !== undefined ? { style: own[index] } : {}) })) },
+      turns: { ...(context.instructions !== undefined ? { shared: context.instructions } : {}), parts: parts.map((part, index) => ({ text: part, ...(performancePassages?.[index] !== undefined ? { performance: performancePassages[index] } : {}), ...(own[index] !== undefined ? { style: own[index] } : {}) })) },
       // A whole block already in the cache is adopted without a call (R-19); parts are never
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged

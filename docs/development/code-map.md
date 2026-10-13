@@ -633,3 +633,12 @@ readiness/approved prose changes and story.ts owns capture, EPUB/M4B build, retr
 Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
 arke:save-story-publication resolves an inventoried edition through the coordinator before a
 native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
+
+
+Audiobook v4 request direction: contracts `audiobook-performance.ts` retains structured
+`PerformancePassage` runs; `grouped-reads.ts` renders them once request membership is known.
+Coordinator `productions/audiobook-run.ts` passes those runs to the same packer used for caps,
+quotes, previews and dispatch. Contracts `cadence.ts` preserves v4 source line breaks through
+Bench's typed-tag compilation. Coverage: contracts `audiobook-performance.test.ts` and
+`grouped-reads.test.ts`, coordinator `voice/direction.test.ts` and
+`productions/audiobook-grouped.test.ts`; see [audiobook direction](audiobook-direction.md).

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compileAudiobookPerformance, AudiobookBookSchema, ClientMessageSchema, performanceNote, recogniseDirection, groupReads, groupedText, type ManifestModel } from "../src/index.js";
+import { compileAudiobookPerformance, AudiobookBookSchema, ClientMessageSchema, performanceNote, recogniseDirection, groupReads, groupedText, packTurns, type ManifestModel } from "../src/index.js";
 
 const model: ManifestModel = { id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4",
   accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { maxPromptChars: 10000, audioFormat: "wav" }, pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
@@ -11,7 +11,7 @@ test("performed dialogue preserves a single narrator and restores narration with
   const rows = [{ text: "“Copy,”", speaker: "Mag" }, { text: "she said." }, { text: "“Copy.”", speaker: "Mag" }];
   const book = AudiobookBookSchema.parse({ schemaVersion: 1, reading: "performed", notes: { Mag: note } });
   const result = compileAudiobookPerformance({ key: "p0.0", paragraph: 0, text: rows.map(r => r.text).join(" "), rows }, book, null, model)!;
-  assert.match(result.text, /retain male timbre\] “Copy,” \[same narrator, natural narration, original voice and accent\] she said\./);
+  assert.match(result.text, /retain male timbre\] “Copy,” \[natural narration, original voice and accent\] she said\./);
   assert.equal(result.text.split(note).length - 1, 2);
   assert.equal(result.text.replace(/\[[^\]]*\]\s*/g, ""), rows.map(r => r.text).join(" "));
   assert.equal(result.noteHeld, false);
@@ -62,7 +62,7 @@ test("an oversized character turn splits source words and restores its identity 
     { reading: "performed", notes: { Jace: "quiet, controlled" } }, null,
     { ...model, limits: { ...model.limits, maxPromptChars: 1200 } })!;
   assert.ok(result.parts.length > 1);
-  assert.ok(result.parts.every(part => part.length <= 1200 && part.startsWith("[same narrator, preserve narrator timbre] [quiet, controlled]")));
+  assert.ok(result.parts.every(part => part.length <= 1200 && part.startsWith("[same narrator throughout] [quiet, controlled]")));
   assert.equal(result.parts.map(part => part.replace(/\[[^\]]*\]\s*/g, "")).join(" "), text);
 });
 
@@ -86,4 +86,40 @@ test("grouping accounts for every compiled tag and paragraph separator", () => {
   assert.equal(result.text.split("[short pause]").length - 1, 1);
   assert.equal(result.text.replace(/\[[^\]]*\]\s*/g, ""), text);
   assert.deepEqual(result.held, []);
+});
+
+
+test("grouped performed requests carry context once and identity only at changes, preserving paragraphs", () => {
+  const book = { reading: "performed" as const, notes: { Jace: "lower British register", Mag: "male narrator, slight pitch lift" } };
+  const source = [
+    { key: "p0.0", paragraph: 0, text: "First paragraph." },
+    { key: "p1.0", paragraph: 1, text: "Second paragraph." },
+    { key: "p2.0", paragraph: 2, text: "Hold.", speaker: "Jace" },
+    { key: "p3.0", paragraph: 3, text: "Stay.", speaker: "Jace" },
+    { key: "p4.0", paragraph: 4, text: "She nodded. Copy.", rows: [{ text: "She nodded." }, { text: "Copy.", speaker: "Mag" }] },
+    { key: "p5.0", paragraph: 5, text: "Then silence." },
+  ];
+  const blocks = source.map(block => {
+    const compiled = compileAudiobookPerformance(block, book, null, model, { book: "natural American narration", chapter: "restrained tension" })!;
+    return { key: block.key, reader: "calen", parts: compiled.parts.map((text, i) => ({ text, performance: compiled.passages[i] })) };
+  });
+  const actual = groupedText(packTurns(blocks, "deltas"));
+  assert.equal(actual, "[same narrator throughout] [natural American narration] [restrained tension] First paragraph.\n\nSecond paragraph.\n\n[lower British register] Hold.\n\nStay.\n\n[natural American narration] She nodded. [male narrator, slight pitch lift] Copy.\n\n[natural American narration] Then silence.");
+  const scoped = groupedText(packTurns(blocks.slice(3, 5), "deltas"));
+  assert.ok(scoped.startsWith("[same narrator throughout] [natural American narration] [restrained tension] [lower British register] Stay."), "a middle-only request reestablishes the narrator and current character");
+  const groups = groupReads(blocks.map(b => ({ ...b, maxCharacters: 220 })));
+  assert.ok(groups.length > 1);
+  assert.ok(groups.every(g => groupedText(g.turns).length <= 220));
+  assert.ok(groups.every(g => groupedText(g.turns).startsWith("[same narrator throughout] [natural American narration] [restrained tension]")));
+});
+
+
+test("temporary delivery resets at a grouped paragraph boundary even for the same speaker", () => {
+  const reader = { ...model, cadence: { ...model.cadence!, deliveries: ["measured", "whispered"], deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" } } } };
+  const book = { reading: "performed" as const, notes: { Jace: "lower British register" } };
+  const first = compileAudiobookPerformance({ key: "a", paragraph: 0, text: "Quiet.", speaker: "Jace" }, book,
+    { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1, delivery: "whispered", cues: [] }, reader)!;
+  const second = compileAudiobookPerformance({ key: "b", paragraph: 1, text: "Move.", speaker: "Jace" }, book, null, reader)!;
+  const text = groupedText(packTurns([first, second].map((p, i) => ({ key: String(i), reader: "calen", parts: p.parts.map((text, j) => ({ text, performance: p.passages[j] })) })), "deltas"));
+  assert.equal(text, "[same narrator throughout] [lower British register] [whispers] Quiet.\n\n[normal speaking voice] [lower British register] Move.");
 });

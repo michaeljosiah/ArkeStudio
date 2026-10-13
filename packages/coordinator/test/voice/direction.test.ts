@@ -71,3 +71,23 @@ it("holds an over-limit v4 note while accepting the authored 300-character note"
   assert.deepEqual(line.line.held, checked.held);
   assert.equal(line.line.text, text);
 });
+
+
+it("v4 preserves paragraph breaks through typed pause recognition and exact request compilation", async () => {
+  const { recogniseDirection } = await import("@arke-studio/contracts");
+  const source = "[natural American narration] First paragraph.\n\nSecond paragraph. [short pause] Continue.\r\n\r\n[lower British register] Hold.";
+  const typed = recogniseDirection(source);
+  const compiled = compileLine(typed.raw, { speed: 1, cues: typed.cues }, row("eleven_v4"), "en-US", "hold");
+  assert.ok(compiled.ok);
+  assert.equal(compiled.line.text, source.replaceAll("\r\n", "\n"));
+  assert.deepEqual(compiled.line.held, []);
+});
+
+it("v4 paragraph gaps do not move later emphasis or pause anchors", () => {
+  const compiled = compileLine("One.\n\nTwo words.", { speed: 1, cues: [
+    { kind: "pause", at: 4, length: "short" },
+    { kind: "emphasis", span: { from: 5, to: 8, text: "Two" }, level: "strong" },
+  ] }, row("eleven_v4"), "en-US", "hold");
+  assert.ok(compiled.ok);
+  assert.equal(compiled.line.text, "One. [short pause]\n\nTWO words.");
+});

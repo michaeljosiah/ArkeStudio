@@ -284,6 +284,17 @@ export function soundMode(sound: Sound, model: CadenceRow, language?: string): {
  */
 export function mapCadence(text: string, expectedHash: string, input: CadencePlan, model: Pick<ManifestModel, "id" | "provider" | "providerModelId" | "cadence">, language?: string) {
   const plan = CadencePlanSchema.parse(input);
+  // Keep folded cue coordinates while preserving v4's audible source layout.
+  const lineBreaks = new Map<number, string>();
+  if (model.provider === "elevenlabs" && model.id === "eleven_v4") {
+    let offset = 0;
+    for (const token of text.trim().match(/\s+|\S+/g) ?? []) {
+      if (/^\s/.test(token)) {
+        if (/[\r\n]/.test(token)) lineBreaks.set(offset, "\n".repeat((token.match(/\r\n|\r|\n/g) ?? []).length));
+        offset += 1;
+      } else offset += token.length;
+    }
+  }
   text = normalizeSpeechText(text);
   if (plan.sourceTextHash !== expectedHash) throw new Error("Cadence was authored for different wording.");
   const boundary = (at: number) => at >= 0 && at <= text.length && !(at > 0 && at < text.length &&
@@ -415,7 +426,7 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
   for (let at = 0; at <= text.length; at++) {
     providerText += inserts.filter((e) => e.at === at).map((e) => e.text).join("");
     if (at === text.length) break;
-    const swapped = replace.get(at);
+    const swapped = lineBreaks.get(at) ?? replace.get(at);
     providerText += swapped !== undefined ? swapped : upper.some((e) => e.from <= at && e.to > at) ? text[at]!.toUpperCase() : text[at];
   }
   // The note rides the same seam as a delivery's tag or sentence (SPEC-047 R-7): a tag after
@@ -440,7 +451,7 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
     }
   }
   if (lead.length > 0) providerText = `${lead.join(" ")} ${providerText}`;
-  providerText = providerText.replace(/ {2,}/g, " ").trim();
+  providerText = providerText.replace(/ {2,}/g, " ").replace(/ *\n */g, "\n").trim();
   return { provider: model.provider, model: model.id, providerModel: model.providerModelId ?? model.id,
     providerText, voiceSettings, ...(instructions !== undefined ? { instructions } : {}), controls };
 }

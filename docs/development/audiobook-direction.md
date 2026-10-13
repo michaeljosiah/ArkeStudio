@@ -54,3 +54,19 @@ Official guidance checked 2026-10-13:
 - [Audio tags](https://elevenlabs.io/docs/help-center/product/core-capabilities/text-to-speech/how-do-audio-tags-work-with-eleven-v3-and-v4)
 - [Prompting and pauses](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
 - [TTS request and PCM output](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+
+
+Request cleanup (2026-10-13): performed v4 retains structured speaker runs until grouping
+chooses an actual request boundary. `packTurns` renders shared context once and identity cues
+only when the speaker changes; a solo or scoped reread establishes its own context. Narration
+returns use the authored book narration brief, so an explicit accent is retained. Temporary
+spoken delivery resets before the next run, including across paragraph boundaries. Reaction-only
+requests do not inherit the prose performance. Group caps, quotes, confirmation previews and
+queued text use the same rendered turns. This implements SPEC-049's request-scoped direction
+amendment; direction tags remain best-effort provider input, not guaranteed vocal control.
+
+V4 cadence mapping retains source line breaks while cue coordinates remain whitespace-folded.
+Bench's typed pause conversion therefore preserves paragraph layout rather than flattening the
+request. Exact-string regressions cover text, line breaks, inline cues, scoped requests, character
+transitions and request limits. Do not normalize whitespace when comparing a reviewed prompt
+with the actual provider request: doing so concealed the original paragraph-loss regression.
