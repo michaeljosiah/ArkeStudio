@@ -1272,7 +1272,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 // the direction's name so the job is this direction's and no other's.
                 ...(block.direction !== null
                   ? {
-                      voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings,
+                      ...(Object.keys(block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings).length > 0
+                        ? { voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings } : {}),
                       directionHash: block.direction.hash,
                       ...((block.direction.perPart[index]?.instructions ?? block.direction.instructions) !== undefined
                         ? { instructions: block.direction.perPart[index]?.instructions ?? block.direction.instructions }

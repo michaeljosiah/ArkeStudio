@@ -1,4 +1,4 @@
-import { groupedText, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { soloTurns, groupedText, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
@@ -655,7 +655,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         if (model === null) return sum;
         const label = speechPlanLabel(model);
         return label !== null ? { ...sum, plan: sum.plan ?? label }
-          : { ...sum, estimate: sum.estimate + estimateSpeechMicroUsd(model, row.block.text), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
+          : { ...sum, estimate: sum.estimate + soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
       }, { estimate: 0, plan: null, tokenPriced: false }),
     [rows, modelOf],
   );
@@ -711,7 +711,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (group === undefined || row.state === "made" || row.state === "awaiting") continue;
       const model = modelOf(row.speaker);
       if (model === null || speechPlanLabel(model) !== null) continue;
-      estimate_ -= estimateSpeechMicroUsd(model, row.block.text);
+      estimate_ -= soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0);
     }
     return estimate_ + grouping.groups.reduce((sum, group) => sum + group.estimatedMicroUsd, 0);
   }, [rows, modelOf, grouping]);
@@ -2773,7 +2773,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     ...(row.sentAs.some((part) => part.style !== undefined) ? ["style"] : []),
     `${row.sentAs.length} ${row.sentAs.length === 1 ? "part" : "parts"}`,
   ];
-  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, estimateSpeechMicroUsd(model, row.block.text), creditLeft) : null;
+  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), creditLeft) : null;
   // The Voice tab (design turn 194, rule 12; 194g): Delivery, Note, Speed and Markers as rows, the
   // takes each with its play, Sent as folded with its parts named, and Upload and Make again at
   // the foot. A held proposal is drawn in the direction's place until it is accepted (184b).

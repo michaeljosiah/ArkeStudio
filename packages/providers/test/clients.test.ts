@@ -214,9 +214,11 @@ describe("synchronous speech returns artifacts to the durable queue path", () =>
     const pcm = new Uint8Array([1, 0, 2, 0]);
     const client = new ElevenLabsClient(async (input, init) => { url = String(input); body = JSON.parse(String(init?.body)); return new Response(pcm); });
     const text = "[curious] Who?\n\n[same narrator, natural narration] Nobody replied.";
-    const result = await client.submit("key", { model: "eleven_v4", capability: "voice-tts", params: { voiceId: "calen", text, audioFormat: "wav" } });
+    const result = await client.submit("key", { model: "eleven_v4", capability: "voice-tts", params: { voiceId: "calen", text, audioFormat: "wav", voiceSettings: {} } });
     assert.equal(url, "https://api.elevenlabs.io/v1/text-to-speech/calen?output_format=pcm_24000");
     assert.deepEqual(body, { model_id: "eleven_v4", text });
+    await client.submit("key", { model: "eleven_v4", capability: "voice-tts", params: { voiceId: "calen", text, voiceSettings: { stability: 0.5 } } });
+    assert.deepEqual(body, { model_id: "eleven_v4", text, voice_settings: { stability: 0.5 } });
     const wav = Buffer.from(result.artifacts![0]!.data!);
     assert.equal(wav.toString("ascii", 0, 4), "RIFF");
     assert.equal(wav.readUInt32LE(24), 24000);

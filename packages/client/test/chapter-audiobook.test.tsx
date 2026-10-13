@@ -1947,16 +1947,19 @@ describe("grouped reads (design turn 185)", () => {
     assert.equal(answered.confirmationToken, "tok");
   });
 
-  it("shows the compiled v4 request before purchasing a continuous read", async () => {
-    const state = grouped();
+  for (const requests of [undefined, "per-paragraph"] as const) it(`prices the compiled v4 request (${requests ?? "grouped"}) before purchasing`, async () => {
+    const state = grouped(requests);
     const v4: ManifestModel = { ...GEMINI, provider: "elevenlabs", id: "eleven_v4", displayName: "Eleven v4", pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
     const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
     state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
-    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", narrator: reader, notes: { "maren-kest": "same narrator, slight pitch lift, retain narrator timbre" } } } : p) };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, notes: { "maren-kest": "same narrator, slight pitch lift, retain narrator timbre" } } } : p) };
     const m = await mount(state);
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const displayedPrice = q(m, '[data-testid="read-audiobook"]')!.textContent!.match(/\$([\d.]+)/)![1]!;
+    assert.ok(Number(displayedPrice) > 0.02, "the price includes repeated narrator direction, not just the short source paragraphs");
+    if (requests === "per-paragraph") return;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));
     const sheet = q(m, '[data-testid="read-sheet"]')!;

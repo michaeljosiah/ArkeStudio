@@ -7,6 +7,7 @@ import { productionAudioGenerationSource, productionAudioOperationId } from "../
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { generationCardResults } from "../../src/world-chat/generation-card-results.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { applyVoiceAssignment } from "../../src/sheets/authoring.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -105,6 +106,21 @@ it("uses the native single-line performance compiler and retains its stable quot
   assert.equal(h.inputs.length, 1); assert.equal(h.inputs[0]!.target.kind, "performance-generation");
   await assert.rejects(h.source.compile(action(h.production.meta.id, { operation: "performance", sceneId: h.scene.id, shotId: h.shot.id,
     direction: { speed: 0.8, cues: [] } }), newId("act"), AT), /speed/);
+});
+
+it("fences expressive performance quotes before approval and paid dispatch", async t => {
+  const h = await setup(); t.after(() => h.store.close());
+  await applyVoiceAssignment(h.store, { path: "characters/maren-kest.md", voice: { provider: "elevenlabs", model: "eleven_v4", voiceId: "calen" } });
+  const id = newId("act"), request = action(h.production.meta.id, { operation: "performance", sceneId: h.scene.id, shotId: h.shot.id,
+    direction: { speed: 1, cues: [{ kind: "sound", at: 0, sound: "snorts" }], note: "same male narrator imitating a British woman, slight pitch lift, retain male timbre" } });
+  await h.quotes().prepare(request, id, AT);
+  assert.equal((await readWorldMeta(h.store.dir)).schemaVersion, 78);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 77 }), /newer|schema|version/i);
+  assert.equal(h.inputs.length, 0);
+  await assert.rejects(readPerformanceGenerationQuote(h.store, productionAudioOperationId(id)));
+  await h.quotes().dispatch(request, id);
+  assert.equal(h.inputs.length, 1);
+  assert.equal((await readPerformanceGenerationQuote(h.store, productionAudioOperationId(id))).cadencePlan.note, request.kind === "production-audio-generation" && request.request.operation === "performance" ? request.request.direction?.note : undefined);
 });
 
 it("quotes table-read work through the native planner, including explicit unavailable lines", async t => {

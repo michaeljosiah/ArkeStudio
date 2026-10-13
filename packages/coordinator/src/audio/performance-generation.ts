@@ -63,6 +63,7 @@ export function compilePerformanceGeneration(store: WorldStore, model: ManifestM
 
 export async function retainPerformanceGenerationQuote(store: WorldStore, value: PerformanceGenerationQuote): Promise<void> {
   const quote = PerformanceGenerationQuoteSchema.parse(value);
+  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "voice-direction");
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
 }
 export async function readPerformanceGenerationQuote(store: WorldStore, operationId: string): Promise<PerformanceGenerationQuote> {

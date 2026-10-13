@@ -139,7 +139,7 @@ export class ElevenLabsClient implements ProviderClient {
       body: JSON.stringify({
         model_id: request.model === "eleven-v3" ? "eleven_v3" : request.model,
         text,
-        ...(request.params["voiceSettings"] !== undefined ? { voice_settings: request.params["voiceSettings"] } : {}),
+        ...(request.params["voiceSettings"] !== undefined && Object.keys(request.params["voiceSettings"] as object).length > 0 ? { voice_settings: request.params["voiceSettings"] } : {}),
       }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
