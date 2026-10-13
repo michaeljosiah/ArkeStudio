@@ -10,6 +10,7 @@ import {
   cueStart,
   isPointCue,
   markerMode,
+  tagCharacterLimit,
   type CadenceCue,
   type CadencePlan,
   type DeliveryMarker,
@@ -247,6 +248,7 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
   const span = editing !== undefined && (editing.kind === "delivery" || editing.kind === "emphasis") ? editing.span : { from: at.span.from, to: caret ? sentenceEnd(text, at.span.from) : at.span.to, text: "" };
   const words = { from: span.from, to: span.to, text: text.slice(span.from, span.to) };
   const support = model === null ? null : cadenceSupport(model, language);
+  const phraseLimit = model?.cadence?.phrase === "best-effort-tag" ? tagCharacterLimit(model) : CADENCE_PHRASE_MAX;
   const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
   // A marker placed replaces what it would break (R-40): another marker over the same words,
   // an emphasis across its edge, the same cue or sound at the same place; the cue being changed
@@ -267,10 +269,10 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
     onApply([...others, cue].sort((a, b) => cueStart(a) - cueStart(b)));
   };
   const struck = (reason: string | null) => (reason === null ? null : `${model?.displayName ?? "this reader"} ${reason}`);
-  const deliveryReason = (delivery: DeliveryMarker["delivery"]) => {
+  const deliveryReason = (delivery: DeliveryMarker["delivery"], phrase = "x") => {
     if (model === null) return "no reader";
     if (words.text.trim() === "") return "no words";
-    const mode = markerMode({ kind: "delivery", span: words, ...(delivery !== undefined ? { delivery } : {}), ...(delivery === undefined ? { phrase: "x" } : {}) }, viewPlan(base), model, language, text.length);
+    const mode = markerMode({ kind: "delivery", span: words, ...(delivery !== undefined ? { delivery } : {}), ...(delivery === undefined ? { phrase } : {}) }, viewPlan(base), model, language, text.length);
     if (mode.mode === "unsupported") return mode.reason;
     return oneRequest && mode.mode === "parts" ? ONE_REQUEST_HOLD : null;
   };
@@ -335,7 +337,7 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
           return (
             <button type="button" role="menuitem" className="fy-ab__menu-opt" disabled={reason !== null} title={struck(reason) ?? "Phrase"} onClick={() => setPhrase(editing?.kind === "delivery" ? (editing.phrase ?? "") : "")}>
               <span className={`fy-ab__menu-label${reason !== null ? " fy-ab__mchip--struck" : ""}`}>Phrase…</span>
-              <span className="fy-ab__menu-meta">{CADENCE_PHRASE_MAX}</span>
+              <span className="fy-ab__menu-meta">{phraseLimit}</span>
             </button>
           );
         })()
@@ -343,22 +345,22 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
         <input
           className="fy-ab__menu-search fy-mono"
           aria-label="Phrase"
-          maxLength={CADENCE_PHRASE_MAX}
+          maxLength={phraseLimit}
           value={phrase}
           autoFocus
           onChange={(event) => setPhrase(event.target.value)}
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             const trimmed = phrase.trim();
-            if (trimmed === "") return;
-            place({ kind: "delivery", span: words, phrase: trimmed.slice(0, CADENCE_PHRASE_MAX), ...(editing?.kind === "delivery" && editing.delivery !== undefined ? { delivery: editing.delivery } : {}) });
+            if (trimmed === "" || trimmed.length > phraseLimit || deliveryReason(undefined, trimmed) !== null) return;
+            place({ kind: "delivery", span: words, phrase: trimmed, ...(editing?.kind === "delivery" && editing.delivery !== undefined ? { delivery: editing.delivery } : {}) });
           }}
         />
       )}
       {only !== "sound" && support?.phrase.status !== "unsupported" && (
         <>
           <div className="fy-ab__menu-eb">Emotion and delivery</div>
-          <div className="fy-ab__menu-chips">{EXPRESSIVE_PHRASES.map((phrase) => chip(phrase, phrase, caret ? "select words" : null, editing?.kind === "delivery" && editing.phrase === phrase, () => place({ kind: "delivery", span: words, phrase })))}</div>
+          <div className="fy-ab__menu-chips">{EXPRESSIVE_PHRASES.map((phrase) => chip(phrase, phrase, caret ? "select words" : deliveryReason(undefined, phrase), editing?.kind === "delivery" && editing.phrase === phrase, () => place({ kind: "delivery", span: words, phrase })))}</div>
         </>
       )}
       {onNote !== undefined && only !== "sound" && (

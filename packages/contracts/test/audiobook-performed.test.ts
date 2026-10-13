@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { AudiobookBookSchema, audiobookDirectionHash, audiobookNoteFor, audiobookTakeDirectionHash, performanceNote, type CadencePlan, type ManifestModel } from "../src/index.js";
+import { audiobookBlockState, audiobookCounts, audiobookTextHash, type ChapterAudiobook, type AudiobookBlock } from "../src/index.js";
 
 // One narrator performs the cast, and a narrator for the book (SPEC-047 R-44..R-46).
 const plan: CadencePlan = { schemaVersion: 1, sourceTextHash: `sha256:${"a".repeat(64)}`, delivery: "measured", speed: 1, cues: [] };
@@ -21,6 +22,22 @@ it("a line's note is its speaker's under performed only, and narration takes non
   assert.equal(audiobookNoteFor(book, {}), undefined, "narration");
   assert.equal(audiobookNoteFor({ ...book, reading: "narrator" }, { speaker: "Maren Kest", sheet: "maren-kest" }), undefined);
   assert.equal(audiobookNoteFor({ ...book, reading: "cast" }, { speaker: "Maren Kest", sheet: "maren-kest" }), undefined);
+});
+
+it("v4 performed takes remember turn attribution even without authored direction", () => {
+  const block: AudiobookBlock = { key: "p0.0", paragraph: 0, text: "Wait. Move.", rows: [{ text: "Wait.", speaker: "Jace" }, { text: "Move." }] };
+  const reader = { provider: "elevenlabs", model: "eleven_v4", voiceId: "calen" };
+  const directionHash = audiobookTakeDirectionHash(null, undefined, undefined, block);
+  assert.ok(directionHash, "an unannotated performance still has a stable recovery identity");
+  const record: ChapterAudiobook = { schemaVersion: 1, chapterVersion: 1, hash: "chapter", updatedAt: "2026-10-13T12:00:00Z", flags: {}, direction: {},
+    takes: { "p0.0": { artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6H1", textHash: audiobookTextHash(block.text), reader, format: "wav", characters: block.text.length,
+      parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, directionHash, madeAt: "2026-10-13T12:00:00Z" } } };
+  assert.equal(audiobookBlockState(block, record, reader, undefined, false, undefined, undefined, true), "made");
+  assert.equal(audiobookCounts([block], record, () => reader, undefined, undefined, undefined, true).made, 1);
+  const corrected = { ...block, rows: [{ text: "Wait." }, { text: "Move.", speaker: "Jace" }] };
+  assert.notEqual(audiobookTakeDirectionHash(null, undefined, undefined, corrected), directionHash);
+  assert.equal(audiobookBlockState(corrected, record, reader, undefined, false, undefined, undefined, true), "stale");
+  assert.equal(audiobookCounts([corrected], record, () => reader, undefined, undefined, undefined, true).stale, 1);
 });
 
 it("a note is played through the row's phrase path, or cannot be (R-45)", () => {

@@ -297,4 +297,7 @@ it("sends a grouped read as one request of styled turns in a designed voice, and
     { ...grouped, params: { ...grouped.params, turns: long, text: long.map(turn => turn.text).join(" ") } },
   ]) await assert.rejects(client.submit("test", invalid), ProviderRequestRejectedError);
   assert.equal(bodies.length, 1, "a refused grouped read is never sent");
+  await client.submit("test", { ...grouped, params: { ...grouped.params, text: turns.map(turn => turn.text).join("\n\n") } });
+  assert.equal(bodies.length, 2, "the shared paragraph-preserving request also reaches Google");
+  assert.deepEqual(bodies[1], bodies[0], "both durable separator versions deliver the same styled turns");
 });

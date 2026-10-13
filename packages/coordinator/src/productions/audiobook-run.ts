@@ -437,7 +437,8 @@ export async function prepareChapter(
       text: leadTags.length > 0 ? `${leadTags.join(" ")} ${part.text}` : part.text,
       ...(leadStyle !== "" ? { instructions: part.instructions === undefined ? leadStyle : `${leadStyle} ${part.instructions}` } : {}),
     });
-    const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading);
+    const performedTurns = plan.reading === "performed" && model.provider === "elevenlabs" && model.id === "eleven_v4" ? planned.block : undefined;
+    const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading, performedTurns);
     // Each part's own style apart from the notes the whole chapter shares (design turn 185): a
     // grouped request sends the notes once and each later turn only this.
     const playedNote = playing?.mode === "instruction" ? note! : undefined;
@@ -483,7 +484,8 @@ export async function prepareChapter(
       if (performance !== null) {
         parts = performance.parts;
         noteHeld = performance.noteHeld;
-        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text, voiceSettings: {}, perPart: parts.map(() => ({ voiceSettings: {} })) };
+        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text,
+          ...(held?.plan.delivery !== undefined ? { delivery: held.plan.delivery } : {}), voiceSettings: {}, perPart: parts.map(() => ({ voiceSettings: {} })) };
         own = [];
       }
       if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
@@ -1213,7 +1215,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           model: block.model.id,
           voiceId: block.reader.voiceId,
           parts: block.parts.length,
-          directionHash: block.takeHash ?? null,
+          directionHash: block.direction?.hash ?? block.takeHash ?? null,
           ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
           reference: block.reference,
         };

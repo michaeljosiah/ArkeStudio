@@ -478,6 +478,32 @@ it("long character notes raise the reader boundary before saving and survive rer
   } finally { await w.close(); }
 });
 
+it("performed v4 keeps delivery provenance and a stable recovery hash even without authored direction", async () => {
+  const w = await world();
+  try {
+    const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+    const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed" });
+    const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
+    const block = plan.blocks[0]!.block;
+    const room = { narrator, models: [model], catalogue: [], transcriber: true };
+    const now = () => "2026-10-03T09:00:00.000Z";
+    const override = { cast: { version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: now(), passes: 1, dropped: 0, omitted: 0, lines: [] } };
+    const plain = await prepareChapter(w.store, LEDGER, "neap", room, now, [block.key], override);
+    assert.equal(plain.kind, "ready", plain.kind === "refused" ? plain.reason : "");
+    if (plain.kind !== "ready") return;
+    const speaking = plain.prepared.speaking.find(part => part.block.key === block.key)!;
+    assert.ok(speaking.takeHash);
+    assert.equal(speaking.direction?.hash, speaking.takeHash, "queued and recovered parts share the take's identity");
+    await writeBlockDirection(w.store, LEDGER, plan.chapter, plan.blocks.map(item => item.block), block.key,
+      directionEntry(block.text, directionPlan(block.text, { delivery: "measured", speed: 1, cues: [] }), now()));
+    const directed = await prepareChapter(w.store, LEDGER, "neap", room, now, [block.key], override);
+    assert.equal(directed.kind, "ready");
+    if (directed.kind !== "ready") return;
+    assert.equal(directed.prepared.speaking.find(part => part.block.key === block.key)!.direction?.delivery, "measured");
+  } finally { await w.close(); }
+});
+
 describe("a chapter read grouped (design turn 185)", () => {
   it("prices the chapter as requests, reads it as one request of turns, and files every block's cut as its take", async () => {
     const { store, worldDir, close } = await world();

@@ -499,7 +499,7 @@ export function assignReaders(
       ...planned,
       ...(byPerson ? { recorded: true as const } : {}),
       ...(reading_ !== undefined ? { reading: reading_ } : {}),
-      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_),
+      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_, reading === "performed"),
     };
   });
 }

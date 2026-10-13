@@ -971,15 +971,19 @@ export function audiobookNoteFor(book: Pick<AudiobookBook, "reading" | "notes"> 
  * under `performed`, its speaker's note — so a note changed makes every line of theirs stale.
  * The same name as before for a take with no note, so no take made before notes goes stale.
  */
-export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string, reading?: AudiobookReadingNotes): string | undefined {
+export function audiobookTakeDirectionHash(plan: CadencePlan | null, note?: string, reading?: AudiobookReadingNotes,
+  performedBlock?: Pick<AudiobookBlock, "text" | "speaker" | "sheet" | "rows">): string | undefined {
   const inner = note === undefined
     ? plan === null ? undefined : audiobookDirectionHash(plan)
     : textDigest(`performed-v1:${JSON.stringify({ note, direction: plan === null ? null : audiobookDirectionHash(plan) })}`);
   // The book note and the chapter note name the take too (design turn 184, R-53): changing
   // either makes every block they lead stale. With neither the name is the one before them, so
   // no take made before the notes goes stale.
-  if (!hasReadingNotes(reading)) return inner;
-  return textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
+  const directed = !hasReadingNotes(reading) ? inner
+    : textDigest(`reading-v1:${JSON.stringify({ book: reading.book ?? null, chapter: reading.chapter ?? null, direction: inner ?? null })}`);
+  if (performedBlock === undefined) return directed;
+  return textDigest(`performed-turns-v1:${JSON.stringify({ direction: directed ?? null,
+    rows: (performedBlock.rows ?? [performedBlock]).map(row => ({ text: normalizeSpeechText(row.text), speaker: row.speaker ?? null, sheet: row.sheet ?? null })) })}`);
 }
 export const DEFAULT_AUDIOBOOK_BOOK: AudiobookBook = { schemaVersion: 1, reading: "narrator" };
 
@@ -1026,7 +1030,7 @@ const sameReader = (a: AudiobookReader, b: AudiobookReader): boolean =>
  * or it could neither play nor be read again (codex on PR 1180).
  */
 export function audiobookBlockState(
-  block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources">,
+  block: Pick<AudiobookBlock, "key" | "text" | "shaped" | "sources" | "speaker" | "sheet" | "rows">,
   record: ChapterAudiobook | null,
   assigned: AudiobookReader,
   hasArtifact?: (artifactId: string) => boolean,
@@ -1036,6 +1040,7 @@ export function audiobookBlockState(
   note?: string,
   /** The book note and the chapter note the block is read under (R-53), part of it too. */
   reading?: AudiobookReadingNotes,
+  performed = false,
 ): AudiobookBlockState {
   if (recorded) {
     const take = record?.takes[block.key];
@@ -1057,7 +1062,8 @@ export function audiobookBlockState(
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
-  if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading) !== take.directionHash) return "stale";
+  const turns = performed && assigned.provider === "elevenlabs" && assigned.model === "eleven_v4" ? block : undefined;
+  if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading, turns) !== take.directionHash) return "stale";
   return "made";
 }
 
@@ -1081,11 +1087,12 @@ export function audiobookCounts(
   recordedOf: (block: AudiobookBlock) => boolean = () => false,
   /** The speaker's note and the reading notes each block is read under (R-45, R-53). */
   ledBy: (block: AudiobookBlock) => { note?: string; reading?: AudiobookReadingNotes } = () => ({}),
+  performed = false,
 ): AudiobookCounts {
   const counts: AudiobookCounts = { total: blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0, awaiting: 0, toMake: [] };
   for (const block of blocks) {
     const led = ledBy(block);
-    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block), led.note, led.reading);
+    const state = audiobookBlockState(block, record, assignedOf(block), hasArtifact, recordedOf(block), led.note, led.reading, performed);
     if (state === "made") counts.made += 1;
     else if (state === "awaiting") counts.awaiting += 1;
     else {

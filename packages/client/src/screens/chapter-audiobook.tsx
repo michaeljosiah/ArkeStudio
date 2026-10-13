@@ -563,7 +563,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         block,
         turns: view?.turns ?? { parts: [{ text: normalizeSpeechText(block.text) }] },
         split: recordOrNull?.flags[block.key]?.split ?? null,
-        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led),
+        state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led, reading === "performed"),
         readingHeld: view?.readingHeld ?? [],
         proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
         ...(note !== undefined ? { note } : {}),
@@ -634,6 +634,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         const row = rows.find((candidate) => candidate.block.key === block.key);
         return { ...(row?.note !== undefined ? { note: row.note } : {}), ...(hasReadingNotes(readingNotes) ? { reading: readingNotes } : {}) };
       },
+      reading === "performed",
     );
     // Reactions are read when the chapter is (design turn 187, R-83): the press counts them with
     // the blocks, so it stands while one is left to read. The chapter's own totals stay its blocks'.
