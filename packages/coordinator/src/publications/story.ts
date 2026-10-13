@@ -1,7 +1,7 @@
 import { zipEntry } from "../world-chat/document-text.js";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, open, readFile, readdir, rename, lstat, rm } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join, resolve, relative } from "node:path";
 import { z } from "zod";
 import { manuscriptDocument, StoryEditionSchema, StoryPublicationSettingsSchema,
   type ChapterMix, type ManuscriptDocument, type StoryEdition, type StoryPublicationSettings,
@@ -123,10 +123,15 @@ export class StoryPublicationService {
       await this.verifiedFile(edition, file);
     }
   }
-  async serve(id: string, name: string): Promise<{ path: string; contentType: string; downloadName: string } | null> {
+  async serve(id: string, name: string) { return this.resolveMedia(id, name, false); }
+  async previewMedia(id: string, name: string) {
+    const hit = await this.resolveMedia(id, name, true);
+    return hit ? { path: hit.path, contentType: hit.contentType } : null;
+  }
+  private async resolveMedia(id: string, name: string, preview: boolean): Promise<{ path: string; contentType: string; downloadName: string } | null> {
     try {
       const { edition } = await this.load(id);
-      if (!["preview", "ready"].includes(edition.status)) return null;
+      if (edition.status !== "ready" && !(preview && edition.status === "preview")) return null;
       const file = edition.files.find(file => file.name === name);
       if (!file) return null;
       // Range requests recheck file identity; unchanged multi-hour books need not be rehashed at each seek.
@@ -140,7 +145,7 @@ export class StoryPublicationService {
       const { edition } = await this.load(id);
       const file = edition.files.find(row => row.name === name && row.name === "story." + row.format);
       if (!file || !["preview", "ready"].includes(edition.status)) throw new Error("This edition file cannot be restored.");
-      if (await this.serve(id, name)) return;
+      if (await this.previewMedia(id, name)) return;
       const folder = join(this.directory(id), "files"), info = await lstat(folder);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("The edition folder is unavailable.");
       const stage = join(folder, randomUUID() + ".restore");
@@ -157,14 +162,14 @@ export class StoryPublicationService {
   }
   async previewPage(id: string, chapter: number): Promise<{ html: string; chapter: number; count: number }> {
     const { edition } = await this.load(id);
-    const file = await this.serve(id, "story.epub");
+    const file = await this.previewMedia(id, "story.epub");
     if (!file || !Number.isInteger(chapter) || chapter < 0 || chapter >= edition.settings.chapterIds.length) throw new Error("The captured book page is unavailable.");
     const bytes = await readFile(file.path);
     const page = zipEntry(bytes, "OEBPS/chapter-" + (chapter + 1) + ".xhtml");
     const css = zipEntry(bytes, "OEBPS/style.css");
     if (!page || !css) throw new Error("The captured book page is incomplete.");
     const html = new TextDecoder().decode(page).replace(/<link[^>]+>/, "<style>" + new TextDecoder().decode(css) + "</style>");
-    if (html.length > 4_000_000) throw new Error("This chapter is too large for the in-app preview. Save the EPUB to review it in a reader.");
+    if (html.length > 4_000_000) throw new Error("This chapter is too large for the in-app preview.");
     return { html, chapter, count: edition.settings.chapterIds.length };
   }
   async preview(store: WorldStore, productionId: string, settings: StoryPublicationSettings, fingerprint: string, notify: (edition: StoryEdition) => void): Promise<StoryEdition> {
@@ -269,30 +274,34 @@ export class StoryPublicationService {
         await atomicWriteFile(path, bytes);
       } else {
         if (!this.options.ffmpeg || !this.options.probe?.info) throw new Error("Audiobook export needs the host’s audio tools.");
-        const work = join(directory, "render"); await mkdir(work, { recursive: true });
-        const tracks: string[] = [], boundaries: Array<{ title: string; start: number; end: number }> = [];
-        let time = 0;
-        for (const [index, chapter] of frozen.mixes.entries()) {
-          await phase("Rendering chapter " + (index + 1) + " of " + frozen.mixes.length);
-          const pcm = await mixSamples(inputRoot, chapter.mix, { ffmpeg: this.options.ffmpeg, signal });
-          const file = "chapter-" + index + ".wav";
-          await atomicWriteFile(join(work, file), writeSpeechWav(pcm)); tracks.push(file);
-          const duration = pcm.samples.length / MIX_RATE;
-          boundaries.push({ title: chapter.title, start: time, end: time + duration }); time += duration;
-        }
-        if (!tracks.length) throw new Error("No complete narration was captured.");
-        await atomicWriteFile(join(work, "chapters.txt"), tracks.map(file => "file '" + file + "'").join("\n") + "\n");
-        await atomicWriteFile(join(work, "metadata.txt"), ";FFMETADATA1\ntitle=" + metadata(edition.settings.title) + "\nartist=" + metadata(edition.settings.author) + "\n" +
-          boundaries.map(chapter => "[CHAPTER]\nTIMEBASE=1/1000\nSTART=" + Math.round(chapter.start * 1000) + "\nEND=" + Math.round(chapter.end * 1000) + "\ntitle=" + metadata(chapter.title)).join("\n") + "\n");
-        const candidate = join(work, "candidate.m4b");
-        const coverArgs = frozen.cover ? ["-i", join(inputRoot, frozen.cover.file)] : [];
-        const coverMap = frozen.cover ? ["-map", "2:v:0", "-c:v", frozen.cover.mediaType === "image/png" ? "png" : "mjpeg", "-disposition:v:0", "attached_pic"] : ["-vn"];
-        await this.options.ffmpeg.run(["-y", "-f", "concat", "-safe", "1", "-i", join(work, "chapters.txt"), "-i", join(work, "metadata.txt"), ...coverArgs,
-          "-map", "0:a:0", ...coverMap, "-map_metadata", "1", "-map_chapters", "1", "-metadata", "album=" + edition.settings.title, "-metadata", "language=" + edition.settings.language, "-metadata", "description=" + edition.settings.description, "-metadata", "comment=" + edition.settings.label, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-f", "mp4", candidate], () => {}, signal);
-        const info = await this.options.probe.info(candidate, { signal });
-        if (!info?.hasAudio || !Number.isFinite(info.durationSec) || Math.abs(info.durationSec - time) > 0.2) throw new Error("The audiobook did not pass its duration and audio checks.");
-        const handle = await open(candidate, "r+"); try { await handle.sync(); } finally { await handle.close(); }
-        await rename(candidate, path);
+        const work = resolve(directory, "render");
+        if (relative(resolve(directory), work) !== "render") throw new Error("Invalid render directory.");
+        await mkdir(work, { recursive: true });
+        try {
+          const tracks: string[] = [], boundaries: Array<{ title: string; start: number; end: number }> = [];
+          let time = 0;
+          for (const [index, chapter] of frozen.mixes.entries()) {
+            await phase("Rendering chapter " + (index + 1) + " of " + frozen.mixes.length);
+            const pcm = await mixSamples(inputRoot, chapter.mix, { ffmpeg: this.options.ffmpeg, signal });
+            const file = "chapter-" + index + ".wav";
+            await atomicWriteFile(join(work, file), writeSpeechWav(pcm)); tracks.push(file);
+            const duration = pcm.samples.length / MIX_RATE;
+            boundaries.push({ title: chapter.title, start: time, end: time + duration }); time += duration;
+          }
+          if (!tracks.length) throw new Error("No complete narration was captured.");
+          await atomicWriteFile(join(work, "chapters.txt"), tracks.map(file => "file '" + file + "'").join("\n") + "\n");
+          await atomicWriteFile(join(work, "metadata.txt"), ";FFMETADATA1\ntitle=" + metadata(edition.settings.title) + "\nartist=" + metadata(edition.settings.author) + "\n" +
+            boundaries.map(chapter => "[CHAPTER]\nTIMEBASE=1/1000\nSTART=" + Math.round(chapter.start * 1000) + "\nEND=" + Math.round(chapter.end * 1000) + "\ntitle=" + metadata(chapter.title)).join("\n") + "\n");
+          const candidate = join(work, "candidate.m4b");
+          const coverArgs = frozen.cover ? ["-i", join(inputRoot, frozen.cover.file)] : [];
+          const coverMap = frozen.cover ? ["-map", "2:v:0", "-c:v", frozen.cover.mediaType === "image/png" ? "png" : "mjpeg", "-disposition:v:0", "attached_pic"] : ["-vn"];
+          await this.options.ffmpeg.run(["-y", "-f", "concat", "-safe", "1", "-i", join(work, "chapters.txt"), "-i", join(work, "metadata.txt"), ...coverArgs,
+            "-map", "0:a:0", ...coverMap, "-map_metadata", "1", "-map_chapters", "1", "-metadata", "album=" + edition.settings.title, "-metadata", "language=" + edition.settings.language, "-metadata", "description=" + edition.settings.description, "-metadata", "comment=" + edition.settings.label, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-f", "mp4", candidate], () => {}, signal);
+          const info = await this.options.probe.info(candidate, { signal });
+          if (!info?.hasAudio || !Number.isFinite(info.durationSec) || Math.abs(info.durationSec - time) > 0.2) throw new Error("The audiobook did not pass its duration and audio checks.");
+          const handle = await open(candidate, "r+"); try { await handle.sync(); } finally { await handle.close(); }
+          await rename(candidate, path);
+        } finally { await rm(work, { recursive: true, force: true }); }
       }
       signal.throwIfAborted();
       const measured = await readPublicationFile(output, name, LIMIT, signal);

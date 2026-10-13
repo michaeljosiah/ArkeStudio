@@ -165,7 +165,7 @@ export function PublicationsScreen() {
       <Button disabled={!bridge || busy} onClick={() => void open("zip")}>Open ZIP</Button>
       <Button variant="ghost" disabled={!bridge || busy} onClick={() => void open("directory")}>Open folder</Button>
     </div>
-    {!bridge && <p>Open publications in the desktop app.</p>}
+    {!bridge && <p>Open video publication packages in the desktop app.</p>}
     {busy && <p role="status">Verifying publication…</p>}
     {error && <p role="alert">{error}</p>}
     {[publication, pending].filter((item): item is PublicationPlayback => item !== null).map(item => <div key={item.sessionId} hidden={item === pending}>

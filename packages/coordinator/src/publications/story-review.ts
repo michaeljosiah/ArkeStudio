@@ -7,7 +7,7 @@ import {
 import { effectiveAudioRights, readAudioRights } from "../audio/rights.js";
 import { ProseAuthoringService } from "../application/prose-authoring.js";
 import { anyNarrator } from "../productions/audiobook-listening.js";
-import { planAudiobook, type AudiobookPlan } from "../productions/audiobook.js";
+import { planAudiobook, readAudiobookBook, type AudiobookPlan } from "../productions/audiobook.js";
 import { chapterTiming, plannedReactions } from "../productions/audiobook-timing.js";
 import { openChapter } from "../productions/ops.js";
 import { scanWorld } from "../world/scan.js";
@@ -32,7 +32,9 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
   if (selected.length !== settings.chapterIds.length) throw new Error("The chapter selection changed. Choose the chapters again.");
   const blockers: string[] = [], warnings: string[] = [];
   const rights = settings.outputs.includes("m4b") ? await readAudioRights(store) : [];
-  for (const problem of scan.problems.filter(problem => (problem.path.startsWith(`productions/${productionId}/chapters/`) || (settings.outputs.includes("m4b") && problem.path.startsWith(`productions/${productionId}/`))))) blockers.push(`${problem.path}: ${problem.message}`);
+  const chapterPaths = new Set(selected.map(chapter => "productions/" + productionId + "/chapters/" + chapter.file + ".md"));
+  for (const problem of scan.problems.filter(problem => chapterPaths.has(problem.path))) blockers.push(problem.path + ": " + problem.message);
+  if (settings.outputs.includes("m4b") && await readAudiobookBook(view, productionId) === "unreadable") blockers.push("The book's narration choices could not be read.");
   for (const problem of publicationTextProblems([settings.title, settings.author, settings.description, settings.label].join("\n"))) blockers.push(problem);
   const chapters: Array<Awaited<ReturnType<typeof openChapter>> & { id: string; audioProblems: string[]; plan: AudiobookPlan | null; mix: ChapterMix | null }> = [];
   const findings: StoryStyleFinding[] = [];

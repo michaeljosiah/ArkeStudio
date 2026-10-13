@@ -34,6 +34,12 @@ output hashes before marking the files ready. Failed/cancelled preparations reta
 inputs for retry; incomplete files are not delivered. Completed files are immutable to the app
 and remain usable after the source world moves or closes. Missing/changed files are refused. Desktop Locate restores only a file whose digest matches the same edition; it cannot substitute a different book.
 
+Private story previews use a separate authenticated media route. Native Save and download delivery
+require a ready edition after Create has rechecked the source; preview playback does not approve
+delivery. Reconnecting reloads the selected saved operation. Audio preparation removes temporary
+chapter WAVs and encoder metadata after success, failure or cancellation, retaining captured inputs
+for retry. Readiness checks apply to selected chapters and their shared narration dependencies.
+
 Publications lists private editions across worlds. Authenticated media delivery supports range
 requests, including paired remote browsers. Desktop Save uses a main-process dialog and resolves
 only inventoried edition files; the renderer cannot supply arbitrary host paths. Browser Save

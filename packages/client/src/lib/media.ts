@@ -62,3 +62,7 @@ export function genesisMediaUrl(genesisId: string, relPath: string): string {
 export function storyEditionMediaUrl(id: string, file: string): string {
   return authorize(`${httpBase()}/story-edition-media/${encodeURIComponent(id)}/${encodeURIComponent(file)}`);
 }
+
+export function storyPreviewMediaUrl(id: string, file: string): string {
+  return authorize(httpBase() + "/story-preview-media/" + encodeURIComponent(id) + "/" + encodeURIComponent(file));
+}

@@ -317,9 +317,19 @@ describe("Publish review (turn 224)", () => {
     await act(async () => button(m, /^View preparation$/)!.click());
     assert.ok(button(m, /^Cancel preparation$/), "reopened work retains cancellation");
     await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
-      requestId: list.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready" } } }));
+      requestId: list.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready", files: [{ format: "epub", name: "story.epub", bytes: 42, sha256: "d".repeat(64) }] } } }));
     assert.ok(button(m, /^Create edition$/), "completion from the original request updates the reopened view");
     assert.equal(button(m, /^Cancel preparation$/), undefined);
+    assert.doesNotMatch(text(m), /Save EPUB/);
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    const refreshed = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "list");
+    assert.ok(refreshed && refreshed.kind === "publish-story");
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      requestId: refreshed.requestId, result: { editions: [{ ...edition, status: "ready", phase: "Files ready",
+        files: [{ format: "epub", name: "story.epub", bytes: 42, sha256: "d".repeat(64) }] }] } }));
+    assert.match(text(m), /Save EPUB/, "reconnect recovers completion even when the final event was missed");
+
   });
 
 });

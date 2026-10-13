@@ -3827,6 +3827,8 @@ export class Coordinator {
       serveFile: async (urlPath) => {
         const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
+        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
+        if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
         const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
         // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which

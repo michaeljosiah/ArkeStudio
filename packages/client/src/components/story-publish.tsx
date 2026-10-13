@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { StoryPublicationSettingsSchema, worldImageReferences, type ProductionBundle, type StoryEdition, type StoryPublicationReview, type StoryPublicationSettings, type StoryStyleFinding, type StoryPublishAction } from "@arke-studio/contracts";
 import { listStoryPublications, publishStory, subscribeStoryPublications, useStore, useWorld } from "../lib/store.js";
-import { storyEditionMediaUrl } from "../lib/media.js";
+import { storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button } from "./ui.js";
 
@@ -16,20 +16,20 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
     {edition.error && <p role="alert">{edition.error}</p>}
     {edition.files.map(file => <article className="fy-publish-card" key={file.format}>
       <div><strong>{file.format === "epub" ? "Book · EPUB" : "Audiobook · M4B"}</strong><p>{(file.bytes / 1024 / 1024).toFixed(1)} MB · {edition.settings.chapterIds.length} chapters</p></div>
-      <a className="fy-publish-link" href={storyEditionMediaUrl(edition.id, file.name)} download={edition.settings.title + "." + file.format} onClick={async event => {
+      {edition.status === "ready" && <a className="fy-publish-link" href={storyEditionMediaUrl(edition.id, file.name)} download={edition.settings.title + "." + file.format} onClick={async event => {
         const host = window.arke?.saveStoryPublication;
         if (!host) return;
         event.preventDefault(); setSaved(null);
         const result = await host(edition.id, file.name).catch(() => ({ ok: false, reason: "The file could not be saved." }));
         if (result.ok) setSaved("File saved. Import or share it when you’re ready.");
         else if (!("cancelled" in result) || !result.cancelled) setSaved(result.reason ?? "The file could not be saved.");
-      }}>Save {file.format.toUpperCase()}</a>
+      }}>Save {file.format.toUpperCase()}</a>}
       {edition.error && window.arke?.locateStoryPublication && <Button onClick={async () => {
         const result = await window.arke!.locateStoryPublication!(edition.id, file.name);
         setSaved(result.ok ? "Matching file restored. You can save it again." : result.cancelled ? null : result.reason ?? "The file could not be restored.");
       }}>Locate {file.format.toUpperCase()}</Button>}
       {edition.status === "ready" && <Button variant="ghost" onClick={() => setHandoff(file.format === "epub" ? "kindle" : "audio")}>{file.format === "epub" ? "Read on Kindle" : "Listen on your phone"}</Button>}
-      {file.format === "m4b" && <audio controls preload="none" aria-label="Preview the captured audiobook" src={storyEditionMediaUrl(edition.id, file.name)} />}
+      {file.format === "m4b" && <audio controls preload="none" aria-label="Preview the captured audiobook" src={storyPreviewMediaUrl(edition.id, file.name)} />}
     </article>)}
     {handoff === "kindle" && <div className="fy-publish-card"><strong>Read on Kindle</strong><ol><li>Save the EPUB file.</li><li>Open Amazon’s Send to Kindle and sign in to your Amazon account.</li><li>Upload the EPUB, then open your Kindle app after Amazon finishes processing it.</li></ol><a className="fy-publish-link" href="https://www.amazon.com/sendtokindle" target="_blank" rel="noreferrer">Open Send to Kindle</a><p>Arke cannot confirm that Amazon has received or delivered your book.</p></div>}
     {handoff === "audio" && <div className="fy-publish-card"><strong>Listen with Arke’s voices</strong><ol><li>Save the M4B file to your phone’s Files or Downloads.</li><li>Import it into an audiobook app that accepts M4B files.</li><li>Check playback and offline access in that app.</li></ol><p>The audiobook includes the chosen narration and character voices. Your listening position is separate from your Kindle reading position.</p></div>}
@@ -112,7 +112,12 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
     const off = subscribeStoryPublications(answer => {
       if (answer.type !== "story.published") return;
       if (answer.requestId === loading.current) {
-        if (answer.result.settings && !dirty.current) setSettings(answer.result.settings);
+        if (watching.current && answer.result.editions) {
+          const current = answer.result.editions.find(row => row.id === watching.current);
+          if (current) { setEdition(current); setBusy(current.status === "creating"); setStep(current.status === "ready" ? "Files" : "Preview"); setError(null); }
+          else { setBusy(false); setError("The saved edition could not be found. Recheck the source."); }
+        }
+        if (answer.result.settings && !dirty.current && !watching.current) setSettings(answer.result.settings);
         if (answer.result.error) setError(answer.result.error);
         return;
       }
@@ -131,7 +136,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
     });
     loading.current = publishStory(worldId, production.meta.id, { action: "list" });
     return off;
-  }, [worldId, production.meta.id]);
+  }, [worldId, production.meta.id, connection]);
   useEffect(() => {
     if (priorSource.current !== sourceStamp) { priorSource.current = sourceStamp; setChanged(true); }
   }, [sourceStamp]);

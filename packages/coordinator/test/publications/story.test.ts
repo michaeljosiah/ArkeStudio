@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { StoryPublicationSettings } from "@arke-studio/contracts";
@@ -29,6 +29,8 @@ describe("private story publication", () => {
     assert.deepEqual(review.blockers, []);
     const preview = await h.service.preview(h.store, h.productionId, h.settings, review.fingerprint, () => {});
     assert.equal(preview.status, "preview", preview.error);
+    assert.equal(await h.service.serve(preview.id, "story.epub"), null, "preview cannot be delivered before Create");
+    assert.ok(await h.service.previewMedia(preview.id, "story.epub"));
     const ready = await h.service.create(h.store, h.productionId, preview.id);
     assert.equal(ready.status, "ready");
     const served = await h.service.serve(ready.id, "story.epub");
@@ -53,6 +55,8 @@ describe("private story publication", () => {
     const current = await openChapter(h.store, h.productionId, h.chapter.id);
     await new ProseAuthoringService(h.store).save(h.productionId, h.chapter.file, "Changed.", { baseHash: current.hash });
     await assert.rejects(h.service.create(h.store, h.productionId, preview.id), /source changed/);
+    assert.equal(await h.service.serve(preview.id, "story.epub"), null, "source changes cannot bypass Create through Save");
+    assert.ok(await h.service.previewMedia(preview.id, "story.epub"));
     await writeFile(join(h.root, preview.id, "files", "story.epub"), "damaged");
     assert.equal(await h.service.serve(preview.id, "story.epub"), null);
     assert.match((await h.service.list())[0]!.error!, /missing or changed/);
@@ -146,6 +150,17 @@ describe("publication narration identity", () => {
     await new ProseAuthoringService(h.store).restore(h.productionId, h.chapter.file, before.version);
     assert.deepEqual((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems, []);
   });
+  it("ignores malformed omitted chapters for both reading and narration readiness", async () => {
+    const h = await setup(); await narrate(h);
+    const other = h.store.getBundle().productions.find(row => row.meta.id === h.productionId)!.chapters.find(row => row.id !== h.chapter.id)!;
+    await writeFile(join(h.dir, "productions", h.productionId, "chapters", other.file + ".md"), "---\ninvalid: [\n---\nUnreadable chapter.");
+    for (const outputs of [["epub"], ["epub", "m4b"]] as ("epub" | "m4b")[][]) {
+      const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs });
+      assert.deepEqual(review.blockers, []);
+      assert.deepEqual(review.chapters.map(row => row.id), [h.chapter.id]);
+      assert.deepEqual(review.chapters[0]!.audioProblems, []);
+    }
+  });
   it("refuses estimated take durations for publication", async () => {
     const h = await setup(); await narrate(h, false);
     const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs: ["m4b"] });
@@ -199,10 +214,13 @@ describe("publication narration identity", () => {
     const failed = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
     assert.equal(failed.status, "failed", failed.error); assert.match(failed.error!, /Disk full/);
     assert.equal(await service.serve(failed.id, "story.epub"), null, "a partial build is not deliverable");
+    await assert.rejects(stat(join(h.root, failed.id, "render")), { code: "ENOENT" });
+    assert.ok(await stat(join(h.root, failed.id, "inputs.json")), "retry keeps captured inputs");
     fail = false;
     const preview = await service.retry(failed.id, () => {});
     assert.equal(preview.status, "preview", preview.error); assert.equal(preview.id, failed.id);
     assert.deepEqual(preview.files.map(file => file.format), ["epub", "m4b"]);
+    await assert.rejects(stat(join(h.root, preview.id, "render")), { code: "ENOENT" });
     assert.equal((await service.create(h.store, h.productionId, preview.id)).status, "ready");
     const attempts = encoded;
     await service.retry(preview.id, () => {}); assert.equal(encoded, attempts, "a completed edition is never rebuilt");
@@ -229,7 +247,7 @@ it("writes a real AAC M4B with ordered chapters, author and cover", { skip: proc
   assert.deepEqual(review.blockers, []); assert.deepEqual(review.chapters.flatMap(row => row.audioProblems), []);
   const preview = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
   assert.equal(preview.status, "preview", preview.error);
-  const audio = await service.serve(preview.id, "story.m4b"); assert.ok(audio);
+  const audio = await service.previewMedia(preview.id, "story.m4b"); assert.ok(audio);
   const info = await probe(audio.path);
   assert.equal(info.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio").codec_name, "aac");
   assert.equal(info.chapters.length, 2);
@@ -239,7 +257,7 @@ it("writes a real AAC M4B with ordered chapters, author and cover", { skip: proc
   assert.ok(info.streams.some((stream: { disposition: { attached_pic: number } }) => stream.disposition.attached_pic === 1));
   const page = await service.previewPage(preview.id, 1);
   assert.match(page.html, /<em>emphasis<\/em>/);
-  const epub = await service.serve(preview.id, "story.epub"); assert.ok(epub);
+  const epub = await service.previewMedia(preview.id, "story.epub"); assert.ok(epub);
   const epubBytes = await readFile(epub.path);
   assert.ok(zipEntry(epubBytes, "OEBPS/cover.png"));
   assert.equal((await service.create(h.store, h.productionId, preview.id)).status, "ready");

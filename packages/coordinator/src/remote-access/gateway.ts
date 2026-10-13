@@ -126,7 +126,7 @@ export class RemoteGateway {
     // to the app shell is safe to admit: the shell is public and unframeable, the SameSite=Strict
     // cookies do not ride on the cross-site visit, and everything the page does next is same-origin.
     const shellVisit = (req.method === "GET" || req.method === "HEAD") && req.headers["sec-fetch-mode"] === "navigate"
-      && req.headers["sec-fetch-dest"] === "document" && !/^\/(remote|media|genesis-media|story-edition-media)\//.test(url.pathname);
+      && req.headers["sec-fetch-dest"] === "document" && !/^\/(remote|media|genesis-media|story-edition-media|story-preview-media)\//.test(url.pathname);
     if (this.closing || !this.accepts(req, shellVisit)) {
       if (!this.closing) this.refused(url.pathname.startsWith("/remote/") ? "remote" : "page", () => this.forbidden(req));
       res.writeHead(403).end(); return;
@@ -169,7 +169,7 @@ export class RemoteGateway {
       if (state === "approved") res.setHeader("Set-Cookie", [setCookie(deviceCookie, sealBrowserProof(pending, browserKey as string, this.origin.origin), this.options.devices.cookieMaxAge(pending) ?? 0), setCookie(pairingCookie, "", 0)]);
       res.writeHead(state === "approved" ? 204 : state === "pending" ? 202 : 410).end(); return;
     }
-    if (/^\/(media|genesis-media|story-edition-media)\//.test(url.pathname)) {
+    if (/^\/(media|genesis-media|story-edition-media|story-preview-media)\//.test(url.pathname)) {
       if (!authenticated) { res.writeHead(401).end(); return; }
       if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405).end(); return; }
       // Imported HTML/SVG is user content, not application script. Sharing the page origin
