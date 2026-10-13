@@ -73,6 +73,8 @@ export interface ArkeBridge {
    */
   /** Reveal a completed export through the host's confined world lookup (SPEC-051 R-59). */
   revealMedia?(worldSlug: string, path: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  locateStoryPublication?(editionId: string, file: string): Promise<{ ok: true } | { ok: false; cancelled?: boolean; reason?: string }>;
+  saveStoryPublication?(editionId: string, file: string): Promise<{ ok: true } | { ok: false; cancelled?: boolean; reason?: string }>;
   saveMedia?(
     worldSlug: string,
     path: string,

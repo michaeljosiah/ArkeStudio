@@ -58,3 +58,7 @@ export function genesisMediaUrl(genesisId: string, relPath: string): string {
   const clean = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
   return authorize(`${httpBase()}/genesis-media/${encodeURIComponent(genesisId)}/${clean.split("/").map(encodeURIComponent).join("/")}`);
 }
+
+export function storyEditionMediaUrl(id: string, file: string): string {
+  return authorize(`${httpBase()}/story-edition-media/${encodeURIComponent(id)}/${encodeURIComponent(file)}`);
+}

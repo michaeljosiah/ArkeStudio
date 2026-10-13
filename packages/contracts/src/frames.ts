@@ -1,3 +1,4 @@
+import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
 import { BrowserMediaFilesSchema } from "./browser-media-import.js";
 import { SamplingSettingSchema } from "./local-sampling.js";
@@ -3702,8 +3703,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the world's `exports/` and reports through `export.progress`; the import is read by the host
    * and shown before anything is written, then appended in one commit.
    */
-  z
-    .object({
+  z.object({ kind: z.literal("list-story-publications"), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("publish-story"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, input: StoryPublishActionSchema }).strict(),
+  z.object({
       kind: z.literal("export-manuscript"),
       worldId: UlidSchema,
       productionId: SlugSchema,

@@ -376,6 +376,14 @@ const bridge = {
     const result = await ipcRenderer.invoke("arke:reveal-media", { worldSlug, path }).catch(() => null);
     return result?.ok === true ? { ok: true } : { ok: false, reason: "That export is unavailable." };
   },
+  async locateStoryPublication(editionId: string, file: string) {
+    const result = await ipcRenderer.invoke("arke:locate-story-publication", { editionId, file }).catch(() => null);
+    return result?.ok === true ? { ok: true as const } : result?.cancelled ? { ok: false as const, cancelled: true } : { ok: false as const, reason: "The file does not match this edition or could not be restored." };
+  },
+  async saveStoryPublication(editionId: string, file: string) {
+    const result = await ipcRenderer.invoke("arke:save-story-publication", { editionId, file }).catch(() => null);
+    return result?.ok === true ? { ok: true as const } : result?.cancelled ? { ok: false as const, cancelled: true } : { ok: false as const, reason: "The edition file could not be saved." };
+  },
   async saveMedia(
     worldSlug: string,
     path: string,
