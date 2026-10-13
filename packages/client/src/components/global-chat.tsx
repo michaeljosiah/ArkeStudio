@@ -92,7 +92,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     return () => { delete document.body.dataset.globalChatEnabled; };
   }, [client]);
   useEffect(() => { for (const [id, result] of Object.entries(dictation)) owner.deliverDictation(id, result); }, [owner, dictation]);
-  useEffect(() => { if (connection !== "open") { owner.loseDictations(); owner.loseCreates(); } }, [owner, connection]);
+  useEffect(() => { if (connection !== "open") { owner.loseDictations(); owner.loseCreates(); owner.loseSetupRequests(); } }, [owner, connection]);
   useEffect(() => subscribeProductionSetupResults(result => owner.deliverSetupResult(result)), [owner]);
   useEffect(() => subscribeWorldChatCreateResults(result => owner.deliverCreateResult(result)), [owner]);
   useLayoutEffect(() => {

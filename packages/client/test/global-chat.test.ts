@@ -183,6 +183,16 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.deliverDictation("lost", { text: "Late result" }); assert.equal(owner.value(production.key, "draft", ""), "Typed words");
     assert.match(owner.value(production.key, "dictationTrouble", ""), /connection ended/);
   });
+  it("an unmounted setup cannot strand a switch after disconnect, and its late answer stays correlated", () => {
+    const setup = chatSurfaceForPage(state, `${root}/productions/setup/${CHAT_ID}`)!, owner = new GlobalChatController();
+    owner.open(setup); owner.setValue(setup.key, "draft", "Uncertain setup line");
+    owner.trackSetupRequest(setup.key, "uncertain", "send", "Uncertain setup line");
+    owner.select({ ...worldChat, worldId: "another-world", key: "another-world:world" }); owner.loseSetupRequests();
+    assert.equal(owner.value(setup.key, "setupPendingRequest", "held"), null);
+    assert.equal(owner.value(setup.key, "draft", ""), "Uncertain setup line");
+    owner.open(setup); owner.select(worldChat); assert.equal(owner.getSnapshot().selected?.key, worldChat.key);
+    owner.deliverSetupResult({ requestId: "uncertain" }); assert.equal(owner.value(setup.key, "draft", ""), "");
+  });
   it("an old saved draft with unknown scope waits for explicit page adoption", () => {
     const saved = JSON.stringify({ version: 1, open: true, selected: { ...cut, props: undefined }, drafts: { [cut.key]: "Words from before the upgrade" } });
     const owner = new GlobalChatController({ getItem: () => saved, setItem() {} });

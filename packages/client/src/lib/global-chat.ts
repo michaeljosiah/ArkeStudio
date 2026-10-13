@@ -322,6 +322,16 @@ export class GlobalChatController {
     if (operation === "send") this.setValue(key, "setupLastSendId", requestId);
     this.setValue(key, "setupPendingRequest", { requestId, operation }); this.holdOpening(key, true);
   }
+  loseSetupRequests() {
+    for (const [requestId, request] of this.setupRequests) {
+      if (this.value<{ requestId: string } | null>(request.key, "setupPendingRequest", null)?.requestId !== requestId) continue;
+      this.setValue(request.key, "setupPendingRequest", null);
+      this.setValue(request.key, "setupFailure", "The connection ended before the answer arrived. Your draft is retained. Check the conversation before sending again.");
+      this.holdOpening(request.key, false);
+    }
+    // Retain correlation for a late answer; a newer request's IDs prevent it from clearing
+    // a different send. Disconnect never replays an uncertain operation automatically.
+  }
   deliverSetupResult(result: { requestId?: string; detail?: string }) {
     if (!result.requestId) return;
     const request = this.setupRequests.get(result.requestId); if (!request) return;
