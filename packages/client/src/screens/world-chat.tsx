@@ -509,7 +509,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
   const rippleNotice = useWorldChatRipples(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
-  const [wrappingUp, setWrappingUp] = useState(false);
+  const [wrappingUp, setWrappingUp] = useConversationState("wrappingUp", false);
   /**
    * Points with a decision in flight.
    *
@@ -683,10 +683,10 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
 
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
-  const asked = useRef<string | null>(null);
+  const [asked, setAsked] = useConversationState<string | null>("wrapUpAsked", null);
   /** A mixed Accept all shows its landed ripples here before carrying its unanswered point away. */
-  const proposalsAfterNews = useRef(false);
-  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
+  const [proposalsAfterNews, setProposalsAfterNews] = useConversationState("proposalsAfterNews", false);
+  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked;
   /**
    * Go to the proposals once there are proposals to go to.
    *
@@ -701,12 +701,12 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
    * takes the answer with it, and leaving the button on "Writing them…" for the rest of the
    * session is the failure this whole change is about — but the coordinator may well have
    * finished, and the closed workspace that proves it arrives on the next connection. So the
-   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
+   * asking is remembered with its conversation across remounting and reconnection.
    */
   useEffect(() => {
     if (!worldId) return;
-    if (asked.current && closed) {
-      asked.current = null;
+    if (asked && closed) {
+      setAsked(null);
       setWrappingUp(false);
       /*
        * Only when something is actually waiting.
@@ -718,16 +718,16 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
        * not decide for them.
        */
       if (onChatPage && (row?.openProposalCount ?? 0) > 0) {
-        if (rippleNotice) proposalsAfterNews.current = true;
+        if (rippleNotice) setProposalsAfterNews(true);
         else navigate(`/w/${worldId}/proposals`);
       }
-    } else if (proposalsAfterNews.current && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
-      proposalsAfterNews.current = false;
+    } else if (proposalsAfterNews && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
+      setProposalsAfterNews(false);
       if (onChatPage) navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice, onChatPage]);
+  }, [wrappingUp, asked, proposalsAfterNews, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice, onChatPage]);
 
   const rows = useMemo(
     () => [...(world?.conversations ?? [])].sort(byPendingConsequence),
@@ -833,7 +833,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
         // goes when the conversation closes.
         const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
         if (!attempt) return;
-        asked.current = attempt;
+        setAsked(attempt);
         setWrappingUp(true);
       }}
     >

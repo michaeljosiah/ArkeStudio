@@ -55,7 +55,9 @@ checks. Ordinary review media actions remain disabled. Application checks cover 
 one transcript through navigation and an active run, explicit switching, microphone release,
 no auto-send, original-draft delivery, world boundaries, overlay coexistence, scoped send,
 refresh recovery, named refusals for failed first-file/long-paste creation, and a simulated
-on-screen keyboard. Hidden or detached registrations are not homes for viewport composers.
+on-screen keyboard. Hidden/detached registrations, closed dialogs and CSS-hidden ancestors
+are not homes for viewport composers. Late attachment refusals and World wrap-up requests
+stay with their conversation through thread switches and remounting.
 Installed microphone/codec/Voxa behavior
 and physical-device keyboard behavior still require host acceptance; no paid provider is used.
 

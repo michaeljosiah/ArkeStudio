@@ -231,6 +231,14 @@ describe("global Chat keeps presentation separate from conversation authority (2
     host.parentElement!.removeAttribute("hidden"); assert.equal(owner.host(), host);
     host.remove(); assert.equal(owner.host(), null);
   });
+  for (const wrapper of ['<dialog>', '<div style="display:none">', '<div style="visibility:hidden">']) it(`an invisible ${wrapper} wrapper is not a composer home`, () => {
+    const tag = wrapper.startsWith('<dialog') ? 'dialog' : 'div';
+    const { document } = parseHTML(`<html><body>${wrapper}<div id="host"></div></${tag}></body></html>`);
+    const host = document.getElementById("host") as unknown as HTMLElement, owner = new GlobalChatController();
+    owner.open(production); owner.register(production, host); assert.equal(owner.host(), null);
+    if (tag === 'dialog') host.parentElement!.setAttribute('open', ''); else host.parentElement!.removeAttribute('style');
+    assert.equal(owner.host(), host);
+  });
   for (const kind of ["files", "note"] as const) it(`a failed deferred ${kind} act answers its attachment callback and retains named feedback`, () => {
     const owner = new GlobalChatController(); owner.startNew(worldChat); let answer: readonly { name: string; reason: string }[] = [];
     owner.setValue(worldChat.key, "opening", { act: kind === "files" ? { kind, files: [{ name: "dropped.txt" }] } : { kind, text: "pasted words" }, wasOpen: null, onAttached: (refused: typeof answer) => { answer = refused; } });

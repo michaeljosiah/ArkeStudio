@@ -16,6 +16,17 @@ export const chatKind = (entry: WorldChatContext): ChatSurface["kind"] => entry.
 export const chatTitle = (entry: WorldChatContext) => chatKind(entry) === "world" ? "World Chat" : entry.kind === "bench" ? "Bench Chat"
   : entry.kind === "shot" ? "Shot Chat" : entry.kind === "stage" ? "Stage Chat" : entry.kind === "takes" ? "Takes Chat" : "Builder Chat";
 
+/** A kept-mounted sheet or CSS-hidden home must not release a body-level composer. */
+function chatHostVisible(host: HTMLElement): boolean {
+  if (host.isConnected === false || host.closest?.('[hidden],dialog:not([open]),[aria-hidden="true"]')) return false;
+  const view = host.ownerDocument?.defaultView;
+  for (let node: HTMLElement | null = host; node; node = node.parentElement) {
+    const style = typeof view?.getComputedStyle === "function" ? view.getComputedStyle(node) : node.style;
+    if (style?.display === "none" || style?.visibility === "hidden" || style?.visibility === "collapse") return false;
+  }
+  return true;
+}
+
 /** Route fallback; mounted workspace registrations supply their exact per-turn selection. */
 export function chatSurfaceForPage(state: ClientState | null, path: string): ChatSurface | null {
   const world = state?.world;
@@ -197,7 +208,7 @@ export class GlobalChatController {
   host = () => {
     const selected = this.snapshot.selected, registered = selected ? this.registrations.get(selected.key) : undefined;
     return selected && registered?.surface.path === selected.path && chatSubjectKey(registered.surface) === chatSubjectKey(selected) &&
-      registered.host.isConnected !== false && !registered.host.closest?.("[hidden]") ? registered.host : null;
+      chatHostVisible(registered.host) ? registered.host : null;
   };
   open(surface = this.forPage()) {
     if (surface) this.select(surface);

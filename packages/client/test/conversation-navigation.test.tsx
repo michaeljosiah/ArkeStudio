@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, useLocation, useNavigate } from "react-router";
-import { ConversationPresentationContext, useConversationNavigationGuard } from "../src/components/global-chat-context.js";
+import { ConversationPresentationContext, useConversationNavigationGuard, useConversationState } from "../src/components/global-chat-context.js";
 import { GlobalChatController } from "../src/lib/global-chat.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -30,4 +30,18 @@ for (const outcome of ["stay", "leave", "park"] as const) test(`a prepared Bench
   if (outcome === "park") await render(false);
   await act(async () => { finish(); await prepared; });
   assert.equal(container.querySelector('[data-path]')!.textContent, outcome === "stay" ? "/bench/prepared" : outcome === "leave" ? "/bible" : "/source");
+});
+
+test("an attachment refusal finishing after a conversation unmounts returns to its originating thread", async () => {
+  const container = dom.document.createElement("div") as unknown as HTMLElement; dom.document.body.append(container); root = createRoot(container);
+  const owner = new GlobalChatController(); let finish!: () => void;
+  const upload = new Promise<void>(resolve => { finish = resolve; });
+  function Consumer() {
+    const [refused, setRefused] = useConversationState<readonly string[]>("attachmentTrouble", []);
+    return <><p>{refused.join(" ")}</p><button onClick={() => { void upload.then(() => setRefused(["notes.txt refused"])); }}>Upload</button></>;
+  }
+  const render = async (key: string) => { await act(async () => root!.render(<ConversationPresentationContext.Provider value={{ owner, key, stopCapture: 0, inPanel: true, hasHome: false, panelHost: null }}><Consumer key={key} /></ConversationPresentationContext.Provider>)); };
+  await render("origin"); await act(async () => container.querySelector('button')!.click()); await render("other");
+  await act(async () => { finish(); await upload; }); assert.equal(container.querySelector('p')!.textContent, "");
+  await render("origin"); assert.equal(container.querySelector('p')!.textContent, "notes.txt refused");
 });
