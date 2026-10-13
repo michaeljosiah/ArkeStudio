@@ -2312,7 +2312,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
     const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shot = orderedShots(scene)[1]!;
-    const mounted = await mount(`${SCENE_PATH}?shot=${shot.id}`);
+    await mount(`${SCENE_PATH}?shot=${shot.id}`);
     assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
   });
 
