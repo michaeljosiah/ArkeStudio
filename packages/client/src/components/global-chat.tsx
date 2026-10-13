@@ -132,6 +132,18 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     return () => { original.forEach(([element, inert]) => { element.inert = inert; }); document.removeEventListener("keydown", trap); };
   }, [phone, snapshot.open, panelHost, path]);
   const close = () => { owner.close(); setHistory(false); afterPaint(() => { if (typeof document !== "undefined") document.querySelector<HTMLElement>('[data-global-chat-trigger]')?.focus(); }); };
+  useEffect(() => {
+    if (!inPanel || !panelHost) return;
+    const escape = (event: KeyboardEvent) => {
+      const dialog = panelHost.closest("dialog");
+      // Native modal sheets cover this view; anchored pickers consume Escape first.
+      if (event.key !== "Escape" || event.defaultPrevented || !dialog?.open || !(event.target instanceof Node) || !dialog.contains(event.target)) return;
+      event.preventDefault();
+      if (history) setHistory(false); else close();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [owner, inPanel, panelHost, history]);
   const adopt = () => { const page = owner.forPage(); if (page) owner.open(page); setHistory(false); };
   const choose = (conversationId: string) => {
     const row = world?.conversations.find(c => c.id === conversationId); if (!world || !row) return;

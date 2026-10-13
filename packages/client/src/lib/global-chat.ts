@@ -138,9 +138,10 @@ export class GlobalChatController {
   stopDictation() { this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); }
   startNew(surface: ChatSurface) {
     if (this.snapshot.phase !== "idle") { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
-    this.conversationIds.delete(surface.key); this.values.delete(surface.key);
+    const key = chatKey(surface.worldId, surface.entry);
+    this.conversationIds.delete(key); this.values.delete(key);
     this.pending = null;
-    this.changed({ selected: { ...surface, newThread: true, conversationId: undefined }, open: true, switching: false });
+    this.changed({ selected: { ...surface, key, newThread: true, conversationId: undefined }, open: true, switching: false });
   }
   select(surface: ChatSurface) {
     if (surface.newThread) { this.startNew(surface); return; }

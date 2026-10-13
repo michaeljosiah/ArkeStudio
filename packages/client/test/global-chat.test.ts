@@ -52,6 +52,8 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.equal(owner.value(production.key, "draft", ""), "");
     owner.open({ ...production, key: chatKey(production.worldId, production.entry, CHAT_ID), conversationId: CHAT_ID });
     assert.equal(owner.value(owner.getSnapshot().selected!.key, "draft", ""), "Keep this in the old conversation");
+    owner.startNew(owner.getSnapshot().selected!);
+    assert.equal(owner.getSnapshot().selected?.key, production.key, "a new thread opened from history has a restorable unbound key");
   });
   it("close and reopen keep the thread; opening from another page explicitly follows that page", () => {
     const owner = new GlobalChatController(); owner.setCurrent(worldChat); owner.open(); owner.reportConversation(worldChat.key, CHAT_ID);

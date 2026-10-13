@@ -45,6 +45,8 @@ try {
  await check('Reopening the same context resumes the draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
  await page('d.querySelector(".fy-mchip__btn").click()');await delay(80);await page('[...d.querySelectorAll(".fy-mpick__row")].find(e=>e.textContent.includes("GPT-5.4")).click()');await delay(100);
  await check('Chat-specific selection keeps the provider mark and has no bullet','!!d.querySelector(".fy-mchip .fy-mark")&&w.getComputedStyle(d.querySelector(".fy-mchip__btn"),"::before").content==="none"');
+ await page('d.querySelector(".fy-mchip__btn").click()');await delay(80);await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await delay(120);
+ await check('The model picker consumes Escape before the Chat panel','!!d.querySelector(".fy-global-chat[open]")&&!d.querySelector(".fy-mchip__menu")&&!d.querySelector(".fy-msheet[open]")');
  if(touch){
   await check('Only the workspace beneath the phone sheet is inert','[...d.querySelectorAll("#root [data-screen]")].every(e=>e.inert)&&!d.querySelector("[data-global-chat-trigger]").closest("[inert]")');
   await page('(()=>{Object.defineProperty(w.visualViewport,"height",{configurable:true,value:500});w.visualViewport.dispatchEvent(new w.Event("resize"));})()');await delay(150);
@@ -77,6 +79,8 @@ try {
  await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
  await check('Send captures the visible conversation rather than a previously viewed world','(()=>{const sent=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-send");return sent?.worldId===w.nativeDesignFixture.world.meta.worldId&&sent?.conversationId===w.nativeDesignFixture.worldChat.conversationId&&sent?.text==="Keep the bells quiet. Add a pause.";})()');
  await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);
+ await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(100);
+ await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);
  await page('[...d.querySelectorAll(".fy-global-chat-history button")].find(e=>e.textContent==="New conversation").click()');await delay(120);
  await check('New conversation starts empty without adopting the old thread','d.querySelector(".fy-global-chat .fy-cx__editor").innerText===""&&JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.newThread===true');
  await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.insertText',{text:'Give the bells a new ending.'});await delay(70);
@@ -84,6 +88,8 @@ try {
  await check('The first line creates a scoped conversation before sending','(()=>{const create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");return create?.worldId===w.nativeDesignFixture.world.meta.worldId&&create?.entryContext?.productionId==="saltlight"&&w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send").length===1;})()');
  await page('(()=>{const state=structuredClone(w.nativeDesignFixture),create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");const id="cv_01J8F0000000000000000000C9";state.world.conversations.push({...state.world.conversations[0],id,title:"A new ending",entryContext:create.entryContext});state.worldChat={...state.worldChat,conversationId:id,turns:[],runStatus:"idle"};w.testNewConversation=id;w.nativeDesignSetState(state);})()');await delay(180);
  await check('Creation delivers the held first line once to the new conversation','(()=>{const sends=w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send");return sends.length===2&&sends[1].conversationId===w.testNewConversation&&sends[1].text==="Give the bells a new ending."&&JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.conversationId===w.testNewConversation;})()');
+ await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await delay(100);
+ await check('Escape closes Chat and returns focus to its titlebar control','!d.querySelector(".fy-global-chat[open]")&&d.activeElement?.hasAttribute("data-global-chat-trigger")');
  await page('w.nativeDesignSetMode("closed")');
  await page('(()=>{const scene=w.nativeDesignFixture.world.productions.find(p=>p.meta.id==="saltlight").scenes[0],shot=scene.shots[0];w.testShotPath=`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/scenes/${scene.id}/shots/${shot.id}`;w.nativeDesignNavigate(w.testShotPath);})()');await delay(200);
  await check('Chat remains visible on a deep shot page','[...d.querySelectorAll("[data-global-chat-trigger]")].some(e=>e.getBoundingClientRect().width>0)');
