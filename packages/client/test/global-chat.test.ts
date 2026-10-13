@@ -270,11 +270,13 @@ describe("global Chat keeps presentation separate from conversation authority (2
     let value = ""; const storage = { getItem: () => value, setItem: (_key: string, next: string) => { value = next; } };
     const owner = new GlobalChatController(storage); owner.open(production); owner.reportConversation(production.key, CHAT_ID); owner.setValue(production.key, "draft", "Reload me");
     owner.setValue(production.key, "languageModel", "openai/gpt-5.4"); owner.setValue(production.key, "variants", { "openai/gpt-5.4": "high" });
+    owner.setValue(production.key, "pendingRemember", "openai/gpt-5.4");
     owner.setValue(production.key, "omittedAttachments", new Set(["wca_1"]));
     const restored = new GlobalChatController(storage);
     assert.equal(restored.getSnapshot().open, true); assert.equal(restored.getSnapshot().selected?.conversationId, CHAT_ID);
     assert.equal(restored.value(production.key, "draft", ""), "Reload me");
     assert.equal(restored.value(production.key, "languageModel", ""), "openai/gpt-5.4");
+    assert.equal(restored.value(production.key, "pendingRemember", ""), "openai/gpt-5.4");
     assert.deepEqual(restored.value(production.key, "variants", {}), { "openai/gpt-5.4": "high" });
     assert.deepEqual([...restored.value<ReadonlySet<string>>(production.key, "omittedAttachments", new Set())], ["wca_1"]);
     const broken = new GlobalChatController({ getItem: () => "invalid", setItem: () => { throw Error("quota"); } });

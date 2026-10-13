@@ -159,10 +159,11 @@ export class GlobalChatController {
         for (const [key, draft] of Object.entries(saved.drafts ?? {})) if (typeof draft === "string") this.values.set(key, new Map([["draft", draft]]));
         for (const [key, fields] of Object.entries(saved.choices ?? {})) {
           if (!fields || typeof fields !== "object") continue;
-          const value = fields as { model?: unknown; variants?: unknown; omitted?: unknown; createRequestId?: unknown };
+          const value = fields as { model?: unknown; variants?: unknown; omitted?: unknown; createRequestId?: unknown; pendingRemember?: unknown };
           if (!this.values.has(key)) this.values.set(key, new Map());
           const values = this.values.get(key)!;
           if (typeof value.model === "string") values.set("languageModel", value.model);
+          if (typeof value.pendingRemember === "string" && value.pendingRemember.length <= 500) values.set("pendingRemember", value.pendingRemember);
           if (typeof value.createRequestId === "string" && value.createRequestId.length > 0 && value.createRequestId.length <= 200) values.set("createRequestId", value.createRequestId);
           if (value.variants && typeof value.variants === "object" && Object.values(value.variants).every(v => typeof v === "string")) values.set("variants", value.variants);
           if (Array.isArray(value.omitted) && value.omitted.every(id => typeof id === "string")) values.set("omittedAttachments", new Set(value.omitted));
@@ -184,7 +185,7 @@ export class GlobalChatController {
       selected: selected ? { ...selected, props: undefined, scope: savedScope(selected) } : null,
       retained: Object.fromEntries([...this.retained].map(([key, surface]) => [key, { ...surface, props: undefined, scope: savedScope(surface) }])),
       conversationIds: Object.fromEntries(this.conversationIds),
-      choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), variants: fields.get("variants"), createRequestId: fields.get("createRequestId"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
+      choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), pendingRemember: fields.get("pendingRemember"), variants: fields.get("variants"), createRequestId: fields.get("createRequestId"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
       drafts: Object.fromEntries([...this.values].map(([key, values]) => [key, values.get("draft") ?? ""])) })); } catch { /* Disk-full/private browsing must not drop an in-memory draft. */ }
   }
   setCurrent(surface: ChatSurface | null) { this.current = surface; }

@@ -7,11 +7,13 @@ import { effectReviewBase } from "../lib/editor-effect-review-base.js";
 import { sendEffectProposalCommand, subscribeEffectProposalResults, useStore } from "../lib/store.js";
 import { useEffectReviewFreshness } from "./editor-effect-review-freshness.js";
 import { claimEditorReview, subscribeEditorReviewOwner } from "../lib/editor-review-ownership.js";
+import { useConversationNavigationGuard } from "../components/global-chat-context.js";
 
 interface SessionEntry { worldId: string; productionId: string; session: EffectReviewSession }
 const sessions = new Map<string, SessionEntry>();
 subscribeEditorReviewOwner(event => { if (event.kind !== "effects") sessions.get(event.key)?.session.close(); });
-const activations = new Set<(event: { worldId: string; productionId: string; active: ActiveEffectReview }) => void>();
+type EffectReviewActivation = { worldId: string; productionId: string; active: ActiveEffectReview; originPath?: string };
+const activations = new Set<(event: EffectReviewActivation) => void>();
 let listening = false;
 const emptySession = new EffectReviewSession();
 const sessionKey = (worldId: string, productionId: string) => `${worldId}/${productionId}`;
@@ -34,17 +36,18 @@ function getSession(worldId: string, productionId: string): EffectReviewSession 
   const savedKey = storageKey(worldId, productionId);
   const session = new EffectReviewSession(value => {
     try { if (value) window.sessionStorage.setItem(savedKey, JSON.stringify(value)); else window.sessionStorage.removeItem(savedKey); } catch { /* Storage is optional; the exact server version remains durable. */ }
-  }, stored(savedKey), active => { claimEditorReview({ key, kind: "effects" }); for (const listener of activations) listener({ worldId, productionId, active }); });
+  }, stored(savedKey), (active, originPath) => { claimEditorReview({ key, kind: "effects" }); for (const listener of activations) listener({ worldId, productionId, active, ...(originPath ? { originPath } : {}) }); });
   sessions.set(key, { worldId, productionId, session });
   return session;
 }
-export function subscribeEffectReviewActivations(listener: (event: { worldId: string; productionId: string; active: ActiveEffectReview }) => void): () => void {
+export function subscribeEffectReviewActivations(listener: (event: EffectReviewActivation) => void): () => void {
   activations.add(listener); return () => activations.delete(listener);
 }
 
 /** One review owner shared by the chat cards and the actual Cut screen. */
 export function useEffectProposalReview(worldId: string | undefined, productionId: string | undefined) {
   const studio = useStore();
+  const location = useLocation();
   const session = useMemo(() => worldId && productionId ? getSession(worldId, productionId) : emptySession, [worldId, productionId]);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const world = studio.state?.world;
@@ -65,7 +68,7 @@ export function useEffectProposalReview(worldId: string | undefined, productionI
     if (!worldId || !productionId || !canEdit) return false;
     ensureResultListener();
     const requestId = ulid();
-    if (!session.begin(requestId, operation)) return false;
+    if (!session.begin(requestId, operation, location.pathname + location.search)) return false;
     if (sendEffectProposalCommand(worldId, productionId, requestId, operation)) return true;
     session.refused(requestId, "Reconnect before changing this proposal."); return false;
   };
@@ -94,9 +97,10 @@ export function useEffectProposalReview(worldId: string | undefined, productionI
 /** Mounted once by ProductionConversation; Show/arrival/restore do not navigate or own a transport. */
 export function useEffectReviewNavigation(worldId?: string, productionId?: string): void {
   const navigate = useNavigate(), location = useLocation();
+  const guard = useConversationNavigationGuard();
   useEffect(() => subscribeEffectReviewActivations(event => {
-    if (!worldId || !productionId || event.worldId !== worldId || event.productionId !== productionId) return;
+    if (!worldId || !productionId || event.worldId !== worldId || event.productionId !== productionId || !event.originPath || !guard.allows(event.originPath)) return;
     const path = `/w/${encodeURIComponent(worldId)}/p/${encodeURIComponent(productionId)}/cut`;
     if (location.pathname !== path) void navigate(path);
-  }), [worldId, productionId, location.pathname, navigate]);
+  }), [worldId, productionId, location.pathname, navigate, guard.allows]);
 }

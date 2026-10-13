@@ -802,7 +802,7 @@ export function ProductionConversationBody({
   const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
   const [chatVariants, setChatVariants] = useConversationState<Readonly<Record<string, string>>>("variants", {});
-  const pendingRemember = useRef<string | undefined>(undefined);
+  const [pendingRemember, setPendingRemember] = useConversationState<string | undefined>("pendingRemember", undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -871,7 +871,7 @@ export function ProductionConversationBody({
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
     setChatVariants({});
-    pendingRemember.current = undefined;
+    setPendingRemember(undefined);
     setOpening(previous => { previous?.onAttached?.([]); return null; });
     setBusyMedia(null);
     setMediaRefusal(null);
@@ -885,11 +885,11 @@ export function ProductionConversationBody({
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
   // Keep the chosen model visible until the authoritative save arrives, including legacy ids.
   useEffect(() => {
-    if (pendingRemember.current !== undefined && pendingRemember.current === rememberedLanguageModel) {
-      if (languageModelId === pendingRemember.current) setLanguageModelId(undefined);
-      pendingRemember.current = undefined;
+    if (pendingRemember !== undefined && pendingRemember === rememberedLanguageModel) {
+      if (languageModelId === pendingRemember) setLanguageModelId(undefined);
+      setPendingRemember(undefined);
     }
-  }, [languageModelId, rememberedLanguageModel]);
+  }, [languageModelId, rememberedLanguageModel, pendingRemember]);
   const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
   const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
   const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
@@ -1309,7 +1309,7 @@ export function ProductionConversationBody({
             const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
             if (kept === undefined) return;
             // Only a model chosen here waits for its save to land; an effort alone leaves the model as it is.
-            if (languageModelId !== undefined) pendingRemember.current = kept;
+            if (languageModelId !== undefined) setPendingRemember(kept);
             setProductionModel(worldId, productionId, "llm", kept, chatVariant);
           } }
         : {})}

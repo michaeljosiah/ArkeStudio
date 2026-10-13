@@ -22,6 +22,10 @@ Stop referring to and explicit File in world, dictation, context-specific model 
 replies. Dictation releases capture on close/suspension and delivers editable words to the original
 draft, including after world navigation. Switching waits for transcription. It never auto-sends.
 Backend decision/spend authorities and the original conversation protocols remain unchanged.
+Effect-review activation retains the Review press's source path and respects current presentation
+before navigating to Cut. Pending production model saves retain their matching choice across
+thread switches and window recovery, clearing only the corresponding unchanged chat override
+when the authoritative save is observed.
 
 [Master/design notes](../../design-system/global-chat-224.notes.md) document provenance, approval
 and verification commands. The native review now imports the implemented App with a recording
