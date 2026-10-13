@@ -118,5 +118,3 @@ export function affectedStoryNarration(plan: AudiobookPlan, body: string): strin
   const next = audiobookBlocks(body, plan.cast === "unreadable" ? null : plan.cast, audiobookHeading(plan.chapter.order, plan.chapter.title), audiobookBlockOptions(plan.book, record));
   return plan.blocks.filter(block => record?.takes[block.block.key] && !next.blocks.some(candidate => candidate.key === block.block.key && candidate.text === block.block.text)).map(block => block.block.key);
 }
-
-

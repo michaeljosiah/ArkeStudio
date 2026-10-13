@@ -35,6 +35,7 @@ const LIMIT = 32 * 1024 ** 3;
 /** Host-owned private files. No edition depends on a world folder after its inputs are captured. */
 export class StoryPublicationService {
   private readonly active = new Map<string, AbortController>();
+  private readonly verified = new Map<string, { expected: string; path: string; assertUnchanged(): Promise<void> }>();
   constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner; probe?: MediaProbe } = {}) {}
   stop(): void { for (const controller of this.active.values()) controller.abort(); }
   cancel(id: string): void { this.active.get(z.string().uuid().parse(id))?.abort(); }
@@ -82,7 +83,13 @@ export class StoryPublicationService {
     const names = await readdir(this.root).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
     const editions: StoryEdition[] = [];
     for (const id of names.filter(name => z.string().uuid().safeParse(name).success)) {
-      const saved = await this.load(id);
+      let saved: z.infer<typeof Stored>;
+      try { saved = await this.load(id); }
+      catch (error) {
+        // A crash before the first receipt can leave a directory, not an edition.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
       let edition = saved.edition;
       if ((worldId && edition.worldId !== worldId) || (productionId && edition.productionId !== productionId)) continue;
       if (edition.status === "creating" && !this.active.has(id)) {
@@ -96,11 +103,24 @@ export class StoryPublicationService {
     }
     return editions.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
+  private async verifiedFile(edition: StoryEdition, file: StoryEdition["files"][number]): Promise<string> {
+    const key = edition.id + "/" + file.name, expected = file.sha256 + ":" + file.bytes;
+    const cached = this.verified.get(key);
+    if (cached?.expected === expected) {
+      try { await cached.assertUnchanged(); return cached.path; }
+      catch { this.verified.delete(key); }
+    }
+    const digest = await readPublicationFile(this.directory(edition.id), "files/" + file.name, LIMIT);
+    requirePublicationDigest(digest, { sha256: file.sha256, byteLength: file.bytes });
+    const path = await checkedPublicationPath(this.directory(edition.id), "files/" + file.name);
+    this.verified.set(key, { expected, path, assertUnchanged: digest.assertUnchanged });
+    return path;
+  }
   private async verify(edition: StoryEdition): Promise<void> {
     if (edition.files.length !== edition.settings.outputs.length) throw new Error("The edition is incomplete.");
     for (const file of edition.files) {
       if (file.name !== "story." + file.format || !edition.settings.outputs.includes(file.format)) throw new Error("Invalid edition inventory.");
-      requirePublicationDigest(await readPublicationFile(this.directory(edition.id), "files/" + file.name, LIMIT), { sha256: file.sha256, byteLength: file.bytes });
+      await this.verifiedFile(edition, file);
     }
   }
   async serve(id: string, name: string): Promise<{ path: string; contentType: string; downloadName: string } | null> {
@@ -109,8 +129,9 @@ export class StoryPublicationService {
       if (!["preview", "ready"].includes(edition.status)) return null;
       const file = edition.files.find(file => file.name === name);
       if (!file) return null;
-      requirePublicationDigest(await readPublicationFile(this.directory(id), "files/" + file.name, LIMIT), { sha256: file.sha256, byteLength: file.bytes });
-      return { path: await checkedPublicationPath(this.directory(id), "files/" + file.name), contentType: file.format === "epub" ? "application/epub+zip" : "audio/mp4", downloadName: [...edition.settings.title].map(char => char.charCodeAt(0) < 32 || '<>:"/\\\\|?*'.includes(char) ? "_" : char).join("").slice(0, 100) + "." + file.format };
+      // Range requests recheck file identity; unchanged multi-hour books need not be rehashed at each seek.
+      const path = await this.verifiedFile(edition, file);
+      return { path, contentType: file.format === "epub" ? "application/epub+zip" : "audio/mp4", downloadName: [...edition.settings.title].map(char => char.charCodeAt(0) < 32 || '<>:"/\\\\|?*'.includes(char) ? "_" : char).join("").slice(0, 100) + "." + file.format };
     } catch { return null; }
   }
   /** Only the trusted desktop picker supplies source; matching bytes repair the same edition. */
@@ -143,6 +164,7 @@ export class StoryPublicationService {
     const css = zipEntry(bytes, "OEBPS/style.css");
     if (!page || !css) throw new Error("The captured book page is incomplete.");
     const html = new TextDecoder().decode(page).replace(/<link[^>]+>/, "<style>" + new TextDecoder().decode(css) + "</style>");
+    if (html.length > 4_000_000) throw new Error("This chapter is too large for the in-app preview. Save the EPUB to review it in a reader.");
     return { html, chapter, count: edition.settings.chapterIds.length };
   }
   async preview(store: WorldStore, productionId: string, settings: StoryPublicationSettings, fingerprint: string, notify: (edition: StoryEdition) => void): Promise<StoryEdition> {
@@ -297,4 +319,3 @@ export class StoryPublicationService {
     });
   }
 }
-

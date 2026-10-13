@@ -28,6 +28,7 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  { group: "Private story publishing · turn 224 · approved", screen: "Narration recovery in the affected chapter", frame: "224v", route: "Story / Chapter / Audiobook", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Clarifies the approved recovery path; saved publication choices survive the chapter visit."] },
   { group: "Private story publishing · turn 224 · approved", screen: "One Publish entry from the story and audiobook", frame: "224a", route: "Story / Publish", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Revision 2 approved by the author on 2026-10-13, including Formatting &amp; style review. The shared rules in turn 224 govern these states; existing exports remain available."] },
   { group: "Private story publishing · turn 224 · approved", screen: "Edition · book and audiobook, one identity", frame: "224b", route: "Story / Publish", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Revision 2 approved by the author on 2026-10-13, including Formatting &amp; style review. The shared rules in turn 224 govern these states; existing exports remain available."] },
   { group: "Private story publishing · turn 224 · approved", screen: "Contents · every selected chapter is accounted for", frame: "224c", route: "Story / Publish", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Revision 2 approved by the author on 2026-10-13, including Formatting &amp; style review. The shared rules in turn 224 govern these states; existing exports remain available."] },
@@ -700,6 +701,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "publish-private-review.html", what: "Approved private EPUB/M4B publishing and explicit style review, turn 224.", state: "approved · implementation PR #1751" },
   { file: "air-particles-220.review.html", what: "Approved Air Particles, physics, blend modes, protection and Arke review: turns 220–223.", state: "approved · SPEC-055" },
   { file: "crossfade-216.review.html", what: "Approved crossfade designs 216–219 and isolated prototype: fixed cuts, bulk authoring, protection and Arke review.", state: "approved · SPEC-054 implementation" },
   { file: "editor-effects-213.review.html", what: "Approved designs 213–215: effect targets, optional audio reaction and editable AI arrangement review; isolated clickable prototype.", state: "design approved · SPEC-053 proposed · not implemented" },

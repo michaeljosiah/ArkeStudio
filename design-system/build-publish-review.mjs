@@ -16,7 +16,7 @@ const styleAt = style.indexOf('/* Turn 224:');
 if (styleAt < 0) throw new Error('Missing turn 224 styles');
 const styles = style.slice(0, style.indexOf('/* Turn 138')) + style.slice(styleAt);
 const captions = [...turn.matchAll(/<div class="dv-olabel"><a class="dv-oid" href="#(224[a-z])">[^<]+<\/a>([^<]+)<\/div>/g)];
-if (captions.length !== 21) throw new Error(`Expected 21 frames, found ${captions.length}`);
+if (captions.length !== 22) throw new Error(`Expected 22 frames, found ${captions.length}`);
 const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
 const output = `<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Arke · Publish a private story · Turn 224</title>

@@ -22,4 +22,3 @@ try {
  const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
  if (code !== 0) throw new Error("Private Publish smoke exited " + code);
 } finally { await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
-

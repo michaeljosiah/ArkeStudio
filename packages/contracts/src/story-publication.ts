@@ -86,7 +86,6 @@ export function emDashSuggestions(body: string): Array<{ paragraph: number; star
 export function publicationTextProblems(text: string): string[] {
   const problems: string[] = [];
   if ([...text].some(char => { const code = char.codePointAt(0)!; return (code < 32 && ![9, 10, 13].includes(code)) || code === 0xfffe || code === 0xffff || (code >= 0xd800 && code <= 0xdfff); })) problems.push("Text contains characters that cannot be represented in EPUB.");
-  if (/^(?:#{1,6}\s|>\s|\s*[-+]\s|\s*\d+[.)]\s|\s*```)/m.test(text) || /!?\[[^\]]*\]\([^)]+\)/.test(text)) problems.push("Headings, lists, quotations, links or code inside prose need review in the manuscript; this book format preserves paragraphs, emphasis and scene breaks.");
+  if (/^(?:#{1,6}\s|>\s|\s*[-+]\s|\s*\*\s+(?!\*)|\s*\d+[.)]\s|\s*```)/m.test(text) || /!?\[[^\]]*\]\([^)]+\)/.test(text)) problems.push("Headings, lists, quotations, links or code inside prose need review in the manuscript; this book format preserves paragraphs, emphasis and scene breaks.");
   return problems;
 }
-

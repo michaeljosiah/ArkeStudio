@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { StoryPublicationSettings } from "@arke-studio/contracts";
@@ -41,7 +41,8 @@ describe("private story publication", () => {
     assert.match(new TextDecoder().decode(zipEntry(bytes, "OEBPS/chapter-1.xhtml")!), /Maren turned—she knew the voice/);
     const current = await openChapter(h.store, h.productionId, h.chapter.id);
     await new ProseAuthoringService(h.store).save(h.productionId, h.chapter.file, "A different story.", { baseHash: current.hash });
-    assert.equal((await h.service.list())[0]!.fingerprint, ready.fingerprint);
+    await mkdir(join(h.root, "00000000-0000-4000-8000-000000000000"));
+    assert.equal((await h.service.list())[0]!.fingerprint, ready.fingerprint, "an interrupted folder before its first receipt does not hide completed editions");
     assert.deepEqual(await readFile((await h.service.serve(ready.id, "story.epub"))!.path), bytes);
   });
   it("refuses source changes after preview and never relabels a damaged edition as ready", async () => {
@@ -106,7 +107,7 @@ describe("private story publication", () => {
 });
 
 
-async function narrate(h: Awaited<ReturnType<typeof setup>>) {
+async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true) {
   const { DEFAULT_NARRATOR, audiobookTextHash } = await import("@arke-studio/contracts");
   const { planAudiobook, updateAudiobook } = await import("../../src/productions/audiobook.js");
   const { fileGeneratedArtifact } = await import("../../src/artifacts/filing.js");
@@ -121,7 +122,7 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>) {
       block: row.block.key, paragraph: row.block.paragraph, textHash: audiobookTextHash(row.block.text), provider: row.assigned.provider,
       model: row.assigned.model, voiceId: row.assigned.voiceId, parts: 1, characters: row.block.text.length, estimatedMicroUsd: 0, costMicroUsd: 0 };
     const artifact = await fileGeneratedArtifact(h.store, { sourcePath, generation, production: h.productionId,
-      mediaProbe: { durationSec: async () => 1, info: async () => ({ durationSec: 1, hasAudio: true }) } });
+      mediaProbe: { durationSec: async () => measured ? 1 : null, info: async () => measured ? { durationSec: 1, hasAudio: true } : null } });
     takes[row.block.key] = { artifactId: artifact.id, textHash: generation.textHash, reader: row.assigned, assigned: row.assigned,
       format: "wav", characters: generation.characters, parts: 1, estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: new Date().toISOString() };
   }
@@ -144,6 +145,11 @@ describe("publication narration identity", () => {
     assert.deepEqual(changed.chapters[0]!.audioProblems, ["Block p0.0: needs updating."]);
     await new ProseAuthoringService(h.store).restore(h.productionId, h.chapter.file, before.version);
     assert.deepEqual((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems, []);
+  });
+  it("refuses estimated take durations for publication", async () => {
+    const h = await setup(); await narrate(h, false);
+    const review = await h.service.review(h.store, h.productionId, { ...h.settings, outputs: ["m4b"] });
+    assert.ok(review.chapters[0]!.audioProblems.some(problem => problem.includes("measured duration is missing")));
   });
   it("keeps presentation-only spacing current without making new audio", async () => {
     const h = await setup(); await narrate(h);
@@ -245,4 +251,3 @@ it("writes a real AAC M4B with ordered chapters, author and cover", { skip: proc
     await writeFile(join(process.env.ARKE_STORY_SMOKE_OUTPUT, "ffprobe.json"), JSON.stringify(info, null, 2));
   }
 });
-

@@ -121,7 +121,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       if (result.review) {
         setReview(result.review); setBusy(false); setFinding(null);
         if (operation.current === "decide") { setApplied(pendingImpact.current); pendingImpact.current = []; }
-        if (operation.current === "review" || operation.current === "decide") setStep("Formatting & style");
+        if (operation.current === "review" || operation.current === "decide") { setChanged(false); setStep("Formatting & style"); }
       }
       if (result.edition) {
         setEdition(result.edition); setBusy(result.edition.status === "creating");
@@ -176,13 +176,14 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
       {step === "Formatting & style" && (finding ? <div className="fy-publish-review">
         <p>{finding.chapterTitle} · Paragraph {finding.paragraph + 1}</p><p>{finding.reason}</p>
         <div className="fy-publish-comparison"><section><h4>Before</h4><p>{finding.before}</p></section><section><h4>Proposed</h4><textarea aria-label="Proposed text" value={replacement} onChange={event => setReplacement(event.target.value)} /></section></div>
-        <p className="fy-publish-notice">{finding.narration.length ? "Narration to check after applying: " + finding.narration.join(", ") + ". Changed recordings will need updating." : "No kept recording was found for this paragraph."} Arke will not regenerate audio here.</p>
+        <p className="fy-publish-notice">{finding.narration.length ? finding.narration.length + (finding.narration.length === 1 ? " recording in this paragraph needs" : " recordings in this paragraph need") + " checking after applying. Changed recordings will need updating." : "No kept recording was found for this paragraph."} Arke will not regenerate audio here.</p>
         <div className="fy-publish-actions"><Button disabled={busy} onClick={() => { pendingImpact.current = []; request({ action: "decide", settings, finding, decision: "keep", replacement: finding.before }); }}>Keep original</Button><Button disabled={busy || !replacement.trim() || replacement === finding.before} variant="primary" onClick={() => { pendingImpact.current = finding.narration; request({ action: "decide", settings, finding, decision: "apply", replacement }); }}>Apply to manuscript</Button><Button variant="ghost" onClick={() => setFinding(null)}>Cancel</Button></div>
       </div> : <>
         <label className="fy-publish-choice"><input type="checkbox" checked={settings.avoidEmDashes} onChange={event => { const next = { ...settings, avoidEmDashes: event.target.checked }; update(next); request({ action: "review", settings: next }); }} /><span><strong>Avoid em dashes</strong><small>Optional style rule. Em dashes are valid in EPUB. Each proposed change needs your approval.</small></span></label>
-        {applied.length > 0 && <p role="status">Text updated. Review narration blocks {applied.join(", ")} before including the audiobook.</p>}
+        {applied.length > 0 && <p role="status">Text updated. Review the {applied.length} affected {applied.length === 1 ? "recording" : "recordings"} before including the audiobook.</p>}
         {blockers.length > 0 && <div className="fy-publish-notice" role="alert"><strong>Needs attention</strong><ul>{blockers.map((problem, index) => <li key={index}>{problem}</li>)}</ul></div>}
         {review?.warnings.map((warning, index) => <p key={index}>{warning}</p>)}
+        {settings.outputs.includes("m4b") && review?.chapters.filter(chapter => chapter.audioProblems.length).map(chapter => <Link key={chapter.id} to={'/w/' + worldId + '/p/' + production.meta.id + '/story/chapters/' + encodeURIComponent(chapter.id) + '?view=audiobook'} onClick={onClose}>Review narration · {chapter.title}</Link>)}
         {review && review.findings.length === 0 && <p>No findings for the selected style rule.</p>}
         {review?.findings.map(row => <article className="fy-publish-card" key={row.id}><strong>{row.chapterTitle} · Paragraph {row.paragraph + 1}</strong><p>{row.before}</p><span>{row.kept ? "Original kept for this text" : row.narration.length ? "Narration may need updating" : "Optional style suggestion"}</span><Button disabled={busy} onClick={() => openFinding(row)}>Review change</Button></article>)}
         <div className="fy-publish-actions"><Button disabled={busy} onClick={() => { setChanged(false); refresh(); }}>Recheck</Button><Link to={`/w/${worldId}/p/${production.meta.id}/story/audiobook`} onClick={onClose}>Review narration</Link>{settings.outputs.includes("m4b") && <Button onClick={() => { const next = { ...settings, outputs: ["epub"] as ("epub" | "m4b")[] }; update(next); request({ action: "review", settings: next }); }}>Make book only</Button>}</div>
@@ -197,4 +198,3 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
     </div>
   </PageSheet>;
 }
-

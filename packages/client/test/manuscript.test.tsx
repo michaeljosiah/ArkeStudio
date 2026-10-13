@@ -293,7 +293,7 @@ describe("Publish review (turn 224)", () => {
       productionId: "inkbound", requestId: request.requestId, result: { review: { fingerprint: "b".repeat(64), settings: request.input.action === "review" ? request.input.settings : {} as never,
         chapters: [{ id: "neap", title: "Neap", words: 10, audioProblems: [] }], findings: [finding], warnings: [], blockers: [] } } }));
     await act(async () => button(m, /^Review change$/)!.click());
-    assert.match(text(m), /Before/); assert.match(text(m), /p0.0/);
+    assert.match(text(m), /Before/); assert.match(text(m), /recording in this paragraph/);
     assert.equal(m.sent.some(message => message.kind === "publish-story" && message.input.action === "decide"), false);
     await act(async () => button(m, /^Apply to manuscript$/)!.click());
     const decision = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "decide");

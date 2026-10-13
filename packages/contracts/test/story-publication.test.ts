@@ -33,4 +33,3 @@ describe("private publication formatting review", () => {
     assert.equal(StoryPublicationSettingsSchema.safeParse({ ...base, language: "English" }).success, false);
   });
 });
-
