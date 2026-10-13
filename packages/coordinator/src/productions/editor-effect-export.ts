@@ -8,6 +8,7 @@ import { partitionEffectBlendLayers, type PictureBlendMode } from "@arke-studio/
 import { hashMediaFile } from "../media/node-media-host.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
+import { toExtendedLength } from "../world/paths.js";
 
 const MAX_INTERMEDIATE_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_GROUPS = 128;
@@ -40,7 +41,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
   const remember = async (path: string) => { const info = await lstat(path); ownedFiles.set(path, { dev: info.dev, ino: info.ino }); };
   const discard = async (path: string) => {
     try {
-      await ownedPath(relative(store.dir, path).split(sep).join("/"));
+      await ownedPath(relative(toExtendedLength(store.dir), toExtendedLength(path)).split(sep).join("/"));
       const current = await lstat(path), owned = ownedFiles.get(path);
       if (owned && current.dev === owned.dev && current.ino === owned.ino) await unlink(path);
     } catch { /* A disappeared or redirected cache path is no longer ours to remove. */ }
