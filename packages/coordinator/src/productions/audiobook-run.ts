@@ -1285,11 +1285,11 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
                 // The direction rides as the performance path's does (R-8): the words already
                 // decorated, the settings beside them, the sentence where the row takes one, and
                 // the direction's name so the job is this direction's and no other's.
+                ...((block.direction?.hash ?? block.takeHash) !== undefined ? { directionHash: block.direction?.hash ?? block.takeHash } : {}),
                 ...(block.direction !== null
                   ? {
                       ...(Object.keys(block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings).length > 0
                         ? { voiceSettings: block.direction.perPart[index]?.voiceSettings ?? block.direction.voiceSettings } : {}),
-                      directionHash: block.direction.hash,
                       ...((block.direction.perPart[index]?.instructions ?? block.direction.instructions) !== undefined
                         ? { instructions: block.direction.perPart[index]?.instructions ?? block.direction.instructions }
                         : {}),

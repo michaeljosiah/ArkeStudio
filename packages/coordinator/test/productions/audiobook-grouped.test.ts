@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   ChapterAudiobookSchema,
+  audiobookTextHash,
   GOOGLE_FREE_LIMIT,
   soloTurns,
   SPLIT_DID_NOT_MATCH,
@@ -17,8 +18,8 @@ import {
 import { geminiSpeechModel, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { dropRunawayTail, integratedLoudness, normaliseSpeech, readSpeechWav, trimSpeech, writeSpeechWav, type SpeechPcm } from "../../src/audio/speech-wav.js";
 import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "../../src/productions/audiobook-split.js";
-import { keepSplitTake, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
-import { directionEntry, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
+import { keepSplitTake, priorPartJob, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
+import { directionEntry, updateAudiobook, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
 import { directionPlan } from "../../src/voice/direction.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { speechStretches, timeWords, type TimedWord } from "../../src/voice/word-times.js";
@@ -672,3 +673,34 @@ describe("a chapter read grouped (design turn 185)", () => {
   });
 });
 
+
+it("a paid performed-v4 sound reaction retains the identity needed for crash recovery", async () => {
+  const w = await world();
+  try {
+    const model = SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")!;
+    const narrator = { provider: model.provider, model: model.id, voiceId: "calen", label: "Calen" };
+    await writeAudiobookBookRaised(w.store, LEDGER, { schemaVersion: 1, reading: "performed", requests: "per-paragraph" });
+    const plan = await planAudiobook(w.store, LEDGER, "neap", { narrator });
+    const host = plan.blocks[1]!.block;
+    await mkdir(join(w.worldDir, "productions", LEDGER, ".voices"), { recursive: true });
+    await writeFile(join(w.worldDir, "productions", LEDGER, ".voices", "01-neap.json"), JSON.stringify({ version: plan.chapter.version, hash: plan.chapter.hash, derivedAt: "2026-10-03T09:00:00.000Z", passes: 1, dropped: 0, omitted: 0, lines: [] }));
+    await updateAudiobook(w.store, LEDGER, plan.chapter, current => ({ ...current, reactions: { x1: {
+      host: { key: host.key, textHash: audiobookTextHash(host.text) }, speaker: "narrator", sound: "laughs", offset: 0, by: "author", at: "2026-10-03T09:00:00.000Z" } } }));
+    const h = await harness(w.store, { model });
+    await h.run({ only: ["x1"] });
+    const quote = priced(h.events)!;
+    assert.ok(quote, JSON.stringify(h.events));
+    await h.run({ only: ["x1"], confirmationToken: quote.confirmationToken });
+    assert.equal(h.sent.length, 1);
+    const input = h.sent[0]!;
+    assert.equal(input.params.text, "[laughs]");
+    assert.ok(input.params.directionHash);
+    const prepared = await prepareChapter(w.store, LEDGER, "neap", { narrator, models: [model], catalogue: [], transcriber: true }, () => "2026-10-03T09:00:00.000Z", ["x1"]);
+    assert.equal(prepared.kind, "ready"); if (prepared.kind !== "ready") return;
+    const block = prepared.prepared.speaking.find(b => b.block.key === "x1")!;
+    assert.equal(input.params.directionHash, block.takeHash);
+    const job = { ...input, id: "jb_reaction", status: "succeeded", landedFiles: ["reaction.wav"] } as unknown as Job;
+    assert.equal(priorPartJob([job], { worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap", block: "x1", textHash: audiobookTextHash(block.text),
+      provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
+  } finally { await w.close(); }
+});
