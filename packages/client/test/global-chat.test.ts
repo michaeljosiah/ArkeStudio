@@ -123,6 +123,14 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.holdOpening(production.key, false); assert.equal(owner.getSnapshot().selected?.key, cut.key);
     owner.select(production); assert.deepEqual(owner.value(production.key, "opening", null), { text: "The submitted first line" });
   });
+  it("an old saved draft with unknown scope waits for explicit page adoption", () => {
+    const saved = JSON.stringify({ version: 1, open: true, selected: { ...cut, props: undefined }, drafts: { [cut.key]: "Words from before the upgrade" } });
+    const owner = new GlobalChatController({ getItem: () => saved, setItem() {} });
+    assert.equal(owner.getSnapshot().selected?.scopeMissing, true); assert.equal(owner.value(cut.key, "draft", ""), "Words from before the upgrade");
+    owner.setCurrent(cut); owner.register(cut, {} as HTMLElement); owner.refresh(cut, {} as HTMLElement);
+    assert.equal(owner.getSnapshot().selected?.scopeMissing, true);
+    owner.open(); assert.equal(owner.getSnapshot().selected?.scopeMissing, undefined); assert.equal(owner.value(cut.key, "draft", ""), "Words from before the upgrade");
+  });
   it("a same-key page with another subject has no home for the retained composer", () => {
     const owner = new GlobalChatController(); owner.open(production);
     const chapter: ChatSurface = { ...production, path: production.path + "/chapter", props: { ...production.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
