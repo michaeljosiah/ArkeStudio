@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { WorldChatContext } from "@arke-studio/contracts";
-import { createWorldChat, useStore } from "./store.js";
+import { createWorldChat, subscribeWorldChatCreateResults, useStore } from "./store.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
+import { chatSurfaceForPage } from "./global-chat.js";
 
 /**
  * Starting a conversation about the thing you are already looking at (#70 phase 6).
@@ -16,16 +18,25 @@ import { createWorldChat, useStore } from "./store.js";
  * readable when the conversation is opened again a week later.
  */
 export function useTalkItThrough(worldId: string | undefined) {
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const [starting, setStarting] = useState(false);
+  const { state, connection } = useStore();
+  const navigate = useNavigate(), location = useLocation(), owner = useGlobalChat();
+  const path = location.pathname + location.search;
+  const [pending, setPending] = useState<{ requestId: string; worldId: string; path: string; conversationId?: string } | null>(null);
+  const starting = pending !== null;
 
-  const opened = state?.worldChat?.conversationId ?? null;
+  useEffect(() => subscribeWorldChatCreateResults(result => {
+    setPending(previous => previous?.requestId === result.requestId && previous.worldId === result.worldId
+      ? result.conversationId ? { ...previous, conversationId: result.conversationId } : null : previous);
+  }), []);
   useEffect(() => {
-    if (!starting || !opened || !worldId) return;
-    setStarting(false);
-    navigate(`/w/${worldId}/chat/${opened}`);
-  }, [starting, opened, worldId, navigate]);
+    if (!pending) return;
+    if (pending.path !== path || pending.worldId !== worldId || connection !== "open") { setPending(null); return; }
+    if (!pending.conversationId || state?.world?.meta.worldId !== worldId || !state.world.conversations.some(row => row.id === pending.conversationId)) return;
+    const destination = `/w/${worldId}/chat/${pending.conversationId}`;
+    const surface = chatSurfaceForPage(state, destination);
+    if (surface) owner?.history(surface);
+    setPending(null); void navigate(destination);
+  }, [pending, path, worldId, connection, state?.world, owner, navigate]);
 
   /**
    * `title` is the opening line of the conversation, not a name somebody has to invent. A
@@ -33,8 +44,9 @@ export function useTalkItThrough(worldId: string | undefined) {
    */
   const talk = (title: string, entryContext: WorldChatContext) => {
     if (!worldId || starting) return;
-    setStarting(true);
-    createWorldChat(worldId, title, crypto.randomUUID(), entryContext);
+    const requestId = crypto.randomUUID();
+    setPending({ worldId, path, requestId });
+    if (!createWorldChat(worldId, title, requestId, entryContext)) setPending(null);
   };
 
   return { talk, starting };

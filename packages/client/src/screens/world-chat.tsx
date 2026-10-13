@@ -1,7 +1,7 @@
 import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
-import { useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
+import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "../components/global-chat-context.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
@@ -477,6 +477,7 @@ export function WorldChatScreen() {
 
 export function WorldChatView({ embedded }: { embedded?: { worldId: string; conversationId?: string; onConversationChange(id: string): void } }) {
   const route = useParams(), presentation = useConversationPresentation();
+  const mediaNavigation = useConversationNavigationGuard();
   const inPanel = presentation?.inPanel === true;
   const worldId = embedded?.worldId ?? route.worldId, conversationId = embedded ? embedded.conversationId : route.conversationId;
 
@@ -517,7 +518,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
    * workspace comes back, which is the only thing that knows whether the point survived.
    */
   const [busyPoints, setBusyPoints] = useState<string[]>([]);
-  const mediaRequests = useRef(new Map<string, string>());
+  const mediaRequests = useRef(new Map<string, { candidateId: string; path: string }>());
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The act waiting on a conversation to exist, and what was open when it was asked for. */
   const [opening, setOpening] = useConversationState<{ act: Opening; wasOpen: string | null } | null>("opening", null);
@@ -558,18 +559,18 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   useEffect(
     () =>
       subscribeWorldChatMediaOpened((answer) => {
-        const candidateId = mediaRequests.current.get(answer.requestId);
-        if (!candidateId || answer.conversationId !== conversationId || answer.worldId !== worldId) return;
+        const request = mediaRequests.current.get(answer.requestId);
+        if (!request || answer.conversationId !== conversationId || answer.worldId !== worldId) return;
         mediaRequests.current.delete(answer.requestId);
-        setBusyPoints((points) => points.filter((id) => id !== candidateId));
+        setBusyPoints((points) => points.filter((id) => id !== request.candidateId));
         if (answer.sessionId) {
           setMediaRefusal(null);
-          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+          if (mediaNavigation.allows(request.path)) void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
         } else {
           setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
         }
       }),
-    [conversationId, navigate, worldId],
+    [conversationId, navigate, worldId, mediaNavigation.allows],
   );
 
   /**
@@ -618,9 +619,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const hold = (act: Opening) => {
     if (!worldId || opening) return;
     setOpening({ act, wasOpen: opened });
-    const requestId = crypto.randomUUID();
+    const requestId = (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
     presentation?.owner.trackCreateRequest(presentation.key, requestId);
-    if (!createWorldChat(worldId, "New conversation", requestId)) {
+    if (!createWorldChat(worldId, "New conversation", requestId, presentation?.owner.getSnapshot().selected?.entry)) {
       setOpening(null);
       presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
     }
@@ -655,7 +656,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
     }
     const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
     if (!requestId) return;
-    mediaRequests.current.set(requestId, point.id);
+    mediaRequests.current.set(requestId, { candidateId: point.id, path: mediaNavigation.path });
     setBusyPoints((points) => [...points, point.id]);
     setMediaRefusal(null);
   };

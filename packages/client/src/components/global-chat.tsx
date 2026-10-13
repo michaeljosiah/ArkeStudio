@@ -58,11 +58,11 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), navigate = useNavigate(), host = useRef<HTMLDivElement>(null);
   const surface = chatSurfaceForPage(state, location.pathname + location.search);
   useEffect(() => {
-    if (conversationId && state?.world?.meta.worldId === worldId && surface && !surface.conversationId)
+    if (conversationId && location.pathname === `/w/${worldId}/chat/${conversationId}` && state?.world?.meta.worldId === worldId && surface && !surface.conversationId)
       void navigate(`/w/${worldId}/chat`, { replace: true });
-  }, [conversationId, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
+  }, [conversationId, location.pathname, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
   const latest = useRef(surface); latest.current = surface;
-  useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId]);
+  useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   return <div className="fy-global-chat-slot">{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></div>;
 }

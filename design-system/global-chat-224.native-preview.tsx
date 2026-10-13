@@ -3,7 +3,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { MemoryRouter, useNavigate } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { App } from "../packages/client/src/App";
 import { __setBridgeForTest, __setStateForTest, __connectionStatusForTest, __applyEventForTest } from "../packages/client/src/lib/store";
 import { developLayoutFixture } from "../packages/client/test/develop-layout-fixture";
@@ -43,7 +43,7 @@ __setBridgeForTest(bridge);
 __setStateForTest(state);
 __connectionStatusForTest("open");
 const renderer = createRoot(document.getElementById("root")!);
-function FixtureNavigation() { const navigate = useNavigate(); Object.assign(window, { nativeDesignNavigate: navigate }); return null; }
+function FixtureNavigation() { const navigate = useNavigate(), route = useLocation(); Object.assign(window, { nativeDesignNavigate: navigate, nativeDesignPath: route.pathname }); return null; }
 flushSync(() => renderer.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/saltlight/story`]}><FixtureNavigation /><App /></MemoryRouter>));
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -57,7 +57,7 @@ async function setMode(mode: string) {
  await wait(150);
 }
 Object.assign(window, { nativeDesignSetMode: setMode, nativeDesignReady: ready,
- nativeDesignSetState: __setStateForTest, nativeDesignEvent: __applyEventForTest, nativeDesignFixture: state });
+ nativeDesignSetState: __setStateForTest, nativeDesignEvent: __applyEventForTest, nativeDesignConnection: __connectionStatusForTest, nativeDesignFixture: state });
 // Comparison-only specimen. World Chat's proposed host hides a model with no Settings name (195f).
 let specimen: ReturnType<typeof createRoot> | null = null, specimenHost: HTMLElement | null = null;
 Object.assign(window, { nativeDesignWorldSpecimen: (value?: string, remove=false) => {

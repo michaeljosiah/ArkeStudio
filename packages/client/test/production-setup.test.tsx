@@ -6,6 +6,9 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
 import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
+import { GlobalWorldChatEntry } from "../src/components/global-chat.js";
+import { GlobalChatContext } from "../src/components/global-chat-context.js";
+import { GlobalChatController } from "../src/lib/global-chat.js";
 import { NewProductionScreen } from "../src/screens/world.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -83,6 +86,15 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    function Entry() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={ID} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Entry /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`);
+    assert.equal(owner.getSnapshot().selected?.kind, "setup");
+  });
   for (const status of ["created", "discarded"] as const) it(`a direct embedded setup chat follows its ${status} result`, async () => {
     const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
     dom.document.body.append(container); root = createRoot(container);

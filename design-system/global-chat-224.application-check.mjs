@@ -47,6 +47,13 @@ try {
  await page('w.nativeDesignSetMode("closed")');await check('Closing hides the sheet without cancelling the run','!d.querySelector(".fy-global-chat[open]")&&!w.nativeDesignCommands.some(e=>e.kind==="world-chat-cancel")');
  await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`)');await delay(250);await page('w.nativeDesignSetMode("proposed")');
  await check('Reopening the same context resumes the draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('d.querySelector(".fy-global-chat [aria-label=Dictate]").click()');await delay(80);await page('d.querySelector(".fy-global-chat [data-listening=true]").click()');await delay(100);
+ await page('(()=>{w.lostDictation=w.nativeDesignCommands.findLast(e=>e.kind==="transcribe-dictation").requestId;w.nativeDesignConnection("closed");})()');await delay(100);await page('w.nativeDesignConnection("open")');await delay(100);
+ await page('d.querySelector(".fy-global-chat [aria-label=Dictate]").click()');await delay(100);
+ await check('Dictation can restart on the retained body after a lost transcription','!!d.querySelector(".fy-global-chat [data-listening=true]")');
+ await page('d.querySelector(".fy-global-chat [data-listening=true]").click()');await delay(100);
+ await page('(()=>{const request=w.nativeDesignCommands.findLast(e=>e.kind==="transcribe-dictation");w.nativeDesignSetState(structuredClone(w.nativeDesignFixture),{dictation:{[w.lostDictation]:{text:"STALE WORDS",error:null},[request.requestId]:{text:"",error:null}}});})()');await delay(120);
+ await check('A lost transcription cannot append after reconnect','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
  await page('d.querySelector(".fy-mchip__btn").click()');await delay(80);await page('[...d.querySelectorAll(".fy-mpick__row")].find(e=>e.textContent.includes("GPT-5.4")).click()');await delay(100);
  await check('Chat-specific selection keeps the provider mark and has no bullet','!!d.querySelector(".fy-mchip .fy-mark")&&w.getComputedStyle(d.querySelector(".fy-mchip__btn"),"::before").content==="none"');
  await page('d.querySelector(".fy-mchip__btn").click()');await delay(80);await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});await delay(120);
@@ -125,5 +132,12 @@ try {
  await page('w.location.reload()');await delay(300);for(let i=0;i<80;i++){if(await page('typeof w.nativeDesignReady==="function" ? w.nativeDesignReady().then(()=>true) : false').catch(()=>false))break;await delay(100);}await delay(150);
  await check('Refreshing during creation retains the unsent first line','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Retain this first line across refresh."');
  await check('Restoring an uncertain first turn does not submit or create automatically','!w.nativeDesignCommands.some(e=>e.kind==="world-chat-send"||e.kind==="world-chat-create")');
+ await page('(()=>{const saved=JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1"));w.retryCreateRequest=saved.choices[saved.selected.key].createRequestId;w.nativeDesignAllowTestInput();d.querySelector(".fy-global-chat [aria-label=Send]").click();})()');await delay(100);
+ await check('An explicit retry reuses the uncertain creation request after refresh','!!w.retryCreateRequest&&w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create").requestId===w.retryCreateRequest');
+ await page('w.nativeDesignConnection("closed")');await delay(80);await page('w.nativeDesignConnection("open")');await delay(80);
+ await page('w.nativeDesignSetMode("closed")');await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/productions/setup/${w.nativeDesignFixture.worldChat.conversationId}`)');await delay(150);
+ await check('The canonical production setup route is not redirected as a missing chat','w.nativeDesignPath.includes("/productions/setup/")');
+ await page('(()=>{const state=structuredClone(w.nativeDesignFixture);state.world.conversations[0].entryContext={kind:"sheet",sheetKind:"character",sheetId:"maren-kest"};w.nativeDesignSetState(state);w.nativeDesignNavigate(`/w/${state.world.meta.worldId}/chat/${state.worldChat.conversationId}`);})()');await delay(120);await page('w.nativeDesignSetMode("proposed")');
+ await check('A sheet conversation retains World Chat and its read-only model display','d.querySelector(".fy-global-chat header h2").textContent==="World Chat"&&!d.querySelector(".fy-global-chat .fy-mchip__btn:not(.fy-mchip__btn--fixed)")');
  if(report.errors.length)throw Error(report.errors.join('\n'));console.log(`${report.checks.length} application lifecycle checks passed (${touch?'coarse':'fine'} pointer)`);
 } finally {fs.writeFileSync(path.join(out,'application-'+(touch?'touch':'mouse')+'.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

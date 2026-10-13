@@ -1,11 +1,21 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useClientRender } from "./production-studio-context.js";
+import { useLocation } from "react-router";
 import type { GlobalChatController } from "../lib/global-chat.js";
 export const GlobalChatContext = createContext<GlobalChatController | null>(null);
 export const useGlobalChat = () => useContext(GlobalChatContext);
 export const ConversationPresentationContext = createContext<{ owner: GlobalChatController; key: string; stopCapture: number; inPanel: boolean; panelHost: HTMLElement | null; hasHome: boolean; scopeMissing?: boolean; conversationId?: string; newThread?: boolean } | null>(null);
 export const useConversationPresentation = () => useContext(ConversationPresentationContext);
+/** Async media preparation may finish on a parked view. Its result cannot take over a new page. */
+export function useConversationNavigationGuard() {
+  const location = useLocation(), presentation = useConversationPresentation();
+  const path = location.pathname + location.search;
+  const current = useRef({ path, visible: true });
+  current.current = { path, visible: !presentation || presentation.inPanel || presentation.hasHome };
+  const allows = useCallback((origin: string) => current.current.path === origin && current.current.visible, []);
+  return { path, allows };
+}
 /** Values belong to their selected subject, including an async dictation finishing after world navigation. */
 export function useConversationState<T>(name: string, initial: T): [T, Dispatch<SetStateAction<T>>] {
   const presentation = useConversationPresentation();

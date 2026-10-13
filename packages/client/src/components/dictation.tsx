@@ -82,13 +82,18 @@ function usePushToTalk(onText: (text: string) => void): PushToTalk {
   const capture = useRef<{ recorder: MediaRecorder; stop(): void } | null>(null);
   const epoch = useRef(0), mounted = useRef(true), deliver = useRef(onText);
   deliver.current = onText;
-  const sidecar = useVoiceSidecar(), { state } = useStore(), dictation = useDictation();
+  const sidecar = useVoiceSidecar(), { state, connection } = useStore(), dictation = useDictation();
   const result = requestId ? dictation[requestId] : undefined;
   useEffect(() => {
     if (!result) return;
     if (result.text && !presentation) onText(result.text);
     setTrouble(result.error); setRequestId(null);
   }, [result]);
+  useEffect(() => {
+    if (connection === "open" || !requestId) return;
+    setRequestId(null);
+    setTrouble("The connection ended before dictation returned. Your typed draft is retained; dictate again.");
+  }, [connection, requestId]);
   useEffect(() => {
     presentation?.owner.phase(recorder ? "listening" : requestId ? "transcribing" : "idle");
   }, [recorder, requestId, presentation?.owner]);

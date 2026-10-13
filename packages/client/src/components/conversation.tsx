@@ -1,5 +1,5 @@
 import { GlobalConversationEntry } from "./global-chat.js";
-import { useConversationPresentation, useConversationState, useGlobalChat } from "./global-chat-context.js";
+import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "./global-chat-context.js";
 import { useClientRender } from "./production-studio-context.js";
 import { ProductionStudio } from "./production-studio.js";
 import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
@@ -797,6 +797,7 @@ export function ProductionConversationBody({
   const navigate = useNavigate();
   useEffectReviewNavigation(worldId, productionId);
   const presentation = useConversationPresentation();
+  const mediaNavigation = useConversationNavigationGuard();
   const [message, setMessage] = useConversationState("draft", "");
   const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
@@ -846,7 +847,7 @@ export function ProductionConversationBody({
   const [sideOpen, setSideOpen] = useState(false);
   const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
-  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
+  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const hasContext = entry !== undefined || !!productionId;
   const contextKey = JSON.stringify(context);
@@ -915,7 +916,7 @@ export function ProductionConversationBody({
     }
     return presentation?.conversationId ? rows.find(row => row.id === presentation.conversationId) ?? null : [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
   }, [state?.world?.conversations, state?.worldChat?.conversationId, contextKey, presentation?.conversationId, presentation?.newThread, opening?.was]);
-  const conversationId = thread?.id ?? null;
+  const conversationId = presentation?.conversationId ?? thread?.id ?? null;
   useEffect(() => { presentation?.owner.reportConversation(presentation.key, conversationId); }, [presentation?.owner, presentation?.key, conversationId]);
 
   useEffect(
@@ -926,16 +927,17 @@ export function ProductionConversationBody({
           answer.conversationId !== mediaRequest.current.conversationId ||
           answer.worldId !== worldId
         ) return;
+        const requestedPath = mediaRequest.current.path;
         mediaRequest.current = null;
         setBusyMedia(null);
         if (answer.sessionId) {
           setMediaRefusal(null);
-          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+          if (mediaNavigation.allows(requestedPath)) void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
         } else {
           setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
         }
       }),
-    [navigate, worldId],
+    [navigate, worldId, mediaNavigation.allows],
   );
 
   const openMedia = (point: WorldChatPoint) => {
@@ -946,7 +948,7 @@ export function ProductionConversationBody({
     }
     const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
     if (!requestId) return;
-    mediaRequest.current = { requestId, candidateId: point.id, conversationId };
+    mediaRequest.current = { requestId, candidateId: point.id, conversationId, path: mediaNavigation.path };
     setBusyMedia(point.id);
     setMediaRefusal(null);
   };
@@ -958,8 +960,9 @@ export function ProductionConversationBody({
   }, [worldId, conversationId]);
 
   const workspace = state?.worldChat ?? null;
-  const createThread = (title: string, requestId: string = crypto.randomUUID()) => {
+  const createThread = (title: string, retry?: string) => {
     if (!worldId) return false;
+    const requestId = retry ?? (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
     presentation?.owner.trackCreateRequest(presentation.key, requestId);
     const sent = createWorldChat(worldId, title, requestId, context);
     if (!sent) presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
@@ -978,9 +981,10 @@ export function ProductionConversationBody({
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
+      if (languageModelId === opening.modelId && chatVariant === opening.variant) { setLanguageModelId(undefined); setChatVariants({}); }
     }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection, languageModelId, chatVariant]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   const readReplies = useReadReplies(loaded);
   const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
@@ -1066,8 +1070,6 @@ export function ProductionConversationBody({
         ...(replyOnly ? { replyOnly: true } : {}),
         ...(onSent !== undefined ? { onSent } : {}),
       });
-      setLanguageModelId(undefined);
-      setChatVariants({});
       return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the

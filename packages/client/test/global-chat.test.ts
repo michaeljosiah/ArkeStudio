@@ -47,6 +47,14 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.open(history);
     assert.equal(owner.value(history.key, "draft", ""), "A retained draft");
   });
+  it("contextual sheet conversations keep World Chat and its model rules after history and refresh", () => {
+    const contextual = { ...state, world: { ...world, conversations: [{ ...world.conversations[0]!, id: CHAT_ID, entryContext: { kind: "sheet" as const, sheetKind: "character" as const, sheetId: "maren-kest" } }] } };
+    const surface = chatSurfaceForPage(contextual, `${root}/chat/${CHAT_ID}`)!;
+    assert.equal(surface.kind, "world"); assert.equal(surface.title, "World Chat"); assert.equal(surface.props, undefined);
+    let saved = ""; const owner = new GlobalChatController({ getItem: () => saved, setItem: (_key, text) => { saved = text; } }); owner.history(surface);
+    const restored = new GlobalChatController({ getItem: () => saved, setItem() {} });
+    assert.equal(restored.getSnapshot().selected?.kind, "world"); assert.equal(restored.getSnapshot().selected?.scopeMissing, false);
+  });
   it("closed workspace registration preserves a restored selected conversation", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID); owner.close();
     owner.setCurrent(cut); owner.register(cut, {} as HTMLElement);
@@ -192,6 +200,14 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.equal(owner.value(setup.key, "draft", ""), "Uncertain setup line");
     owner.open(setup); owner.select(worldChat); assert.equal(owner.getSnapshot().selected?.key, worldChat.key);
     owner.deliverSetupResult({ requestId: "uncertain" }); assert.equal(owner.value(setup.key, "draft", ""), "");
+  });
+  it("an uncertain create keeps its retry identity across refresh without replaying the act", () => {
+    let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, text: string) => { saved = text; } };
+    const owner = new GlobalChatController(storage); owner.startNew(production); owner.setValue(production.key, "draft", "Retry the first line");
+    owner.trackCreateRequest(production.key, "same-create-request"); owner.loseCreates();
+    const restored = new GlobalChatController(storage);
+    assert.equal(restored.value(production.key, "createRequestId", null), "same-create-request");
+    assert.equal(restored.value(production.key, "draft", ""), "Retry the first line"); assert.equal(restored.opening(), false);
   });
   it("an old saved draft with unknown scope waits for explicit page adoption", () => {
     const saved = JSON.stringify({ version: 1, open: true, selected: { ...cut, props: undefined }, drafts: { [cut.key]: "Words from before the upgrade" } });

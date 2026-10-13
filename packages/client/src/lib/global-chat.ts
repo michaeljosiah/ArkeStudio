@@ -11,7 +11,9 @@ export const chatKey = (worldId: string, entry: WorldChatContext, conversationId
   `${worldId}:${JSON.stringify(entry)}${conversationId ? ":" + conversationId : ""}`;
 export const chatSubjectKey = (value: ChatSurface) => JSON.stringify([value.entry, value.props?.subject,
   value.props?.dock?.subjectPrefix, value.props?.dock?.about]);
-export const chatTitle = (entry: WorldChatContext) => entry.kind === "world" ? "World Chat" : entry.kind === "bench" ? "Bench Chat"
+export const chatKind = (entry: WorldChatContext): ChatSurface["kind"] => entry.kind === "production-setup" ? "setup"
+  : entry.kind === "bench" || "productionId" in entry ? "production" : "world";
+export const chatTitle = (entry: WorldChatContext) => chatKind(entry) === "world" ? "World Chat" : entry.kind === "bench" ? "Bench Chat"
   : entry.kind === "shot" ? "Shot Chat" : entry.kind === "stage" ? "Stage Chat" : entry.kind === "takes" ? "Takes Chat" : "Builder Chat";
 
 /** Route fallback; mounted workspace registrations supply their exact per-turn selection. */
@@ -58,7 +60,7 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
   const row = conversationId ? world.conversations.find(c => c.id === conversationId) : undefined;
   if (conversationId && !row) { conversationId = undefined; path = `/w/${world.meta.worldId}/chat`; }
   if (row?.entryContext) { entry = row.entryContext; title = chatTitle(entry); label = `${world.meta.name} / ${row.title}`; }
-  const kind = entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production";
+  const kind = chatKind(entry);
   return { key: chatKey(world.meta.worldId, entry, conversationId), worldId: world.meta.worldId,
     worldName: world.meta.name, title, label, kind, entry, path,
     ...(conversationId ? { conversationId } : {}),
@@ -80,7 +82,7 @@ function savedScope(surface: ChatSurface) {
     subjectPrefix: props.dock.subjectPrefix, about: props.dock.about, subjectLine: props.dock.subjectLine } : undefined } : undefined;
 }
 function restoreScope(worldId: string, entry: WorldChatContext, raw: unknown): ProductionConversationProps | undefined {
-  if (!raw || typeof raw !== "object" || entry.kind === "world" || entry.kind === "production-setup") return undefined;
+  if (!raw || typeof raw !== "object" || chatKind(entry) !== "production") return undefined;
   const value = raw as { subject?: unknown; dock?: Record<string, unknown> };
   const subject = WorldChatSubjectSchema.safeParse(value.subject), props = conversationProps(worldId, entry);
   if (value.subject !== undefined && !subject.success) return undefined;
@@ -102,8 +104,8 @@ function restoredSurface(raw: unknown): ChatSurface | null {
   if (value.conversationId !== undefined && !ConversationIdSchema.safeParse(value.conversationId).success) return null;
   const props = restoreScope(value.worldId, parsed.data, value.scope);
   return { key: value.key, worldId: value.worldId, worldName: String(value.worldName ?? "World"), title: String(value.title ?? "Chat"), label: String(value.label ?? ""), path: String(value.path ?? ""),
-    entry: parsed.data, kind: parsed.data.kind === "world" ? "world" : parsed.data.kind === "production-setup" ? "setup" : "production",
-    conversationId: value.conversationId, props, scopeMissing: value.scopeMissing === true || parsed.data.kind !== "world" && parsed.data.kind !== "production-setup" && !props };
+    entry: parsed.data, kind: chatKind(parsed.data),
+    conversationId: value.conversationId, props, scopeMissing: chatKind(parsed.data) === "production" && (value.scopeMissing === true || !props) };
 }
 
 /** Presentation only. Coordinator identities, workspace state and decision authorities stay in the store. */
@@ -133,8 +135,8 @@ export class GlobalChatController {
           key: saved.selected.key, worldId: saved.selected.worldId, worldName: String(saved.selected.worldName ?? "World"),
           title: String(saved.selected.title ?? "Chat"), label: String(saved.selected.label ?? ""), path: String(saved.selected.path ?? ""),
           entry, props: restoreScope(saved.selected.worldId, entry, saved.selected.scope),
-          scopeMissing: entry.kind !== "world" && entry.kind !== "production-setup" && (saved.selected.scopeMissing === true || !restoreScope(saved.selected.worldId, entry, saved.selected.scope)),
-          kind: entry.kind === "world" ? "world" : entry.kind === "production-setup" ? "setup" : "production",
+          scopeMissing: chatKind(entry) === "production" && (saved.selected.scopeMissing === true || !restoreScope(saved.selected.worldId, entry, saved.selected.scope)),
+          kind: chatKind(entry),
           ...(conversationId.success ? { conversationId: conversationId.data } : {}), newThread: saved.selected.newThread === true } };
         if (conversationId.success) this.conversationIds.set(saved.selected.key, conversationId.data);
         for (const raw of Object.values(saved.retained ?? {})) {
@@ -146,10 +148,11 @@ export class GlobalChatController {
         for (const [key, draft] of Object.entries(saved.drafts ?? {})) if (typeof draft === "string") this.values.set(key, new Map([["draft", draft]]));
         for (const [key, fields] of Object.entries(saved.choices ?? {})) {
           if (!fields || typeof fields !== "object") continue;
-          const value = fields as { model?: unknown; variants?: unknown; omitted?: unknown };
+          const value = fields as { model?: unknown; variants?: unknown; omitted?: unknown; createRequestId?: unknown };
           if (!this.values.has(key)) this.values.set(key, new Map());
           const values = this.values.get(key)!;
           if (typeof value.model === "string") values.set("languageModel", value.model);
+          if (typeof value.createRequestId === "string" && value.createRequestId.length > 0 && value.createRequestId.length <= 200) values.set("createRequestId", value.createRequestId);
           if (value.variants && typeof value.variants === "object" && Object.values(value.variants).every(v => typeof v === "string")) values.set("variants", value.variants);
           if (Array.isArray(value.omitted) && value.omitted.every(id => typeof id === "string")) values.set("omittedAttachments", new Set(value.omitted));
         }
@@ -170,7 +173,7 @@ export class GlobalChatController {
       selected: selected ? { ...selected, props: undefined, scope: savedScope(selected) } : null,
       retained: Object.fromEntries([...this.retained].map(([key, surface]) => [key, { ...surface, props: undefined, scope: savedScope(surface) }])),
       conversationIds: Object.fromEntries(this.conversationIds),
-      choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), variants: fields.get("variants"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
+      choices: Object.fromEntries([...this.values].map(([key, fields]) => [key, { model: fields.get("languageModel"), variants: fields.get("variants"), createRequestId: fields.get("createRequestId"), omitted: fields.get("omittedAttachments") instanceof Set ? [...fields.get("omittedAttachments") as Set<string>] : undefined }])),
       drafts: Object.fromEntries([...this.values].map(([key, values]) => [key, values.get("draft") ?? ""])) })); } catch { /* Disk-full/private browsing must not drop an in-memory draft. */ }
   }
   setCurrent(surface: ChatSurface | null) { this.current = surface; }
