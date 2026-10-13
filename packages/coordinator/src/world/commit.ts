@@ -38,7 +38,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
-import { carriesEditorEffects, carriesEditorTransitions } from "../productions/timeline-record.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -474,6 +474,7 @@ export const EDITOR_EFFECTS_SCHEMA_VERSION = 74;
 export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
 /** SPEC-054: exact-pair transitions and their durable protected history. */
 export const EDITOR_TRANSITIONS_SCHEMA_VERSION = 76;
+export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -931,6 +932,7 @@ export class Committer {
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorEffects(f.newContent)) ? EDITOR_EFFECTS_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorTransitions(f.newContent)) ? EDITOR_TRANSITIONS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorAppearance(f.newContent)) ? EDITOR_APPEARANCE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,

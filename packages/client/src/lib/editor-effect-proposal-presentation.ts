@@ -1,4 +1,4 @@
-import { effectAnalysisCanonicalJson, effectPresetDefinition, EffectProtectedPropertySchema,
+import { effectAnalysisCanonicalJson, effectAuthoredValue, effectPresetDefinition, EffectProtectedPropertySchema,
   type ConversationActionCard, type EffectAudioInput, type EffectClip, type EffectFinalDelta, type EffectHumanDecision,
   type EffectProposalFamilyView, type EffectProposalVersion, type EffectProtectionInput, type EffectStickyScope, type EffectTarget,
   type EffectVersionRef, type HumanDecisionCard, type ProductionTimeline } from "@arke-studio/contracts";
@@ -19,8 +19,8 @@ export function effectCardDecisions(family: EffectProposalFamilyView, version: E
 
 /** Preparation/failure stays visible until the corresponding native composite card exists. */
 export function effectCompositeReplacesAction(action: Pick<ConversationActionCard, "actionKind" | "actionId" | "worldId" | "conversationId">, cards: readonly HumanDecisionCard[]): boolean {
-  return (action.actionKind === "world-chat-effect-proposal" || action.actionKind === "world-chat-transition-proposal") && cards.some(card => card.actionId === action.actionId &&
-    card.worldId === action.worldId && card.conversationId === action.conversationId && (card.body.control.kind === "effect-proposal" || card.body.control.kind === "transition-proposal"));
+  return ["world-chat-effect-proposal", "world-chat-transition-proposal", "world-chat-picture-proposal"].includes(action.actionKind) && cards.some(card => card.actionId === action.actionId &&
+    card.worldId === action.worldId && card.conversationId === action.conversationId && ["effect-proposal", "transition-proposal", "picture-proposal"].includes(card.body.control.kind));
 }
 
 export function effectFrameLabel(frame: number, fps: number): string {
@@ -62,7 +62,7 @@ export function effectStickyLabel(scope: EffectStickyScope): string {
 
 export interface EffectPropertyDifference { key: string; label: string; before: string; after: string; keepScope?: EffectStickyScope }
 const equal = (a: unknown, b: unknown) => effectAnalysisCanonicalJson(a ?? null) === effectAnalysisCanonicalJson(b ?? null);
-const atPath = (effect: EffectClip, path: string): unknown => path.split(".").reduce<unknown>((value, key) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, effect);
+const atPath = effectAuthoredValue;
 
 /** Field and point rows preserve exact identities; the UI pages them rather than truncating. */
 export function effectPropertyDifferences(delta: Extract<EffectFinalDelta, { kind: "effect-result" }>, family: EffectProposalFamilyView,
@@ -82,8 +82,8 @@ export function effectPropertyDifferences(delta: Extract<EffectFinalDelta, { kin
       if (property === "target") return effectCardTargetLabel(chosen.target, timeline);
       if (property === "preset") return `${effectName(chosen)} · v${chosen.preset.version}`;
       if (typeof value === "number") {
-        const percentage = ["appearance.amount", "appearance.size", "appearance.opacity", "motion.speed", "reaction.strength", "reaction.beat", "reaction.bass", "reaction.energy", "reaction.limit"].includes(property);
-        return percentage ? `${Number((value * 100).toPrecision(12))}%` : `${value}${property === "motion.direction" ? "°" : " frames"}`;
+        const percentage = ["appearance.amount", "appearance.size", "appearance.opacity", "appearance.texture", "appearance.softness", "appearance.depth", "motion.airflow", "motion.speed", "reaction.strength", "reaction.beat", "reaction.bass", "reaction.energy", "reaction.limit"].includes(property);
+        return percentage ? `${Number((value * 100).toPrecision(12))}%` : `${value}${property === "seed" ? "" : property === "motion.direction" ? "°" : " frames"}`;
       }
       return effectProtectionValue(chosen, property, timeline ?? undefined);
     };
@@ -96,7 +96,7 @@ export function effectPropertyDifferences(delta: Extract<EffectFinalDelta, { kin
   add("fades.startFrame", "Fade envelope Start", before?.fades.startFrame, after?.fades.startFrame, frame, { kind: "placement", fields: ["fade-start"] });
   add("fades.endFrame", "Fade envelope End", before?.fades.endFrame, after?.fades.endFrame, frame, { kind: "placement", fields: ["fade-end"] });
   add("order", "Stacking order", before?.order, after?.order, String, { kind: "placement", fields: ["order"] });
-  add("seed", "Variation seed", before?.seed, after?.seed, String);
+
   const originId = family.identities.origins.find(origin => origin.lineageId === effect.lineageId)?.originId;
   for (const curve of ["intensityCurve", "reactionCurve"] as const) {
     const oldPoints = before?.[curve].points ?? [], newPoints = after?.[curve].points ?? [];

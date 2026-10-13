@@ -85,6 +85,8 @@ export * from "./editor-effect-protection.js";
 export * from "./editor-effect-catalogue.js";
 export * from "./editor-effect-evaluator.js";
 export * from "./editor-effect-raster.js";
+export * from "./editor-air-particles.js";
+export * from "./editor-effect-setting.js";
 export * from "./editor-effect-render-plan.js";
 export * from "./editor-effect-analysis.js";
 export * from "./editor-effect-audio-features.js";
@@ -185,3 +187,8 @@ export * from "./production-card-preview.js";
 export * from "./browser-media-import.js";
 export * from "./editor-transitions.js";
 export * from "./editor-transition-proposal.js";
+export * from "./editor-picture-appearance.js";
+
+export * from "./editor-picture-proposal.js";
+
+export * from "./story-publication.js";

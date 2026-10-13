@@ -187,9 +187,9 @@ describe("what the page says, as data (199)", () => {
 });
 
 describe("the hero (199a, 199b, rule 4)", () => {
-  it("until a block is made, Read the book is the primary and Listen and Export are not drawn", async () => {
+  it("before narration, Read the book leads and Publish can create a book-only edition", async () => {
     await mount(inkbound(0));
-    assert.deepEqual(presses(), ["read-book", "audiobook-more"]);
+    assert.deepEqual(presses(), ["audiobook-export-open", "read-book", "audiobook-more"]);
     assert.ok(q('[data-testid="read-book"]')!.classList.contains("fy-abshow__btn--pri"));
   });
 

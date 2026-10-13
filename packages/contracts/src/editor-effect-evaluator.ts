@@ -1,6 +1,9 @@
 import { effectVisibilityAt, type EffectClip } from "./editor-effects.js";
 import { EDITOR_EFFECT_RENDERER_VERSION, EFFECT_RENDER_PROFILE, effectPresetDefinition, type EffectPresetDefinition } from "./editor-effect-catalogue.js";
 import { preparedEffectExtraSpeedSeconds, preparedEffectModulationAt, type PreparedEffectReaction } from "./editor-effect-reaction.js";
+import { airParticlesAt } from "./editor-air-particles.js";
+import { effectRandom } from "./editor-effect-random.js";
+export { effectRandom } from "./editor-effect-random.js";
 
 export interface EffectParticle {
   /** Stable for this seed and birth slot; seeks never mint a fresh identity. */
@@ -15,6 +18,10 @@ export interface EffectParticle {
   opacity: number;
   colour: readonly [number, number, number];
   shape: EffectPresetDefinition["shape"];
+  texture?: number;
+  softness?: number;
+  textureSeed?: number;
+  rim?: boolean;
 }
 
 export interface EffectFrame {
@@ -25,6 +32,7 @@ export interface EffectFrame {
   /** False means a clearly labelled base-only preview; export must require ready features. */
   reactionReady: boolean;
   particles: readonly EffectParticle[];
+  blendMode?: NonNullable<EffectClip["appearance"]["blendMode"]>;
 }
 
 export interface EvaluateEffectFrameInput {
@@ -36,15 +44,6 @@ export interface EvaluateEffectFrameInput {
 }
 
 const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.max(low, value));
-
-/** Integer mixing uses only specified 32-bit operations, including negative pre-roll slots. */
-export function effectRandom(seed: number, birthSlot: number, channel: number): number {
-  const high = Math.floor(birthSlot / 0x100000000);
-  let value = (seed ^ Math.imul(birthSlot | 0, 0x9e3779b1) ^ Math.imul(high | 0, 0x85ebca6b) ^ Math.imul(channel + 1, 0xc2b2ae35)) >>> 0;
-  value = Math.imul(value ^ (value >>> 16), 0x7feb352d) >>> 0;
-  value = Math.imul(value ^ (value >>> 15), 0x846ca68b) >>> 0;
-  return ((value ^ (value >>> 16)) >>> 0) / 0x100000000;
-}
 
 /** A versioned rational approximation avoids platform trigonometric library differences. */
 function sineDegrees(degrees: number): number {
@@ -72,10 +71,14 @@ export function evaluateEffectFrame(input: EvaluateEffectFrameInput): EffectFram
   if (!Number.isFinite(targetAspectRatio) || targetAspectRatio > EFFECT_RENDER_PROFILE.maxWidth || targetAspectRatio < 1 / EFFECT_RENDER_PROFILE.maxHeight) throw new RangeError("Effect target aspect ratio is outside the supported range");
   const preset = effectPresetDefinition(effect.preset);
   const frame: EffectFrame = { rendererVersion: EDITOR_EFFECT_RENDERER_VERSION, effectId: effect.id, absoluteFrame, targetAspectRatio,
-    reactionReady: !effect.reaction.enabled || prepared !== undefined, particles: [] };
+    reactionReady: !effect.reaction.enabled || prepared !== undefined, particles: [], blendMode: effect.appearance.blendMode ?? "normal" };
   const visibility = effectVisibilityAt(effect, absoluteFrame);
   if (visibility === 0) return frame;
   if (prepared && (prepared.effectId !== effect.id || prepared.frameRate !== frameRate || absoluteFrame < prepared.evaluationStartFrame || absoluteFrame >= prepared.evaluationEndFrame)) throw new RangeError("Prepared reaction does not cover this effect and frame");
+  if (preset.id === "air-particles") {
+    const brightness = 1 + (effect.reaction.property === "brightness" && prepared ? preparedEffectModulationAt(prepared, absoluteFrame) : 0);
+    return { ...frame, particles: airParticlesAt(effect, absoluteFrame, frameRate, targetAspectRatio, visibility * brightness, prepared, colourBytes(effect, preset.tint, 1)) };
+  }
   const phaseSec = (absoluteFrame - effect.simulationOriginFrame) / frameRate;
   const lastBirth = Math.floor(phaseSec * preset.birthsPerSecond);
   const firstBirth = Math.ceil((phaseSec - preset.maximumLifetimeSec) * preset.birthsPerSecond);

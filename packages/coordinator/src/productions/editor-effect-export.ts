@@ -3,6 +3,7 @@ import { lstat, open, stat, unlink, writeFile } from "node:fs/promises";
 import { buildFfmpegArgs, containedPictureRect, effectCapabilityProblem, effectRenderCapabilityProblem, ulid, EFFECT_ANALYSIS_PROFILE, EffectFeatureManifestSchema, effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, prepareEffectReactions, type EffectFeatureManifest, type EffectAlphaInput, type EffectClip, type ExportPlan } from "@arke-studio/contracts";
 import { runExport, type ExportHandle, type ExportSidecar, type FfmpegRunner } from "../takes/export.js";
 import type { EffectRasterHost } from "../media/node-effect-renderer.js";
+import { partitionEffectBlendLayers, type PictureBlendMode } from "@arke-studio/contracts";
 import { hashMediaFile } from "../media/node-media-host.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
@@ -75,7 +76,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
       const projection = plan.effectRender!;
       if (!runner.graphFileOption) throw new Error("This encoder host cannot determine effect graph-file support");
       const graphOption = await runner.graphFileOption(signal);
-      if (projection.rendererVersion !== "software-rgba-v1") throw new Error("Unsupported effect renderer version");
+      if (projection.rendererVersion !== "software-rgba-v2") throw new Error("Unsupported effect renderer version");
       const activeReaction = projection.effectLayers.filter(({ effect }) => effect.reaction.enabled && effect.startFrame < projection.endFrame && effect.startFrame + effect.durationFrames > projection.startFrame &&
         (effect.target.kind === "composition" || projection.pictureLayers.some(picture => picture.kind === "media" &&
           (effect.target.kind === "picture-track" ? effect.target.trackId === picture.trackId : effect.target.kind === "visual-clip" && effect.target.clipId === picture.clipId) &&
@@ -100,18 +101,18 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
         picture.sourceSize = { width: measured.width, height: measured.height };
         if (!picture.still && measured.durationSec) picture.sourceOutSec = Math.min(picture.sourceOutSec ?? Infinity, measured.durationSec);
       }
-      const groups: Array<{ pictureClipId?: string; effects: EffectClip[]; width: number; height: number; startFrame: number; endFrame: number }> = [];
+      const groups: Array<{ pictureClipId?: string; effects: EffectClip[]; blendMode: PictureBlendMode; width: number; height: number; startFrame: number; endFrame: number }> = [];
       const intersects = (effect: EffectClip, start: number, end: number) => effect.startFrame < end && effect.startFrame + effect.durationFrames > start;
       for (const picture of projection.pictureLayers) {
         if (picture.kind !== "media" || !picture.sourceSize) continue;
         const start = Math.max(projection.startFrame, picture.startFrame), end = Math.min(projection.endFrame, picture.endFrame);
         const effects = projection.effectLayers.map(layer => layer.effect).filter(effect => intersects(effect, start, end) &&
           (effect.target.kind === "visual-clip" && effect.target.clipId === picture.clipId || effect.target.kind === "picture-track" && effect.target.trackId === picture.trackId));
-        if (effects.length && start < end) groups.push({ pictureClipId: picture.clipId, effects,
+        if (effects.length && start < end) for (const group of partitionEffectBlendLayers(effects)) groups.push({ pictureClipId: picture.clipId, ...group,
           ...containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, projection.width, projection.height), startFrame: start, endFrame: end });
       }
       const composition = projection.effectLayers.map(layer => layer.effect).filter(effect => effect.target.kind === "composition" && intersects(effect, projection.startFrame, projection.endFrame));
-      if (composition.length) groups.push({ effects: composition, width: projection.width, height: projection.height, startFrame: projection.startFrame, endFrame: projection.endFrame });
+      for (const group of partitionEffectBlendLayers(composition)) groups.push({ ...group, width: projection.width, height: projection.height, startFrame: projection.startFrame, endFrame: projection.endFrame });
       if (groups.length > MAX_GROUPS) throw new Error(`Effect export supports at most ${MAX_GROUPS} target groups per delivery`);
       const alpha: EffectAlphaInput[] = [];
       let diskBytes = 0, completedFrames = 0;
@@ -133,7 +134,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
         diskBytes += (await stat(path)).size;
         if (diskBytes > MAX_INTERMEDIATE_BYTES) throw new Error("Effect intermediates exceeded the 8 GiB job disk budget");
         completedFrames += group.endFrame - group.startFrame;
-        alpha.push({ path, startFrame: group.startFrame, endFrame: group.endFrame, ...(group.pictureClipId ? { pictureClipId: group.pictureClipId } : {}) });
+        alpha.push({ path, startFrame: group.startFrame, endFrame: group.endFrame, blendMode: group.blendMode, ...(group.pictureClipId ? { pictureClipId: group.pictureClipId } : {}) });
       }
       const args = buildFfmpegArgs(plan, store.dir, stage, runner.slateFont, alpha);
       // Windows command lines are bounded. The graph is local job data, never shell code.

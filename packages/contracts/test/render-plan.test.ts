@@ -64,6 +64,17 @@ const artifacts: RenderArtifact[] = [
   { id: NOTES, file: "notes.md", kind: "document" },
 ];
 
+it("placeholder shot slates retain their authored blend mode and opacity in preview and export", () => {
+  const value = production();
+  const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+    { kind: "picture-appearance", clipId: "cl_sh-3", patch: { blendMode: "screen", opacity: 0 } },
+  ], { effectAuthority: "human" });
+  const result = buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok);
+  const slate = result.plan.effectRender!.pictureLayers.find(row => row.clipId === "cl_sh-3")!;
+  assert.equal(slate.kind, "slate"); assert.equal(slate.blendMode, "screen"); assert.equal(slate.opacity, 0);
+});
+
 it("effects alone do not create a delivery range (SPEC-053 R-19)", () => {
   const value = production({ cut: { audio: [], overlays: [] } });
   const timeline = seedEmptyPictureTimeline(value);

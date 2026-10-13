@@ -13,7 +13,7 @@ import { tempDir } from "../tmp.js";
 
 const effect = defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", seed: 42, startFrame: 0, durationFrames: 24 });
 const plan = (): ExportPlan => ({ preset: "review-cut", frameRate: 24, totalSec: 1, items: [], overlays: [], audio: [], effectRender: {
-  rendererVersion: "software-rgba-v1", width: 64, height: 64, frameRate: 24, startFrame: 0, endFrame: 24,
+  rendererVersion: "software-rgba-v2", width: 64, height: 64, frameRate: 24, startFrame: 0, endFrame: 24,
   effectLayers: [{ effect, trackId: "tr_fx", trackOrder: 0 }], issues: [], pictureLayers: [{ clipId: "cl_picture", trackId: "tr_picture", order: 0,
     kind: "media", label: "picture", path: "artifacts/effect-picture.png", still: true, sourceInSec: 0, startFrame: 0, endFrame: 24, fit: "contain", matte: "source-alpha" }] } });
 async function world() { const store = await WorldStore.open(await makeTempWorld()); closeOnCleanup(() => store.close());
@@ -123,4 +123,17 @@ test("ready reaction freezes its manifest and fences muted descriptor sources om
   const stale = await runEffectExport(store, authored, "stale-audio.mp4", runner, host, () => {}, undefined, undefined, new Map([[effect.id, ready]])).done;
   assert.equal(stale.status, "failed"); if (stale.status === "failed") assert.match(stale.error, /source changed before export/);
   assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
+});
+
+// SPEC-053 export cleanup keeps ownership checks when the world was opened through an alias.
+test("effect export cleans its owned intermediates through a world directory alias", async () => {
+  const target = await makeTempWorld(), aliases = await tempDir("arke-effect-alias-");
+  const alias = join(aliases, "world");
+  await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
+  const store = await WorldStore.open(alias); closeOnCleanup(() => store.close());
+  await writeFile(join(store.dir, "artifacts/effect-picture.png"), "source-v1");
+  const result = await runEffectExport(store, plan(), "alias.mp4", runner, host, () => {}).done;
+  assert.equal(result.status, "done", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(await readdir(join(target, ".cache/exports")), []);
+  assert.equal(await readFile(join(target, "exports/alias.mp4"), "utf8"), "video");
 });

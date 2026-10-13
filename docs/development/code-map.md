@@ -37,6 +37,26 @@ Client, coordinator and integrations ──> shared contracts
 
 ## Change entry points
 
+Air Particles (approved turns 220–223 revision 3; SPEC-055 accepted) extends the
+existing Cut library, scrolling Inspector and Arke composite-card flow. The
+[focused review](../../design-system/air-particles-220.review.html) and
+[notes](../../design-system/air-particles-220.notes.md) describe physics, blending,
+protection and explicit review. `design-system/air-particles-220.mjs` generates the
+master/index entries; `.native.mjs`, `.native-panels.mjs`, `.native.css` and
+`.native-prototype.mjs` own the isolated fixture. Run
+`node design-system/air-particles-220.check.mjs` for browser/render checks and
+`node design-system/air-particles-220.serve.mjs` for the read-only review URL.
+Contracts `editor-air-particles.ts` owns the bounded seeded simulation and
+`editor-particle-texture.ts` its stamps. `editor-effect-raster.ts`, `editor-effect-render-plan.ts`
+and `cut.ts` share Normal/Screen/Add composition across preview and native export.
+`editor-picture-appearance.ts` owns clip appearance/protection and
+`editor-picture-proposal.ts` the typed, sticky proposal compiler. Coordinator
+`productions/editor-picture-requests.ts` owns durable Review/Apply and
+`world-chat/picture-proposals.ts` binds the Arke action; client
+`editor-picture-appearance.tsx`, `editor-picture-proposal-card.tsx` and
+`lib/editor-picture-review.ts` reuse the existing Inspector and chat. World schema 77
+prevents older readers from dropping these fields, including retained history.
+
 Crossfade designs (approved 2026-10-12; SPEC-054 accepted): turns 216–219 draw fixed-cut
 still-image transitions (turn 216 revision 2: a picker at the cut and Library drag placement),
 batch scopes and explicit short-clip exceptions, separate join and
@@ -603,3 +623,10 @@ estimate. Client `src/components/audiobook-player.tsx` and coordinator
 `scripts/interactive-player-source.mjs` keeps the offline player identical. Regressions are in
 client `test/audiobook-player.test.ts`; public design drawings and approval are in
 [turn 212's notes](../../design-system/listen-captions-212.notes.md).
+
+Private story Publish (approved turn 224): contracts src/story-publication.ts owns settings,
+review and edition messages; coordinator src/publications/story-review.ts owns fresh-source
+readiness/approved prose changes and story.ts owns capture, EPUB/M4B build, retry and delivery.
+Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
+arke:save-story-publication resolves an inventoried edition through the coordinator before a
+native Save dialog. See [publications](publications.md) for file ownership and format boundaries.

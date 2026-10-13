@@ -34,7 +34,7 @@ subscribeTransitionProposalResults(result => {
     comparison: request.operation.kind === "review" ? "suggested" : previous?.comparison ?? "suggested", fallback: previous?.ref } });
   else update(request.key, { pending: null, error: "A new version is ready. Choose Review in timeline before applying it." });
 });
-subscribeEditorReviewOwner(event => { if (event.kind === "effects" && states.has(event.key)) update(event.key, { active: null, error: null }); });
+subscribeEditorReviewOwner(event => { if (event.kind !== "transitions" && states.has(event.key)) update(event.key, { active: null, error: null }); });
 
 /** Arrival updates the world snapshot only. This controller activates versions solely on human review results. */
 export function useTransitionReview(worldId: string | undefined, production: ProductionBundle | null | undefined) {

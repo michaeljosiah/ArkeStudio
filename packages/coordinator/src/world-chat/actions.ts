@@ -308,7 +308,9 @@ import { benchChatSessionId, completeBenchChatAction } from "../bench/chat-sessi
 import type { BenchChatControls } from "../bench/chat-controls.js";
 import { benchReadRows } from "../bench/chat-reads.js";
 import { transitionProposalConversationAdapter } from "./transition-proposals.js";
+import { pictureProposalConversationAdapter } from "./picture-proposals.js";
 import { WorldChatTransitionProposalActionSchema } from "@arke-studio/contracts";
+import { WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
@@ -546,6 +548,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-performance-command": ["performances", "scenes", "timeline"],
   "production-audio-edit": ["timeline"],
   "production-transitions-propose": ["timeline", "editor-requests"],
+  "production-pictures-propose": ["timeline", "editor-requests"],
   "production-effects-propose": ["timeline", "editor-requests"],
   "production-timeline-operation": ["timeline", "scenes", "takes", "artifacts"],
   "production-audio-cue": ["timeline"],
@@ -778,6 +781,7 @@ function productionActionTargets(
     case "production-timeline-operation": return [{ requirement: "timeline", target: action.productionId }, { requirement: "scenes", target: action.productionId }, { requirement: "takes", target: action.productionId }, { requirement: "artifacts", target: worldId }];
     case "production-audio-edit": return [{ requirement: "timeline", target: action.productionId }];
     case "production-transitions-propose":
+    case "production-pictures-propose":
     case "production-effects-propose": return [{ requirement: "timeline", target: action.productionId }, { requirement: "editor-requests", target: action.productionId }];
     case "production-audio-cue": return [{ requirement: "timeline", target: action.productionId },
       ...(action.source.kind === "bench-take" ? [{ requirement: "bench" as const, target: action.source.sessionId }] : []),
@@ -979,6 +983,7 @@ function preparedWorldPayload(
       : WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: compileProductionTimelineRequest(store, action, actionId) });
     case "production-audio-edit": return WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: action.request });
     case "production-transitions-propose": return WorldChatTransitionProposalActionSchema.parse({ kind: "world-chat-transition-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
+    case "production-pictures-propose": return WorldChatPictureProposalActionSchema.parse({ kind: "world-chat-picture-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
     case "production-effects-propose": {
       return WorldChatEffectProposalActionSchema.parse({ kind: "world-chat-effect-proposal", worldId, productionId: action.productionId,
         proposal: action.proposal, ...effectProposalRequestContext(store.getBundle(), action.productionId, action.scope, subject) });
@@ -1362,6 +1367,7 @@ function worldActionTargets(
     case "production-timeline-operation":
     case "production-audio-edit":
     case "production-transitions-propose":
+    case "production-pictures-propose":
     case "production-effects-propose":
     case "production-audio-cue": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-audio-generation": return [{ kind: "production", id: action.productionId, label: action.productionId },
@@ -5300,6 +5306,7 @@ export function worldChatActionAdapters(
     editor,
     effectProposalConversationAdapter(store, deps.effectDependencies, now),
     transitionProposalConversationAdapter(store, deps.effectDependencies),
+    pictureProposalConversationAdapter(store, deps.effectDependencies),
     worldMetadata,
     canonAction,
     canonRetire,

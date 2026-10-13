@@ -134,3 +134,5 @@ createRoot(document.getElementById("root")!).render(
     </HashRouter>
   </StrictMode>,
 );
+
+import "./components/story-publish.css";

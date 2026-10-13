@@ -82,5 +82,10 @@ export function editorRequestReadRows(production: ProductionBundle | undefined):
       ...version.transitions.map((transition, index) => ({ key: `transition:${family.id}:${version.id}:${index}`, value: { kind: "proposed-transition", transition } })),
       ...version.sticky.map((decision, index) => ({ key: `transition:${family.id}:${version.id}:sticky:${index}`, value: { kind: "retained-human-transition-decision", decision } })),
     ])),
+    ...(production?.pictureFamilies ?? []).flatMap(family => family.versions.flatMap(version => [
+      { key: `picture:${family.id}:${version.id}`, value: { kind: "picture-proposal", familyId: family.id, versionId: version.id, candidateHash: version.candidateHash, status: family.status, summary: version.summary, notes: version.notes, conflicts: version.conflicts } },
+      ...version.pictures.map((picture, index) => ({ key: `picture:${family.id}:${version.id}:${index}`, value: { kind: "proposed-picture", picture } })),
+      ...version.sticky.map((decision, index) => ({ key: `picture:${family.id}:${version.id}:sticky:${index}`, value: { kind: "retained-human-picture-decision", decision } })),
+    ])),
     ...(production?.effectFamilies ?? []).flatMap(effectProposalReadRows)];
 }

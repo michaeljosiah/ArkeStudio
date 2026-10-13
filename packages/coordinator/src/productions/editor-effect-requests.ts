@@ -123,6 +123,7 @@ function replaceFamily(file: EditorRequestFile, family: EffectProposalFamily): E
   const families = file.schemaVersion === 2 ? file.effectFamilies : [];
   return { schemaVersion: 2, requests: file.requests,
     ...(file.schemaVersion === 2 && file.transitionFamilies ? { transitionFamilies: file.transitionFamilies } : {}),
+    ...(file.schemaVersion === 2 && file.pictureFamilies ? { pictureFamilies: file.pictureFamilies } : {}),
     effectFamilies: families.some(row => row.id === family.id) ? families.map(row => row.id === family.id ? family : row) : [...families, family] };
 }
 

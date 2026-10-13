@@ -57,7 +57,7 @@ export function EffectInspector(props: EffectAuthoringProps & { children?: React
       <h3>Preset</h3><label className="fx-inspector__select">Atmosphere<select aria-label="Atmosphere preset" disabled={disabled} value={preset ?? effect.preset.id} onChange={event => setPreset(event.currentTarget.value === effect.preset.id ? null : event.currentTarget.value as EffectClip["preset"]["id"])}>
         {EFFECT_PRESET_CATALOGUE.map(value => <option key={value.id} value={value.id}>{value.label}</option>)}
       </select></label>
-      {preset && <div className="fx-inspector__conversion" role="status"><p>Retains Amount, Size, Opacity, Colour, Direction, Speed, emitting area, fades, both curves, target, interval, sound and protection. All six presets support these controls; no conversion is needed.</p>
+      {preset && <div className="fx-inspector__conversion" role="status"><p>Retains appearance, blend, Pattern, Direction, Speed, emitting area, fades, curves, target, interval, sound and protection. Texture, depth and particle physics are used by Air Particles; their settings are retained when another preset is chosen.</p>
         <p>The particle shape and preset motion character will change.</p>
         <div className="fx-inspector__actions"><button type="button" disabled={disabled} onClick={() => { patch({ preset: { id: preset, version: 1 } }, "Change atmosphere preset"); setPreset(null); }}>Use {EFFECT_PRESET_CATALOGUE.find(value => value.id === preset)!.label}</button><button type="button" onClick={() => setPreset(null)}>Cancel preset change</button></div>
       </div>}
@@ -67,12 +67,34 @@ export function EffectInspector(props: EffectAuthoringProps & { children?: React
         value={effect.appearance[key] * 100} min={0} max={100} step={1} suffix="%" disabled={disabled} slider resetToken={authoringRevision}
         onCommit={value => patch({ appearance: { [key]: value / 100 } }, `Change effect ${key}`)} onPreview={value => preview(value === null ? null : { appearance: { [key]: value / 100 } })} />)}
       <EffectColour key={effect.id} {...props} />
+      {effect.preset.id === "air-particles" && (["texture", "softness", "depth"] as const).map(key => <EffectNumberField key={key}
+        label={key === "depth" ? "Depth variation" : key === "texture" ? "Texture" : "Softness"} value={(effect.appearance[key] ?? (key === "texture" ? .75 : key === "softness" ? .55 : .6)) * 100}
+        min={0} max={100} step={1} suffix="%" disabled={disabled} slider resetToken={authoringRevision}
+        onCommit={value => patch({ appearance: { [key]: value / 100 } }, `Change effect ${key}`)} onPreview={value => preview(value === null ? null : { appearance: { [key]: value / 100 } })} />)}
+      <label className="fx-inspector__select">Blend mode<select aria-label="Effect blend mode" disabled={disabled} value={effect.appearance.blendMode ?? "normal"}
+        onChange={event => patch({ appearance: { blendMode: event.currentTarget.value as "normal" | "screen" | "add" } }, "Change effect blend mode")}>
+        <option value="normal">Normal</option><option value="screen">Screen</option><option value="add">Add</option>
+      </select></label>
     </div></section>
     <section aria-label="Effect motion"><h3>Motion</h3><div className="fx-inspector__fields">
       <EffectNumberField label="Direction" value={effect.motion.direction} min={-360} max={360} step={1} suffix="°" disabled={disabled} slider resetToken={authoringRevision}
         onCommit={direction => patch({ motion: { direction } }, "Change effect direction")} onPreview={direction => preview(direction === null ? null : { motion: { direction } })} />
       <EffectNumberField label="Speed" value={effect.motion.speed * 100} min={0} max={100} step={1} suffix="%" disabled={disabled} slider resetToken={authoringRevision}
         onCommit={value => patch({ motion: { speed: value / 100 } }, "Change effect speed")} onPreview={value => preview(value === null ? null : { motion: { speed: value / 100 } })} />
+      <div className="fx-inspector__pattern"><div>Pattern<strong>{effect.seed}</strong></div><button type="button" disabled={disabled} onClick={() => {
+        const random = crypto.getRandomValues(new Uint32Array(1))[0]!;
+        patch({ seed: random === effect.seed ? (random + 1) >>> 0 : random }, "New effect pattern");
+      }}>New pattern</button></div><p className="fx-inspector__hint">Playback and seeking keep this pattern. New pattern updates all split segments together and is undoable.</p>
+      {effect.preset.id === "air-particles" && <details className="fx-inspector__physics"><summary>Particle physics</summary>
+        <EffectNumberField label="Airflow variation" value={(effect.motion.airflow ?? .5) * 100} min={0} max={100} step={1} suffix="%" disabled={disabled} slider resetToken={authoringRevision}
+          onCommit={value => patch({ motion: { airflow: value / 100 } }, "Change airflow variation")} onPreview={value => preview(value === null ? null : { motion: { airflow: value / 100 } })} />
+        <label className="fx-inspector__contacts"><input type="checkbox" disabled={disabled} checked={effect.motion.particleDeflections ?? true}
+          onChange={event => patch({ motion: { particleDeflections: event.currentTarget.checked } }, "Change particle deflections")} />Gentle particle deflections</label>
+        <label className="fx-inspector__select">Picture boundary<select aria-label="Picture boundary" disabled={disabled} value={effect.motion.boundary ?? "soft-bounce"}
+          onChange={event => patch({ motion: { boundary: event.currentTarget.value as "soft-bounce" | "open-flow" } }, "Change picture boundary")}>
+          <option value="soft-bounce">Soft bounce</option><option value="open-flow">Open flow</option>
+        </select></label><p className="fx-inspector__hint">Uses picture edges. Walls inside the image are not detected.</p>
+      </details>}
     </div></section>
     <EffectAreaEditor {...props} />
     <section aria-label="Effect fades"><h3>Fades</h3><div className="fx-inspector__fields">

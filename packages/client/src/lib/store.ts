@@ -1,3 +1,4 @@
+import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
@@ -687,7 +688,9 @@ export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
 const dialogueListeners = new Set<(result: DialogueResult) => void>();
 export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
 const transitionProposalListeners = new Set<(result: import("@arke-studio/contracts").TransitionReviewResult) => void>();
+const pictureProposalListeners = new Set<(result: import("@arke-studio/contracts").PictureReviewResult) => void>();
 export function subscribeTransitionProposalResults(listener: (result: import("@arke-studio/contracts").TransitionReviewResult) => void): () => void { transitionProposalListeners.add(listener); return () => { transitionProposalListeners.delete(listener); }; }
+export function subscribePictureProposalResults(listener: (result: import("@arke-studio/contracts").PictureReviewResult) => void): () => void { pictureProposalListeners.add(listener); return () => { pictureProposalListeners.delete(listener); }; }
 const effectProposalListeners = new Set<(result: import("@arke-studio/contracts").EffectReviewResult) => void>();
 export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void {
   effectProposalListeners.add(listener); return () => { effectProposalListeners.delete(listener); };
@@ -790,6 +793,17 @@ export function subscribeWebPackages(listener: (answer: WebPackagesListed) => vo
 }
 
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */
+export type StoryPublishAnswer = Extract<DomainEvent, { type: "story.published" | "story.editions" }>;
+const storyPublishListeners = new Set<(answer: StoryPublishAnswer) => void>();
+export function subscribeStoryPublications(listener: (answer: StoryPublishAnswer) => void): () => void {
+  storyPublishListeners.add(listener); return () => { storyPublishListeners.delete(listener); };
+}
+export function publishStory(worldId: string, productionId: string, input: StoryPublishAction): string | null {
+  const requestId = ulid(); return send({ kind: "publish-story", worldId, productionId, requestId, input }) ? requestId : null;
+}
+export function listStoryPublications(): string | null {
+  const requestId = ulid(); return send({ kind: "list-story-publications", requestId }) ? requestId : null;
+}
 export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
 const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
 export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void {
@@ -1675,6 +1689,7 @@ function handleFrame(json: string): void {
     }
     if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
     if (event.type === "editor-transition.proposal-result") for (const listener of transitionProposalListeners) listener(event);
+    if (event.type === "editor-picture.proposal-result") for (const listener of pictureProposalListeners) listener(event);
     if (event.type === "editor-effect.proposal-result") for (const listener of effectProposalListeners) listener(event);
     if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
@@ -1766,6 +1781,7 @@ function handleFrame(json: string): void {
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
     }
+    if (event.type === "story.published" || event.type === "story.editions") { for (const listener of storyPublishListeners) listener(event); }
     if (event.type === "audiobook.listening") {
       for (const listener of audiobookListeningListeners) listener(event);
     }
