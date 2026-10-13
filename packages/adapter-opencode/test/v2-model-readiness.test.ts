@@ -46,7 +46,7 @@ describe("Copilot per-location readiness (#1696)", () => {
       for (const operation of ["beats", "continuity", "cast"]) {
         const cwd = `C:\\scratch\\${operation}`;
         const session = await prepare(adapter, cwd);
-        assert.equal(polls.get(`C:/scratch/${operation}`), 2);
+        assert.equal(polls.get(`C:/scratch/${operation}`), 3);
         assert.equal(adapter.knownInputTokenLimit(session.sessionId), 123_456);
         assert.deepEqual(stub.requests.findLast(r => r.path === "/api/session")?.body, {
           location: { directory: `C:/scratch/${operation}` },
@@ -75,7 +75,7 @@ describe("Copilot per-location readiness (#1696)", () => {
         return { models: [{ ...ready, package: "aisdk:@ai-sdk/github-copilot", settings: { endpoint: "responses" } }] };
       };
       await prepare(adapter, "/scratch/slow");
-      assert.equal(polls, 5);
+      assert.equal(polls, 6);
       assert.equal(stub.requests.some(r => r.path.endsWith("/prompt")), false);
     });
   });
@@ -85,7 +85,7 @@ describe("Copilot per-location readiness (#1696)", () => {
       await fixture(async (stub, adapter) => {
         stub.modelResponse = () => ({ models: [{ ...pending, settings: { endpoint } }] });
         await prepare(adapter, "/scratch/resolved");
-        assert.equal(stub.requests.filter(r => r.path === "/api/model").length, 1);
+        assert.equal(stub.requests.filter(r => r.path === "/api/model").length, 2, "readiness followed by the full image catalog");
       });
     });
   }
@@ -119,7 +119,7 @@ describe("Copilot per-location readiness (#1696)", () => {
 
   it("honours the caller's cancellation during a hung catalogue request", async () => {
     await fixture(async (stub, adapter, traces) => {
-      stub.modelResponse = () => ({ hold: true });
+      stub.modelResponse = () => ({ models: [{ providerID: "ollama", id: "fixture-model", capabilities: { input: ["text"] } }] });
       const stop = new AbortController();
       const creation = prepare(adapter, "/scratch/stopped", stop.signal);
       const rejected = assert.rejects(creation, /author stopped/);
@@ -155,7 +155,7 @@ describe("Copilot per-location readiness (#1696)", () => {
       stub.modelResponse = () => ({ hold: true });
       adapter.prepareSession({ preparationId: "local", model: "ollama/fixture-model" });
       await adapter.createSession({ purpose: "extraction", cwd: "/scratch/local", agent: "canon-author", preparationId: "local" });
-      assert.equal(stub.requests.some(r => r.path === "/api/model"), false);
+      assert.equal(stub.requests.filter(r => r.path === "/api/model").length, 1, "one image-capability read, without Copilot readiness polling");
     });
   });
 
