@@ -119,6 +119,7 @@ export class GlobalChatController {
   private dictations = new Map<string, { key: string; deliver(text: string): void }>();
   private retained = new Map<string, ChatSurface>();
   private setupRequests = new Map<string, { key: string; operation: string; text?: string }>();
+  private createRequests = new Map<string, { key: string; surface: ChatSurface }>();
   current: ChatSurface | null = null;
   constructor(private storage?: ChatStorage) {
     try {
@@ -207,7 +208,7 @@ export class GlobalChatController {
     // currently loaded workspace may precede its new summary, so retain that arrival.
     const known = before ?? new Set([...this.conversationIds].filter(([key]) => key.startsWith(worldId + ":")).map(([, id]) => id));
     const removed = new Set([...known].filter(id => !ids.has(id) && (before !== undefined || id !== loadedId)));
-    for (const id of removed) this.retained.delete(`${worldId}:${id}`);
+    for (const id of removed) { this.retained.delete(`${worldId}:${id}`); this.openings.delete(`${worldId}:conversation:${id}`); }
     for (const [key, id] of this.conversationIds) if (key.startsWith(worldId + ":") && removed.has(id)) {
       this.conversationIds.delete(key); this.values.delete(`${worldId}:conversation:${id}`);
     }
@@ -218,7 +219,7 @@ export class GlobalChatController {
       title: "World Chat", kind: "world", entry, path: `/w/${worldId}/chat`, newThread: true });
   }
   startNew(surface: ChatSurface) {
-    if (this.snapshot.phase !== "idle" || this.openings.has(this.snapshot.selected?.key ?? "")) { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
+    if (this.snapshot.phase !== "idle" || this.opening()) { this.pending = { ...surface, newThread: true, conversationId: undefined }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return; }
     const key = chatKey(surface.worldId, surface.entry);
     this.conversationIds.delete(key); this.values.delete(key);
     this.pending = null;
@@ -228,7 +229,7 @@ export class GlobalChatController {
     if (surface.newThread) { this.startNew(surface); return; }
     const selected = this.snapshot.selected;
     if (selected && (selected.key !== surface.key || chatSubjectKey(selected) !== chatSubjectKey(surface)) &&
-      (this.snapshot.phase !== "idle" || selected.worldId === surface.worldId && this.openings.has(selected.key))) {
+      (this.snapshot.phase !== "idle" || selected.worldId === surface.worldId && this.opening())) {
       this.pending = surface; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return;
     }
     const conversationId = surface.conversationId ?? this.conversationIds.get(surface.key);
@@ -243,9 +244,10 @@ export class GlobalChatController {
   reportConversation(key: string, conversationId: string | null) {
     const selected = this.snapshot.selected;
     if (selected?.key !== key || !conversationId || selected.conversationId === conversationId) return;
-    const existing = this.values.get(this.valueKey(key));
+    const previousKey = this.valueKey(key), existing = this.values.get(previousKey);
     this.conversationIds.set(key, conversationId);
     const target = this.valueKey(key);
+    if (this.openings.delete(previousKey)) this.openings.add(target);
     if (existing && !this.values.has(target)) this.values.set(target, existing);
     this.values.delete(key);
     this.changed({ selected: { ...selected, conversationId, newThread: false } });
@@ -259,15 +261,47 @@ export class GlobalChatController {
   phase(phase: Snapshot["phase"]) {
     if (phase === this.snapshot.phase) return;
     this.changed({ phase });
-    if (phase === "idle" && this.pending && !this.openings.has(this.snapshot.selected?.key ?? "")) this.select(this.pending);
+    if (phase === "idle" && this.pending && !this.opening()) this.select(this.pending);
   }
   holdOpening(key: string, held: boolean) {
-    if (this.openings.has(key) === held) return;
-    if (held) this.openings.add(key); else this.openings.delete(key);
+    const wanted = this.valueKey(key);
+    if (this.openings.has(wanted) === held) return;
+    if (held) this.openings.add(wanted); else this.openings.delete(wanted);
     this.changed();
     if (!held && this.pending && this.snapshot.phase === "idle") this.select(this.pending);
   }
-  opening = () => this.openings.has(this.snapshot.selected?.key ?? "");
+  opening = () => this.openings.has(this.valueKey(this.snapshot.selected?.key ?? ""));
+  trackCreateRequest(key: string, requestId: string) {
+    const surface = this.snapshot.selected;
+    if (surface?.key !== key) return;
+    this.createRequests.set(requestId, { key, surface });
+    this.setValue(key, "createRequestId", requestId); this.setValue(key, "creationTrouble", null);
+  }
+  deliverCreateResult(result: { requestId: string; worldId: string; conversationId?: string; detail?: string }) {
+    const request = this.createRequests.get(result.requestId);
+    if (!request || request.surface.worldId !== result.worldId) return;
+    this.createRequests.delete(result.requestId);
+    if (this.value(request.key, "createRequestId", "") !== result.requestId) return;
+    if (!result.conversationId) { this.failCreate(request.key, result.detail); return; }
+    const previousKey = this.valueKey(request.key), existing = this.values.get(previousKey);
+    this.conversationIds.set(request.key, result.conversationId);
+    if (this.openings.delete(previousKey)) this.openings.add(this.valueKey(request.key));
+    if (existing) this.values.set(this.valueKey(request.key), existing);
+    this.values.delete(request.key);
+    const surface = { ...request.surface, conversationId: result.conversationId, newThread: false };
+    this.retained.set(`${result.worldId}:${result.conversationId}`, surface);
+    this.changed(this.snapshot.selected?.key === request.key ? { selected: surface } : {});
+  }
+  private failCreate(key: string, detail?: string) {
+    const opening = this.value<{ files?: readonly { name: string }[]; onAttached?: (refusals: readonly { name: string; reason: string }[]) => void } | null>(key, "opening", null);
+    const reason = detail ?? "The connection ended before creation returned. Your draft is retained; send again after reconnecting.";
+    opening?.onAttached?.((opening.files ?? []).map(file => ({ name: file.name, reason })));
+    this.setValue(key, "opening", null); this.setValue(key, "creationTrouble", reason); this.holdOpening(key, false);
+  }
+  loseCreates() {
+    const requests = [...this.createRequests.values()]; this.createRequests.clear();
+    for (const request of requests) this.failCreate(request.key);
+  }
   queueDictation(key: string, requestId: string, deliver: (text: string) => void) {
     this.dictations.set(requestId, { key, deliver }); this.phase("transcribing");
   }

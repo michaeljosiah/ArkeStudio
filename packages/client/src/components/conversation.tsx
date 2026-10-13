@@ -909,8 +909,9 @@ export function ProductionConversationBody({
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
     if (presentation?.newThread && !presentation.conversationId) {
-      const created = state?.worldChat?.conversationId;
-      return opening && created && created !== opening.was ? rows.find(row => row.id === created) ?? null : null;
+      // The global owner's create-result binds the exact request, including while another
+      // world is open. An unrelated workspace arrival cannot identify this new thread.
+      return null;
     }
     return presentation?.conversationId ? rows.find(row => row.id === presentation.conversationId) ?? null : [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
   }, [state?.world?.conversations, state?.worldChat?.conversationId, contextKey, presentation?.conversationId, presentation?.newThread, opening?.was]);
@@ -957,6 +958,13 @@ export function ProductionConversationBody({
   }, [worldId, conversationId]);
 
   const workspace = state?.worldChat ?? null;
+  const createThread = (title: string, requestId: string = crypto.randomUUID()) => {
+    if (!worldId) return false;
+    presentation?.owner.trackCreateRequest(presentation.key, requestId);
+    const sent = createWorldChat(worldId, title, requestId, context);
+    if (!sent) presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
+    return sent;
+  };
   useEffect(() => {
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
@@ -1012,7 +1020,7 @@ export function ProductionConversationBody({
       ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
       ...(chatVariant !== undefined ? { variant: chatVariant } : {}),
     });
-    createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
+    createThread(conversationTitle(openWith));
     // context is derived from route params and rebuilt each render; the latch above is what
     // makes this safe to leave out of the dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1047,7 +1055,7 @@ export function ProductionConversationBody({
       // Nothing is waited on for a create that never left (codex on PR 1232).
       // A create made again after it was lost goes under its first request, which the coordinator
       // makes at most once (codex on PR 1232).
-      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
+      if (!createThread(conversationTitle(text), again)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
@@ -1256,7 +1264,7 @@ export function ProductionConversationBody({
     ...(worldId ? { onAttachFiles: (files: readonly File[]) => {
       if (opening || running) return Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })));
       if (conversationId) return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
-      if (!createWorldChat(worldId, "Production references", crypto.randomUUID(), context)) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
+      if (!createThread("Production references")) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
       return new Promise<readonly {name:string;reason:string}[]>(resolve => setOpening({ text: "", files, was: workspace?.conversationId ?? null, onAttached: resolve }));
     } } : {}),
     ...(worldId
@@ -1265,7 +1273,7 @@ export function ProductionConversationBody({
           if (conversationId) worldChatAttachFiles(worldId, conversationId);
           else {
             setOpening({ text: "", attach: true, was: workspace?.conversationId ?? null });
-            createWorldChat(worldId, "Production references", crypto.randomUUID(), context);
+            createThread("Production references");
           }
         } }
       : {}),

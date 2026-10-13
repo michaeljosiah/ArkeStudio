@@ -153,6 +153,29 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.select({ ...worldChat, worldId: "another-world", key: "another-world:world" }); owner.deliverSetupResult({ requestId: "other" });
     assert.equal(owner.value(production.key, "draft", ""), "");
   });
+  it("creation binds its origin while another world owns the workspace, and failure frees held switches", () => {
+    const owner = new GlobalChatController(); owner.startNew(production);
+    owner.setValue(production.key, "draft", "The first line"); owner.setValue(production.key, "opening", { text: "The first line", was: null });
+    owner.holdOpening(production.key, true); owner.trackCreateRequest(production.key, "create-origin");
+    const other = { ...worldChat, worldId: "another-world", key: "another-world:world" }; owner.select(other);
+    owner.deliverCreateResult({ worldId: "another-world", requestId: "create-origin", conversationId: CHAT_ID });
+    owner.deliverCreateResult({ worldId: production.worldId, requestId: "create-origin", conversationId: CHAT_ID });
+    assert.equal(owner.getSnapshot().selected?.key, other.key);
+    owner.open(production); assert.equal(owner.getSnapshot().selected?.conversationId, CHAT_ID);
+    assert.deepEqual(owner.value(production.key, "opening", null), { text: "The first line", was: null });
+    owner.setValue(production.key, "opening", null); owner.holdOpening(production.key, false);
+    const history = { ...production, key: chatKey(production.worldId, production.entry, CHAT_ID), conversationId: CHAT_ID };
+    owner.history(history); owner.holdOpening(production.key, true); owner.holdOpening(history.key, false); owner.select(cut);
+    assert.equal(owner.getSnapshot().selected?.key, cut.key);
+    owner.open(production); owner.select(cut); assert.equal(owner.getSnapshot().selected?.key, cut.key, "the original alias has no stranded hold");
+    owner.startNew(production); owner.setValue(production.key, "draft", "Retry these words");
+    owner.setValue(production.key, "opening", { text: "Retry these words", was: null }); owner.holdOpening(production.key, true);
+    owner.trackCreateRequest(production.key, "lost-create"); owner.select(cut); owner.loseCreates();
+    assert.equal(owner.getSnapshot().selected?.key, cut.key); assert.equal(owner.value(production.key, "draft", ""), "Retry these words");
+    assert.equal(owner.value(production.key, "opening", "held"), null);
+    owner.deliverCreateResult({ worldId: production.worldId, requestId: "lost-create", conversationId: CHAT_ID });
+    owner.open(production); assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
+  });
   it("a lost transcription releases queued switching and cannot deliver a stale result after reconnect", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.setValue(production.key, "draft", "Typed words");
     owner.queueDictation(production.key, "lost", text => owner.setValue(production.key, "draft", text)); owner.select(cut); owner.loseDictations();

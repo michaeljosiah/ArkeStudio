@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MemoryRouter, useNavigate } from "react-router";
 import { App } from "../packages/client/src/App";
-import { __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "../packages/client/src/lib/store";
+import { __setBridgeForTest, __setStateForTest, __connectionStatusForTest, __applyEventForTest } from "../packages/client/src/lib/store";
 import { developLayoutFixture } from "../packages/client/test/develop-layout-fixture";
 import { ModelChip } from "../packages/client/src/components/model-chip";
 
@@ -57,7 +57,7 @@ async function setMode(mode: string) {
  await wait(150);
 }
 Object.assign(window, { nativeDesignSetMode: setMode, nativeDesignReady: ready,
- nativeDesignSetState: __setStateForTest, nativeDesignFixture: state });
+ nativeDesignSetState: __setStateForTest, nativeDesignEvent: __applyEventForTest, nativeDesignFixture: state });
 // Comparison-only specimen. World Chat's proposed host hides a model with no Settings name (195f).
 let specimen: ReturnType<typeof createRoot> | null = null, specimenHost: HTMLElement | null = null;
 Object.assign(window, { nativeDesignWorldSpecimen: (value?: string, remove=false) => {

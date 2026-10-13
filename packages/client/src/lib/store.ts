@@ -1002,6 +1002,12 @@ export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefus
 
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
 export type ProductionSetupResult = Extract<DomainEvent, { type: "production-setup.result" }>;
+export type WorldChatCreateResult = Extract<DomainEvent, { type: "world-chat.create-result" }>;
+const worldChatCreateListeners = new Set<(result: WorldChatCreateResult) => void>();
+export function subscribeWorldChatCreateResults(listener: (result: WorldChatCreateResult) => void): () => void {
+  worldChatCreateListeners.add(listener);
+  return () => { worldChatCreateListeners.delete(listener); };
+}
 const productionSetupListeners = new Set<(result: ProductionSetupResult) => void>();
 const narrativeSavedListeners = new Set<(result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void>();
 export function subscribeNarrativeSaved(listener: (result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void): () => void {
@@ -2519,6 +2525,8 @@ function handleFrame(json: string): void {
       }
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
+    } else if (event.type === "world-chat.create-result") {
+      for (const listener of worldChatCreateListeners) listener(event);
     } else if (event.type === "world-chat.send-result") {
       sendResults = new Map([...sendResults, [event.requestId, event] as const].slice(-50));
       for (const listener of sendResultListeners) listener(event);

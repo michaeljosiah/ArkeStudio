@@ -15,7 +15,7 @@ import { PageSheet } from "./page-sheet.js";
 import { More, X } from "./icons.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { RouteErrorBoundary } from "./route-error-boundary.js";
-import { setWorldChatInitiative, subscribeProductionSetupResults } from "../lib/store.js";
+import { setWorldChatInitiative, subscribeProductionSetupResults, subscribeWorldChatCreateResults } from "../lib/store.js";
 
 function afterPaint(action: () => void): () => void {
   if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
@@ -92,8 +92,9 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     return () => { delete document.body.dataset.globalChatEnabled; };
   }, [client]);
   useEffect(() => { for (const [id, result] of Object.entries(dictation)) owner.deliverDictation(id, result); }, [owner, dictation]);
-  useEffect(() => { if (connection !== "open") owner.loseDictations(); }, [owner, connection]);
+  useEffect(() => { if (connection !== "open") { owner.loseDictations(); owner.loseCreates(); } }, [owner, connection]);
   useEffect(() => subscribeProductionSetupResults(result => owner.deliverSetupResult(result)), [owner]);
+  useEffect(() => subscribeWorldChatCreateResults(result => owner.deliverCreateResult(result)), [owner]);
   useLayoutEffect(() => {
     if (!bodyHost) return;
     const into = selected?.kind === "world" && inPanel ? panelHost : home ?? parked.current;
@@ -191,6 +192,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
         {sameWorld && mismatch && <div className="fy-global-chat-boundary"><p>You’re viewing {current?.label}. This conversation stays about {selected?.label}.</p><button type="button" onClick={adopt}>Use this page</button></div>}
         {sameWorld && selected.scopeMissing && <div className="fy-global-chat-boundary" role="status"><p>This saved draft’s subject could not be restored. Choose this page before sending; your words are retained.</p><button type="button" onClick={adopt}>Use this page</button></div>}
         {snapshot.switching && <p className="fy-global-chat-boundary" role="status">{owner.opening() ? "Waiting for the opening message before switching conversations…" : "Finishing dictation before switching conversations…"}</p>}
+        {sameWorld && selected && owner.value<string | null>(selected.key, "creationTrouble", null) && <p className="fy-global-chat-boundary" role="status">{owner.value(selected.key, "creationTrouble", "")}</p>}
         <div ref={setPanelHost} className="fy-global-chat-conversation" />
         <div role="separator" aria-label="Chat width" aria-orientation="vertical" aria-valuemin={360} aria-valuemax={560} aria-valuenow={width} tabIndex={0} className="fy-global-chat-resize"
           onKeyDown={event => { if (["ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); resize(width + (event.key === "ArrowLeft" ? 20 : -20)); } }}

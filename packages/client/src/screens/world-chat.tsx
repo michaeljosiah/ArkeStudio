@@ -592,10 +592,10 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
       return;
     }
     if (!opened || opened === opening.wasOpen) return;
+    if (embedded && opened !== embedded.conversationId) return;
     const act = opening.act;
-    setOpening(null);
     if (act.kind === "say") {
-      sendWorldChat(worldId, opened, act.text);
+      if (sendWorldChat(worldId, opened, act.text) === null) return;
       setDraft("");
     } else if (act.kind === "pick") {
       worldChatAttachFiles(worldId, opened);
@@ -606,6 +606,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
         setDeferredTrouble,
       );
     }
+    setOpening(null);
     if (embedded) embedded.onConversationChange(opened);
     else navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
   }, [opening, opened, worldId, connection, navigate]);
@@ -617,7 +618,12 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const hold = (act: Opening) => {
     if (!worldId || opening) return;
     setOpening({ act, wasOpen: opened });
-    createWorldChat(worldId, "New conversation", crypto.randomUUID());
+    const requestId = crypto.randomUUID();
+    presentation?.owner.trackCreateRequest(presentation.key, requestId);
+    if (!createWorldChat(worldId, "New conversation", requestId)) {
+      setOpening(null);
+      presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
+    }
   };
 
   /*
