@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ModelWorldChatActionSchema, TimelineCommandSchema, type WorldChatContext } from "@arke-studio/contracts";
+import { ModelEditorRequestSchema, ModelWorldChatActionSchema, type WorldChatContext } from "@arke-studio/contracts";
 import {
   ACTION_GUIDE_ENTRIES,
   actionGuideScopes,
@@ -23,6 +23,21 @@ const SCHEMA_KINDS = ModelWorldChatActionSchema.options.map(
 );
 const HUGE = 10_000_000;
 
+it("ordinary Cut chat receives effect vocabulary and a scoped proposal example without selecting a form", () => {
+  const entry = describeAction("production-effects-propose")!;
+  assert.ok("example" in entry && entry.example?.kind === "production-effects-propose");
+  assert.equal(entry.example.scope?.kind, "effects-only");
+  assert.ok(entry.fields?.some(field => field.startsWith("scope?")));
+  for (const budget of [HUGE, 1000]) {
+    const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
+    assert.match(guide, /ordinary chat/); assert.match(guide, /Otherwise include action.scope/);
+    assert.match(guide, /Applied and discarded families are history/);
+    assert.match(guide, /Prior releases or review grants never transfer/);
+    assert.match(guide, /build-with-energy/);
+    assert.doesNotMatch(guide, /Only prepare production-effects-propose when/);
+  }
+});
+
 it("advertises every complete receipt enforced by whole-cut actions", () => {
   const entry = ACTION_GUIDE_ENTRIES.find(value => value.kind === "production-timeline-operation")!;
   assert.deepEqual(entry.reads, ["get_timeline", "list_scenes", "get_scene", "list_takes", "list_artifacts"]);
@@ -40,12 +55,19 @@ it("advertises available audio actions, dependent cues, spine verbs and the huma
   assert.match(guide, /sample rights and purge remain human/); assert.match(guide, /attach\/detach/); assert.match(guide, /Refuse sound effects\/SFX/);
 });
 
-/** The kinds a rendered guide names, read back out of its entry lines. */
-it("names every timeline command in full and compact guides and explicitly excludes live detachment", () => {
+// Direct editor commands include human-only effect/protection operations. The model guide
+// must follow the narrower request schema rather than advertise those commands (SPEC-053 R-36).
+it("names only generic editor request commands in full and compact guides and states the effect review boundary", () => {
+  const allowed = ModelEditorRequestSchema.shape.commands.element.options.map(option => option.shape.kind.value);
   for (const budget of [HUGE, 1000]) {
     const text = renderActionGuide(["world", "production"], budget).text;
-    for (const option of TimelineCommandSchema.options) assert.ok(text.includes(option.shape.kind.value), option.shape.kind.value);
+    const vocabulary = text.split("\n").find(line => line.startsWith("Timeline command vocabulary: "))!;
+    const advertised = [...vocabulary.matchAll(/(?:Timeline command vocabulary: | \| )([a-z-]+) \(/g)].map(match => match[1]);
+    assert.deepEqual(advertised, allowed);
     assert.match(text, /detach-audio is excluded from editorRequests/);
+    assert.match(text, /procedural effects and protection require their dedicated reviewed-version flow/);
+    assert.match(text, /generic editorRequests cannot change effect tracks/);
+    assert.match(text, /Generic Accept cannot apply effects or release protection/);
     assert.match(text, /set-performance-source \(clipId, sourceClipId\)/);
     assert.match(text, /import-cues \(trackId, cues, replace, provenance\)/);
   }

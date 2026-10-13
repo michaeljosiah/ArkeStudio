@@ -8,8 +8,8 @@ import type {
 } from "@arke-studio/contracts";
 
 /**
- * Wire-to-contract normalisation for the v2 sign-in surface (SPEC-030 §2.2). Every shape here
- * was measured against 0.0.0-next-17444: GET /api/integration lists vendors with `methods`
+ * Wire-to-contract normalisation for the v2 sign-in surface (SPEC-030 §2.2), targeting
+ * 2.0.26. GET /api/integration lists vendors with `methods`
  * (oauth | key | env | command) and current `connections` (credential | env); an OAuth attempt
  * carries {attemptID, url, instructions, mode, time{created, expires}} and its status polls as
  * pending | complete | failed | expired.

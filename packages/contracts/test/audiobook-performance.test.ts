@@ -28,6 +28,7 @@ test("character briefs retain all clauses without oversized tags or silent trunc
   assert.equal(performanceNote("x".repeat(161), model).mode, "unsupported");
   assert.ok(!AudiobookBookSchema.safeParse({ schemaVersion: 1, notes: { Mag: "x".repeat(301) } }).success);
   assert.ok(ClientMessageSchema.safeParse({ kind: "set-audiobook-note", worldId: "01J8F3K2QW9VZX4N7M0RTYB6H1", productionId: "book-one", speaker: "Mag", note: "x".repeat(300) }).success);
+  assert.ok(ClientMessageSchema.safeParse({ kind: "set-sheet-narration", worldId: "01J8F3K2QW9VZX4N7M0RTYB6H1", path: "characters/mag.md", narration: "x".repeat(300) }).success);
 });
 
 test("character turns must match source words rather than guessing attribution", () => {

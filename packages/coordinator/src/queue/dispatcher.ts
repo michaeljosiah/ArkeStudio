@@ -91,7 +91,6 @@ export interface DispatchClient {
   /** The local models this client has sent work to in this run. */
   usedModels?(): ReadonlySet<string>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
-  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void | Promise<void>;
   submit(

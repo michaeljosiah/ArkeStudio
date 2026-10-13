@@ -56,5 +56,6 @@ await build({
 });
 
 // import.meta.url resolves beside main.cjs in the bundle, so session preparation reads here.
+await build({ ...shared, entryPoints: [join(root, "../../packages/coordinator/src/media/effect-raster-worker.ts")] });
 cpSync(join(root, "../../packages/coordinator/src/harness/skills"), join(root, "dist/skills"), { recursive: true });
 console.log(`[build] main.cjs + preload.cjs and authoring skills at ${version}`);

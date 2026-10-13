@@ -2075,7 +2075,7 @@ export function SettingsHarnessScreen() {
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
   const generation = state?.app.harnessInfo?.generation;
-  const runningEngine = generation === "claude" || generation === "codex" || generation === "arke"
+  const runningEngine = generation === "claude" || generation === "codex"
     ? generation
     : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
   const harnessHealth = state?.app.health.harness;
@@ -2168,9 +2168,7 @@ export function SettingsHarnessScreen() {
             </button>
             <div>
               <strong>Search online</strong>
-              {/* The setting is global, but Local has no web tools yet, so it never searches. */}
-              <p>{runningEngine === "arke" ? researchOn ? "On, but Local stays offline." : "Stays offline."
-                : researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
+              <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
           <div className="fy-set__row">

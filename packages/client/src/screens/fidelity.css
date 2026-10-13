@@ -2041,6 +2041,14 @@ select.fy-sheetselect { padding-right: 24px; }
   animation: fy-fade-up 0.7s var(--ease-out) 0.1s both;
 }
 .fy-cutviewer__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--neutral-950); transition: opacity 0.15s var(--ease-out); }
+.fy-effectpreview { position: absolute; inset: 0; overflow: hidden; }
+.fy-effectpreview__stage { position: absolute; container-type: size; overflow: hidden; }
+.fy-effectpreview__picture { display: block; width: 100%; height: 100%; }
+.fy-effectpreview__quality { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 4px; color: var(--neutral-50); background: var(--neutral-950); font: 11px var(--font-sans); }
+.fy-effectpreview__quality select { color: inherit; background: inherit; font: inherit; border: 1px solid var(--neutral-600); border-radius: 3px; }
+.fy-effectpreview__notice { position: absolute; top: 40px; left: 8px; right: 8px; width: fit-content; max-width: calc(100% - 16px); padding: 5px 8px; color: var(--neutral-50); background: var(--neutral-950); font: 11px/1.4 var(--font-sans); }
+.fy-effectpreview__notice > span { display: block; }
+.fy-effectpreview__error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--neutral-50); background: var(--neutral-950); font: 12px/1.5 var(--font-sans); }
 /* A span with nothing to show says so, rather than holding the previous shot's last frame. */
 .fy-cutviewer__empty {
   position: absolute;
@@ -5165,7 +5173,7 @@ span.fy-bench__who { border-bottom: 0; }
 .fy-bench__chip--on { color: var(--foreground); border-color: var(--foreground); }
 .fy-bench__chip--refs { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-weight: 500; }
 
-.fy-bench__dispatch { display: flex; align-items: center; gap: 8px; margin-top: 11px; flex: none; min-width: 0; }
+.fy-bench__dispatch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 11px; flex: none; min-width: 0; }
 .fy-bench__modelwrap { position: relative; display: inline-flex; flex: 1 1 120px; min-width: 0; }
 .fy-bench__modelwrap > svg {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
@@ -6599,6 +6607,15 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-voice--6 { --fy-voice: var(--voice-6); }
 .fy-ab__block--dim { opacity: 0.4; }
 /* Who speaks: the colour is the dot's; the name is the label type in the muted ink (194). */
+/* A beat (design turn 201, rule 4): its head over its first line, in the text column, the block's own
+   rows below it. Its name in the foreground, then whose it is, its paragraphs and length, muted. */
+.fy-ab__beathead { grid-column: 2 / -1; display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 1px 0 4px; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-ab__beathead b { font: 600 13px/1.4 var(--font-sans); color: var(--foreground); }
+/* Grouping (design turn 201, rule 3): the press's mark turns while the director reads. */
+.fy-ab__pill--busy { cursor: default; }
+.fy-ab__spin { display: inline-flex; animation: fy-ab-spin 0.9s linear infinite; }
+@keyframes fy-ab-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-ab__spin { animation: none; } }
 .fy-ab__speaker { display: inline-flex; align-items: center; gap: 7px; max-width: 120px; padding-top: 3px; min-width: 0; font: var(--type-label); color: var(--muted-foreground); white-space: nowrap; }
 .fy-ab__speaker .fy-ab__speaker-dot { width: 7px; height: 7px; }
 .fy-ab__speaker-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--fy-voice); box-sizing: border-box; }
@@ -6671,6 +6688,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-vd__note--stacked > .fy-vd__note-input:focus { color: var(--foreground); }
 .fy-ab__text--proposed .fy-ab__mk, .fy-ab__text--proposed .fy-ab__mks, .fy-ab__text--proposed .fy-ab__emph { outline: 1.5px dashed var(--muted-foreground); outline-offset: 1px; border-radius: 4px; }
 .fy-ab__directsheet { display: flex; flex-direction: column; gap: 10px; }
+.fy-page-sheet__head + .fy-page-sheet__body .fy-ab__directsheet .fy-ab__card-title { display: none; }
 .fy-ab__reads { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; }
 .fy-ab__read { display: flex; align-items: center; gap: 10px; min-width: 0; height: 30px; padding: 0 10px; font-size: 12px; }
 .fy-ab__read + .fy-ab__read { border-top: 1px solid var(--border); }
@@ -7241,7 +7259,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-swrun button[data-primary="true"]:hover, .fy-swrun button[data-primary="true"]:focus-visible { background: var(--accent); }
 .fy-swrun .fy-swrun__review { padding: 4px 9px; }
 .fy-swrun .fy-swrun__dismiss { width: 22px; height: 22px; padding: 0; border-radius: 6px; display: inline-grid; place-items: center; }
-.fy-sw > .fy-arke { width: auto; min-width: 0; }
+.fy-sw > .fy-arke, .fy-sw .fy-production-studio-chat > .fy-arke { width: auto; min-width: 0; }
 /* The design's send is a 24px radius-7 square; the glyph stays the house arrow the other composers share. */
 .fy-sw .fy-cx__send { width: 24px; height: 24px; border-radius: 7px; }
 .fy-swproposal__removes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; padding: 8px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-size: 11px; }
@@ -8594,11 +8612,23 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-voiceuse { display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--border); }
 .fy-voiceuse:last-child { border-bottom: 0; }
 .fy-voiceuse__noplay { width: 30px; flex: none; }
-.fy-voiceuse__name { width: 96px; flex: none; font: 600 13px var(--font-sans); }
+.fy-voiceuse__name { width: 116px; flex: none; display: flex; align-items: center; gap: 6px; font: 600 13px var(--font-sans); }
 .fy-voiceuse__source { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font: 400 12.5px var(--font-sans); }
 .fy-voiceuse__source svg { flex: none; color: var(--neutral-400); }
 .fy-voiceuse--empty .fy-voiceuse__source { color: var(--neutral-400); }
 .fy-voiceuse__meta { white-space: nowrap; color: var(--neutral-400); }
+/* Design turn 200: a character's narration written in place, and the narrator's limit when it bites. */
+.fy-voiceuse__field { flex: 1; min-width: 0; height: 36px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--foreground); border-radius: 8px; background: transparent; color: var(--foreground); font: 400 12.5px var(--font-sans); }
+.fy-voiceuse__meta--warn { color: var(--warning); }
+/* Help, asked for (turn 200): a glyph after a label, and its popover under it. */
+.fy-helptip { position: relative; display: inline-flex; }
+.fy-helptip__press { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 99px; background: none; color: var(--neutral-400); cursor: help; }
+.fy-helptip__press:hover, .fy-helptip__press:focus-visible { color: var(--foreground); }
+.fy-helptip__pop { position: absolute; left: -8px; top: calc(100% + 8px); z-index: 30; width: 300px; box-sizing: border-box; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 8px; color: var(--foreground); font: 400 12.5px/1.5 var(--font-sans); text-align: left; white-space: normal; }
+.fy-helptip__pop b { font: 600 13px var(--font-sans); }
+.fy-helptip__eg { display: flex; align-items: center; gap: 8px; }
+.fy-helptip__eg .fy-mono, .fy-helptip__extra { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); }
+.fy-helptip__chip { padding: 3px 9px; border: 1px solid var(--border); border-radius: 99px; font: 400 12px var(--font-sans); }
 
 .fy-voiceways__head { display: flex; align-items: baseline; gap: 12px; }
 .fy-voiceways__head h2 { font: 600 13px var(--font-sans); }

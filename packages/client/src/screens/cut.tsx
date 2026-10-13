@@ -1,3 +1,6 @@
+import { usePictureReview } from "../lib/editor-picture-review.js";
+import { PictureReviewBar } from "./editor-picture-review-bar.js";
+import { isPictureAppearanceCommand } from "@arke-studio/contracts";
 import { pointerIsTouch } from "./editor-gesture.js";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
@@ -37,6 +40,7 @@ import {
   cueAtSec,
   type ArtifactSidecar,
   orderedShots,
+  effectPresetDefinition,
 } from "@arke-studio/contracts";
 import { Button } from "../components/ui.js";
 import {
@@ -67,7 +71,7 @@ import {
   Upload,
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
-import { ProductionConversation } from "../components/conversation.js";
+import { ProductionConversation, type DockAsk } from "../components/conversation.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds } from "../lib/format.js";
 import { artifactDisplayName, artifactsForProduction, linkNameResolver } from "../lib/artifact-view.js";
@@ -87,6 +91,12 @@ import { fileKindsFromTransfer, snapCandidates, type DroppedKind } from "../lib/
 import { SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
+import { CutLoopControl } from "./editor-loop.js";
+import { TransitionProvider, TransitionLibrary, TransitionInspector, TransitionTouchJoins, TransitionPhoneNavigation } from "./editor-transitions.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { isTransitionCommand, type TransitionPair } from "@arke-studio/contracts";
+import { useTransitionReview } from "../lib/editor-transition-review.js";
+import { TransitionReviewBar } from "./editor-transition-review-bar.js";
 import {
   moveTimelineHistory,
   moveTimelinePictureClip,
@@ -112,6 +122,17 @@ import { CutTouchContext, EditorSheetSlot, LaneSheet, cutTime, useCutLayout, use
 import { PageSheet } from "../components/page-sheet.js";
 import { Grid2x2, More, Pause, SplitMark as Columns, Trash as Trash2, RotateCcw as Undo2, RotateCw as Redo2 } from "../components/icons.js";
 import { isRemoteSession } from "../lib/remote-session.js";
+import { EffectLibrary } from "./editor-effect-library.js";
+import { EffectTrackRows } from "./editor-effect-tracks.js";
+import { EditorPanelTabs } from "./editor-panel-tabs.js";
+import { EffectPanel } from "./editor-effect-panel.js";
+import { useHumanEffectDraft } from "./editor-effect-draft.js";
+import { useEffectProposalReview } from "./editor-effect-review.js";
+import { effectReviewCommandIntent } from "../lib/editor-effect-review-authoring.js";
+import { useEffectReviewProjection } from "./editor-effect-review-projection.js";
+import { EffectReviewBar } from "./editor-effect-review-bar.js";
+import { EffectArrangementDialog } from "./editor-effect-arrangement.js";
+import { useEffectReviewPosition } from "./editor-effect-review-position.js";
 
 function focusFirstControl(pane: HTMLElement | null): void {
   pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
@@ -219,6 +240,7 @@ export function CutScreen() {
 function CutEditorScreen() {
   const navigate = useNavigate();
   const { phone, compact } = useCutLayout();
+  const portraitPhone = useMediaQuery("(max-width: 599px) and (orientation: portrait)");
   const remote = isRemoteSession();
   const [arkeOpen, setArkeOpen] = useState(false);
   const [laneOpen, setLaneOpen] = useState<TimelineTrackId | null>(null);
@@ -227,6 +249,12 @@ function CutEditorScreen() {
   const { connection, state: studio } = useStore();
   const worlds = studio?.worlds ?? [];
   const { world, production } = useProduction(worldId, prodId);
+  const effectReview = useEffectProposalReview(worldId, prodId);
+  const transitionReview = useTransitionReview(worldId, production);
+  const pictureReview = usePictureReview(worldId, production);
+  const [arrangementOpen, setArrangementOpen] = useState(false);
+  const [effectAsk, setEffectAsk] = useState<DockAsk | null>(null);
+  useEffect(() => { setArrangementOpen(false); setEffectAsk(null); }, [worldId, prodId]);
   const timelineState = production?.timeline ?? ABSENT_TIMELINE;
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
   /*
@@ -275,7 +303,10 @@ function CutEditorScreen() {
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
+  const [selectedTransition, setSelectedTransition] = useState<TransitionPair | null>(null);
+  useEffect(() => { setSelectedTransition(null); }, [worldId, prodId]);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [transitionBatchOpen, setTransitionBatchOpen] = useState(false);
   const [sceneLabels, setSceneLabels] = useState<boolean | null>(null);
   const showScenes = sceneLabels ?? compact;
   const [importing, setImporting] = useState(false);
@@ -335,6 +366,7 @@ function CutEditorScreen() {
     // Once, on arrival: the drawer is the person's to close afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
   const [ghostRequestId, setGhostRequestId] = useState<string | null>(null);
@@ -423,11 +455,17 @@ function CutEditorScreen() {
     production,
     artifacts: world?.artifacts,
     timelineState,
-    timeline: editableTimeline,
+    timeline: pictureReview.timeline ?? transitionReview.timeline ?? editableTimeline,
     timelineError,
     subtitleView,
     subtitleHidden,
   });
+  const effectProjection = useEffectReviewProjection({ worldId, production, artifacts: worldArtifacts,
+    current: pictureReview.timeline ?? transitionReview.timeline ?? editableTimeline, canonical: renderPlan?.ok ? renderPlan.plan : null, frameRate, active: effectReview.active,
+    staleReason: effectReview.freshness.checking ? "Checking reviewed sources…" : effectReview.freshness.staleReason });
+  const effectTimeline = effectProjection.timeline, effectPreviewPlan = effectProjection.plan, effectAnalysisContext = effectProjection.context;
+  const effectDraft = useHumanEffectDraft(effectTimeline, selected?.kind === "effect" ? selected.id : null,
+    effectPreviewPlan, setTimelineCommandError);
   /*
    * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
    * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
@@ -435,7 +473,7 @@ function CutEditorScreen() {
    * timeline record blocks editing.
    */
   const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
-  const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
+  const planTotalSec = effectProjection.canonicalPlan?.totalSec ?? null;
   /*
    * Two lengths. The CANVAS is how much timeline to draw and must extend past the last clip or
    * there is nowhere to drop the next one; the FILM is how long the thing actually is. Trailing
@@ -444,14 +482,16 @@ function CutEditorScreen() {
    * blank editor space the export never emits. Both come from the plan, which reads the record
    * the editor edits; a production with no story keeps room past its last clip for the next one.
    */
-  const canvasSec = spineCut
+  const mediaCanvasSec = spineCut
     ? spineCut.trackDurationSec
     : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
-  const filmSec = planTotalSec ?? canvasSec;
+  const canvasSec = Math.max(mediaCanvasSec, ...(effectTimeline?.tracks.flatMap(track => (track.effects ?? []).map(effect => (effect.startFrame + effect.durationFrames) / frameRate)) ?? []));
+  const filmSec = planTotalSec ?? mediaCanvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
   const touchLanes = useTouchLanes({ phone, transport, totalSec, zoom, setZoom });
+  useEffectReviewPosition(effectReview, { ownerKey: `${worldId}/${prodId}`, frameRate, transport, canvas: touchLanes.canvas, selected, onSelect: setSelected });
   // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
   // LTX port has always offered and nothing had yet asked for.
   /*
@@ -460,8 +500,9 @@ function CutEditorScreen() {
    */
   /** Keyed on the plan, so the preview's frame loop restarts when the film changes and not before. */
   const spans = useMemo(
-    () => (spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : []),
-    [spineCut, renderPlan],
+    () => (effectReview.active && effectProjection.canonicalPlan ? planSpans(effectProjection.canonicalPlan)
+      : spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : []),
+    [!!effectReview.active, effectProjection.canonicalPlan, spineCut, renderPlan],
   );
   /*
    * What a song not yet opened on the timeline still holds in `cut.json`: counted, because the
@@ -504,7 +545,7 @@ function CutEditorScreen() {
     if (decision === "accept") setInFlight({ revision: timelineRevision, since: Date.now() });
     decideEditorRequest(worldId, prodId, requestId, decision);
   };
-  const shownTimeline = draft ?? ghostTimeline ?? editableTimeline;
+  const shownTimeline = effectDraft.draft ?? (pictureReview.timeline ?? transitionReview.timeline ?? (effectReview.active ? effectTimeline : draft ?? ghostTimeline ?? editableTimeline));
   /*
    * The strip under a clip reads its in-point from the resolver's entry, and a live head trim
    * shows the draft: resolved from the saved record, the entry would name the old in-point until
@@ -533,6 +574,7 @@ function CutEditorScreen() {
     : [];
   const drift = production && editableTimeline && timelineState.status === "ready" ? storyOrderDrift(production, editableTimeline) : null;
   const allCues = editableTimeline ? editableTimeline.tracks.flatMap((track) => (track.cues ?? []).map((cue) => ({ cue, track }))) : [];
+  const allEffects = effectTimeline?.tracks.flatMap(track => track.effects ?? []) ?? [];
   const selectedExists =
     selected?.kind === "picture"
       ? spineCut
@@ -540,11 +582,12 @@ function CutEditorScreen() {
         : allClips.some(({ clip }) => clip.id === selected.id)
       : selected?.kind === "cue"
         ? allCues.some(({ cue }) => cue.id === selected.id)
-        : false;
+        : selected?.kind === "effect" && allEffects.some(effect => effect.id === selected.id);
   // Nothing is selected until someone selects (R-25a): the Inspector opens on the cut, and
   // Escape has something to clear only after a click. A selection that no longer exists reads as none.
   const activeSelection: CutSelection | null = selectedExists ? selected : null;
   const revealDetails = () => {
+    setDetailTab("inspector");
     setLibraryOpen(false);
     if (phone) return;
     setRightOpen(true);
@@ -556,14 +599,41 @@ function CutEditorScreen() {
     }
   };
   const selectPicture = (id: string) => {
+    setSelectedTransition(null);
     setSelected({ kind: "picture", id });
     revealDetails();
   };
   const selectCue = (id: string) => {
+    setSelectedTransition(null);
     setSelected({ kind: "cue", id });
     revealDetails();
     if (phone) setRightOpen(true);
   };
+  useEffect(() => {
+    const inspect = (event: Event) => { const detail = (event as CustomEvent<{ key: string; pair: TransitionPair }>).detail;
+      if (detail.key !== `${worldId}/${prodId}`) return; setSelectedTransition(detail.pair); setSelected(null); setDetailTab("inspector"); setRightOpen(true); };
+    window.addEventListener("arke-inspect-transition", inspect); return () => window.removeEventListener("arke-inspect-transition", inspect);
+  }, [worldId, prodId]);
+  const selectEffect = (id: string) => { setSelectedTransition(null); setSelected({ kind: "effect", id }); revealDetails(); if (phone) setRightOpen(true); };
+  useEffect(() => {
+    const inspect = (event: Event) => { const detail = (event as CustomEvent<{ key: string; clipId: string }>).detail;
+      if (detail.key !== `${worldId}/${prodId}`) return; setSelectedTransition(null); setSelected({ kind: "picture", id: detail.clipId }); setDetailTab("inspector"); setRightOpen(true); };
+    window.addEventListener("arke-inspect-picture", inspect); return () => window.removeEventListener("arke-inspect-picture", inspect);
+  }, [worldId, prodId]);
+  useEffect(() => {
+    const inspection = effectReview.state.inspect;
+    if (!inspection || inspection.ref.versionId !== effectReview.active?.ref.versionId) return;
+    setArkeOpen(false);
+    selectEffect(inspection.effectId);
+  }, [effectReview.state.inspect?.serial]);
+  useEffect(() => {
+    if (!effectReview.state.cardFocus) return;
+    // Review navigation replaces the phone sheet; an already-open Arke sheet otherwise stays
+    // covered by the newer Inspector in the overlay stack (SPEC-053 R-31, R-39).
+    if (phone) setRightOpen(false);
+    setLibraryOpen(false);
+    setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true);
+  }, [effectReview.state.cardFocus?.serial]);
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
   // on it from the moment the production opens.
@@ -586,6 +656,10 @@ function CutEditorScreen() {
   // timing rows move with the hand rather than freezing until release (issue 1036).
   const shownClips = shownTimeline ? shownTimeline.tracks.flatMap((track) => track.clips.map((clip) => ({ clip, track }))) : allClips;
   const shownSelected = activeSelection?.kind === "picture" ? (shownClips.find(({ clip }) => clip.id === activeSelection.id) ?? selectedAny) : null;
+  const selectedEffect = activeSelection?.kind === "effect" ? allEffects.find(effect => effect.id === activeSelection.id) ?? null : null;
+  const shownEffect = selectedEffect ? shownTimeline?.tracks.flatMap(track => track.effects ?? []).find(effect => effect.id === selectedEffect.id) ?? selectedEffect : null;
+  const selectedTimed = selectedEffect ?? selectedAny?.clip ?? null;
+  const selectedLabel = selectedEffect ? effectPresetDefinition(selectedEffect.preset).label : selectedAny?.clip.source.label ?? "";
   const selectedPictureIndex = selectedPictureClip
     ? orderedPictureClips.findIndex((clip) => clip.id === selectedPictureClip.id)
     : -1;
@@ -605,7 +679,8 @@ function CutEditorScreen() {
     const timer = window.setTimeout(() => setInFlight((pending) => (pending === inFlight ? null : pending)), inFlight.patient ? 600_000 : 8000);
     return () => window.clearTimeout(timer);
   }, [inFlight, timelineRevision]);
-  const commandsDisabled =
+  const currentCommandsDisabled =
+    effectReview.active !== null ||
     timelineError !== null ||
     !worldId ||
     !prodId ||
@@ -617,11 +692,18 @@ function CutEditorScreen() {
     // A ghost is the request's timeline, not the live one; a gesture drawn against it would
     // land against the record and mean something else (round eight). Decide the card first.
     ghostTimeline !== null;
+  const commandsDisabled = currentCommandsDisabled || transitionReview.active !== null || pictureReview.active !== null;
+  const effectCommandsDisabled = effectReview.active
+    ? effectReview.active.comparison !== "suggested" || effectReview.active.family.status !== "pending" || effectReview.busy ||
+      effectReview.freshness.checking || !!effectReview.freshness.staleReason || connection !== "open" || !effectTimeline || timelineError !== null
+    : commandsDisabled;
+  const selectionCommandsDisabled = selectedEffect ? effectCommandsDisabled : commandsDisabled;
   const sourceLength = useMemo(
     () => (production ? sourceLengthFramesFor(production, artifacts) : () => undefined),
     [production, artifacts],
   );
   const sendPictureMove = (direction: "earlier" | "later") => {
+    if (effectReview.active || transitionReview.active || pictureReview.active) return;
     if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || fence === null || ghostTimeline !== null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
@@ -629,8 +711,26 @@ function CutEditorScreen() {
   };
   /** Every editor action reaches the coordinator through here: one batch, one revision, one Undo step. */
   const sendCommands = (commands: TimelineCommand[], label?: string) => {
+    if (pictureReview.active) {
+      if (pictureReview.active.comparison !== "suggested" || pictureReview.pending || pictureReview.checking || pictureReview.stale || !commands.every(isPictureAppearanceCommand)) { setTimelineCommandError("Edit picture appearance in Suggested, or close review to change Current."); return; }
+      pictureReview.operate({ kind: "edit", ref: pictureReview.active.ref, commands }); return;
+    }
+    if (transitionReview.active) {
+      if (transitionReview.active.comparison !== "suggested" || !commands.every(isTransitionCommand)) { setTimelineCommandError("Edit crossfades in Suggested, or close review to change Current."); return; }
+      transitionReview.operate({ kind: "edit", ref: transitionReview.active.ref, commands });
+      return;
+    }
+    if (effectReview.active) {
+      if (effectCommandsDisabled || !effectTimeline) return;
+      const next = effectReviewCommandIntent(effectTimeline, commands);
+      if (!next.ok) { setTimelineCommandError(next.reason); return; }
+      effectDraft.preview(null);
+      effectReview.intent(effectReview.active.ref, next.intent);
+      return;
+    }
     if (commandsDisabled || !worldId || !prodId || !production || fence === null) return;
     setTimelineCommandError(null);
+    effectDraft.preview(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
@@ -681,7 +781,7 @@ function CutEditorScreen() {
     );
   }, [searchParams, setSearchParams]);
   useEffect(() => {
-    if (assembleSceneId === null || !worldId || !prodId || !production || fence === null || timelineState.status === "invalid") return;
+    if (effectReview.active || assembleSceneId === null || !worldId || !prodId || !production || fence === null || timelineState.status === "invalid") return;
     const key = `${worldId}:${prodId}:${assembleSceneId}`;
     if (assembled.current === key) return;
     assembled.current = key;
@@ -702,19 +802,26 @@ function CutEditorScreen() {
     if (allClips.some(({ clip }) => clip.id === id)) {
       pendingSelect.current = null;
       selectPicture(id);
-    } else if (!commandPending) {
+    } else if (allEffects.some(effect => effect.id === id)) {
+      pendingSelect.current = null;
+      selectEffect(id);
+    } else if (!commandPending && !effectReview.busy) {
       // The write was refused or answered without the clip: the old selection stands.
       pendingSelect.current = null;
     }
   });
   /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
   const openOnTimeline = () => {
+    if (effectReview.active) return;
     if (!worldId || !prodId || spineCut === null || sourceFingerprint === null || commandPending || timelineState.status !== "absent") return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, [], null, sourceFingerprint, "Open the song on the timeline");
   };
   const sendHistory = (action: "undo" | "redo") => {
+    if (pictureReview.active) { pictureReview.operate({ kind: "history", ref: pictureReview.active.ref, direction: action }); return; }
+    if (transitionReview.active) { transitionReview.operate({ kind: "history", ref: transitionReview.active.ref, direction: action }); return; }
+    if (effectReview.active) { if (effectCommandsDisabled) return; effectDraft.preview(null); effectReview.history(action); return; }
     if (commandPending) return;
     setTimelineCommandError(null);
     if (worldId && prodId && timelineRevision !== null) {
@@ -724,25 +831,39 @@ function CutEditorScreen() {
   };
   const mintClipId = (): TimelineClipId => `cl_${ulid()}`;
   const playheadFrame = secondsToFrames(Math.max(0, Math.min(transport.time, totalSec)), frameRate);
+  const backToEffectProposal = () => effectReview.backToProposal();
+  const reviseEffectProposal = () => {
+    const active = effectReview.active;
+    if (!active) return;
+    setEffectAsk({ line: "Revise this effects arrangement: ", text: "Revise this effects arrangement: ",
+      subject: { kind: "effect-arrangement", scope: active.family.scope, reviewed: active.ref,
+        ...(selectedEffect ? { selectedEffectId: selectedEffect.id as TimelineClipId } : {}) }, draft: true, press: ulid() });
+    backToEffectProposal();
+  };
   /** Every edge a drag can land against while Snap is on (issue 1034): clip edges on every lane, the playhead, zero. */
-  const snapFrames = snap && shownTimeline ? (except: TimelineClipId) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
+  const snapFrames = snap && shownTimeline ? (except: string) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
   /** The viewer follows an edge in hand (issue 1036): one seek per frame the edge crosses. */
   const scrubTo = (frame: number) => transport.seek(frame / frameRate);
+  const effectAuthoring = shownEffect && shownTimeline ? {
+    effect: shownEffect, timeline: shownTimeline, frameRate, playheadFrame,
+    authoringRevision: effectReview.active?.authoringEpoch ?? editableTimeline?.revision, disabled: effectCommandsDisabled,
+    onCommands: sendCommands, onPreview: effectDraft.preview, onScrub: scrubTo,
+  } : undefined;
   /** A press on empty lane, measured across the track stack the same way the ruler measures itself. */
   const seekFromLane = seekDrag({ totalSec, transport, laneOf: (element) => element, seekOnPress: true });
-  const canUndo = !commandsDisabled && timelineRevision !== null && timelineUndo > 0;
-  const canRedo = !commandsDisabled && timelineRevision !== null && timelineRedo > 0;
+  const canUndo = pictureReview.active ? !pictureReview.pending && !!pictureReview.active.family.undo.length : transitionReview.active ? !transitionReview.pending && !!transitionReview.active.family.undo.length : effectReview.active ? !effectCommandsDisabled && effectReview.canUndo : !commandsDisabled && timelineRevision !== null && timelineUndo > 0;
+  const canRedo = pictureReview.active ? !pictureReview.pending && !!pictureReview.active.family.redo.length : transitionReview.active ? !transitionReview.pending && !!transitionReview.active.family.redo.length : effectReview.active ? !effectCommandsDisabled && effectReview.canRedo : !commandsDisabled && timelineRevision !== null && timelineRedo > 0;
   void inFlight?.since;
   // The monitor mix reads the same plan the export does (SPEC-038 R-13, R-17).
   const urlFor = useCallback((path: string) => (slug ? mediaUrl(slug, path) : null), [slug]);
-  usePlanAudio({ plan: renderPlan?.ok ? renderPlan.plan : null, playing: transport.playing, timeRef: transport.timeRef, urlFor });
-  const cuePlan = renderPlan?.ok ? renderPlan.plan : null;
+  usePlanAudio({ plan: effectProjection.canonicalPlan, playing: transport.playing, timeRef: transport.timeRef, discontinuityRef: transport.discontinuityRef, urlFor });
+  const cuePlan = effectProjection.canonicalPlan;
   const cueAt = useMemo(() => (cuePlan === null ? null : (sec: number) => cueAtSec(cuePlan, sec)), [cuePlan]);
   const playheadInsideSelected =
-    selectedAny !== null &&
-    playheadFrame > selectedAny.clip.startFrame &&
-    playheadFrame < selectedAny.clip.startFrame + selectedAny.clip.durationFrames;
-  const unpickedSplit = phone && !selectedAny ? orderedPictureClips.find(clip => playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames) : undefined;
+    selectedTimed !== null &&
+    playheadFrame > selectedTimed.startFrame &&
+    playheadFrame < selectedTimed.startFrame + selectedTimed.durationFrames;
+  const unpickedSplit = phone && !activeSelection ? orderedPictureClips.find(clip => playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames) : undefined;
   /** Placement from the Library (SPEC-039 R-9, R-10): one `place` command, never a host path. */
   const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number,
     options: { kind?: "picture" | "audio"; newTrack?: boolean } = {}) => {
@@ -884,12 +1005,24 @@ function CutEditorScreen() {
   };
   /** An explicit draft from speech (SPEC-038 R-25): fenced like every other write. */
   const transcribe = (trackId: TimelineTrackId, language: string) => {
+    if (effectReview.active) return;
     if (!worldId || !prodId || timelineRevision === null || commandPending) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now(), patient: true });
     sendTimelineTranscribe(worldId, prodId, timelineRevision, trackId, language);
   };
   const selectedAction = (action: "split" | "duplicate" | "delete" | "ripple") => {
+    if (selectedEffect) {
+      const clipId = selectedEffect.id as TimelineClipId;
+      if (action === "split") sendCommands([{ kind: "effect-split", clipId, atFrame: playheadFrame, newClipId: mintClipId() }], "Split effect");
+      else if (action === "duplicate") {
+        const newClipId = mintClipId();
+        pendingSelect.current = newClipId;
+        sendCommands([{ kind: "effect-duplicate", clipId, newClipId, newLineageId: `ef_${ulid()}`,
+          startFrame: selectedEffect.startFrame + selectedEffect.durationFrames, seed: crypto.getRandomValues(new Uint32Array(1))[0]! }], "Duplicate effect");
+      } else if (action === "delete") sendCommands([{ kind: "effect-remove", clipId }], "Remove effect");
+      return;
+    }
     if (action === "delete" && selectedCueId !== null) {
       sendCommands([{ kind: "delete-cue", cueId: selectedCueId as `cu_${string}` }], "Delete subtitle");
       return;
@@ -967,8 +1100,8 @@ function CutEditorScreen() {
       </div>
     );
   }
-  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen });
-  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen };
+  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled: selectionCommandsDisabled, keysOpen });
+  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedTimed, selectedCueId, commandsDisabled: selectionCommandsDisabled, keysOpen };
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
@@ -1044,8 +1177,11 @@ function CutEditorScreen() {
   );
 
   return (
+    <TransitionProvider timeline={shownTimeline} artifacts={world?.artifacts ?? []} disabled={currentCommandsDisabled || !!pictureReview.active || !!effectReview.active || !!transitionReview.pending || !!transitionReview.stale || transitionReview.active?.comparison === "current"} pending={!!transitionReview.active}
+      selected={selectedTransition} select={setSelectedTransition} send={sendCommands} transport={transport} adjustedKeys={transitionReview.active?.version.sticky.map(value => value.key)} onBatchChange={setTransitionBatchOpen}
+      onInspect={(openingPicker) => { setSelected(null); setDetailTab("inspector"); if (!openingPicker || !phone) { revealDetails(); setRightOpen(true); } }}>
     <CutTouchContext.Provider value={{ snap, toggleSnap: () => setSnap(value => !value), openLane: setLaneOpen }}>
-    <div className="fy-cutcols" data-screen="cut" data-phone={phone || undefined} data-compact={compact || undefined}
+    <div className="fy-cutcols" data-screen="cut" data-phone={phone || undefined} data-compact={compact || undefined} data-transition-panel={portraitPhone && rightOpen && (!!selectedTransition || transitionBatchOpen) || undefined}
       style={{ "--cut-aspect": (production?.meta.aspect ?? "16:9").replace(":", "/"), "--cut-zoom": zoom } as CSSProperties}
       // A lane or the Library that took or refused the drag has spoken (issue 1035): its
       // dropEffect stands. What is left is a file over the chrome, which appends — while the
@@ -1061,6 +1197,11 @@ function CutEditorScreen() {
         event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files));
       }}>
       <ArtifactPanel
+        transitions={<TransitionLibrary />}
+        effects={<EffectLibrary timeline={effectTimeline} frameRate={frameRate} pictureDurationFrames={secondsToFrames(filmSec, frameRate)}
+          selectedPictureId={selectedAny?.track.kind === "picture" ? selectedAny.clip.id : null} playheadFrame={playheadFrame}
+          disabled={effectCommandsDisabled} onCommands={sendCommands} onCreated={selectEffect}
+          onSuggest={effectReview.active ? undefined : () => setArrangementOpen(true)} />}
         worldId={worldId}
         artifacts={world?.artifacts ?? []}
         slug={slug}
@@ -1107,7 +1248,7 @@ function CutEditorScreen() {
         {phone && <header className="fy-cut-back">
           <button type="button" aria-label="Back to production" onClick={() => navigate(`/w/${worldId}/p/${prodId}`)}><ChevronLeft size={20} /></button>
           <div><span>{production?.meta.title}</span><b>Cut · {cutTime(secondsToFrames(filmSec, frameRate), frameRate).split(".")[0]}</b></div>
-          <Button variant="primary" disabled={timelineError !== null || renderError !== null} onClick={() => setExportOpen(true)}><Upload size={16} />Export</Button>
+          <Button variant="primary" disabled={!!effectReview.active || !!transitionReview.active || !!pictureReview.active || timelineError !== null || renderError !== null} onClick={() => setExportOpen(true)}><Upload size={16} />Export</Button>
         </header>}
         <header className="fy-cuthead">
           <button type="button" className="fy-tlbtn fy-tlbtn--text fy-cut-import" disabled={commandsDisabled || remote} onClick={() => importMedia("append")}><Upload size={12} />{importing ? "Importing…" : "Import media"}{remote && <span>on the desktop app</span>}</button>
@@ -1141,7 +1282,7 @@ function CutEditorScreen() {
           <Button
             size="sm"
             variant="primary"
-            disabled={timelineError !== null || renderError !== null}
+            disabled={!!effectReview.active || !!transitionReview.active || !!pictureReview.active || timelineError !== null || renderError !== null}
             onClick={() => setExportOpen(true)}
           >
             <Download size={12} />
@@ -1166,6 +1307,16 @@ function CutEditorScreen() {
           </button>
         </header>
         {notice}
+        {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
+        {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
+        {effectReview.active && <EffectReviewBar version={effectReview.active.version.number} changes={effectReview.active.version.delta.length}
+          comparison={effectReview.active.comparison} busy={effectReview.busy} reason={effectReview.statusReason ?? effectProjection.problem}
+          canApply={effectReview.active.version.delta.length > 0 && connection === "open"}
+          onCompare={effectReview.compare} onChanges={backToEffectProposal} onRevise={reviseEffectProposal}
+          onUpdate={() => effectReview.active && effectReview.update(effectReview.active.ref)}
+          onDiscard={() => effectReview.active && effectReview.discard(effectReview.active.ref)}
+          onApply={effectReview.apply} onCheckResponse={effectReview.retryRequest} onClose={() => { effectDraft.preview(null); effectReview.close(); }} />}
+        {effectReview.state.error && <div className="fy-cuttimeline-error" role="alert">{effectReview.state.error.reason}</div>}
         <div className="fy-cutpreview-wrap">
           {timelineError && <div className="fy-cuttimeline-error">Timeline unavailable · {timelineError}</div>}
           {timelineError === null && renderError !== null && (
@@ -1179,7 +1330,10 @@ function CutEditorScreen() {
             restartToken={watchToken}
             transport={transport}
             cueAt={cueAt}
-            cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
+            cueStyle={cuePlan?.subtitles?.style ?? null}
+            plan={effectDraft.plan}
+            effectControls={effectAuthoring}
+            {...(effectAnalysisContext ? { analysisContext: effectAnalysisContext } : {})}
           />
         </div>
         {compact && <div className="fy-cut-clock">
@@ -1188,6 +1342,7 @@ function CutEditorScreen() {
             <button type="button" className="fy-cut-clock__play" aria-label={transport.playing ? "Pause" : "Play"} onClick={() => { if (!transport.playing && transport.timeRef.current >= filmSec) transport.seek(0); transport.setPlaying(value => !value); }}>{transport.playing ? <Pause size={22} /> : <Play size={22} />}</button>
             <button type="button" aria-label="Next frame" onClick={() => transport.seek(transport.timeRef.current + 1 / frameRate)}><FrameNext size={20} /></button></span>
           <code>{cutTime(secondsToFrames(filmSec, frameRate), frameRate)}</code>
+          <CutLoopControl transport={transport} />
         </div>}
         <section className="fy-timeline" aria-label="Timeline" data-ghost={ghostTimeline !== null ? "true" : undefined}>
           <div className="fy-timeline__toolbar">
@@ -1219,6 +1374,13 @@ function CutEditorScreen() {
               </span>
             )}
             <span className="fy-h1row__push" />
+            {!compact && <span className="fy-timeline__group" role="group" aria-label="Playback">
+              <button type="button" className="fy-tlbtn fy-tip" aria-label={transport.playing ? "Pause" : "Play"} data-tip={`${transport.playing ? "Pause" : "Play"} · Space`} onClick={() => {
+                if (!transport.playing && transport.timeRef.current >= filmSec) transport.seek(0);
+                transport.setPlaying(value => !value);
+              }}>{transport.playing ? <Pause size={14} /> : <Play size={14} />}</button>
+              <CutLoopControl transport={transport} />
+            </span>}
             <span className="fy-timeline__group" role="group" aria-label="History">
               <button type="button" className="fy-tlbtn fy-tip" data-tip="Undo · Ctrl+Z" aria-label="Undo" disabled={!canUndo} onClick={() => sendHistory("undo")}>
                 <RotateCcw size={12} />
@@ -1245,7 +1407,7 @@ function CutEditorScreen() {
                 className="fy-tlbtn fy-tip"
                 data-tip="Move earlier · ["
                 aria-label="Move earlier"
-                disabled={timelineError !== null || commandPending || selectedPictureIndex <= 0}
+                disabled={!!effectReview.active || timelineError !== null || commandPending || selectedPictureIndex <= 0}
                 onClick={() => sendPictureMove("earlier")}
               >
                 <ChevronLeft size={12} />
@@ -1256,6 +1418,7 @@ function CutEditorScreen() {
                 data-tip="Move later · ]"
                 aria-label="Move later"
                 disabled={
+                  !!effectReview.active ||
                   timelineError !== null ||
                   commandPending ||
                   selectedPictureIndex < 0 ||
@@ -1274,7 +1437,7 @@ function CutEditorScreen() {
                 className="fy-tlbtn fy-tip"
                 data-tip={sourceFingerprint === null ? "Open on the timeline · measure the master track first" : "Open on the timeline"}
                 aria-label="Open on the timeline"
-                disabled={commandPending || sourceFingerprint === null || !worldId || !prodId}
+                disabled={!!effectReview.active || commandPending || sourceFingerprint === null || !worldId || !prodId}
                 onClick={openOnTimeline}
               >
                 <Film size={12} />
@@ -1287,15 +1450,15 @@ function CutEditorScreen() {
                   className="fy-tlbtn fy-tip"
                   data-tip={playheadInsideSelected ? "Split at the playhead · S" : "Move the playhead over the selected clip to split it"}
                   aria-label="Split"
-                  disabled={commandsDisabled || !playheadInsideSelected}
+                  disabled={selectionCommandsDisabled || !playheadInsideSelected}
                   onClick={() => selectedAction("split")}
                 >
                   <SplitMark size={12} />
                 </button>
-                <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}>
+                <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}>
                   <Copy size={12} />
                 </button>
-                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("delete")}>
+                <button type="button" className="fy-tlbtn fy-tip" data-tip="Delete · ⌫" aria-label="Delete" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("delete")}>
                   <Trash size={12} />
                 </button>
                 <button type="button" className="fy-tlbtn fy-tip" data-tip="Ripple delete · ⇧⌫" aria-label="Ripple delete" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("ripple")}>
@@ -1352,7 +1515,7 @@ function CutEditorScreen() {
                * was reached. Pressing empty lane still clears, because that is the gesture this
                * handler is for; the two surfaces that exist to move the clock are not it.
                */
-              if (target.closest(".fy-cutseg, .fy-typedclip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
+              if (target.closest(".fy-cutseg, .fy-typedclip, .fy-effect-clip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
               setSelected(null);
             }}
           >
@@ -1416,6 +1579,7 @@ function CutEditorScreen() {
                   />
                 ) : shownTimeline ? (
                   <>
+                    <TransitionTouchJoins />
                     {showScenes && <SceneBands views={views} totalFrames={totalFrames} names={compact ? new Map(production.scenes.map(scene => [scene.number, scene.title])) : undefined} />}
                     <PictureTrack
                       production={production ?? undefined}
@@ -1484,6 +1648,13 @@ function CutEditorScreen() {
                 )
               ) : (
                 <EmptyEditorTrack label="Picture" detail="Opening accepted takes…" kind="picture" />
+              )}
+              {effectTimeline && (
+                <EffectTrackRows timeline={shownTimeline ?? effectTimeline} totalFrames={totalFrames} frameRate={frameRate}
+                  authoringRevision={effectReview.active?.authoringEpoch ?? effectTimeline.revision}
+                  selectedEffectId={selectedEffect?.id ?? null} playheadFrame={playheadFrame} disabled={effectCommandsDisabled}
+                  onSelect={selectEffect} onCommands={sendCommands} onPreview={effectDraft.preview} onScrub={scrubTo}
+                  snapFrames={snapFrames} tool={tool} onCreated={selectEffect} />
               )}
               {editableTimeline && (
                 <NewLaneStrip
@@ -1585,18 +1756,9 @@ function CutEditorScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
-        {/*
-          Inspector and Arke stack rather than tabbing (design turn 122). Tabs assert that two
-          things are alternatives; a property sheet scoped to the selection and a collaborator
-          scoped to the whole cut are not, and tabbing them means consulting one costs the other
-          at exactly the moment both are wanted — a clip selected, and something to say about it.
-
-          The Inspector is capped at half the edge and scrolls inside it, so a selection with a
-          lot to author can never push the composer off the screen: it is the one control here
-          that must not need scrolling to reach.
-        */}
+        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => setArkeOpen(true)} onDone={() => setRightOpen(false)} />}
         <div className="fy-cutside__head">
-          <span className="fy-cutside__headlabel">Details</span>
+          <EditorPanelTabs value={detailTab} onChange={setDetailTab} />
           <button
             type="button"
             className="fy-cutside__close"
@@ -1609,10 +1771,13 @@ function CutEditorScreen() {
             &times;
           </button>
         </div>
-        <EditorSheetSlot sheet={phone} open={rightOpen} title={selectedAny ? `${selectedAny.clip.source.kind === "shot" ? `Shot ${selectedAny.clip.source.shotNumber} · ` : ""}${selectedAny.clip.source.label}` : "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
+        <EditorSheetSlot sheet={phone && !(portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen))} open={rightOpen} title={selectedTransition ? "Transition" : selectedLabel || "Details"} onClose={() => setRightOpen(false)} className="fy-cut-trim-sheet"
           footer={<><span>± one frame · {frameRate} fps</span><Button variant="primary" onClick={() => setRightOpen(false)}>Done</Button></>}>
-        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel">
-            <CutInspector
+        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && detailTab !== "inspector"}>
+            {effectReview.active && <button type="button" onClick={backToEffectProposal}>Back to proposal · Version {effectReview.active.version.number}</button>}
+            {selectedTransition && shownTimeline ? <TransitionInspector /> : effectAuthoring && effectAnalysisContext ? <EffectPanel key={effectAuthoring.effect.id} {...effectAuthoring}
+              plan={effectPreviewPlan} scopeLabel={effectReview.active?.comparison === "suggested" ? `Pending · Version ${effectReview.active.version.number}` : "Current"}
+              context={effectAnalysisContext} /> : <CutInspector
               worldId={worldId}
               prodId={prodId}
               production={production}
@@ -1631,6 +1796,9 @@ function CutEditorScreen() {
               savedPictureOrder={timelineState.status === "ready"}
               frameRate={frameRate}
               commandsDisabled={commandsDisabled}
+              appearanceDisabled={pictureReview.active ? !pictureReview.connected || pictureReview.checking || !!pictureReview.pending || !!pictureReview.stale || pictureReview.active.comparison !== "suggested" : commandsDisabled}
+              appearanceRevision={pictureReview.active?.version.id}
+              appearanceScopeLabel={pictureReview.active?.comparison === "suggested" ? "Suggested" : "Current"}
               onCommands={sendCommands}
               onFill={(clipId) => {
                 selectPicture(clipId);
@@ -1639,12 +1807,12 @@ function CutEditorScreen() {
               }}
               mintClipId={mintClipId}
               sourceLength={sourceLength}
-            />
-            {compact && !phone && selectedAny && <div className="fy-cut-detail-actions"><Button disabled={commandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={commandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
+            />}
+            {compact && !phone && selectedTimed && <div className="fy-cut-detail-actions"><Button disabled={selectionCommandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")}><Scissors size={16} />Split</Button><Button disabled={selectionCommandsDisabled} onClick={() => selectedAction("delete")}><Trash size={16} />Delete</Button></div>}
           </div>
         </EditorSheetSlot>
         <EditorSheetSlot sheet={compact} open={arkeOpen} title="Arke" onClose={() => setArkeOpen(false)} className="fy-cut-arke-sheet">
-        <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel">
+        <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-arke-tab"} hidden={!compact && detailTab !== "arke"}>
             {assembly !== null && (
               <div className="fy-arkenotes" data-testid="arke-notes">
                 <div className="fy-cutinspect__eyebrow">{assembly.label.toUpperCase()}</div>
@@ -1659,12 +1827,14 @@ function CutEditorScreen() {
               worldId={worldId}
               productionId={prodId}
               entry={{ kind: "cut", productionId: prodId ?? "" }}
-              dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation` }}
+              dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation`, ask: effectAsk ?? undefined, onAsk: setEffectAsk }}
               openingNote="opening production conversation…"
               emptyLine="Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject."
               placeholder="Ask Arke about this production…"
               pointsEmpty="Nothing understood yet."
-              subject={selectedAny ? { kind: "timeline-clip", clipId: selectedAny.clip.id } : undefined}
+              subject={effectReview.active ? { kind: "effect-arrangement", scope: effectReview.active.family.scope, reviewed: effectReview.active.ref,
+                ...(selectedEffect ? { selectedEffectId: selectedEffect.id as TimelineClipId } : {}) }
+                : selectedTimed ? { kind: "timeline-clip", clipId: selectedTimed.id as TimelineClipId } : undefined}
               side={
                 production && production.editorRequests.length > 0 ? (
                   <EditorRequestCards
@@ -1676,7 +1846,7 @@ function CutEditorScreen() {
                     ghostId={ghostRequestId}
                     onGhost={setGhostRequestId}
                     onDecide={decideRequest}
-                    disabled={timelineError !== null || commandPending || !worldId || !prodId}
+                    disabled={!!effectReview.active || timelineError !== null || commandPending || !worldId || !prodId}
                   />
                 ) : undefined
               }
@@ -1686,20 +1856,29 @@ function CutEditorScreen() {
       </aside>
       {compact && <>
         {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
-        <div className="fy-cut-tools" data-picked={phone && selectedAny !== null || undefined}>
-          {phone && selectedAny && <div className="fy-cut-tools__selection"><Film size={13} />{selectedAny.clip.source.label} · {(selectedAny.clip.durationFrames / frameRate).toFixed(1)}s</div>}
-          {(!phone || !selectedAny) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
-          <button type="button" disabled={commandsDisabled || !playheadInsideSelected && !unpickedSplit} onClick={() => unpickedSplit ? sendCommands([{ kind: "split", clipId: unpickedSplit.id, atFrame: playheadFrame, newClipId: mintClipId() }], "Split clip") : selectedAction("split")}><Scissors size={20} /><span>Split</span></button>
-          {phone && selectedAny && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>Trim</span></button>}
-          {(!phone || selectedAny) && <><button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
-            <button type="button" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction(phone ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone ? "Delete" : "Ripple delete"}</span></button></>}
-          {phone && selectedAny ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedAny.clip.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
+        <div className="fy-cut-tools" data-picked={phone && selectedTimed !== null || undefined}>
+          {phone && selectedTimed && <div className="fy-cut-tools__selection"><Film size={13} />{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
+          {(!phone || !selectedTimed) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
+          <button type="button" disabled={selectionCommandsDisabled || !playheadInsideSelected && !unpickedSplit} onClick={() => unpickedSplit ? sendCommands([{ kind: "split", clipId: unpickedSplit.id, atFrame: playheadFrame, newClipId: mintClipId() }], "Split clip") : selectedAction("split")}><Scissors size={20} /><span>Split</span></button>
+          {phone && selectedTimed && <button type="button" onClick={() => setRightOpen(true)}><Columns size={20} /><span>{selectedEffect ? "Inspector" : "Trim"}</span></button>}
+          {(!phone || selectedTimed) && <><button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction("duplicate")}><Copy size={20} /><span>Duplicate</span></button>
+            <button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction(phone || selectedEffect ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone || selectedEffect ? "Delete" : "Ripple delete"}</span></button></>}
+          {phone && selectedTimed ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedTimed.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
             : <><button type="button" disabled={!canUndo} onClick={() => sendHistory("undo")}><Undo2 size={20} /><span>Undo</span></button><button type="button" disabled={!canRedo} onClick={() => sendHistory("redo")}><Redo2 size={20} /><span>Redo</span></button></>}
-          {phone && !selectedAny && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
+          {phone && !selectedTimed && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
           {!phone && <><button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-.5)}><Minus size={16} /></button><button type="button" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => zoomBy(.5)}><Plus size={16} /></button></>}
         </div>
       </>}
       <LaneSheet track={editableTimeline?.tracks.find(track => track.id === laneOpen) ?? null} baseTrackId={pictureTrack?.id} disabled={commandsDisabled} onCommands={sendCommands} onClose={() => setLaneOpen(null)} />
+      {arrangementOpen && worldId && production && editableTimeline && <EffectArrangementDialog
+        context={{ worldId, production, artifacts: worldArtifacts ?? [], timeline: editableTimeline }}
+        plan={renderPlan?.ok ? renderPlan.plan : null} selectedPictureId={selectedAny?.track.kind === "picture" ? selectedAny.clip.id : null}
+        disabledReason={commandsDisabled ? "Return to Current editing before starting another arrangement." : undefined}
+        onClose={() => setArrangementOpen(false)} onPrepare={request => {
+          setArrangementOpen(false); setEffectAsk({ line: "Suggest an effects arrangement", text: request.text,
+            subject: { kind: "effect-arrangement", scope: request.scope }, press: ulid() });
+          // The mounted conversation drains its queue while hidden; preparation leaves the panel alone (SPEC-053 R-30).
+        }} />}
       <PageSheet open={addLaneOpen} title="Add lane" onClose={() => setAddLaneOpen(false)} className="fy-cut-sheet fy-cut-lane-sheet">
         <button type="button" disabled={commandsDisabled} onClick={() => { if (editableTimeline) sendCommands([newAudioTrack(editableTimeline)], "Add audio track"); setAddLaneOpen(false); }}>Audio</button>
         <button type="button" onClick={() => { setAddLaneOpen(false); setLibraryOpen(true); }}>Picture from Library</button>
@@ -1707,5 +1886,6 @@ function CutEditorScreen() {
       </PageSheet>
     </div>
     </CutTouchContext.Provider>
+    </TransitionProvider>
   );
 }

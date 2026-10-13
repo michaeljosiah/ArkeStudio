@@ -1,13 +1,12 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { HarnessEngine, LocalHarnessModel } from "@arke-studio/contracts";
+import type { HarnessEngine } from "@arke-studio/contracts";
 import {
-  buildProfileConfigV2,
   credentialEnvPatch,
   discoverPreferredHarness,
-  meetsV2Gate,
   OpenCodeAdapter,
   OpenCodeV2Adapter,
+  OPENCODE2_PINNED_VERSION,
   v2BasicAuth,
   type DiscoveredHarness,
   type DiscoveryOptions,
@@ -25,11 +24,9 @@ import {
 } from "@arke-studio/adapter-claude";
 import { CodexAdapter, codexCredentialEnv, discoverCodex, type CodexDiscoveryOptions, type DiscoveredCodex } from "@arke-studio/adapter-codex";
 import type { CodexImageRunner } from "@arke-studio/providers";
-import { ArkeAdapter } from "@arke-studio/adapter-arke";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { ownedChildHooks } from "./owned-child.js";
-import { localModelPolicy } from "../setup/catalogue.js";
 
 // This package owns shared desktop/dev composition, so every adapter is a runtime dependency.
 // Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
@@ -115,18 +112,35 @@ export function harnessProfileDir(appRoot: string): string {
   return join(appRoot, "harness", "profile");
 }
 
-/**
- * The profile-level config inside that redirected profile, where the local models are listed
- * (issue 1247). `XDG_CONFIG_HOME` is what v2 resolves `opencode.json` against, and the env
- * above points it here — so this file is Arke's, never the person's own OpenCode config.
- */
-export function harnessProfileConfigPath(appRoot: string): string {
-  return join(harnessProfileDir(appRoot), ".config", "opencode", "opencode.json");
+function object(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Remove the former Studio-generated inventory once; credentials and other provider settings stay in place. */
+async function retireGeneratedOllamaModels(profileDir: string): Promise<void> {
+  const path = join(profileDir, ".config", "opencode", "opencode.json");
+  let config: unknown;
+  try { config = JSON.parse(await readFile(path, "utf8")); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return;
+    throw error;
+  }
+  if (!object(config) || !object(config.providers)) return;
+  const ollama = config.providers["ollama"];
+  if (!object(ollama) || ollama.name !== "Ollama" || ollama.package !== "aisdk:@ai-sdk/openai-compatible" ||
+    !object(ollama.settings) || ollama.settings.apiKey !== "ollama" || !object(ollama.models)) return;
+  // The removed writer used model-id names and zero-cost capability rows. User-defined models
+  // with different names/options are configuration, not an inventory Studio can retire.
+  if (!Object.entries(ollama.models).every(([id, row]) => object(row) && row.name === id &&
+    object(row.cost) && row.cost.input === 0 && row.cost.output === 0 && object(row.capabilities) &&
+    typeof row.capabilities.tools === "boolean" && Object.keys(row).every(key => ["name", "cost", "capabilities", "limit"].includes(key)))) return;
+  delete ollama.models;
+  await atomicWriteFile(path, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 /** What Settings names about the wired harness (issue 327 §9, SPEC-005 R-1). */
 export interface AssembledHarnessInfo {
-  generation: "v2" | "v1" | "claude" | "codex" | "arke";
+  generation: "v2" | "v1" | "claude" | "codex";
   source: "configured" | "path" | "bundled";
   version: string | null;
   beta: boolean;
@@ -139,7 +153,7 @@ export function harnessInfoFrom(harness: DiscoveredHarness): AssembledHarnessInf
     generation: harness.generation,
     source: harness.discovery.source,
     version: harness.discovery.version,
-    beta: harness.generation === "v2",
+    beta: false,
     ...(harness.rejectedV2 ? { rejectedV2Version: harness.rejectedV2.version } : {}),
   };
 }
@@ -152,7 +166,7 @@ export interface AssembleHarnessOptions {
   deps?: SupervisorDeps;
   preferV1?: boolean;
   v1?: DiscoveryOptions;
-  v2?: DiscoveryOptions & { minBuild?: number };
+  v2?: DiscoveryOptions;
   /**
    * The bring-your-own harness, off unless asked for, and never a fallback: OpenCode is the
    * default and ships in the installer; Claude Code is a convenience for people already running
@@ -172,12 +186,6 @@ export interface AssembleHarnessOptions {
     cache?: ConfinementCache;
   };
   codex?: CodexDiscoveryOptions & { enabled?: boolean };
-  /**
-   * Arke's own local harness (issue 1247). No discovery and no process: it is part of the app
-   * and talks to Ollama on this machine. `maxContextTokens` is the window a session asks for;
-   * `baseUrl` moves it to another loopback port (the adapter refuses anything else).
-   */
-  arke?: { enabled?: boolean; maxContextTokens?: number; baseUrl?: string };
   /** The adapter's trace sink — logs/harness.jsonl at the host's root. */
   onTrace?: (line: Record<string, unknown>) => void;
 }
@@ -186,16 +194,10 @@ export interface AssembledHarness {
   harness: DiscoveredHarness | null;
   isV2: boolean;
   supervisor: ChildSupervisor | null;
-  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | ArkeAdapter | null;
+  adapter: OpenCodeAdapter | OpenCodeV2Adapter | ClaudeAdapter | CodexAdapter | null;
   harnessInfo?: AssembledHarnessInfo;
   unavailableReason?: string;
   relaunchHarness: (credentials: Record<string, string | undefined>) => Promise<void>;
-  /**
-   * Put the local runtime's models in front of the harness (issue 1247). Present only for a
-   * v2 launch, whose redirected profile is Arke's to write; Claude, Codex and a v1 on PATH
-   * read their own configuration, and a writer for them would be writing into the person's.
-   */
-  publishLocalModels?: (models: readonly LocalHarnessModel[]) => Promise<void>;
   /**
    * What happened, in lines the host prints under its own prefix — states and refusals
    * stated once here so desktop and dev can never describe the same discovery differently.
@@ -212,28 +214,7 @@ export interface AssembledHarness {
  * after review found the two copies already drifting in their first week.
  */
 export async function assembleHarness(opts: AssembleHarnessOptions): Promise<AssembledHarness> {
-  const engine = opts.engine ?? (opts.arke?.enabled ? "arke" : opts.codex?.enabled ? "codex" : opts.claude?.enabled ? "claude" : "opencode");
-  if (engine === "arke") {
-    // Nothing to discover, supervise or authenticate: the adapter reaches Ollama on loopback and
-    // says itself, through readiness, whether it is answering. Only a loopback address is ever
-    // used here — a remote runtime would be an explicit setting, and there is none yet.
-    const adapter = new ArkeAdapter({
-      ...(opts.arke?.baseUrl !== undefined ? { baseUrl: opts.arke.baseUrl } : {}),
-      ...(opts.arke?.maxContextTokens !== undefined ? { maxContextTokens: opts.arke.maxContextTokens } : {}),
-      // What the setup catalogue knows about a model Arke installed: its publisher's sampling,
-      // and whether it waits to be chosen by name (issue 1289).
-      modelOptions: (model) => localModelPolicy(model)?.sampling,
-      explicitOnly: (model) => localModelPolicy(model)?.explicitChoiceOnly === true,
-      ...(opts.onTrace ? { onTrace: opts.onTrace } : {}),
-    });
-    return {
-      harness: null, isV2: false, supervisor: null, adapter,
-      harnessInfo: { generation: "arke", source: "bundled", version: null, beta: false },
-      // No credentials anywhere in this lane: a saved key changes nothing it does.
-      relaunchHarness: async () => {},
-      logLines: ["Arke local harness: Ollama on this machine, confined Arke tools"],
-    };
-  }
+  const engine = opts.engine ?? (opts.codex?.enabled ? "codex" : opts.claude?.enabled ? "claude" : "opencode");
   // A selected bring-your-own engine has its own lifecycle. An unrelated OpenCode installation
   // must neither gate initialization nor be launched as an invisible fallback after failure.
   if (engine === "claude") {
@@ -279,15 +260,28 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       logLines: [`Codex ${found.version}: ${found.source}, private app-server with confined Arke tools`],
     };
   }
-  const harness = await discoverPreferredHarness({
+  const discovery = await discoverPreferredHarness({
     ...(opts.preferV1 !== undefined ? { preferV1: opts.preferV1 } : {}),
     ...(opts.v1 ? { v1: opts.v1 } : {}),
     ...(opts.v2 ? { v2: opts.v2 } : {}),
   });
+  const harness = discovery.found;
+  if (!harness && discovery.rejectedV2) {
+    const rejected = discovery.rejectedV2;
+    const reason = `OpenCode ${rejected.version ?? "(unknown version)"} is installed but unsupported. Use OpenCode ${OPENCODE2_PINNED_VERSION}.`;
+    return {
+      harness: null, isV2: false, supervisor: null, adapter: null,
+      harnessInfo: { generation: "v2", source: rejected.source, version: rejected.version, beta: false, rejectedV2Version: rejected.version },
+      unavailableReason: reason, relaunchHarness: async () => {}, logLines: [reason],
+    };
+  }
   const isV2 = harness?.generation === "v2";
   const password = new HarnessPasswordHolder();
   const profileDir = harnessProfileDir(opts.appRoot);
-  if (isV2) await mkdir(profileDir, { recursive: true });
+  if (isV2) {
+    await mkdir(profileDir, { recursive: true });
+    await retireGeneratedOllamaModels(profileDir);
+  }
 
   const supervisor = new ChildSupervisor(
     {
@@ -296,8 +290,17 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
       args: ["serve", "--port", "{port}", "--hostname", "127.0.0.1"],
       // Real keys arrive via relaunchHarness before the first spawn (SPEC-005 D5); v2 also
       // gets the redirected profile so no personal OpenCode login can shadow them (§2).
-      ...(isV2 ? { env: v2ProfileEnv(profileDir) } : {}),
-      healthPath: "/api/health",
+      ...(isV2 ? {
+        // An inherited password suppresses the stdout handshake. This is Studio's private
+        // server, so personal server credentials must not determine its authentication.
+        inheritEnv: false,
+        env: {
+          ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
+            !["OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD", "OPENCODE_SERVER_USERNAME"].includes(entry[0].toUpperCase()))),
+          ...v2ProfileEnv(profileDir),
+        },
+      } : {}),
+      healthPath: isV2 ? "/api/info" : "/api/health",
       readyTimeoutMs: 30_000,
       ...(isV2 ? { healthHeaders: password.healthHeaders, onStdoutLine: password.onStdoutLine } : {}),
     },
@@ -318,11 +321,11 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
   const logLines: string[] = [];
   if (harness) {
     logLines.push(
-      `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})${isV2 ? " [beta]" : ""}`,
+      `OpenCode ${harness.generation}: ${harness.discovery.source} (${harness.discovery.version ?? "unknown version"})`,
     );
     if (harness.rejectedV2) {
       logLines.push(
-        `OpenCode v2 found but too old: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
+        `OpenCode v2 does not match the supported release: ${harness.rejectedV2.version ?? "unknown version"} — running v1`,
       );
     }
     // The legacy knob deserves honest treatment now that a generation preference outranks it
@@ -330,15 +333,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     if (isV2 && opts.v1?.configuredPath) {
       logLines.push(
         "configured OpenCode path passed over — v2 preferred; set ARKE_OPENCODE_GENERATION=v1 to use it",
-      );
-    }
-    if (
-      harness.generation === "v1" &&
-      harness.discovery.source === "configured" &&
-      meetsV2Gate(harness.discovery.version)
-    ) {
-      logLines.push(
-        "the configured path looks like an OpenCode v2 binary — point ARKE_OPENCODE2_CMD at it instead",
       );
     }
   } else {
@@ -354,10 +348,6 @@ export async function assembleHarness(opts: AssembleHarnessOptions): Promise<Ass
     // The PATCH form, deliberately: it names every managed variable, so a cleared key is a
     // deletion the merge honours rather than an omission it preserves.
     relaunchHarness: (credentials) => supervisor.updateEnv(credentialEnvPatch(credentials)),
-    ...(isV2 ? {
-      publishLocalModels: (models: readonly LocalHarnessModel[]) =>
-        atomicWriteFile(harnessProfileConfigPath(opts.appRoot), `${JSON.stringify(buildProfileConfigV2(models), null, 2)}\n`),
-    } : {}),
     logLines,
   };
 }

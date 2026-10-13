@@ -5,6 +5,8 @@ import { BodyLayer } from "./body-layer.js";
 import { ProductionStudioContext, StudioInlineContext, useClientRender, type StudioControls } from "./production-studio-context.js";
 import { ProductionStudioCanvas } from "./production-studio-canvas.js";
 import { useStore } from "../lib/store.js";
+import { useMediaQuery } from "../lib/media-query.js";
+import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { studioActionFocus, studioEntry, type StudioFocus } from "../lib/production-studio.js";
 
 /** The canvas view as the breadcrumb says it; the nav's own labels, so the two never disagree. */
@@ -21,7 +23,11 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const hasProposal = !!proposal || proposalDecisions.length > 0;
   /** A staged proposal is what a wrap-up becomes, so the canvas opens on it (turns 89, 91). */
   const resting = (): StudioFocus => hasProposal ? { ...studioEntry(entry), view: "proposal" } : studioEntry(entry);
-  const [active, setActive] = useState(!docked), [wide, setWide] = useState(false), [width, setWidth] = useState(420);
+  // On a Fold7 the page opens on the conversation (design turn 202): the canvas waits for a card's
+  // Show or the Canvas press, and then takes the right half. It opened standing at 380 beside a
+  // canvas that was mostly empty (installed 0.5.69).
+  const half = useMediaQuery(ARKE_HALF_QUERY);
+  const [active, setActive] = useState(!docked && !half), [wide, setWide] = useState(false), [width, setWidth] = useState(420);
   const [focus, setFocus] = useState<StudioFocus>(resting);
   const [pinned, setPinned] = useState(false), [phoneView, setPhoneView] = useState("thread");
   const [fullCardId, setFullCardId] = useState<string | null>(null), [canvasHost, setCanvasHost] = useState<HTMLDivElement | null>(null);
@@ -29,7 +35,9 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const inline = useRef<HTMLDivElement>(null), thread = useRef<HTMLDivElement>(null);
   const understandingSlot = useRef<HTMLDivElement>(null), proposalSlot = useRef<HTMLDivElement>(null), parked = useRef<HTMLDivElement>(null);
   const client = useClientRender(), host = () => client ? document.createElement("div") : null;
-  const [chatHost] = useState(host), [understandingHost] = useState(host), [proposalHost] = useState(host);
+  // The chat's own mount is named, so a page's dock rules reach the dock through it (see the CSS).
+  const [chatHost] = useState(() => { const element = host(); if (element) element.className = "fy-production-studio-chat"; return element; });
+  const [understandingHost] = useState(host), [proposalHost] = useState(host);
   const returnId = useRef<string | null>(null), drag = useRef<{ x: number; width: number } | null>(null);
   const production = world?.productions.find(p => p.meta.id === productionId);
   // Read as the transcript reads them: a workspace that never went through the schema's default
@@ -51,7 +59,8 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const key = `${world?.meta.worldId ?? ""}:${productionId ?? ""}:${JSON.stringify(entry)}:${workspace?.conversationId ?? ""}`;
   useEffect(() => { setFocus(studioEntry(entry)); setPinned(false); setFullCardId(null); }, [key]);
   useEffect(() => {
-    if (!pinned && latest) { setFocus(latestFocus); setFullCardId(null); }
+    // An effects proposal arrives as a chat card. Only its explicit Review action opens Suggested.
+    if (!pinned && latest && latest.actionKind !== "world-chat-effect-proposal") { setFocus(latestFocus); setFullCardId(null); }
   }, [latest?.actionId, run?.run.id, pinned, key]);
   // The decision is the newest thing a wrap-up leaves, and the canvas follows the newest thing
   // unless pinned (§2.5). Declared after the two above so that, on arrival, it is the one that holds.

@@ -2,6 +2,7 @@ import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteComm
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
+import { pickBrowserMedia, readBrowserMedia } from "./browser-media-import.js";
 import { isRemoteSession, remoteSocketUrl, remoteSocketProtocols } from "./remote-session.js";
 import { useSyncExternalStore } from "react";
 import type { GroupApprovalPort } from "./conversation-group-approval.js";
@@ -413,6 +414,11 @@ interface StoreState {
   >;
   audiobookRecords: Record<string, { record?: import("@arke-studio/contracts").ChapterAudiobook; refused?: string; seq: number; requestId?: string }>;
   /**
+   * Group by beats (design turn 201), by `world/production/chapter`: grouping while the director
+   * reads, then what came of it — the blocks before and after, or why nothing was grouped.
+   */
+  beats: Record<string, { state: "grouping" | "grouped" | "refused" | "failed" | "unavailable"; reason?: string; before?: number; after?: number }>;
+  /**
    * Recordings on their way to being a block's take (design turn 155c), by the window's request
    * id: the host's picker open, the checks back, the keep on its way, or refused in one clause.
    */
@@ -620,6 +626,7 @@ let current: StoreState = {
   direction: {},
   illustration: {},
   audiobookRecords: {},
+  beats: {},
   stagedTakes: {},
   speakerLines: {},
   narratorQuotes: {},
@@ -679,6 +686,14 @@ export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignme
 export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
 const dialogueListeners = new Set<(result: DialogueResult) => void>();
 export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
+const transitionProposalListeners = new Set<(result: import("@arke-studio/contracts").TransitionReviewResult) => void>();
+const pictureProposalListeners = new Set<(result: import("@arke-studio/contracts").PictureReviewResult) => void>();
+export function subscribeTransitionProposalResults(listener: (result: import("@arke-studio/contracts").TransitionReviewResult) => void): () => void { transitionProposalListeners.add(listener); return () => { transitionProposalListeners.delete(listener); }; }
+export function subscribePictureProposalResults(listener: (result: import("@arke-studio/contracts").PictureReviewResult) => void): () => void { pictureProposalListeners.add(listener); return () => { pictureProposalListeners.delete(listener); }; }
+const effectProposalListeners = new Set<(result: import("@arke-studio/contracts").EffectReviewResult) => void>();
+export function subscribeEffectProposalResults(listener: (result: import("@arke-studio/contracts").EffectReviewResult) => void): () => void {
+  effectProposalListeners.add(listener); return () => { effectProposalListeners.delete(listener); };
+}
 export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
 const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
 export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
@@ -698,6 +713,13 @@ export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, 
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
 type DesignedVoiceSaved = Extract<DomainEvent, { type: "voice.designed-saved" }>;
 type DesignedVoiceAudition = Extract<DomainEvent, { type: "voice.design-audition" }>;
+type ProjectVoicesListed = Extract<DomainEvent, { type: "voice.designed-listed" }>;
+const projectVoiceListeners = new Set<(result: ProjectVoicesListed) => void>();
+/** The connected Google project's designed voices, as the coordinator lists them (design turn 204). */
+export function subscribeProjectVoices(listener: (result: ProjectVoicesListed) => void): () => void {
+  projectVoiceListeners.add(listener);
+  return () => { projectVoiceListeners.delete(listener); };
+}
 const designedVoiceListeners = new Set<(result: DesignedVoiceSaved) => void>();
 const designedAuditionListeners = new Set<(result: DesignedVoiceAudition) => void>();
 export function subscribeDesignedVoices(listener: (result: DesignedVoiceSaved) => void): () => void {
@@ -746,6 +768,18 @@ export function subscribeAudiobookVideoExported(listener: (answer: AudiobookVide
 }
 export type AudiobookVideoStateAnswer = Extract<DomainEvent, { type: "audiobook.video-state" }>;
 const audiobookVideoStateListeners = new Set<(answer: AudiobookVideoStateAnswer) => void>();
+export type AudiobookMotionAnswer = Extract<DomainEvent, { type: "audiobook.motion" }>;
+const audiobookMotionListeners = new Set<(answer: AudiobookMotionAnswer) => void>();
+export function subscribeAudiobookMotion(listener: (answer: AudiobookMotionAnswer) => void): () => void {
+  audiobookMotionListeners.add(listener);
+  return () => audiobookMotionListeners.delete(listener);
+}
+export type AudiobookWordTimingAnswer = Extract<DomainEvent, { type: "audiobook.word-timing" }>;
+const audiobookWordTimingListeners = new Set<(answer: AudiobookWordTimingAnswer) => void>();
+export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTimingAnswer) => void): () => void {
+  audiobookWordTimingListeners.add(listener);
+  return () => audiobookWordTimingListeners.delete(listener);
+}
 export function subscribeAudiobookVideoState(listener: (answer: AudiobookVideoStateAnswer) => void): () => void {
   audiobookVideoStateListeners.add(listener);
   return () => audiobookVideoStateListeners.delete(listener);
@@ -810,6 +844,16 @@ export function subscribeBenchTakeDeleted(listener: (answer: BenchTakeDeleted) =
 }
 
 export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
+export type LookRenameResult = Extract<DomainEvent, { type: "reference.look-renamed" }>;
+const lookRenameListeners = new Set<(result: LookRenameResult) => void>();
+export function subscribeLookRename(listener: (result: LookRenameResult) => void): () => void {
+  lookRenameListeners.add(listener);
+  return () => { lookRenameListeners.delete(listener); };
+}
+export function renameSavedLook(worldId: string, sheetId: string, lookId: string, name: string, expectedName: string | null): string | null {
+  const requestId = ulid();
+  return send({ kind: "rename-character-look", worldId, sheetId, lookId, name, expectedName, requestId }) ? requestId : null;
+}
 const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
 export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
   referenceImageListeners.add(listener);
@@ -893,6 +937,12 @@ export function subscribeBibleHelper(listener: (answer: BibleHelperAnswered) => 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
   return () => filedBatchListeners.delete(listener);
+}
+
+const audiobookActivityListeners = new Set<(run: import("@arke-studio/contracts").AudiobookActivity) => void>();
+export function subscribeAudiobookActivity(listener: (run: import("@arke-studio/contracts").AudiobookActivity) => void): () => void {
+  audiobookActivityListeners.add(listener);
+  return () => { audiobookActivityListeners.delete(listener); };
 }
 
 export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => void): () => void {
@@ -1257,6 +1307,10 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
           },
         },
       };
+    case "audiobook.activity": {
+      const runs = [event.run, ...(state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
+      return { ...state, app: { ...state.app, audiobookActivity: runs } };
+    }
     case "job.updated": {
       const jobs = [...state.app.jobs];
       const i = jobs.findIndex((j) => j.id === event.job.id);
@@ -1278,6 +1332,11 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       const frameRuns = state.frameRuns.filter((run) => run.run.id !== event.runId);
       if (event.state !== null) frameRuns.push(event.state);
       return { ...state, frameRuns };
+    }
+    case "editor-effect.analysis": {
+      const effectAnalyses = (state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
+      if (event.analysis !== null) effectAnalyses.push(event.analysis);
+      return { ...state, effectAnalyses };
     }
     case "ledger.appended":
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
@@ -1535,6 +1594,8 @@ function handleFrame(json: string): void {
       // A replay restores a proposal held or a run going; what ended while this window was away is not kept.
       illustration: changedWorld || rejoined ? {} : current.illustration,
       audiobookRecords: changedWorld ? {} : current.audiobookRecords,
+      // As a direction: a grouping still going is dropped, and the replay restores it when it is.
+      beats: changedWorld ? {} : Object.fromEntries(Object.entries(current.beats).filter(([, held]) => held.state !== "grouping")),
       stagedTakes: changedWorld ? {} : current.stagedTakes,
       speakerLines: changedWorld ? {} : current.speakerLines,
       narratorQuotes: changedWorld ? {} : current.narratorQuotes,
@@ -1573,6 +1634,7 @@ function handleFrame(json: string): void {
     let direction = current.direction;
     let illustration = current.illustration;
     let audiobookRecords = current.audiobookRecords;
+    let beats = current.beats;
     let stagedTakes = current.stagedTakes;
     let speakerLines = current.speakerLines;
     let narratorQuotes = current.narratorQuotes;
@@ -1614,6 +1676,9 @@ function handleFrame(json: string): void {
       }
     }
     if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
+    if (event.type === "editor-transition.proposal-result") for (const listener of transitionProposalListeners) listener(event);
+    if (event.type === "editor-picture.proposal-result") for (const listener of pictureProposalListeners) listener(event);
+    if (event.type === "editor-effect.proposal-result") for (const listener of effectProposalListeners) listener(event);
     if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
     if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
@@ -1621,8 +1686,10 @@ function handleFrame(json: string): void {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
     if (event.type === "voice.designed-saved") for (const listener of designedVoiceListeners) listener(event);
+    if (event.type === "voice.designed-listed") for (const listener of projectVoiceListeners) listener(event);
     if (event.type === "voice.design-audition") for (const listener of designedAuditionListeners) listener(event);
     if (event.type === "voice.deleted") for (const listener of voiceDeleteListeners) listener(event);
+    if (event.type === "audiobook.activity") for (const listener of audiobookActivityListeners) listener(event.run);
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
     }
@@ -1711,6 +1778,8 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.video-exported") {
       for (const listener of audiobookVideoExportedListeners) listener(event);
     }
+    if (event.type === "audiobook.motion") for (const listener of audiobookMotionListeners) listener(event);
+    if (event.type === "audiobook.word-timing") for (const listener of audiobookWordTimingListeners) listener(event);
     if (event.type === "audiobook.video-state") {
       for (const listener of audiobookVideoStateListeners) listener(event);
     }
@@ -1737,6 +1806,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "reference.images") {
       for (const listener of referenceImageListeners) listener(event);
+    }
+    if (event.type === "reference.look-renamed") {
+      for (const listener of lookRenameListeners) listener(event);
     }
     if (event.type === "world.artifacts") {
       for (const listener of worldArtifactListeners) listener(event);
@@ -2292,31 +2364,49 @@ function handleFrame(json: string): void {
       if (current.state?.world?.meta.worldId === event.worldId) {
         audiobookNotes = { ...audiobookNotes, [event.productionId]: { dropped: event.dropped, held: event.held ?? 0, chapters: event.chapters, seq: (audiobookNotes[event.productionId]?.seq ?? 0) + 1 } };
       }
+    } else if (event.type === "audiobook.beats") {
+      const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
+      beats = {
+        ...beats,
+        [key]: {
+          state: event.outcome,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          ...(event.before !== undefined ? { before: event.before } : {}),
+          ...(event.after !== undefined ? { after: event.after } : {}),
+        },
+      };
     } else if (event.type === "direction.started") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
       // A replay reaches every refresh: a window that already holds the run keeps what it knows.
-      if (direction[key]?.state !== "directing") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
+      if (direction[key]?.state !== "directing" && direction[key]?.state !== "accepting") direction = { ...direction, [key]: { state: "directing", directed: 0, dropped: 0 } };
     } else if (event.type === "direction.finished") {
       const key = `${event.worldId}/${event.productionId}/${event.chapterId}`;
-      direction = {
-        ...direction,
-        [key]: {
-          state: event.outcome,
-          directed: event.directed,
-          dropped: event.dropped,
-          ...(event.summary !== undefined ? { summary: event.summary } : {}),
-          ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
-          ...(event.hash !== undefined ? { hash: event.hash } : {}),
-          ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
-          ...(event.cast !== undefined ? { cast: event.cast } : {}),
-          ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
-          ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
-          ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
-          ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
-          ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
-        },
-      };
+      const before = direction[key];
+      // A held proposal replay must not re-arm its Accept while its write is pending or after
+      // that write was acknowledged. Only a genuinely new proposal replaces that decision.
+      const decided = event.proposalId !== undefined && event.proposalId === before?.proposalId
+        && (before.state === "accepting" || before.state === "accepted");
+      if (!decided) {
+        direction = {
+          ...direction,
+          [key]: {
+            state: event.outcome,
+            directed: event.directed,
+            dropped: event.dropped,
+            ...(event.summary !== undefined ? { summary: event.summary } : {}),
+            ...(event.proposed !== undefined ? { proposed: event.proposed } : {}),
+            ...(event.hash !== undefined ? { hash: event.hash } : {}),
+            ...(event.chapterVersion !== undefined ? { chapterVersion: event.chapterVersion } : {}),
+            ...(event.cast !== undefined ? { cast: event.cast } : {}),
+            ...(event.castRecord !== undefined ? { castRecord: event.castRecord } : {}),
+            ...(event.proposalId !== undefined ? { proposalId: event.proposalId } : {}),
+            ...(event.proposed !== undefined ? { moved: Object.values(event.proposed).filter((input) => (input.delivery !== undefined && input.delivery !== "measured") || input.note !== undefined || input.speed !== 1 || input.cues.length > 0).length } : {}),
+            ...(event.chapterNote !== undefined ? { chapterNote: event.chapterNote } : {}),
+            ...(event.speakerNotes !== undefined ? { speakerNotes: event.speakerNotes } : {}),
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
+        };
+      }
     } else if (event.type === "authoring.status") {
       const existing = authoring[event.proposalId] ?? { status: event.status, lines: [] };
       authoring = {
@@ -2570,7 +2660,7 @@ function handleFrame(json: string): void {
       const held = exportsState[event.exportId];
       exportsState = {
         ...exportsState,
-        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files } },
+        [event.exportId]: { ...(held ?? { worldId: event.worldId, productionId: event.productionId, status: "done" as const, percent: 100, output: null, error: null }), deliveryKind: "audiobook-video", made: { dir: event.result.dir, files: event.result.files, ...(event.result.scope !== undefined ? { scope: event.result.scope } : {}), ...(event.result.chapterIds !== undefined ? { chapterIds: event.result.chapterIds } : {}) } },
       };
     }
     if (event.type === "canon.answer") {
@@ -2635,6 +2725,7 @@ function handleFrame(json: string): void {
       direction,
       illustration,
       audiobookRecords,
+      beats,
       stagedTakes,
       speakerLines,
       narratorQuotes,
@@ -2785,6 +2876,12 @@ export function send(msg: ClientMessage): boolean {
   if (!bridge || current.connection !== "open") return false;
   bridge.send(JSON.stringify(msg));
   return true;
+}
+
+/** Exact authenticated editor operations; review state and request retries belong to their domain controller. */
+export function sendEffectProposalCommand(worldId: string, productionId: string, requestId: string,
+  operation: import("@arke-studio/contracts").EffectReviewOperation): boolean {
+  return send({ kind: "editor-effect-proposal", worldId, productionId, requestId, operation });
 }
 
 export function openWorld(worldId: string): void {
@@ -3591,6 +3688,15 @@ export function renameSheet(worldId: string, path: string, name: string, shortNa
   return send({ kind: "rename-sheet", worldId, requestId, path, name, ...(shortName !== undefined ? { shortName } : {}) }) ? requestId : null;
 }
 
+/**
+ * A character's narration (design turn 200, SPEC-047 R-165): how a narrator plays them under
+ * `performed`, written straight to the sheet. Null or empty clears it. False when disconnected.
+ */
+export function setSheetNarration(worldId: string, path: string, narration: string | null): boolean {
+  const trimmed = narration?.trim() ?? "";
+  return send({ kind: "set-sheet-narration", worldId, path, narration: trimmed === "" ? null : trimmed });
+}
+
 export function assignVoice(
   worldId: string,
   path: string,
@@ -4194,7 +4300,7 @@ export function acceptChapterLook(
   worldId: string,
   sheetId: string,
   takeId: string,
-  options: { closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
+  options: { name?: string; closeTakeId?: string; closeFor?: string; choose?: { productionId: string; chapterFile: string; key: string; name?: string; sheet?: string } } = {},
 ): boolean {
   return send({ kind: "accept-character-look", worldId, sheetId, takeId, ...options });
 }
@@ -4294,6 +4400,11 @@ export function saveVoiceDesign(worldId: string, source: { jobId: string } | { r
   send({ kind: "save-designed-voice", requestId, worldId, ...source });
   return requestId;
 }
+export function listProjectVoices(worldId: string): string {
+  const requestId = ulid();
+  send({ kind: "list-designed-voices", requestId, worldId });
+  return requestId;
+}
 export function hearDesignedVoice(worldId: string, model: string, voiceId: string, text: string, confirmedSpeechMicroUsd: number): string {
   const requestId = queueRequest("hear-designed-voice");
   send({ kind: "hear-designed-voice", requestId, worldId, model, voiceId, text, confirmedSpeechMicroUsd });
@@ -4343,6 +4454,8 @@ export function requestVoicePreview(
   model: string,
   voiceId: string,
   voiceUploadConfirmedFor?: string,
+  /** The character's narration, played as the narrator would play it (design turn 200, R-168). */
+  note?: string,
 ): string {
   const requestId = queueRequest("voice-preview");
   const quoteToken = current.voiceCandidates[sheetId]?.previewQuoteByVoice?.[voiceTargetKey({ provider, model, voiceId })];
@@ -4355,6 +4468,7 @@ export function requestVoicePreview(
     model,
     voiceId,
     ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
+    ...(note !== undefined && note.trim() !== "" ? { note: note.trim() } : {}),
     requestId,
   });
   return requestId;
@@ -5189,12 +5303,42 @@ export function importEditorMedia(
   files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
-  if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
+  if (!bridge || current.connection !== "open") return { requestId: null, reason: "The studio is disconnected. Reconnect before importing files." };
+  const browserImport = typeof window !== "undefined" && !window.arke;
+  if (browserImport && [...pendingQueueRequests.values()].some(request => request.command === "upload-artifacts"))
+    return { requestId: null, reason: "Another import is running. Wait for it to finish." };
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
   const scope = production !== undefined ? { production } : {};
+  if (browserImport) {
+    const currentBridge = bridge;
+    let worldChanged = false;
+    const unsubscribe = onWorldChange(id => { if (id !== worldId) worldChanged = true; });
+    const stillCurrent = () => !worldChanged && bridge === currentBridge && current.connection === "open" && current.state?.world?.meta.worldId === worldId && pendingQueueRequests.has(requestId);
+    // Picker/read failures are local refusals, delivered to the same requesting controls.
+    const finish = (reason?: string) => {
+      pendingQueueRequests.delete(requestId);
+      const result: QueueEnqueueResult = { type: "queue.enqueue-result", at: new Date().toISOString(), requestId,
+        command: "upload-artifacts", disposition: reason ? "rejected" : "not-queued", requestedCount: reason ? 1 : 0,
+        acceptedJobIds: [], failures: reason ? [{ index: 0, reason }] : [] };
+      for (const listener of queueResultListeners) listener(result);
+    };
+    // Start the input synchronously while the click still has browser user activation.
+    const selection = files === undefined ? pickBrowserMedia() : Promise.resolve([...files]);
+    void selection.then(async selected => {
+      if (selected.length === 0) { finish(); return; }
+      const browserFiles = await readBrowserMedia(selected, stillCurrent);
+      if (!send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope, browserFiles }))
+        throw new Error("The files could not be imported. Check the connection and use Import media.");
+    }).catch(error => finish(error instanceof Error ? error.message : "The files could not be read.")).finally(unsubscribe);
+    return { requestId };
+  }
+  if (files && !bridge.importDroppedMedia) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "File drops are unavailable. Use Import media instead." };
+  }
   const submitted = files
     ? bridge!.importDroppedMedia!({ worldId, requestId, editor, ...scope }, files).submitted
     : send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope });
@@ -5287,7 +5431,7 @@ export interface ExportState {
   /** An audiobook video's place while it renders (design turn 197d). */
   video?: import("@arke-studio/contracts").AudiobookVideoProgress;
   /** What an audiobook video made, once it has (197e): its folder and files. */
-  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[] };
+  made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[]; scope?: import("@arke-studio/contracts").AudiobookScope; chapterIds?: string[] };
   error: string | null;
 }
 
@@ -5565,10 +5709,16 @@ export function resetAudiobookSeams(worldId: string, productionId: string, chapt
   return send({ kind: "reset-audiobook-seams", worldId, productionId, chapterFile });
 }
 
-/** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
-export function openAudiobookListening(worldId: string, productionId: string): string | null {
+/** Group by beats (SPEC-047 R-172): the director joins each beat's blocks, answered as `audiobook.beats` under the id returned. */
+export function groupChapterBeats(worldId: string, productionId: string, chapterFile: string): string | null {
   const requestId = ulid();
-  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId }) ? requestId : null;
+  return send({ kind: "group-chapter-beats", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+
+/** The book as a listener hears it (design turn 186): answered as `audiobook.listening` under the id returned. */
+export function openAudiobookListening(worldId: string, productionId: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
+  const requestId = ulid();
+  return send({ kind: "open-audiobook-listening", worldId, productionId, requestId, ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** A picture set on a block, or taken off with null (design turn 186c): answered as `audiobook.record` under the id returned. */
@@ -5785,6 +5935,11 @@ export function useDirectionRuns(): StoreState["direction"] {
   return useStore().direction;
 }
 
+/** Group by beats as it runs and ends (design turn 201), by `world/production/chapter`. */
+export function useBeatRuns(): StoreState["beats"] {
+  return useStore().beats;
+}
+
 export function useAudiobookRecords(): StoreState["audiobookRecords"] {
   return useStore().audiobookRecords;
 }
@@ -5949,9 +6104,9 @@ export function setAudiobookPictureFocus(worldId: string, productionId: string, 
 }
 
 /** The audiobook as the player (design turn 186e): answered as `audiobook.exported` under the id returned. */
-export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string): string | null {
+export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
-  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}) }) ? requestId : null;
+  return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
 }
 
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */
@@ -6185,6 +6340,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     direction: {},
     illustration: {},
     audiobookRecords: {},
+    beats: {},
     stagedTakes: {},
     speakerLines: {},
   narratorQuotes: {},

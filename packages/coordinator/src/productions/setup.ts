@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProductionSetupDraftSchema, ProductionSetupStateSchema, ProductionSetupOriginSchema, PRODUCTION_SETUP_SCHEMA_VERSION,
-  applyProductionSetupUpdate, ulid,
+  adaptableStories, applyProductionSetupUpdate, ulid,
   type ConversationId, type ProductionSetupState, type ProductionSetupUpdate, type WorldChatLoaded,
 } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
@@ -12,9 +12,32 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { CommitStaleError, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
+
+/**
+ * Adapt from names a story in this world (SPEC-052 R-1): refused before it is written, whether the
+ * rail or Arke named it, so a draft never holds a source the rail would not have offered.
+ */
+export function assertAdaptableSource(world: WorldStore, update: ProductionSetupUpdate): void {
+  const source = update.fields?.source;
+  if (!source) return;
+  if (!adaptableStories(world.getBundle().productions).some(story => story.id === source.productionId)) {
+    throw new Error("Adapt from names a story with chapters in this world. Choose one from the list.");
+  }
+}
+
+/**
+ * The world is raised past the builds that cannot read a setup's source (design turn 205) before
+ * the first draft naming one is written, as models are (design turn 153).
+ */
+export async function fenceAdaptableSource(world: WorldStore, update: ProductionSetupUpdate): Promise<void> {
+  if (update.fields?.source) await world.ensureSchemaVersion(ADAPT_FROM_SCHEMA_VERSION, "production-setup");
+  // A Target is carried by the draft once it is a micro drama: chosen, or seeded by the change of
+  // format (SPEC-052 R-6). Raised for either, since the seeding happens inside the update.
+  if (update.fields?.target || update.fields?.kind === "microdrama") await world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
+}
 
 function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
   return { status: "draft", review: null, draft: ProductionSetupDraftSchema.parse({
@@ -118,6 +141,8 @@ export class ProductionSetupService {
       if (update.fields?.models && Object.keys(update.fields.models).length > 0) {
         await this.world.ensureSchemaVersion(WORLD_MODELS_SCHEMA_VERSION, "production-setup");
       }
+      assertAdaptableSource(this.world, update);
+      await fenceAdaptableSource(this.world, update);
       return this.world.ownedWrite(async () => {
       const view = await this.read(id);
       const state = this.editable(view, update.expectedRevision);
@@ -191,6 +216,8 @@ export class ProductionSetupService {
       this.uncertain.add(id);
       try {
         const review = state.review!;
+        // A season carrying a Target is past the builds that read season.json without it.
+        if (review.plan.initialSeason?.target) await this.world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
         await createProductionFromPlan(this.world, review.plan, {
           source: "production-setup", requestId: review.id,
           precondition: () => setupSourceDigest(this.world.getBundle()) === review.sourceDigest

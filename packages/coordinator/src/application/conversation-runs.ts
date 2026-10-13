@@ -1,4 +1,5 @@
 import { productionSetupBrief } from "../productions/setup-brief.js";
+import { assertAdaptableSource, fenceAdaptableSource } from "../productions/setup.js";
 import { validateProductionPlan } from "../world-chat/production-readiness.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
@@ -10,6 +11,7 @@ import { readAudioRights } from "../audio/rights.js";
 import { readPlanRecords } from "../productions/plans.js";
 import { readContinuity } from "../productions/continuity.js";
 import { readVoices } from "../productions/voices.js";
+import { readAudiobook } from "../productions/audiobook.js";
 import { stageEditorRequests } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "../productions/scene-edits.js";
 import { BibleStaleError, readBible } from "../world/bible.js";
@@ -113,6 +115,11 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getChapterVoices: async (productionId, chapterFile) => {
       const record = await readVoices(store, productionId, chapterFile);
       return record === "unreadable" ? null : record;
+    },
+    // The beats a chapter was grouped by (design turn 201), the units an adaptation reads (SPEC-052).
+    getChapterBeats: async (productionId, chapterFile) => {
+      const record = await readAudiobook(store, productionId, chapterFile);
+      return record === null || record === "unreadable" ? null : record.beats ?? [];
     },
     attachments,
     findAttachment: async (lease, id) => {
@@ -260,6 +267,10 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         return outcome;
       }, budgetChars,
     ),
+    checkSetupUpdate: async (update) => {
+      assertAdaptableSource(store, update);
+      await fenceAdaptableSource(store, update);
+    },
     setupBrief: ({ leaseToken, draft, budgetChars }) => productionSetupBrief(
       store.getBundle(), draft, async (tool, args) => {
         const outcome = await retrieval.call(leaseToken, tool, args);

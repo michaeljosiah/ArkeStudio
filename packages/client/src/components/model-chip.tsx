@@ -262,7 +262,7 @@ export function ModelChip({
   needsTools?: boolean;
   /** What letting go of this chat's choice is called, where "saved" would name nothing. */
   unsetLabel?: string;
-  /** The model is named, not chosen here: no menu, no chevron, and nothing at all when it has no name to give. */
+  /** The model is named, not chosen here: no menu or chevron. */
   readOnly?: boolean;
   /** The effort in force for this model, in the harness's own name; absent means the harness's default. */
   variant?: string;
@@ -321,8 +321,10 @@ export function ModelChip({
 
   const models = state?.app.harnessModels ?? [];
   const manifest = state?.app.manifest?.models;
-  const current = value ? findHarnessModel(value, models, manifest) : models.find((model) => model.isDefault);
-  const label = current ? harnessModelLabel(state, current) : (value ?? "Model");
+  // isDefault can name a preferred model for each provider. It does not establish which
+  // model an unpinned session will use; only a resolved choice may name its model or effort.
+  const current = value ? findHarnessModel(value, models, manifest) : undefined;
+  const label = current ? harnessModelLabel(state, current) : (value ?? "Harness default");
   // A catalogue that is not one the harness has just confirmed — loading, failed, or the harness
   // stopped — offers nothing to pick; the menu still opens, so a saved choice can be let go of.
   const notReady = state?.app.health.harness.status !== "healthy" || state?.app.harnessModelStatus?.status !== "ready";
@@ -333,14 +335,14 @@ export function ModelChip({
   const reference = current ? harnessModelReference(current) : value;
 
   if (readOnly) {
-    if (current === undefined && value === undefined) return null;
+    const source = value === undefined ? "Chosen by the harness" : "Chosen in Settings";
     return (
       <span className="fy-mchip">
         <span
           className="fy-mchip__btn fy-mchip__btn--fixed"
           role="note"
           tabIndex={0}
-          aria-label={`Language model: ${label}. Chosen in Settings`}
+          aria-label={`Language model: ${label}. ${source}`}
           onMouseEnter={(event) => setTip(event.currentTarget)}
           onMouseLeave={() => setTip(null)}
           onFocus={(event) => setTip(event.currentTarget)}
@@ -348,7 +350,7 @@ export function ModelChip({
         >
           <span className="fy-mchip__name">{label}</span>
         </span>
-        {tip !== null && <BodyTip anchor={tip} className="fy-mchip__tip">Chosen in Settings</BodyTip>}
+        {tip !== null && <BodyTip anchor={tip} className="fy-mchip__tip">{source}</BodyTip>}
       </span>
     );
   }

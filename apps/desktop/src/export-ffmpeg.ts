@@ -2,7 +2,8 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { ffmpegFilterPath } from "@arke-studio/contracts";
-import type { FfmpegRunner } from "@arke-studio/coordinator";
+import { probeFfmpegGraphFileOption, type FfmpegRunner } from "@arke-studio/coordinator";
+import { createMediaProcessRunner } from "./media-tools.js";
 
 type SpawnLike = typeof nodeSpawn;
 type HashFile = (path: string) => Promise<string>;
@@ -16,7 +17,7 @@ const GEIST_REGULAR_SHA256 = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7
  * a command line) cannot be read here, so it is taken to draw, and the font is proved first.
  */
 export function usesDrawtext(args: readonly string[]): boolean {
-  if (args.includes("-/filter_complex")) return true;
+  if (args.includes("-/filter_complex") || args.includes("-filter_complex_script")) return true;
   return args.some((arg, index) => {
     const previous = args[index - 1];
     return (
@@ -100,7 +101,7 @@ export function createExportFfmpegRunner(
             : error,
         ),
       );
-      child.on("exit", (code) =>
+      child.on("close", (code) =>
         finish(
           code === 0
             ? undefined
@@ -201,6 +202,7 @@ export function createExportFfmpegRunner(
 
   return {
     slateFont,
+    graphFileOption: signal => probeFfmpegGraphFileOption(createMediaProcessRunner({ ffmpeg, ffprobe: "" }, spawn), signal),
     run: async (args, onProgress, signal, onSeconds) => {
       const drawsText = usesDrawtext(args);
       if (drawsText) {

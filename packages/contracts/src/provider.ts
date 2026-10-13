@@ -268,6 +268,12 @@ export const ProviderStatusSchema = z
   .strict();
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 
+/** Native Ollama inventory may outlive its runtime; writing admission uses the existing LLM health probe. */
+export function ollamaLlmAvailable(providers: readonly ProviderStatus[]): boolean {
+  const status = providers.find(provider => provider.id === "ollama");
+  return status?.validation === "valid" && status.probes.some(probe => probe.capability === "llm" && probe.available);
+}
+
 /** A fault about the credential in use, which disables what it unlocked; a store's fault is not one. */
 export function credentialFaulted(status: Pick<ProviderStatus, "fault" | "faultKind"> | undefined): boolean {
   return status !== undefined && status.fault !== null && (status.faultKind === undefined || status.faultKind === "credential");

@@ -95,7 +95,8 @@ it("makes and exports a thirteen-step film through Production Chat with no pre-a
   const humanDecisions: unknown[] = [];
   // Editor preparation records a pending review. That operational record is permitted;
   // authored production data, selections and timeline must stay unchanged until a decision.
-  const stateDigest = () => createHash("sha256").update(JSON.stringify(store.getBundle().productions.map(({ editorRequests: _reviews, ...authored }) => authored))).digest("hex");
+  const stateDigest = () => createHash("sha256").update(JSON.stringify(store.getBundle().productions.map(({ editorRequests: _reviews,
+    editorRequestState: _requestFile, effectFamilies: _effects, transitionFamilies: _transitions, ...authored }) => authored))).digest("hex");
   async function read(url: string, tool: string, args: Record<string, unknown>): Promise<string> {
     let cursor: string | null = null, receipt = "";
     do {

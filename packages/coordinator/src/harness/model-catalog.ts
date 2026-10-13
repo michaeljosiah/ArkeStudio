@@ -1,6 +1,6 @@
 import {
   ModelInfoSchema, findHarnessModel, harnessModelDisabled, harnessModelManifestEntry,
-  harnessModelMissingInput, harnessModelReference, modelEligible, PROVIDERS,
+  harnessModelMissingInput, harnessModelReference, modelEligible, ollamaLlmAvailable, PROVIDERS,
   type ClientState, type HarnessAdapter, type HarnessModelStatus, type ModelInfo,
 } from "@arke-studio/contracts";
 
@@ -110,6 +110,9 @@ export function selectHarnessModel(
 ): LanguageModelSelection {
   const model = findHarnessModel(reference, models, app.manifest?.models);
   if (!model) return { modelId: reference, reason: `${reference} is unavailable through the running harness. Choose an available model or clear the saved choice.` };
+  if (model.provider === "ollama" && !ollamaLlmAvailable(app.providers)) {
+    return { modelId: reference, reason: "Ollama is unavailable. Start Ollama and retry, or choose another Writing model." };
+  }
   const entry = harnessModelManifestEntry(model, app.manifest?.models);
   if (harnessModelDisabled(model, app.models.disabled, app.manifest?.models) ||
     (entry && PROVIDERS[entry.provider].local && !modelEligible(entry, {

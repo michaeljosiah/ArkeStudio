@@ -9,6 +9,8 @@ import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
 import type { FrameRate } from "./world.js";
+import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection } from "./editor-effect-render-plan.js";
+import type { PictureBlendMode } from "./editor-effects.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -391,6 +393,7 @@ export interface ExportOverlay {
 }
 
 export interface ExportPlan {
+  effectRender?: EffectRenderProjection;
   preset: ExportPreset;
   /** The production clock, which may differ from the preset's legacy default. */
   frameRate: FrameRate;
@@ -625,12 +628,192 @@ export function buildExportPlan(
  * One ffmpeg invocation for the whole plan (D11): slates from the lavfi color source with a
  * drawtext label; clips trimmed by their ranges; everything concatenated in a single encode.
  */
-export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
+export interface EffectAlphaInput {
+  blendMode?: PictureBlendMode;
+  /** Absent for the final composition layer; a clip id for a source-atop picture layer. */
+  pictureClipId?: string;
+  path: string;
+  startFrame: number;
+  endFrame: number;
+}
+
+/** Alpha files are derived, bounded job intermediates, never authored timeline sources. */
+function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: string, alpha: readonly EffectAlphaInput[], args: string[], filters: string[]): { last: string; inputIndex: number } {
+  const projection = plan.effectRender!;
+  const { width, height, frameRate: fps, startFrame, endFrame } = projection;
+  const duration = (endFrame - startFrame) / fps;
+  let inputIndex = 0, last = "effectGround";
+  args.push("-f", "lavfi", "-t", String(duration), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
+  filters.push(`[${inputIndex++}:v]format=gbrap[${last}]`);
+  const blending = projection.pictureLayers.some(picture => picture.fadeIn || picture.fadeOut || picture.blendMode && picture.blendMode !== "normal" || picture.opacity !== undefined && picture.opacity !== 1);
+  const tracks = new Map<string, Array<{ source: string; picture: typeof projection.pictureLayers[number] }>>();
+  for (const [number, picture] of projection.pictureLayers.entries()) {
+    const from = Math.max(startFrame, picture.startFrame), to = Math.min(endFrame, picture.endFrame);
+    if (from >= to) continue;
+    const count = to - from, shiftFrames = from - startFrame, seconds = count / fps;
+    let source = `ep${number}`;
+    let rect = { x: 0, y: 0, width, height };
+    if (picture.kind === "slate") {
+      assertSlateLabelSupported(picture.label);
+      args.push("-f", "lavfi", "-t", String(seconds), "-i", `color=c=black:s=${width}x${height}:r=${fps}`);
+      filters.push(`[${inputIndex++}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${ffmpegDrawtextText(picture.label)}':fontcolor=${EFFECT_SLATE_STYLE.colour}:fontsize=${EFFECT_SLATE_STYLE.fontSize}:x=(w-tw)/2:y=(h-th)/2,format=gbrap,settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+    } else {
+      if (!picture.path || !picture.sourceSize) throw new Error(`Picture ${picture.clipId} needs measured dimensions before effect export`);
+      rect = containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, width, height);
+      let sourceAt = 0;
+      if (picture.still) args.push("-loop", "1", "-framerate", String(fps), "-t", String(seconds));
+      else {
+        sourceAt = picture.sourceInSec + (from - picture.startFrame) / fps;
+        sourceAt = Math.max(0, picture.sourceOutSec === undefined ? sourceAt : Math.min(sourceAt, picture.sourceOutSec - 0.0001));
+        if (picture.sourceOutSec !== undefined) args.push("-to", String(picture.sourceOutSec));
+      }
+      args.push("-i", `${worldDir}/${picture.path}`);
+      // Keep the last source frame at or before the production sample, including a non-aligned
+      // in-point. Input seeking would discard that predecessor and pick the following frame.
+      filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+      for (const [layer, overlay] of alpha.filter(value => value.pictureClipId === picture.clipId).entries()) {
+        args.push("-i", overlay.path);
+        const effect = `ea${number}_${layer}`, mask = `em${number}_${layer}`, next = `es${number}_${layer}`;
+        filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${overlay.startFrame - startFrame},split[${effect}][${mask}Source]`);
+        filters.push(`[${mask}Source]alphaextract,format=gbrap[${mask}]`);
+        // Source-atop preserves the picture's alpha. Multiplying both alphas and then using
+        // ordinary overlay would wrongly increase coverage at transparent edges (R-18).
+        if (overlay.blendMode && overlay.blendMode !== "normal") {
+          filters.push(`[${source}]split[${next}Base][${next}Backdrop]`);
+          filters.push(`[${next}Backdrop][${effect}]blend=all_mode=${overlay.blendMode === "add" ? "addition" : "screen"}:shortest=1[${next}Blend]`);
+          filters.push(`[${next}Base][${next}Blend][${mask}]maskedmerge=planes=7[${next}]`);
+        } else filters.push(`[${source}][${effect}][${mask}]maskedmerge=planes=7[${next}]`);
+        source = next;
+      }
+    }
+    const next = `ec${number}`;
+    if (blending) {
+      filters.push(`[${source}]pad=${width}:${height}:${rect.x}:${rect.y}:color=black@0,setpts=PTS-STARTPTS,tpad=start=${shiftFrames}:stop=${endFrame - to}:color=black@0,trim=end_frame=${endFrame - startFrame},settb=expr=1/${fps},setpts=N[${next}]`);
+      tracks.set(picture.trackId, [...(tracks.get(picture.trackId) ?? []), { source: next, picture }]);
+      continue;
+    }
+    // FFmpeg 6's overlay enable counter can diverge when its secondary stream starts late.
+    // Recover the exact delivery frame from the master timestamp; rounding also avoids a
+    // decimal-second boundary dropping the first frame at rates such as 24 or 30 fps.
+    filters.push(`[${last}][${source}]overlay=x=${rect.x}:y=${rect.y}:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*${fps}),${shiftFrames})*lt(round(t*${fps}),${to - startFrame})'[${next}]`);
+    last = next;
+  }
+  for (const [index, entries] of [...tracks.values()].entries()) {
+    const styled = entries.filter(entry => entry.picture.blendMode && entry.picture.blendMode !== "normal");
+    if (styled.length) {
+      filters.push(`[${last}]split=${styled.length + 1}[trackBase${index}]${styled.map((_, i) => `[trackBackdrop${index}_${i}]`).join("")}`);
+      last = `trackBase${index}`;
+    }
+    let styleIndex = 0;
+    const pictures = entries.map(({ source, picture }, i) => {
+      const prefix = `pictureStyle${index}_${i}`;
+      if (picture.blendMode && picture.blendMode !== "normal") {
+        filters.push(`[${source}]split[${prefix}Colour][${prefix}MatteSource]`);
+        filters.push(`[${prefix}MatteSource]alphaextract[${prefix}Matte]`);
+        filters.push(`[trackBackdrop${index}_${styleIndex++}][${prefix}Colour]blend=all_mode=${picture.blendMode === "add" ? "addition" : "screen"}:shortest=1,format=gbrp[${prefix}Blend]`);
+        filters.push(`[${prefix}Blend][${prefix}Matte]alphamerge[${prefix}Straight]`);
+        source = `${prefix}Straight`;
+      }
+      const weight = [picture.opacity ?? 1, picture.fadeIn ? `max(0,min(1,(N+${startFrame}-${picture.fadeIn.startFrame})/${picture.fadeIn.durationFrames}))` : "1",
+        picture.fadeOut ? `1-max(0,min(1,(N+${startFrame}-${picture.fadeOut.startFrame})/${picture.fadeOut.durationFrames}))` : "1"].map(value => `(${value})`).join("*");
+      // Each source blends against the same lower-track backdrop. Weight premultiplied
+      // contributions, then composite the track once: opaque crossfades never dim midway.
+      // These are exact pixel reads. Older geq bilinear sampling clamps edge coordinates to
+      // the preceding pixel, changing picture alpha and colour even at integer coordinates.
+      filters.push(`[${source}]geq=interpolation=nearest:r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}',premultiply=inplace=1[${prefix}Weighted]`);
+      return `${prefix}Weighted`;
+    });
+    let track = pictures[0]!;
+    for (let number = 1; number < pictures.length; number++) {
+      const sum = `transitionSum${index}_${number}`;
+      filters.push(`[${track}][${pictures[number]}]blend=all_mode=addition:shortest=1[${sum}]`); track = sum;
+    }
+    const straight = `transitionStraight${index}`, next = `transitionTrack${index}`;
+    filters.push(`[${track}]unpremultiply=inplace=1[${straight}]`);
+    filters.push(`[${last}][${straight}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass[${next}]`); last = next;
+  }
+  for (const [layer, composition] of alpha.filter(value => value.pictureClipId === undefined).entries()) {
+    args.push("-i", composition.path);
+    const plate = `compositionAlpha${layer}`, next = `effectComposition${layer}`;
+    filters.push(`[${inputIndex++}:v]format=gbrap,settb=expr=1/${fps},setpts=N+${composition.startFrame - startFrame}[${plate}]`);
+    if (composition.blendMode && composition.blendMode !== "normal") {
+      filters.push(`[${last}]split[${next}Base][${next}Backdrop]`);
+      filters.push(`[${plate}]split[${next}Colour][${next}MaskSource]`);
+      filters.push(`[${next}MaskSource]alphaextract,format=gbrap[${next}Mask]`);
+      filters.push(`[${next}Backdrop][${next}Colour]blend=all_mode=${composition.blendMode === "add" ? "addition" : "screen"}:shortest=1[${next}Blend]`);
+      filters.push(`[${next}Base][${next}Blend][${next}Mask]maskedmerge=planes=7[${next}]`);
+    } else filters.push(`[${last}][${plate}]overlay=0:0:format=gbrp:alpha=straight:eof_action=pass:enable='gte(round(t*${fps}),${composition.startFrame - startFrame})*lt(round(t*${fps}),${composition.endFrame - startFrame})'[${next}]`);
+    last = next;
+  }
+  return { last, inputIndex };
+}
+
+/** The canonical audible graph shared by export and SPEC-053 analysis. Paths are resolved by the host.
+ * Optional contribution taps preserve the complete mix; callers must consume every tap.
+ * `preLimiter` replaces the final filter only when reconstructing a source's contribution. */
+export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" | "speech" | "totalSec">,
+  paths: readonly string[], inputIndex = 0, tapContributions = false): {
+    args: string[]; filters: string[]; hasAudio: boolean; preLimiter: string; limiter: string;
+  } {
+  if (paths.length !== plan.audio.length) throw new Error("Every canonical audio input needs a resolved path");
+  const args: string[] = [], filters: string[] = [], audioLabels: string[] = [];
+  /*
+   * Speech-first mixing (SPEC-038 R-14, R-15). A Music or Ambience clip under expected speech is
+   * lowered by the production's ducking figure along the same look-ahead and release envelope the
+   * browser applies, as a per-frame volume expression in film seconds. A plan with no speech, or
+   * no mix at all, emits the plain `volume=<gain>dB` it always did.
+   */
+  const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
+  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
+  plan.audio.forEach((clip, i) => {
+    const index = inputIndex + i;
+    // Windowed at the input so the source starts where the clip's own in-point says (R-19).
+    if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
+    args.push("-i", paths[i]!);
+    const d = Math.max(clip.endSec - clip.startSec, 0);
+    const delayMs = Math.round(clip.startSec * 1000);
+    const volume = ducked(clip)
+      ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
+      : `volume=${clip.gainDb}dB`;
+    filters.push(
+      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
+    );
+    if (tapContributions) filters.push(`[ac${i}]asplit[am${i}][at${i}]`);
+    audioLabels.push(tapContributions ? `[am${i}]` : `[ac${i}]`);
+  });
+  let preLimiter = "", limiter = "";
+  if (audioLabels.length > 0) {
+    // One clip needs no mixer; asking amix for a single input is a filter that does nothing.
+    const mixed = audioLabels.length === 1 ? audioLabels[0]! : "[amix]";
+    if (audioLabels.length > 1) {
+      filters.push(
+        `${audioLabels.join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest[amix]`,
+      );
+    }
+    // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
+    // early does not shorten it. Peak protection last (R-17): the same ceiling the browser's
+    // limiter holds, applied after every gain and duck, and transparent when nothing reaches it.
+    const ceilingDb = plan.mix?.limiterCeilingDb ?? -1;
+    const ceiling = Math.pow(10, ceilingDb / 20).toFixed(6);
+    preLimiter = `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS`;
+    limiter = `alimiter=limit=${ceiling}:level=false`;
+    filters.push(`${preLimiter},${limiter}[aout]`);
+  }
+
+  return { args, filters, hasAudio: audioLabels.length > 0, preLimiter, limiter };
+}
+
+export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string, effectAlpha?: readonly EffectAlphaInput[]): string[] {
   const p = PRESETS[plan.preset];
   const fps = plan.frameRate;
   const args: string[] = ["-y"];
   const filters: string[] = [];
   let inputIndex = 0;
+  let last = "out";
+  if (plan.effectRender) {
+    if (effectAlpha === undefined) throw new Error("Effects require the prepared deterministic renderer before export");
+    ({ last, inputIndex } = effectPictureGraph(plan, worldDir, slateFont, effectAlpha, args, filters));
+  } else {
   for (const item of plan.items) {
     if (item.type === "clip") {
       if (item.inSec !== undefined) args.push("-ss", String(item.inSec));
@@ -682,7 +865,6 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
    * ending the whole film when it runs out. Untouched when there are none, so an export with no
    * overlays emits exactly the arguments it always did.
    */
-  let last = "out";
   plan.overlays.forEach((overlay, i) => {
     const index = plan.items.length + i;
     // A still has one frame: held for the film's length, so its window has something to show.
@@ -700,6 +882,8 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     );
     last = next;
   });
+  inputIndex = plan.items.length + plan.overlays.length;
+  }
 
   /*
    * Burned-in subtitles (SPEC-038 R-27, §2.3). Each cue is one drawtext confined to its window,
@@ -750,50 +934,11 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
    * length whether the file runs long or short, so a bed that is thirty seconds of a four-minute
    * track occupies thirty seconds rather than the rest of the film.
    */
-  const audioLabels: string[] = [];
-  /*
-   * Speech-first mixing (SPEC-038 R-14, R-15). A Music or Ambience clip under expected speech is
-   * lowered by the production's ducking figure along the same look-ahead and release envelope the
-   * browser applies, as a per-frame volume expression in film seconds. A plan with no speech, or
-   * no mix at all, emits the plain `volume=<gain>dB` it always did.
-   */
-  const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
-  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
-  plan.audio.forEach((clip, i) => {
-    const index = plan.items.length + plan.overlays.length + i;
-    // Windowed at the input so the source starts where the clip's own in-point says (R-19).
-    if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
-    args.push("-i", `${worldDir}/${clip.path}`);
-    const d = Math.max(clip.endSec - clip.startSec, 0);
-    const delayMs = Math.round(clip.startSec * 1000);
-    const volume = ducked(clip)
-      ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
-      : `volume=${clip.gainDb}dB`;
-    filters.push(
-      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
-    );
-    audioLabels.push(`[ac${i}]`);
-  });
-  if (audioLabels.length > 0) {
-    // One clip needs no mixer; asking amix for a single input is a filter that does nothing.
-    const mixed = audioLabels.length === 1 ? audioLabels[0]! : "[amix]";
-    if (audioLabels.length > 1) {
-      filters.push(
-        `${audioLabels.join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest[amix]`,
-      );
-    }
-    // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
-    // early does not shorten it. Peak protection last (R-17): the same ceiling the browser's
-    // limiter holds, applied after every gain and duck, and transparent when nothing reaches it.
-    const ceilingDb = plan.mix?.limiterCeilingDb ?? -1;
-    const ceiling = Math.pow(10, ceilingDb / 20).toFixed(6);
-    filters.push(
-      `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS,alimiter=limit=${ceiling}:level=false[aout]`,
-    );
-  }
-
+  const audioGraph = buildCanonicalAudioGraph(plan, plan.audio.map(clip => `${worldDir}/${clip.path}`), inputIndex);
+  args.push(...audioGraph.args); filters.push(...audioGraph.filters);
   args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`);
-  if (audioLabels.length > 0) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  if (audioGraph.hasAudio) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  if (plan.effectRender) args.push("-frames:v", String(plan.effectRender.endFrame - plan.effectRender.startFrame), "-pix_fmt", "yuv420p");
   args.push("-crf", String(PRESETS[plan.preset].crf), outFile);
   return args;
 }

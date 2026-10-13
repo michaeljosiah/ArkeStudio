@@ -5,6 +5,7 @@ import {
   formatRunningTime,
   kitLookLibrary,
   pictureBench,
+  pictureDetailSkins,
   pictureLookChanged,
   pictureMood,
   pictureSpans,
@@ -19,7 +20,7 @@ import {
   type WorldImageReference,
 } from "@arke-studio/contracts";
 import { usableModels } from "./dispatch-bar.js";
-import { setupForMode } from "../lib/composer-mode.js";
+import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { mediaUrl } from "../lib/media.js";
 import { sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
@@ -27,6 +28,7 @@ import { Button, Textarea, cx } from "./ui.js";
 import { usePictureSuggestion, type PictureSuggestionState } from "./audiobook-suggest.js";
 import { PictureCard, PicturePress } from "./audiobook-picture-card.js";
 import { chosenFrom, madePicture } from "./audiobook-made-picture.js";
+import { AudiobookMotionControl } from "./audiobook-motion.js";
 
 /**
  * Pictures that follow the words (design turn 186c, SPEC-047 R-69): in a chapter's Audiobook
@@ -167,13 +169,15 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // Generate (R-69): a new Bench session in image mode with the brief written in, then the Bench —
   // which prices and confirms the picture as any image, and files it as an artifact kept there.
   const bench = useBench();
-  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[] } | null>(null);
+  const pending = useRef<{ before: string | null; brief: string; refs?: readonly string[]; setup?: ModeSetup } | null>(null);
   useEffect(() => {
     const asked = pending.current;
     const session = bench?.session;
     if (asked === null || session === undefined || session.id === asked.before || bench?.worldId !== worldId) return;
     pending.current = null;
-    const setup = setupForMode("image", undefined, usableModels(store.state, "image"));
+    // Editing a plan-backed picture must not silently switch it to a paid Bench default.
+    // Keep an unavailable original model too: the Bench requires a usable choice before dispatch.
+    const setup = asked.setup ?? setupForMode("image", undefined, usableModels(store.state, "image"));
     sendBenchCompose(worldId, session.id, { mode: "image", provider: setup.provider, model: setup.model, params: setup.params, brief: asked.brief });
     // Edit prompt (191a): the pictures that were to ride go in as the Bench takes them, one batch, in the order the brief cites them.
     if (asked.refs !== undefined) sendBenchAddReference(worldId, session.id, asked.refs.map((path) => ({ pick: { source: "world-file" as const, path } })));
@@ -188,7 +192,11 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const editInBench = (picked: PictureSuggestion, prompt: string) => {
     const carried = picked.who.filter((who) => who.carried && who.reference !== null);
     const cited = carried.map((who, order) => ({ name: who.name, kind: who.kind, token: `Image ${order + 1}` }));
-    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description))), refs: carried.map((who) => who.reference!) };
+    // Whose hand a detail shows, with the skin their sheet gives: a person's key is their sheet's id.
+    const sheets = world?.sheets ?? [];
+    const detailed = pictureDetailSkins(picked.shot?.details ?? [], sheets.map((sheet) => ({ key: sheet.id, name: sheet.name, sheet: sheet.id })), sheets);
+    pending.current = { before: bench?.session.id ?? null, brief: pictureBench(prompt, cited, pictureMood(record?.look, productionStyleFor(production.meta, world?.artDirection.description)), detailed), refs: carried.map((who) => who.reference!),
+      setup: { provider: picked.model.provider, model: picked.model.id, params: { kind: "image", count: 1, ...(picked.aspect !== undefined ? { aspect: picked.aspect } : {}) } } };
     sendBenchNewSession(worldId);
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
@@ -207,6 +215,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // The card in hand: a suggestion being drafted or made stands over the picture's own.
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
   const choosePicture = connection === "open" ? () => setOpen(true) : undefined;
+  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={row.block.key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={row.block.key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
   // Make again at the foot. When it shows and how long it holds are the chip's and the tab's, not
@@ -225,13 +234,14 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           onEdit={editInBench}
           offline={connection !== "open"}
           picture={here === null ? null : mediaUrl(world.meta.slug, here.file)}
+          mediaActions={motionControl}
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
           chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[row.block.key] !== undefined ? { own: record.ownLooks[row.block.key] } : {}) }}
         />
       ) : !open ? (
         <>
-          <div className="fy-pcard__top">
+          <div className={motionControl === undefined ? "fy-pcard__top" : "fy-pcard__top fy-pcard__top--motion"}>
             {here !== null && world !== null ? (
               <PicturePress onChoose={choosePicture}>
                 <img className="fy-pcard__img fy-ab__picnow" src={mediaUrl(world.meta.slug, here.file)} alt="" data-testid="picture-card-picture" />
@@ -241,6 +251,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
                 <span className="fy-mono">Choose</span>
               </button>
             )}
+            {motionControl}
             <div className="fy-pcard__facts">
               {here !== null && world !== null ? (
                 <>

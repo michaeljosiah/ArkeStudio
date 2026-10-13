@@ -44,6 +44,18 @@ import "./screens/scene-workspace/shot-page.css";
 import "./screens/scene-workspace/responsive.css";
 import "./screens/generate-responsive.css";
 import "./screens/editor-responsive.css";
+import "./screens/editor-effect-fields.css";
+import "./screens/editor-effect-inspector.css";
+import "./screens/editor-effect-area.css";
+import "./screens/editor-effect-curves.css";
+import "./screens/editor-effect-audio.css";
+import "./screens/editor-effect-library.css";
+import "./screens/editor-effect-tracks.css";
+import "./screens/editor-effect-shell.css";
+import "./screens/editor-effect-arrangement.css";
+import "./screens/editor-effect-review-bar.css";
+import "./screens/editor-transitions.css";
+import "./components/editor-effect-proposal-card.css";
 import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";
 import "./screens/season-responsive.css";
@@ -55,13 +67,16 @@ import "./components/production-studio.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
+import "./components/audiobook-activity.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";
 import "./screens/audiobook-show.css";
+import "./components/audiobook-motion.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import "./components/audiobook-look.css";
 import "./components/audiobook-new-look.css";
+import "./components/saved-look-collection.css";
 import "./components/audiobook-suggest.css";
 import "./components/audiobook-picture-card.css";
 import "./components/audiobook-video.css";
@@ -72,6 +87,8 @@ import { isRemoteSession } from "./lib/remote-session.js";
 import { RemoteEntry } from "./components/remote-entry.js";
 import "./screens/remote-access.css";
 import "./screens/settings-responsive.css";
+// Last: Arke's hinge half on a Fold7 (design turn 202) stands over the drawers' rules.
+import "./components/arke-half.css";
 import { initializeTheme } from "./lib/theme.js";
 
 /*

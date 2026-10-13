@@ -1,3 +1,4 @@
+import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { AccountStateSchema } from "./account.js";
@@ -9,13 +10,19 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineSchema, ChapterAudiobookSchema, DirectionReadsSchema } from "./audiobook.js";
-import { AudiobookListeningSchema } from "./audiobook-listening.js";
+import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
+import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
+import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
+import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
+import { EffectReviewResultSchema } from "./editor-effect-review.js";
+import { TransitionReviewResultSchema } from "./editor-transition-proposal.js";
+import { PictureReviewResultSchema } from "./editor-picture-proposal.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
@@ -146,6 +153,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("reference.look-renamed"), worldId: UlidSchema, sheetId: SlugSchema,
+    lookId: z.string().min(1), requestId: UlidSchema, error: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
     productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("production-setup.result"), worldId: UlidSchema,
@@ -373,6 +382,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 
   /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
+  EffectReviewResultSchema,
+  TransitionReviewResultSchema,
+  PictureReviewResultSchema,
   z
     .object({
       ...base,
@@ -870,6 +882,15 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   }).strict(),
   z.object({ ...base, type: z.literal("voice.design-audition"), requestId: UlidSchema, worldId: UlidSchema, file: z.string().min(1) }).strict(),
   /**
+   * The voices designed in the connected Google project (design turn 204, issue 1635), each as
+   * Google lists it — its ID, name, language, model and how long it reads — or why there are none.
+   */
+  z.object({ ...base, type: z.literal("voice.designed-listed"), requestId: UlidSchema, worldId: UlidSchema,
+    voices: z.array(z.object({ remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/), name: z.string().min(1).max(1000),
+      language: z.string().max(64), model: z.string().min(1).max(200), expiresAt: z.string().max(64) }).strict()).max(500).nullable(),
+    reason: z.string().nullable(),
+  }).strict(),
+  /**
    * The outcome of deleting a cloned voice (SPEC-046 R-15): the library's part first, then each
    * copy a hosted reader kept — removed, or kept with the vendor's reason. A copy the vendor
    * would not give up never blocks the delete here; it is reported once, on this event.
@@ -1103,6 +1124,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * provider and its share; a progress event per block as its take lands or is flagged; then
    * finished with a named ending. Keyed like continuity's and the cast's runs.
    */
+  z.object({ ...base, type: z.literal("audiobook.activity"), run: AudiobookActivitySchema }).strict(),
   z
     .object({
       ...base,
@@ -1343,6 +1365,35 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * A chapter's blocks grouped by beats (SPEC-047 R-172): how many blocks it had and has, and the
+   * beats the director named — each with its first block, how many blocks it joined and their
+   * expected seconds — or why nothing was grouped. The record itself is answered as `audiobook.record`.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("audiobook.beats"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      requestId: UlidSchema.optional(),
+      /** `grouping` when the director starts reading (design turn 201, rule 3), then how it ended. */
+      outcome: z.enum(["grouping", "grouped", "unavailable", "refused", "failed"]),
+      before: z.number().int().min(0).optional(),
+      after: z.number().int().min(0).optional(),
+      beats: z
+        .array(z.object({ start: z.string().min(1), blocks: z.number().int().min(1), seconds: z.number().min(0), name: z.string().min(1).max(80).optional(), whose: z.string().min(1).max(120).optional() }).strict())
+        .max(4000)
+        .optional(),
+      /** Beat starts the director named that the chapter does not hold, dropped and counted. */
+      dropped: z.number().int().min(0).optional(),
+      /** Beats begun where it named none: a scene break, a gap no join crosses, or the length cap. */
+      cut: z.number().int().min(0).optional(),
+      summary: z.string().optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
    * The looks a book's chapters have chosen (design turn 193, SPEC-047 R-114), answered to the
    * window that asked: for each kit look, the chapters (by their number) that chose it, so a
    * picker can say `chapters 3, 5`. Nothing was changed or spent.
@@ -1431,6 +1482,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("audiobook.motion"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, block: z.string(), state: z.enum(["quoted", "making", "review", "chosen", "failed"]), quote: AudiobookMotionQuoteSchema.optional(), reason: z.string().optional() }).strict(),
+  z.object({ ...base, type: z.literal("audiobook.word-timing"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordTimingStateSchema }).strict(),
   /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
   z
     .object({
@@ -1465,7 +1518,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       result: z.union([
-        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean() }).strict(),
+        z.object({ ok: z.literal(true), id: z.string().min(1), dir: z.string().min(1), file: z.string().min(1), chapters: z.number().int().min(1), pictures: z.number().int().min(0), bytes: z.number().int().min(0), joined: z.boolean(), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict(),
         z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
       ]),
     })
@@ -1492,7 +1545,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       type: z.literal("web-packages.listed"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1) }).strict()),
+      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict()),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
@@ -1845,6 +1898,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  z.object({ ...base, type: z.literal("editor-effect.analysis"), worldId: UlidSchema, productionId: SlugSchema,
+    analysis: EffectAnalysisProjectionSchema.nullable() }).strict(),
   /** First-run environment verification (SPEC-016 R-2, D4): checked once, reported plainly. */
   z
     .object({
@@ -2412,3 +2467,4 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
 ]));
 export type DomainEvent = z.infer<typeof DomainEventSchema>;
+export type WebPackagesListed = Extract<DomainEvent, { type: "web-packages.listed" }>;

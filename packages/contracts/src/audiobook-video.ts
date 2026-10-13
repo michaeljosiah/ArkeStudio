@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { PICTURE_CROSSFADE_SEC } from "./audiobook-pictures.js";
-import type { ListeningChapter } from "./audiobook-listening.js";
+import { AudiobookScopeSchema, type AudiobookScope, type ListeningChapter } from "./audiobook-listening.js";
 import { SubtitleOutputModeSchema, type SubtitleOutputMode } from "./subtitles.js";
+import type { AcousticWord } from "./audiobook-word-timing.js";
+import type { AudiobookMotion } from "./audiobook-motion.js";
 
 /**
  * The audiobook as a video (design turn 197, SPEC-047): what the player shows — the picture of
@@ -19,6 +21,7 @@ export type CaptionPosition = "bottom" | "middle";
 export type CaptionSize = "s" | "m" | "l";
 
 export interface AudiobookVideoOptions {
+  scope?: AudiobookScope;
   /** One file a chapter (the default), or one for the book in parts of at most twelve hours. */
   files: "chapter" | "book";
   shape: VideoShape;
@@ -28,6 +31,8 @@ export interface AudiobookVideoOptions {
   subtitles: SubtitleOutputMode;
   captionPosition: CaptionPosition;
   captionSize: CaptionSize;
+  /** Absent on older saved/export options: ordinary phrase captions. */
+  captionStyle?: "phrases" | "word";
   titleCards: boolean;
 }
 
@@ -35,12 +40,14 @@ export interface AudiobookVideoOptions {
 // declarations the engine's bundle has refused as too long to serialize.
 export const AudiobookVideoOptionsSchema: z.ZodType<AudiobookVideoOptions, z.ZodTypeDef, unknown> = z
   .object({
+    scope: AudiobookScopeSchema.optional(),
     files: z.enum(["chapter", "book"]),
     shape: z.enum(VIDEO_SHAPES),
     slowPush: z.boolean(),
     subtitles: SubtitleOutputModeSchema,
     captionPosition: z.enum(["bottom", "middle"]),
     captionSize: z.enum(["s", "m", "l"]),
+    captionStyle: z.enum(["phrases", "word"]).optional(),
     titleCards: z.boolean(),
   })
   .strict();
@@ -131,6 +138,8 @@ export interface VideoSegment {
   key?: string;
   focus?: { x: number; y: number };
   title?: string;
+  motion?: AudiobookMotion;
+  motionAt?: number;
 }
 
 const round = (seconds: number) => Math.round(seconds * 1000) / 1000;
@@ -160,7 +169,7 @@ export function videoSegments(chapter: Pick<ListeningChapter, "title" | "blocks"
   if (firstAt > 0) segments.push(cover !== null ? { kind: "cover", file: cover, from: 0, to: round(firstAt) } : { kind: "black", file: null, from: 0, to: round(firstAt) });
   pictures.forEach((picture, index) => {
     const to = round(pictures[index + 1]?.at ?? end);
-    segments.push({ kind: "picture", file: picture.file, key: picture.key, from: round(picture.at), to, ...(picture.focus !== undefined ? { focus: picture.focus } : {}) });
+    segments.push({ kind: "picture", file: picture.file, key: picture.key, from: round(picture.at), to, ...(picture.focus !== undefined ? { focus: picture.focus } : {}), ...(picture.motion !== undefined ? { motion: picture.motion, motionAt: picture.at } : {}) });
   });
   segments = segments.filter((segment) => segment.to > segment.from);
   if (titleCards) {
@@ -245,6 +254,8 @@ export interface VideoCue {
   text: string;
   startSec: number;
   endSec: number;
+  /** Only acoustic timings are carried. Interpolated phrase cues never gain this field. */
+  words?: AcousticWord[];
 }
 
 /** Words broken into lines of at most `maxChars`; a word longer than a line stands on its own. */
@@ -320,13 +331,19 @@ interface TimedWord {
   after: BreakKind;
   /** A quotation is open after this word: a cue cut here starts its next one mid-quote. */
   quoted: boolean;
+  acoustic?: AcousticWord;
 }
 
-/** A block's words, each timed by its share of its sentence's time, as Text shares a take by length. */
+/** Verified acoustic words when present; phrase-only captions retain the existing sentence estimate. */
 function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
   const end = block.at + block.seconds;
   const words: TimedWord[] = [];
   const textEnds = new Set<number>();
+  if (block.words !== undefined) {
+    for (const word of block.words) words.push({ text: word.text, from: word.startSec, to: word.endSec, after: "sentence", quoted: false, acoustic: word });
+    words.forEach((word, i) => { if (ENDS_SENTENCE.test(word.text)) textEnds.add(i); });
+  }
+  if (block.words === undefined) {
   block.sentences.forEach((sentence, index) => {
     const from = Math.max(block.at, sentence.at);
     const to = Math.min(end, block.sentences[index + 1]?.at ?? end);
@@ -341,6 +358,7 @@ function timedWords(block: ListeningChapter["blocks"][number]): TimedWord[] {
     });
     textEnds.add(words.length - 1);
   });
+  }
   for (let at = 0; at < words.length - 1; at++) words[at]!.after = breakKind(words[at]!.text, words[at + 1]!.text, textEnds.has(at));
   // Straight quotes open and close by turns; a block is its own paragraph, so it starts closed.
   let open = false;
@@ -419,13 +437,14 @@ function blockCues(words: readonly TimedWord[], lineChars: number): VideoCue[] {
     // A short sentence over a long pause clears after six seconds rather than hang; only a cue
     // that ends a sentence, so no cue ends mid-sentence before the next begins.
     const endsSentence = cut.to === n || words[cut.to - 1]!.after === "sentence";
-    if (endsSentence && end - start > CUE_MAX_SEC) end = start + CUE_MAX_SEC;
+    if (endsSentence && end - start > CUE_MAX_SEC && words[cut.from]!.acoustic === undefined) end = start + CUE_MAX_SEC;
     // A flash too short to read borrows the silence after it, where there is any.
     const next = cuts[index + 1];
     const room = next === undefined ? end : words[next.from]!.from;
     if (end - start < CUE_MIN_SEC && room > end) end = Math.min(room, start + CUE_MIN_SEC);
     const text = cut.lines === null ? join(cut.from, cut.to) : `${join(cut.from, cut.lines)}\n${join(cut.lines, cut.to)}`;
-    return { text, startSec: round(start), endSec: round(end) };
+    const acoustic = words.slice(cut.from, cut.to).flatMap((word) => word.acoustic !== undefined ? [word.acoustic] : []);
+    return { text, startSec: round(start), endSec: round(end), ...(acoustic.length === cut.to - cut.from ? { words: acoustic } : {}) };
   });
 }
 
@@ -442,13 +461,14 @@ export function chapterCues(chapter: Pick<ListeningChapter, "blocks">, lineChars
   // cue beside it, where that one can spare it and still be read, moving their shared edge.
   // Only a shared edge moves, so no gap opens inside a sentence.
   cues.forEach((cue, index) => {
+    if (cue.words !== undefined) return;
     const lack = CUE_MIN_SEC - (cue.endSec - cue.startSec);
     if (!(lack > 0.001)) return;
     const next = cues[index + 1];
     const before = cues[index - 1];
-    if (next !== undefined && next.startSec === cue.endSec && next.endSec - next.startSec - lack >= CUE_MIN_SEC) {
+    if (next !== undefined && next.words === undefined && next.startSec === cue.endSec && next.endSec - next.startSec - lack >= CUE_MIN_SEC) {
       cue.endSec = next.startSec = round(cue.endSec + lack);
-    } else if (before !== undefined && before.endSec === cue.startSec && before.endSec - before.startSec - lack >= CUE_MIN_SEC) {
+    } else if (before !== undefined && before.words === undefined && before.endSec === cue.startSec && before.endSec - before.startSec - lack >= CUE_MIN_SEC) {
       cue.startSec = before.endSec = round(cue.startSec - lack);
     }
   });
@@ -474,6 +494,44 @@ export function burnedCues(chapter: Pick<ListeningChapter, "blocks">, shape: Vid
 /** The cue showing at a time: the preview's caption. */
 export function cueAt(cues: readonly VideoCue[], at: number): VideoCue | null {
   return cues.find((cue) => at >= cue.startSec && at < cue.endSec) ?? null;
+}
+
+/** The one measured word sounding now; a pause has no highlight, and earlier words return to white. */
+export function captionWordParts(cue: VideoCue, at: number): Array<{ text: string; active: boolean }> {
+  const active = cue.words?.find((word) => at >= word.startSec && at < word.endSec);
+  if (active === undefined) return [{ text: cue.text, active: false }];
+  let cursor = 0;
+  for (const word of cue.words ?? []) {
+    const start = cue.text.indexOf(word.text, cursor);
+    if (start < 0) return [{ text: cue.text, active: false }];
+    if (word === active) return [{ text: cue.text.slice(0, start), active: false }, { text: word.text, active: true }, { text: cue.text.slice(start + word.text.length), active: false }];
+    cursor = start + word.text.length;
+  }
+  return [{ text: cue.text, active: false }];
+}
+
+/** Discrete ASS events share the preview's plan. No karaoke sweep, accumulated highlight, or synthetic word clock. */
+export function highlightedCaptionAss(cues: readonly VideoCue[], options: AudiobookVideoOptions): string {
+  const { width, height } = shapeSize(options.shape);
+  const size = captionFontPx(options.shape, options.captionSize);
+  const alignment = options.captionPosition === "middle" ? 5 : 2;
+  const time = (seconds: number) => {
+    const cs = Math.round(seconds * 100);
+    return `${Math.floor(cs / 360000)}:${String(Math.floor(cs / 6000) % 60).padStart(2, "0")}:${String(Math.floor(cs / 100) % 60).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
+  };
+  const escape = (text: string) => text.replace(/\\/g, "\\\\").replace(/\{/g, "\\{").replace(/\}/g, "\\}").replace(/\n/g, "\\N");
+  const events: string[] = [];
+  for (const cue of cues) {
+    if (cue.words === undefined) throw new Error("measured word timing is required for highlighted captions");
+    const edges = [...new Set([cue.startSec, cue.endSec, ...cue.words.flatMap((word) => [word.startSec, word.endSec]).filter((at) => at > cue.startSec && at < cue.endSec)])].sort((a, b) => a - b);
+    for (let i = 1; i < edges.length; i++) {
+      const from = edges[i - 1]!, to = edges[i]!;
+      if (time(from) === time(to)) continue;
+      const text = captionWordParts(cue, (from + to) / 2).map((part) => `${part.active ? "{\\bord3\\3a&H00&\\3c&H0063DFFF&\\1c&H00171717&}" : "{\\bord0\\3a&HFF&\\1c&H00FFFFFF&}"}${escape(part.text)}`).join("");
+      events.push(`Dialogue: 0,${time(from)},${time(to)},Caption,,0,0,0,,${text}`);
+    }
+  }
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Caption,Geist,${size},&H00FFFFFF,&H00FFFFFF,&H99000000,&H99000000,-1,0,0,0,100,100,0,0,3,0,0,${alignment},${Math.round(width * .08)},${Math.round(width * .08)},${Math.round(height * CAPTION_BOTTOM_SHARE)},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${events.join("\n")}\n`;
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————
@@ -520,8 +578,9 @@ export function videoFileName(book: string, file: { kind: "chapter"; order: numb
 }
 
 /** The dated folder under the world's exports: `na-love-or-juju-video-20261004`. */
-export function videoFolderName(book: string, isoDate: string): string {
-  return `${videoSlug(book)}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
+export function videoFolderName(book: string, isoDate: string, scope?: AudiobookScope): string {
+  // Add scope after truncating the title: long book titles must not erase chapter identity.
+  return `${videoSlug(book)}${scope?.kind === "chapter" ? `-chapter-${scope.chapterId}` : ""}-video-${isoDate.slice(0, 10).replace(/-/g, "")}`;
 }
 
 // ————————————————————————————————————————————————————————————————————————————————————————————
@@ -564,6 +623,7 @@ export function videoEstimate(input: { shape: VideoShape; slowPush: boolean; vid
 // What a render made.
 
 export interface AudiobookVideoFile {
+  chapterIds?: string[];
   /** The file's name in the export's folder. */
   name: string;
   seconds: number;
@@ -584,11 +644,14 @@ export type AudiobookVideoResult =
       /** Chapters encoded by this render; the rest came from the cache. */
       made: number;
       renderedAt: string;
+      scope?: AudiobookScope;
+      chapterIds?: string[];
     }
   | { ok: false; blockers: string[] };
 
 const VideoFileSchema = z
   .object({
+    chapterIds: z.array(z.string().min(1)).min(1).optional(),
     name: z.string().regex(/^[A-Za-z0-9._-]+\.mp4$/),
     seconds: z.number().min(0),
     bytes: z.number().int().min(0),
@@ -599,12 +662,14 @@ const VideoFileSchema = z
   .strict();
 
 export const AudiobookVideoResultSchema: z.ZodType<AudiobookVideoResult, z.ZodTypeDef, unknown> = z.union([
-  z.object({ ok: z.literal(true), dir: z.string().startsWith("exports/"), files: z.array(VideoFileSchema).min(1), made: z.number().int().min(0), renderedAt: z.string().min(1) }).strict(),
+  z.object({ ok: z.literal(true), dir: z.string().startsWith("exports/"), files: z.array(VideoFileSchema).min(1), made: z.number().int().min(0), renderedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(z.string().min(1)).min(1).optional() }).strict(),
   z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
 ]);
 
 /** What the sheet is told before Render: which chapters this render would make, and this machine's rates. */
 export interface AudiobookVideoState {
+  scope?: AudiobookScope;
+  blockers?: string[];
   chapters: Array<{ chapterId: string; seconds: number; rendered: boolean }>;
   rates: VideoRates;
   /** The narrator, for the book file's opening. */
@@ -615,6 +680,8 @@ export interface AudiobookVideoState {
 
 export const AudiobookVideoStateSchema: z.ZodType<AudiobookVideoState, z.ZodTypeDef, unknown> = z
   .object({
+    scope: AudiobookScopeSchema.optional(),
+    blockers: z.array(z.string().min(1)).optional(),
     chapters: z.array(z.object({ chapterId: z.string().min(1), seconds: z.number().min(0), rendered: z.boolean() }).strict()),
     rates: z.record(z.object({ bytesPerSec: z.number().min(0), speed: z.number().positive() }).strict()),
     readBy: z.string(),

@@ -63,7 +63,7 @@ export interface PictureDeriverInput {
   after?: string;
   /** The look the prompt takes its lines from: the place, then each person's, with their chosen look's name. */
   lines: readonly BriefLine[];
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence">>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence" | "aliases" | "identity" | "pov">>;
   places: readonly ChapterPlace[];
   /** Sheets that are never to be pictured: named so the model leaves them out of frame. */
   never: readonly string[];
@@ -254,7 +254,7 @@ export async function pictureRoom(store: WorldStore, productionId: string, chapt
   const note = book === null || book === "unreadable" ? undefined : clip(book.chapterNotes?.[plan.chapter.id], PICTURE_BOUNDS.note);
   return {
     plan,
-    people: chapterPeople(store, plan),
+    people: chapterPeople(store, plan, productionId),
     places: chapterPlaces(store, plan),
     look,
     mood: pictureMood(look, artDirectionFor(store, productionId)),
@@ -318,7 +318,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
     if (options.signal?.aborted) throw new Error("stopped");
     const prompt = clipPrompt(raw.prompt, maxChars);
     if (prompt === "") throw new Error("the writing service gave no picture");
-    const drafted = holdBrief(raw, { people: visible, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
+    const drafted = holdBrief(raw, { people: room.people, places: room.places, prompt, fallback: () => namedIn(planned.block, visible) });
     const who = pictureWho(store, options.model, briefRiders(drafted), { look: room.look, frame: drafted.frame, own });
     const held = { ...drafted, prompt: neutralWhereLooksRide(drafted.prompt, who) };
     // A detail's hand keeps the look its person has for this picture too.
@@ -333,7 +333,7 @@ export async function suggestPicture(store: WorldStore, room: PictureRoom, block
   const { held, who, used, checks } = drafted;
   const picks = ridingPicks(who);
   const aspect = pictureAspect(options.model);
-  const stamp = pictureLookFor(room.look, held.inFrame.map((person) => person.key), picks, library);
+  const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
   return {
     block: blockKey,
     prompt: held.prompt,

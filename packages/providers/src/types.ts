@@ -446,8 +446,6 @@ export interface ProviderClient {
   /** The local models this client has sent work to since it was made. */
   usedModels?(): ReadonlySet<string>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
-  /** The language models a local runtime has pulled, for the writing harness's catalogue (issue 1247). */
-  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void | Promise<void>;
   /**

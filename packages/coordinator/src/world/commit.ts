@@ -38,6 +38,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -121,6 +122,12 @@ export interface CommitInput {
    * nothing here may rename it (SPEC-002's stable-identity rule applied to the world itself).
    */
   worldFields?: Record<string, unknown>;
+  /**
+   * Recheck a production read set after staging, while rollback is still legal (SPEC-053 R-36).
+   * This host-only callback is never serialized into the journal. Recovery after the committing
+   * marker must finish the recorded transaction even if a source has subsequently changed.
+   */
+  validateBeforeCommit?: () => Promise<void>;
 }
 
 export interface CommitResult {
@@ -428,6 +435,46 @@ export const AUDIOBOOK_SEAMS_SCHEMA_VERSION = 66;
  * is raised before the first record carrying it. Sixty-six is the same turn's block seams.
  */
 export const CAST_PARAGRAPHS_SCHEMA_VERSION = 67;
+/**
+ * A character's `narration` (design turn 200, SPEC-047 R-165), a field of a strict sheet: a build
+ * without it drops the sheet on scan, and with it the character, so the world is fenced with the
+ * first sheet that carries one, however it was written — the Voice tab, a draft, or by hand.
+ */
+export const SHEET_NARRATION_SCHEMA_VERSION = 68;
+/**
+ * The beats the director named when a chapter was grouped by beats (design turn 201, SPEC-047
+ * R-175): `beats` on the chapter's strict audiobook record, which a build before it reads as
+ * unreadable — every take of the chapter read as lost — so the world is raised before the first.
+ */
+export const AUDIOBOOK_BEATS_SCHEMA_VERSION = 69;
+/** Turn 208: strict old readers must not drop a record containing motion or acoustic word timing. */
+export const AUDIOBOOK_MOTION_SCHEMA_VERSION = 73;
+/**
+ * The story a production setup is adapted from (design turn 205, SPEC-052 R-2): `source` on the
+ * strict setup draft in its conversation, which a build before it reads as an unreadable setup —
+ * so the world is raised before the first draft that names one, from the rail or from Arke.
+ */
+export const ADAPT_FROM_SCHEMA_VERSION = 70;
+/**
+ * A micro drama's Target (design turn 205, SPEC-052 R-6): `target` on the strict setup draft and on
+ * the strict season.json, which a build before it reads as an unreadable setup or season. The
+ * world is raised before the first draft that carries one, which becoming a micro drama seeds,
+ * and before a creation that writes one.
+ */
+export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
+/** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
+export const LOOK_NAMES_SCHEMA_VERSION = 72;
+/**
+ * Procedural effects and their protection/history are strict timeline fields (SPEC-053 R-21).
+ * Fence their first transaction, including an adopted file or a record holding only an inverse,
+ * so older readers refuse the world instead of discarding its editor state.
+ */
+export const EDITOR_EFFECTS_SCHEMA_VERSION = 74;
+/** SPEC-053 R-26–38: immutable effect proposal families, scoped human decisions and receipts. */
+export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
+/** SPEC-054: exact-pair transitions and their durable protected history. */
+export const EDITOR_TRANSITIONS_SCHEMA_VERSION = 76;
+export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
@@ -435,6 +482,12 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
+      if (/^productions\/[^/]+\/editor-requests\.json$/.test(file.path) && JSON.parse(file.newContent)?.schemaVersion === 2)
+        boundary = Math.max(boundary, EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION);
+      if (/^references\/[^/]+\/kit\.json$/.test(file.path)) {
+        const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
+        if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
+      }
       const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
@@ -877,6 +930,9 @@ export class Committer {
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorEffects(f.newContent)) ? EDITOR_EFFECTS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/timeline\.json$/.test(f.path) && f.newContent != null && carriesEditorTransitions(f.newContent)) ? EDITOR_TRANSITIONS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesEditorAppearance(f.newContent)) ? EDITOR_APPEARANCE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
@@ -886,6 +942,7 @@ export class Committer {
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
@@ -1025,6 +1082,7 @@ export class Committer {
         moved.push({ path: "world.json", expected: journal.worldJsonBaseHash, found: worldFound });
       }
       if (moved.length > 0) throw new CommitStaleError(moved);
+      await input.validateBeforeCommit?.();
     } catch (err) {
       if (err instanceof CrashSignal) throw err; // a real kill leaves debris for recover()
       await this.assertOwned(); // a successor, not a deposed process, owns rollback too

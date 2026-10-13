@@ -85,8 +85,9 @@ export async function resetAudiobookSeams(store: WorldStore, productionId: strin
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: room.narrator });
   if (plan.record === "unreadable") throw new SeamRefusal("record unreadable · Read the chapter replaces it");
   const record = await updateAudiobook(store, productionId, plan.chapter, (current) => {
-    if (current.seams === undefined) return null;
-    const { seams: _gone, ...rest } = current;
+    if (current.seams === undefined && current.beats === undefined) return null;
+    // The beats named for the seams go with them (design turn 201): one block a paragraph again.
+    const { seams: _gone, beats: _named, ...rest } = current;
     return { ...rest, updatedAt: store.now() };
   });
   await followChapterTakes(store, productionId, plan.chapter, room);

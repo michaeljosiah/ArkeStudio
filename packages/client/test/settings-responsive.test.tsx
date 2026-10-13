@@ -169,12 +169,12 @@ it("Activity tabs keep focus on the tab and world scope belongs only to Inbox an
   dom.HTMLElement.prototype.focus = function(this: HTMLElement) { focused.push(this); };
   try {
    for (const tab of ["new", "spend", "inbox"] as const) {
-    const button = [...document.querySelectorAll<HTMLElement>('.fy-ap [role="tab"]')].find(e => e.textContent?.startsWith(tab === "new" ? "What's new" : tab === "spend" ? "Spend" : "Inbox"))!;
+    const button = [...document.querySelectorAll<HTMLElement>('.fy-ap [role="tab"]')].find(e => e.textContent?.startsWith(tab === "new" ? "What’s new" : tab === "spend" ? "Spend" : "Inbox"))!;
     assert.ok(button); button.focus(); const before = focused.length; find('.fy-ap__body').scrollTop = 400;
     await act(async () => button.click());
     assert.equal(focused.length, before); assert.equal(focused.at(-1), button); assert.equal(button.getAttribute("aria-selected"), "true");
     assert.equal(find('.fy-ap__body').scrollTop, 0);
-    assert.equal(!!find(pixels < 600 ? '.fy-activity-phone footer' : '.fy-ap__scope'), tab !== "new");
+    assert.equal(!!find('.fy-ap__scope'), tab !== "new");
    }
   } finally { dom.HTMLElement.prototype.focus = original; }
   await act(async () => root?.unmount()); root = null; document.body.innerHTML = "";

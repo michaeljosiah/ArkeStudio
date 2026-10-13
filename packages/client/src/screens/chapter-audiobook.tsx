@@ -1,10 +1,15 @@
 import { groupedText, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useLocation } from "react-router";
 import {
   AUDIOBOOK_DELIVERIES,
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   PERFORMANCE_NOTE_MAX,
+  audiobookBeatAt,
+  audiobookActivityLive,
+  audiobookActivityStage,
+  audiobookBeatCount,
   hasReadingNotes,
   readingNotesLead,
   type AudiobookReadingNotes,
@@ -17,6 +22,7 @@ import {
   audiobookDirectionFor,
   audiobookHeading,
   audiobookNoteFor,
+  sheetNarrations,
   audiobookRekeyed,
   audiobookRecordingKey,
   audiobookSeamLabel,
@@ -59,7 +65,7 @@ import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWord
 // for the callers and tests that name them from the audiobook.
 export { cueLabel, markerLabel, type MarkerAt };
 import { useMediaQuery } from "../lib/media-query.js";
-import { ChevronDown, ChevronRight, Mic, More, PlaySolid, X } from "../components/icons.js";
+import { ChevronDown, ChevronRight, GroupMark, LoaderCircle, Mic, More, PlaySolid, X } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { Button } from "../components/ui.js";
 import { clearQueue, dismissPlayback, enqueueClip, jumpQueue, playClip, playbackSnapshot, usePlayback, useQueueAt } from "../lib/audio.js";
@@ -106,6 +112,8 @@ import {
   resetAudiobookSeams,
   setAudiobookSeam,
   setAudiobookRequests,
+  groupChapterBeats,
+  useBeatRuns,
   type ReadingVoice,
 } from "../lib/store.js";
 
@@ -157,8 +165,16 @@ export interface ChapterAudiobookInput {
   illustrate?: { press: () => void; busy: boolean; again: boolean; state?: string; running?: { line: string; stop?: () => void } };
   /** The chapter's Looks (design turn 193a), in the same menu (194): opens the Looks sheet; `state` is what it says beside it. */
   looks?: { open: () => void; state?: string };
+  /** Turn 209: the phone's Chapter actions keeps the same chapter as the Export sheet's scope. */
+  export?: () => void;
   /** On a phone (design turn 198, rule 10) the Blocks press and its Reset are in the toolbar's ⋯ menu. */
   seamsInMenu?: boolean;
+  /**
+   * The reading is the toolbar ⋯'s first item where the line has no room for its press (design
+   * turn 203): `open` shows the reading menu, and `narrator` names the voice where the hook's own
+   * reader has no label.
+   */
+  readingInMenu?: { open: () => void; narrator: string };
   /**
    * Casting from the view (design turn 198): the paragraphs edited since the cast (`changed`) or
    * the chapter, through the workspace's press, which waits out the autosave; busy while a cast runs.
@@ -167,7 +183,7 @@ export interface ChapterAudiobookInput {
 }
 
 /** What a press asks for once the save lands: the chapter, these blocks alone, a direction, or a card's acceptance. */
-export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
+export type AudiobookIntent = { kind: "read"; blocks?: readonly string[]; fromExport?: boolean; /** The paragraphs left to cast, cast first (design turn 198). */ castFirst?: boolean } | { kind: "direct"; also?: DirectAlso } | { kind: "accept" } | { kind: "open-direct" };
 
 /** What the Direct sheet's `Also` asks for with the direction (design turn 184a, R-53, R-54). */
 export interface DirectAlso {
@@ -210,6 +226,11 @@ export interface BlockRow {
    * rule 14): they wait for the paragraph's cast, so no speaker can be given to them yet.
    */
   waits?: boolean;
+  /**
+   * The beat the block is (design turn 201, rule 4): the name and speaker the director gave it,
+   * its paragraphs and its length at the reading rate; absent on a block that is no named beat.
+   */
+  beat?: { name?: string; whose?: string; paragraphs: number; seconds: number };
   /** The kept take was recorded by a person (SPEC-047 R-34), not made by a voice. */
   recorded: boolean;
   /** The block's speaker is recorded by a person (R-37): made only by a recording. */
@@ -375,11 +396,24 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const catalogue = useStore().voiceCatalogue;
   const runs = useAudiobookRuns();
   const run = runs[`${worldId}/${prodId}/${chapter.id}`];
+  const activity = state?.app.audiobookActivity?.find(run => run.worldId === worldId && run.productionId === prodId && run.chapterId === chapter.id && audiobookActivityLive(run));
   const at = useQueueAt();
   const [selected, setSelected] = useState<string | null>(null);
+  const location = useLocation();
+  const requestedBlock = new URLSearchParams(location.search).get("block");
+  const openedBlock = useRef<string | null>(null);
   // The marker menu (R-42): the view's, so the page's `[` and the side's button open the same one.
   const [marker, setMarker] = useState<MarkerAt | null>(null);
-  useEffect(() => setMarker(null), [chapter.id]);
+  useEffect(() => { setMarker(null); setSelected(null); }, [chapter.id]);
+  useEffect(() => {
+    const entry = `${location.key}/${requestedBlock}`;
+    if (!requestedBlock || !body || openedBlock.current === entry) return;
+    const frame = requestAnimationFrame(() => {
+      const row = [...document.querySelectorAll<HTMLElement>("[data-block]")].find(element => element.dataset.block === requestedBlock);
+      if (row) { openedBlock.current = entry; setSelected(requestedBlock); row.scrollIntoView({ block: "center" }); }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [chapter.id, location.key, requestedBlock, body]);
 
   // The narrator as the coordinator chooses it (codex on PR 1180): a stored narrator whose
   // voice cannot speak now falls back the same way on both sides, or the client would judge
@@ -433,6 +467,8 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     [chapters, derived.blocks],
   );
   const rows = useMemo<BlockRow[]>(() => {
+    // The characters' own narration (design turn 200, R-166), as the coordinator plans with it.
+    const narrations = reading === "performed" ? sheetNarrations(world?.sheets ?? []) : {};
     return derived.blocks.map((block) => {
       let assigned = narrator;
       let mark = block.key === AUDIOBOOK_TITLE_KEY ? "title" : "narrator";
@@ -499,14 +535,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       }
       const recorded = take?.source === "recorded";
       const byPerson = recordedKeys.has(audiobookRecordingKey(block));
+      const named = audiobookBeatAt(recordOrNull?.beats, block);
       const direction = rowDirection(recordOrNull, block);
       const speakerModel = modelOf(speaker);
-      const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block);
+      const note = audiobookNoteFor({ reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, block, narrations);
       const led = hasReadingNotes(readingNotes) ? readingNotes : undefined;
       let view = (direction === null && note === undefined && led === undefined) || speakerModel === null ? null : directionView(block.text, direction?.input ?? null, speakerModel, language, note, led);
       if (speakerModel !== null) {
         try {
-          const performed = compileAudiobookPerformance(block, { reading, ...(notes !== undefined ? { notes: { ...notes } } : {}) }, direction === null ? null : viewPlan(direction.input), speakerModel, led);
+          const performed = compileAudiobookPerformance(block, { reading, notes: { ...narrations, ...notes } }, direction === null ? null : viewPlan(direction.input), speakerModel, led);
           if (performed !== null) view = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
         } catch { view = null; }
       }
@@ -518,7 +555,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       let proposedView = proposedInput === undefined || speakerModel === null ? null : directionView(block.text, proposedInput, speakerModel, language, proposedNote, proposedReading);
       if (proposedInput !== undefined && speakerModel !== null) {
         try {
-          const performed = compileAudiobookPerformance(block, { reading, notes: { ...proposal?.speakerNotes, ...notes } }, viewPlan(proposedInput), speakerModel, proposedReading);
+          const performed = compileAudiobookPerformance(block, { reading, notes: { ...proposal?.speakerNotes, ...narrations, ...notes } }, viewPlan(proposedInput), speakerModel, proposedReading);
           if (performed !== null) proposedView = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
         } catch { proposedView = null; }
       }
@@ -544,6 +581,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         // The first turn's mark is the row's (design turn 198): a later turn's is drawn on its break.
         kept: turnMarks !== undefined ? turnMarks[0]!.kept === true : block.kept === true,
         waits: block.paragraph >= 0 && waiting.has(block.paragraph) && block.speaker === undefined && block.rows === undefined,
+        ...(named !== null
+          ? { beat: { ...(named.name !== undefined ? { name: named.name } : {}), ...(named.whose !== undefined ? { whose: (() => { const sheet = world?.sheets.find((candidate) => candidate.type === "character" && candidate.name === named.whose); return sheet === undefined ? named.whose : (labels.get(sheet.id)?.label ?? named.whose); })() } : {}), paragraphs: block.sources?.length ?? 1, seconds: expectedSpeechSeconds(block.text) } }
+          : {}),
         recorded,
         byPerson,
         direction,
@@ -765,6 +805,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // `Make again` reads these blocks alone (R-30), held across the same chain of answers as the
   // consent is, and cleared with it: the chapter's own press reads what is not made.
   const only = useRef<readonly string[] | null>(null);
+  const fromExport = useRef(false);
   // The chapter's press casts the paragraphs left to cast first (design turn 198, rule 13), held
   // across the same chain of answers and cleared with it; the confirm's tick is the author's say.
   const castFirst = useRef(false);
@@ -780,6 +821,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   useEffect(() => {
     uploadAllowed.current = null;
     only.current = null;
+    fromExport.current = false;
     castFirst.current = false;
   }, [chapter.id]);
   // Each price asked comes with the box ticked again, as Direct's sheet opens with it ticked.
@@ -818,20 +860,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       setUpload(null);
       uploadAllowed.current = null;
       only.current = intent.blocks ?? null;
+      fromExport.current = intent.fromExport === true;
       castFirst.current = intent.castFirst === true;
       send();
     },
     [worldId, prodId, chapter.id, chapter.file, send],
   );
   const press = useCallback(
-    (blocks: readonly string[] | null) => {
+    (blocks: readonly string[] | null, recovery = false) => {
       if (locked || connection !== "open" || reading_) return;
       // Unsaved typing is not what is read (R-2): the press waits out the autosave, as the
       // chapter's other reads do, and the workspace sends it once the save lands.
       // The chapter's read under a reading that needs the cast casts what is left first (design
       // turn 198): ticked by default in the confirm, and done at once where nothing is asked.
       const castingFirst = blocks === null && reading !== "narrator" && toCast.length > 0;
-      const intent: AudiobookIntent = { kind: "read", ...(blocks !== null ? { blocks } : {}), ...(castingFirst ? { castFirst: true } : {}) };
+      const intent: AudiobookIntent = { kind: "read", ...(recovery ? { fromExport: true } : {}), ...(blocks !== null ? { blocks } : {}), ...(castingFirst ? { castFirst: true } : {}) };
       if (input.beforeRead !== undefined && !input.beforeRead(intent)) return;
       resume(intent);
     },
@@ -893,7 +936,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // compared once the record answers.
   const seamView = derived.seams;
   const seamLabel = audiobookSeamLabel(seamView);
-  const seamsHeld = locked || connection !== "open" || reading_;
+  // Group by beats (design turn 201): while the director reads, the press says so and the chapter's
+  // other presses that reshape or read it wait (rule 3), as they do for a direction.
+  const beatRun = useBeatRuns()[`${worldId}/${prodId}/${chapter.id}`];
+  const beatGrouping = beatRun?.state === "grouping";
+  const seamsHeld = locked || connection !== "open" || reading_ || beatGrouping;
   const madeAtPress = useRef<{ made: ReadonlySet<string>; updatedAt: string | null } | null>(null);
   const [madeAgain, setMadeAgain] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => {
@@ -926,6 +973,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     notePress();
     resetAudiobookSeams(worldId, prodId, chapter.file);
   }, [seamsHeld, notePress, worldId, prodId, chapter.file]);
+  // Under Cast each voice is read apart, so a beat could join nothing (rule 2): off, said there only.
+  const groupOff = reading === "cast" ? "Cast · voices apart" : undefined;
+  const groupBeats = useCallback(() => {
+    if (seamsHeld || groupOff !== undefined) return;
+    notePress();
+    groupChapterBeats(worldId, prodId, chapter.file);
+  }, [seamsHeld, groupOff, notePress, worldId, prodId, chapter.file]);
   // A take a person recorded (turn 155c): the host's picker opens for the block, the checks come
   // back as a dialog, and the keep answers as the block's record does.
   const [uploadId, setUploadId] = useState<string | null>(null);
@@ -994,62 +1048,18 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         />
       );
     }
-    if (run?.state === "priced" && run.price !== undefined && run.price.requests !== undefined) {
-      // A grouped read is confirmed in its sheet (design turn 185a): the head says what is asked.
-      return whole(
-        <span className="fy-ab__control">
-          <Button variant="primary" disabled data-testid="read-audiobook">
-            Read the chapter · {run.toMake} block{run.toMake === 1 ? "" : "s"} · {run.price.requests} request{run.price.requests === 1 ? "" : "s"} · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}
-          </Button>
-        </span>
-      );
-    }
     if (run?.state === "priced" && run.price !== undefined) {
-      const price = run.price;
-      // The author confirms the estimate. `up to` stays only where every reader is priced by
-      // the character, which a cache hit alone can lower; a token reader's estimate can be
-      // passed, so it is `~`, and its service-limit cap is the dispatcher's guard, never shown
-      // (SPEC-049 R-6) — said here as the maximum, it was $18.49 for about $0.40 of speech.
-      // A chapter Google's free day cannot cover asks in its own words when it costs nothing:
-      // what the author decides is how far the day's reads go. A priced speaker keeps the price
-      // on the button, the day's line beside it (codex on PR 1475).
-      const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
-      return whole(
-        <span className="fy-ab__control">
-          {/* Cast first (design turn 198, rule 13): ticked, as Direct's `Cast the lines first`; unticked, nothing reads. */}
-          {price.toCast !== undefined && <CastFirstCheck count={price.toCast} on={castTick} onChange={setCastTick} />}
-          <Button
-            disabled={starting || (price.toCast !== undefined && !castTick)}
-            data-testid="audiobook-confirm"
-            onClick={() => {
-              // A press that never left has no answer coming, so it is not shown as starting.
-              if (send({ confirmationToken: price.confirmationToken })) setStartingFrom(run);
-            }}
-            title="the words and the voice go to the provider · the text stays in Activity"
-          >
-            {starting ? "starting…" : free !== null && price.estimatedMicroUsd === 0 ? free.confirm : <>
-              Confirm {price.characters.toLocaleString()} characters · {speechPricePrefix(models, price.voices.map((voice) => voice.provider))}{formatMicroUsd(price.estimatedMicroUsd)}
-              {price.voices.map((voice) => ` · ${voice.label} · ${readerPlace(voice.provider)}`).join("")}
-            </>}
-          </Button>
-          {free !== null && <span className="fy-mono" data-testid="audiobook-free-plan">{free.line}</span>}
-          {/* What a first read through a slot-keeping reader adds (SPEC-046 R-40), on the read
-              that incurs it: not in the estimate, so said beside it. */}
-          {price.notices.map((notice) => <span key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</span>)}
-          <Button variant="ghost" onClick={() => dismissAudiobookRun(worldId, prodId, chapter.id)}>
-            Cancel
-          </Button>
-        </span>
-      );
+      // Every quote has one modal review; the toolbar never duplicates its spend control.
+      return whole(<Button variant="primary" disabled data-testid="read-audiobook">Review read · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}</Button>);
     }
     if (reading_) {
       return whole(
-        <span className="fy-ab__control">
+        <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
-          <Button variant="ghost" onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
-            Stop
+          <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
+            {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
           </Button>
         </span>
       );
@@ -1066,6 +1076,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     const seamReset: ToolMenuItem[] = input.seamsInMenu === true && seamLabel !== null
       ? [{ key: "blocks-reset", label: "Reset", state: `Blocks · ${seamLabel}`, disabled: seamsHeld, press: resetSeams, testId: "audiobook-blocks-reset" }]
       : [];
+    // Group by beats is the menu's first item there (design turn 201, rule 5), with its mark.
+    const beatGroup: ToolMenuItem[] = input.seamsInMenu === true
+      ? [{ key: "blocks-group", label: "Group by beats", mark: <GroupMark size={14} />, state: beatGrouping ? "grouping…" : (groupOff ?? `${rows.length} blocks`), disabled: seamsHeld || groupOff !== undefined, press: groupBeats, testId: "audiobook-blocks-group" }]
+      : [];
     const menu = rows.length === 0 ? null : running !== undefined ? (
       <span className="fy-ab__control" data-testid="audiobook-run-line">
         <span className="fy-mono">{running.line}</span>
@@ -1077,18 +1091,21 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       </span>
     ) : (
       <ToolMenu
-        label="Direct and illustrate"
+        label={input.seamsInMenu === true ? "Chapter actions" : "Direct and illustrate"}
         testId="direct-illustrate"
-        icon={input.compact === true}
         // On a phone the lines to cast head the menu (design turn 198j), Reset beside them over Direct and illustrate.
         {...(input.seamsInMenu === true && castItems.length > 0 ? { lead: { head: paragraphsToCast(toCast.length), items: castItems, also: seamReset } } : {})}
         items={[
+          ...(input.readingInMenu !== undefined && input.seamsInMenu !== true
+            ? [{ key: "reading", label: `${READINGS.find((r) => r.reading === input.reading)?.label ?? input.reading} · ${narrator.label ?? input.readingInMenu.narrator}`, state: "reading", disabled: false, press: input.readingInMenu.open, testId: "audiobook-reading-item" }]
+            : []),
           {
             key: "direct",
+            ...(input.seamsInMenu === true ? { section: "Direct and illustrate" } : {}),
             label: directedBlocks > 0 ? "Direct again" : "Direct this chapter",
             state: proposal !== null ? "proposed" : directedBlocks > 0 ? "directed" : "",
             // A held proposal answers the press until it is accepted or discarded (turn 184b).
-            disabled: !directable || locked || connection !== "open",
+            disabled: !directable || locked || connection !== "open" || beatGrouping,
             press: directPress,
             testId: "direct-audiobook",
           },
@@ -1105,8 +1122,15 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           ...(input.looks !== undefined
             ? [{ key: "looks", label: "Looks", state: input.looks.state ?? "", disabled: connection !== "open", press: input.looks.open, testId: "audiobook-looks-open" }]
             : []),
-          // On a phone the Blocks press is in this menu (design turn 198, rule 10): Reset, with what it puts back.
-          ...(castItems.length === 0 ? seamReset : []),
+          ...(input.seamsInMenu === true && input.export !== undefined
+            ? [{ key: "export", label: "Export…", state: "This chapter", separator: true, disabled: connection !== "open", press: input.export, testId: "audiobook-chapter-export" }]
+            : []),
+          ...(input.seamsInMenu === true && input.readingInMenu !== undefined
+            ? [{ key: "reading", label: `${READINGS.find((r) => r.reading === input.reading)?.label ?? input.reading} · ${narrator.label ?? input.readingInMenu.narrator}`, state: "Reading settings", separator: true, disabled: false, press: input.readingInMenu.open, testId: "audiobook-reading-item" }]
+            : []),
+          ...(input.seamsInMenu === true
+            ? [{ key: "blocks", label: "Blocks", state: seamLabel ?? "", disabled: false, children: [...beatGroup, { key: "blocks-reset", label: "Reset", state: seamLabel ?? "none set", disabled: seamsHeld || ((recordOrNull?.seams?.length ?? 0) === 0 && (recordOrNull?.beats?.length ?? 0) === 0), press: resetSeams, testId: "audiobook-blocks-reset" }], testId: "audiobook-blocks-menu" }]
+            : []),
         ]}
       />
     );
@@ -1114,7 +1138,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     // says `Read · price` (194, rule 1): the tails are their own boxes so the centre's container
     // query can drop them and keep the toolbar on one line.
     const read = counts.toMake.length > 0 ? (
-      <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open"} onClick={begin} data-testid="read-audiobook">
+      <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open" || beatGrouping} onClick={begin} data-testid="read-audiobook">
         <span>Read<span className="fy-ab__presstail"> the chapter</span></span>
         {SPOKEN_GAP}
         {(() => {
@@ -1185,10 +1209,17 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
 
   // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
   // request, Google's free day where it is known, the estimate.
-  const readSheet = run?.state === "priced" && run.price?.requests !== undefined
+  const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
         ...(grouping.groups.length > 0 ? { previews: grouping.groups.flatMap(group => group.preview === undefined ? [] : [{ request: group.request, ...group.preview }]) } : {}),
+        token: run.price.confirmationToken,
+        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
+        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
         blocks: run.toMake,
+        characters: run.price.characters,
+        free: run.price.estimatedMicroUsd === 0,
+        notices: run.price.notices,
+        destinations: run.price.voices.map((voice) => `${voice.label} · ${readerPlace(voice.provider)}`).join(" · "),
         requests: run.price.requests,
         perParagraph: run.price.perParagraph ?? run.toMake,
         voice: run.price.voices.map((voice) => voice.label).join(" · "),
@@ -1280,6 +1311,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     narrator,
     modelOf,
     makeAgain,
+    readRemaining: (numbers: number[]) => {
+      const keys = rows.filter((_row, index) => numbers.includes(index + 1)).map((row) => row.block.key);
+      if (keys.length > 0) press(keys, true);
+    },
     resume,
     directionRun,
     directedBlocks,
@@ -1308,6 +1343,26 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
      * read, and the blocks made again at no cost since the view opened.
      */
     seams: { gaps: seamView.gaps, label: seamLabel, changed: seamView.changed, notRead: rows.filter((row) => row.block.shaped === true && row.state === "not made").length, press: pressSeam, reset: resetSeams, held: seamsHeld, madeAgain },
+    /**
+     * The Blocks press (design turn 201, rule 1): always in the toolbar once the chapter has
+     * blocks, its data the block count, the seams' label, `N beats` or `grouping…`, and its menu's
+     * Group by beats and Reset.
+     */
+    blocks: rows.length === 0 ? null : {
+      label: beatGrouping ? "grouping…" : (() => {
+        const beats = audiobookBeatCount(recordOrNull?.beats, rows.map((row) => row.block));
+        return beats > 0 ? `${beats} beat${beats === 1 ? "" : "s"}` : (seamLabel ?? String(rows.length));
+      })(),
+      count: rows.length,
+      changed: seamView.changed,
+      resettable: (recordOrNull?.seams?.length ?? 0) > 0 || (recordOrNull?.beats?.length ?? 0) > 0,
+      held: seamsHeld,
+      grouping: beatGrouping,
+      ...(groupOff !== undefined ? { groupOff } : {}),
+      ...(beatRun !== undefined && beatRun.state !== "grouping" && beatRun.state !== "grouped" && beatRun.reason !== undefined ? { groupNote: beatRun.reason } : {}),
+      onGroup: groupBeats,
+      onReset: resetSeams,
+    },
   };
 }
 
@@ -1333,7 +1388,9 @@ const READINGS: ReadonlyArray<{ reading: AudiobookReading; label: string; data: 
  * readings — the book's, written as the door's seg writes it — and `Narrator…`. The build had no
  * reading on the chapter and no way into `Performed` from it (issue 1324 §3).
  */
-export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator }: {
+export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator, external }: {
+  /** Drawn without its own press, opened from the toolbar's ⋯ (design turn 203). */
+  external?: { open: boolean; onClose: () => void };
   reading: AudiobookReading;
   /** The narrator the book reads in, by name. */
   narrator: string;
@@ -1342,7 +1399,14 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
   onReading: (reading: AudiobookReading) => void;
   onNarrator: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = external !== undefined ? external.open : ownOpen;
+  const setOpen = (next: boolean | ((was: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(open) : next;
+    if (external !== undefined) {
+      if (!value) external.onClose();
+    } else setOwnOpen(value);
+  };
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const label = READINGS.find((r) => r.reading === reading)?.label ?? reading;
@@ -1375,8 +1439,8 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
     }
   };
   return (
-    <span className="fy-ab__reading">
-      <button
+    <span className={external !== undefined ? "fy-ab__reading fy-ab__reading--external" : "fy-ab__reading"}>
+      {external === undefined && <button
         ref={button}
         type="button"
         className={`fy-ab__reading-press fy-mono${open ? " fy-ab__reading-press--open" : ""}`}
@@ -1388,7 +1452,7 @@ export function ReadingMenu({ reading, narrator, disabled, onReading, onNarrator
       >
         <span className="fy-ab__reading-k">{label} ·</span> <b>{narrator}</b>
         <ChevronDown size={13} stroke={2} aria-hidden="true" />
-      </button>
+      </button>}
       {open && (
         <div ref={menu} className="fy-ab__menu fy-ab__reading-menu" role="menu" aria-label="Reading" onKeyDown={onKey}>
           <p className="fy-ab__menu-eb">Reading · whole book</p>
@@ -1671,6 +1735,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             onPointerDown={() => { pressedSelection.current = audiobookSelection(rows); }}
             onClick={() => { onSelectionChange?.(audiobookSelection(rows) ?? pressedSelection.current); pressedSelection.current = null; onSelect(row.block.key); }}
           >
+            {/* A beat's head (design turn 201, rule 4): its name, then whose it is, its paragraphs and its length, in the text column. */}
+            {row.beat !== undefined && (
+              <span className="fy-ab__beathead" data-testid="audiobook-beat-head">
+                {row.beat.name !== undefined && <b>{row.beat.name}</b>}
+                <span>{[...(row.beat.whose !== undefined ? [row.beat.whose] : []), `${row.beat.paragraphs} paragraph${row.beat.paragraphs === 1 ? "" : "s"}`, clock(row.beat.seconds)].join(" · ")}</span>
+              </span>
+            )}
             {(() => {
               // A kept line keeps the menu (design turn 198, rule 14); words that wait for their
               // paragraph's cast do not, and say nothing about it.
@@ -1835,7 +1906,9 @@ function packTurnsFor(rows: readonly BlockRow[]) {
  * The sheet a grouped read is confirmed in (design turn 185a): the blocks and the requests, as
  * many as a block a request would make, Google's free day where it is known, and the estimate.
  */
-export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]> }) {
+type ReadSheetState = NonNullable<ReturnType<typeof useChapterAudiobook>["readSheet"]>;
+
+export function ReadSheet({ sheet, headless = false, footer = true }: { sheet: ReadSheetState; headless?: boolean; footer?: boolean }) {
   const row = (label: string, value: string) => (
     <div className="fy-ab__read" key={label}>
       <b>{label}</b>
@@ -1843,16 +1916,24 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
     </div>
   );
   return (
-    <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label="Read the chapter">
-      <div>
-        <h3 className="fy-ab__card-title">Read the chapter</h3>
-        <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"} · {sheet.requests} request{sheet.requests === 1 ? "" : "s"}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>
-      </div>
+    <section className="fy-bible__panel fy-ab__directsheet fy-ab__readsheet" data-testid="read-sheet" aria-label={sheet.title}>
+      {(!headless || sheet.recovery === null) && <div>
+        {!headless && <h3 className="fy-ab__card-title">{sheet.title}</h3>}
+        {sheet.recovery !== null && <p className="fy-mono fy-ab__card-line">{sheet.recovery.chapter}</p>}
+        {sheet.recovery === null && <p className="fy-mono fy-ab__card-line">{sheet.blocks} block{sheet.blocks === 1 ? "" : "s"}{sheet.requests !== undefined ? ` · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"}` : ""}{sheet.voice !== "" ? ` · ${sheet.voice}` : ""}</p>}
+      </div>}
       <div className="fy-ab__reads" data-testid="read-sheet-reads">
-        {row("Requests", `${sheet.requests} · grouped`)}
-        {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+        {sheet.recovery !== null ? <>
+          {row("Ready", `${sheet.recovery.ready} of ${sheet.recovery.total} blocks`)}
+          {row("To read", `${sheet.blocks} blocks`)}
+          {row("Estimated total", sheet.estimate)}
+        </> : <>{sheet.requests !== undefined ? <>
+          {row("Requests", `${sheet.requests} · grouped`)}
+          {row("Per paragraph", `${sheet.perParagraph} request${sheet.perParagraph === 1 ? "" : "s"}`)}
+        </> : row("Characters", sheet.characters.toLocaleString())}
+        {sheet.destinations !== "" && row("Readers", sheet.destinations)}
         {sheet.freeDay !== undefined && row("Google today", `${sheet.freeDay.allowed} a day · ${sheet.freeDay.allowed - sheet.freeDay.left} used`)}
-        {row("Estimate", sheet.estimate)}
+        {row("Estimate", sheet.estimate)}</>}
       </div>
       {(sheet.previews ?? []).map((preview) => <details key={preview.request}>
         <summary>Request {preview.request} · preview</summary>
@@ -1860,15 +1941,24 @@ export function ReadSheet({ sheet }: { sheet: NonNullable<ReturnType<typeof useC
         <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflow: "auto" }}>{JSON.stringify(preview.body, null, 2)}</pre>
         <p>Preview before generation. Activity records the request actually sent.</p>
       </details>)}
+      {sheet.recovery !== null && <p>The {sheet.recovery.ready} current takes stay as they are.</p>}
+      {sheet.freeDay !== undefined && <p className="fy-mono" data-testid="audiobook-free-plan">{freePlanAskCopy(sheet.freeDay).line}</p>}
+      {sheet.notices.map((notice) => <p key={notice} className="fy-mono" data-testid="audiobook-notice">{notice}</p>)}
       {sheet.castFirst !== undefined && <CastFirstCheck count={sheet.castFirst.count} on={sheet.castFirst.on} onChange={sheet.castFirst.set} />}
-      <div className="fy-ab__control fy-ab__directsheet-foot">
+      {footer && <ReadSheetActions sheet={sheet} />}
+    </section>
+  );
+}
+
+export function ReadSheetActions({ sheet }: { sheet: ReadSheetState }) {
+  return (
+    <div className="fy-ab__control fy-ab__directsheet-foot">
         <span className="fy-ch__panelpush" />
-        <Button variant="ghost" onClick={sheet.cancel}>Cancel</Button>
+        <Button variant="ghost" onClick={sheet.cancel}>{sheet.recovery !== null ? "Back to export" : "Cancel"}</Button>
         <Button variant="primary" data-testid="audiobook-confirm" disabled={sheet.starting || (sheet.castFirst !== undefined && !sheet.castFirst.on)} onClick={sheet.confirm}>
-          {sheet.starting ? "starting…" : `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}`}
+          {sheet.starting ? "starting…" : sheet.recovery !== null ? `Read ${sheet.blocks} blocks · ${sheet.estimate}` : sheet.freeDay !== undefined && sheet.free ? freePlanAskCopy(sheet.freeDay).confirm : sheet.requests !== undefined ? `Confirm · ${sheet.requests} request${sheet.requests === 1 ? "" : "s"} · ${sheet.estimate}` : `Confirm ${sheet.characters.toLocaleString()} characters · ${sheet.estimate}`}
         </Button>
       </div>
-    </section>
   );
 }
 
@@ -1932,7 +2022,7 @@ function usePopover() {
 const SPOKEN_GAP = <span className="fy-sr-only"> </span>;
 
 /** One item of a toolbar menu: the label, its state at the right in mono, and its press. */
-export interface ToolMenuItem { key: string; label: string; state: string; disabled: boolean; press: () => void; testId?: string }
+export type ToolMenuItem = { key: string; label: string; state: string; disabled: boolean; testId?: string; mark?: ReactNode; section?: string; separator?: boolean } & ({ press: () => void; children?: never } | { children: readonly ToolMenuItem[]; press?: never });
 
 /**
  * Direct and illustrate (design turn 194, rule 3): one press, its menu drawn with the reading
@@ -1952,12 +2042,13 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
 }) {
   const pop = usePopover();
   const [inner, setInner] = useState(false);
+  const [submenu, setSubmenu] = useState<ToolMenuItem | null>(null);
   useEffect(() => {
-    if (!pop.open) setInner(false);
+    if (!pop.open) { setInner(false); setSubmenu(null); }
   }, [pop.open]);
   useEffect(() => {
     if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
-  }, [pop.open, inner]);
+  }, [pop.open, inner, submenu]);
   const leading = lead !== undefined && lead.items.length > 0 && !inner;
   if (leading) {
     return (
@@ -2012,24 +2103,8 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
       </button>
       {pop.open && (
         <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end" role="menu" aria-label={label} onKeyDown={pop.onKey}>
-          {items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              aria-disabled={item.disabled}
-              className="fy-ab__menu-opt"
-              onClick={() => {
-                if (item.disabled) return;
-                pop.close(false);
-                item.press();
-              }}
-              {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
-            >
-              <span className="fy-ab__menu-label">{item.label}</span>
-              {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
-            </button>
-          ))}
+          {submenu !== null && <div className="fy-ab__menu-hd">{submenu.label}</div>}
+          {(submenu?.children ?? items).map((item) => <ToolMenuOption key={item.key} item={item} onChildren={() => setSubmenu(item)} onDone={() => pop.close(false)} />)}
         </div>
       )}
     </span>
@@ -2037,23 +2112,31 @@ export function ToolMenu({ label, items, testId, icon = false, lead }: {
 }
 
 /** One item of a toolbar menu, as the toolbar's menus draw it: its label, its state at the right. */
-function ToolMenuOption({ item, onDone }: { item: ToolMenuItem; onDone: () => void }) {
+function ToolMenuOption({ item, onDone, onChildren }: { item: ToolMenuItem; onDone: () => void; onChildren?: () => void }) {
   return (
+    <>
+    {item.separator && <div className="fy-ab__menu-rule" role="separator" />}
+    {item.section !== undefined && <div className="fy-ab__menu-hd">{item.section}</div>}
     <button
       type="button"
       role="menuitem"
       aria-disabled={item.disabled}
       className="fy-ab__menu-opt"
+      aria-haspopup={item.children !== undefined ? "menu" : undefined}
       onClick={() => {
         if (item.disabled) return;
+        if (item.children !== undefined) { onChildren?.(); return; }
         onDone();
         item.press();
       }}
       {...(item.testId !== undefined ? { "data-testid": item.testId } : {})}
     >
+      {item.mark}
       <span className="fy-ab__menu-label">{item.label}</span>
       {item.state !== "" && <span className="fy-ab__menu-meta">{item.state}</span>}
+      {item.children !== undefined && <ChevronRight size={13} stroke={2} aria-hidden="true" />}
     </button>
+    </>
   );
 }
 
@@ -2190,48 +2273,90 @@ export function AudiobookFilterMenu({ filters, filter, onFilter }: {
 }
 
 /**
- * `Blocks · 3 changed ▾` (design turn 198, rule 10): after the speaker filter once a seam is set
- * by hand, the same press as its neighbours, the data counting the blocks whose shape differs
- * from the automatic split, the joins held and the seams dropped. Its menu holds Reset, which asks
- * nothing: the old takes are found again.
+ * `Blocks · 122 ▾` (design turn 201, rule 1; amending 198, rule 10): after the speaker filter from
+ * the start, the same press as its neighbours, its data the chapter's block count — or the seams'
+ * label once one is set by hand, `30 beats` once the chapter is grouped, `grouping…` with a
+ * spinning mark while the director reads. Its menu holds Group by beats, with its mark and the
+ * block count, then Reset, which asks nothing: the old takes are found again.
  */
-export function BlocksPress({ label, changed, held, onReset }: { label: string; changed: number; held: boolean; onReset: () => void }) {
+export function BlocksPress({ label, count, changed, resettable, held, grouping, groupOff, groupNote, onGroup, onReset }: {
+  label: string;
+  count: number;
+  changed: number;
+  /** A seam or a beat is set: Reset has something to put back. */
+  resettable: boolean;
+  held: boolean;
+  grouping: boolean;
+  /** Why Group by beats is off (`Cast · voices apart`), said as its data. */
+  groupOff?: string;
+  /** Why the last grouping did not group, said as its data until the next press. */
+  groupNote?: string;
+  onGroup: () => void;
+  onReset: () => void;
+}) {
   const pop = usePopover();
   useEffect(() => {
     if (pop.open) pop.panel.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [pop.open]);
+  useEffect(() => {
+    if (grouping) pop.close(false);
+  }, [grouping]);
+  const groupDisabled = held || groupOff !== undefined;
   return (
     <span className="fy-ab__tool">
       <button
         ref={pop.press}
         type="button"
-        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}`}
+        className={`fy-ab__pill${pop.open ? " fy-ab__pill--on" : ""}${grouping ? " fy-ab__pill--busy" : ""}`}
         aria-haspopup="menu"
         aria-expanded={pop.open}
-        onClick={() => pop.setOpen((was) => !was)}
+        aria-disabled={grouping}
+        onClick={() => {
+          if (grouping) return;
+          pop.setOpen((was) => !was);
+        }}
         data-testid="audiobook-blocks-press"
       >
+        {grouping && <span className="fy-ab__spin" aria-hidden="true"><LoaderCircle size={13} stroke={2} /></span>}
         Blocks
         {SPOKEN_GAP}
         <em>{label}</em>
-        <ChevronDown size={13} stroke={2} aria-hidden="true" />
+        {!grouping && <ChevronDown size={13} stroke={2} aria-hidden="true" />}
       </button>
+      {/* Anchored at the press's right edge, as Direct and illustrate's is: the press can end the line, and a menu
+          opened rightward from there ran past the column and was cut off (0.5.67, 2026-10-08). */}
       {pop.open && (
-        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__blocksmenu" role="menu" aria-label="Blocks" onKeyDown={pop.onKey}>
+        <div ref={pop.panel} className="fy-ab__menu fy-ab__toolmenu fy-ab__toolmenu--end fy-ab__blocksmenu" role="menu" aria-label="Blocks" onKeyDown={pop.onKey}>
           <button
             type="button"
             role="menuitem"
-            aria-disabled={held}
+            aria-disabled={groupDisabled}
             className="fy-ab__menu-opt"
             onClick={() => {
-              if (held) return;
+              if (groupDisabled) return;
+              pop.close(true);
+              onGroup();
+            }}
+            data-testid="audiobook-blocks-group"
+          >
+            <GroupMark size={14} />
+            <span className="fy-ab__menu-label">Group by beats</span>
+            <span className="fy-ab__menu-meta">{groupOff ?? groupNote ?? `${count} block${count === 1 ? "" : "s"}`}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            aria-disabled={held || !resettable}
+            className="fy-ab__menu-opt"
+            onClick={() => {
+              if (held || !resettable) return;
               pop.close(true);
               onReset();
             }}
             data-testid="audiobook-blocks-reset"
           >
             <span className="fy-ab__menu-label">Reset</span>
-            <span className="fy-ab__menu-meta">{changed > 0 ? `${changed} block${changed === 1 ? "" : "s"}` : label}</span>
+            <span className="fy-ab__menu-meta">{!resettable ? "none set" : changed > 0 ? `${changed} block${changed === 1 ? "" : "s"}` : label}</span>
           </button>
         </div>
       )}
@@ -2398,7 +2523,7 @@ export function markerAtSelection(rows: readonly BlockRow[]): MarkerAt | null {
  * `Hear <name>` — the selected line if it is theirs, else their first in the chapter, as it
  * would be read, priced on the button for a cloud narrator — and what that line is sent as.
  */
-export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, noteHeld, line, model, slug, focused, onFocus }: {
+export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, source, noteHeld, line, model, slug, focused, onFocus }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
@@ -2407,6 +2532,8 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   lines: number;
   tone: string;
   note?: string;
+  /** Where the note comes from (design turn 200, R-167): writing here always sets the book's own. */
+  source?: "this book" | "character";
   noteHeld: boolean;
   /** The line Hear plays and Sent as shows. */
   line: BlockRow | null;
@@ -2474,7 +2601,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
               if (event.key === "Enter") (event.target as HTMLInputElement).blur();
             }}
           />
-          <span className="fy-ab__note-count fy-mono">{value.length}/{PERFORMANCE_NOTE_MAX}</span>
+          <span className="fy-ab__note-count fy-mono">{`${value.length}/${PERFORMANCE_NOTE_MAX}${source !== undefined ? ` · ${source}` : ""}`}</span>
         </div>
       )}
       {focused && line !== null && (
@@ -2883,17 +3010,22 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         <span className="fy-ch__panelpush" />
         {takes.length > 0 && (
           <Button variant="primary" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make-again">
-            Make again{price !== null ? ` · ${price}` : ""}
+            Reread {blockReadTarget(row.block.key, rows)}{price !== null ? ` · ${price}` : ""}
           </Button>
         )}
         {unread && (
           <Button variant="primary" onClick={() => onMakeAgain(row.block.key)} data-testid="audiobook-make">
-            Make{price !== null ? ` · ${price}` : ""}
+            Read {blockReadTarget(row.block.key, rows)}{price !== null ? ` · ${price}` : ""}
           </Button>
         )}
       </div>
     </>
   );
+}
+
+/** The paid action names the same block as the panel, including the chapter title. */
+function blockReadTarget(key: string, rows: readonly BlockRow[]): string {
+  return key === AUDIOBOOK_TITLE_KEY ? "title" : `block ${rows.findIndex((row) => row.block.key === key) + 1}`;
 }
 
 /** The block panel's three tabs (design turn 194, rule 12). */
@@ -2928,15 +3060,18 @@ export function blockTakes(
 export function blockPanelHead(row: BlockRow, rows: readonly BlockRow[], record: ChapterAudiobook | null, chapterTitle: string, names: Parameters<typeof voiceDisplayLabel>[1]): { title: string; /** The title with every name in full, for its tooltip, where it differs. */ full?: string; sub: string; flag: string | null } {
   const who = row.turnMarks !== undefined ? [...new Set(row.turnMarks.map((turn) => turn.label))] : [row.speakerKey === null ? "narrator" : row.mark];
   const whoFull = row.turnMarks !== undefined ? [...new Set(row.turnMarks.map((turn) => turn.full ?? turn.label))] : [row.speakerKey === null ? "narrator" : row.full];
-  const title = row.block.key === AUDIOBOOK_TITLE_KEY ? `Title · ${chapterTitle}` : `Block ${rows.indexOf(row) + 1} · ${who.join(", ")}`;
-  const full = row.block.key === AUDIOBOOK_TITLE_KEY ? title : `Block ${rows.indexOf(row) + 1} · ${whoFull.join(", ")}`;
+  // A beat is named for itself (design turn 201, rule 4), and counted in paragraphs, not lines.
+  const named = row.beat?.name;
+  const title = row.block.key === AUDIOBOOK_TITLE_KEY ? `Title · ${chapterTitle}` : `${named ?? `Block ${rows.indexOf(row) + 1}`} · ${who.join(", ")}`;
+  const full = row.block.key === AUDIOBOOK_TITLE_KEY ? title : `${named ?? `Block ${rows.indexOf(row) + 1}`} · ${whoFull.join(", ")}`;
   const lines = row.turnMarks?.length ?? 1;
+  const counted = row.beat !== undefined ? `${row.beat.paragraphs} paragraph${row.beat.paragraphs === 1 ? "" : "s"}` : `${lines} line${lines === 1 ? "" : "s"}`;
   const take = record?.takes[row.block.key];
   const seconds = row.state === "made" ? (row.artifact?.mediaInfo?.durationSec ?? take?.grouped?.durationSec ?? null) : null;
   // A block a seam shaped and not read yet says how long it will be, at the reading rate (198c).
   const reshaped = row.block.shaped === true && row.state === "not made";
   const sub = [
-    `${lines} line${lines === 1 ? "" : "s"}`,
+    counted,
     ...(seconds !== null ? [`${seconds.toFixed(1)} s`] : reshaped ? [`~${expectedSpeechSeconds(row.block.text).toFixed(1)} s`] : []),
     `read by ${voiceDisplayLabel(row.speaker, names)}`,
     ...(row.speaker !== row.assigned ? ["stands in"] : row.byNarrator && row.note !== undefined ? ["performed"] : []),
@@ -3293,10 +3428,10 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
   const castFirst = castNeeded && cast;
   const speakersNoted = !castFirst && allNotes;
   const pad = String(chapterOrder).padStart(2, "0");
-  const row = (label: string, value: string) => (
+  const row = (label: string, value: string, description?: string) => (
     <div className="fy-ab__read" key={label}>
       <b>{label}</b>
-      <span>{value}</span>
+      <span title={description} aria-description={description}>{value}</span>
     </div>
   );
   const check = (label: string, on: boolean, set: (on: boolean) => void, data?: string, disabled = false) => (
@@ -3322,7 +3457,7 @@ export function DirectSheet({ worldId, productionId, chapterFile, chapterOrder, 
           {row("Chapter", [reads.chapter.synopsis ? "synopsis" : "no synopsis", ...(reads.chapter.pov !== undefined ? [`point of view ${reads.chapter.pov}`] : []), `v${reads.chapter.version}`].join(" · "))}
           {row("Tone", reads.tone ?? "none")}
           {row("Speakers", reads.speakers.length === 0 ? "none" : `${reads.speakers.join(" · ")} — their sheets`)}
-          {row("Narrator", `${reads.narrator.label}${reads.narrator.description !== undefined ? ` — ${reads.narrator.description}` : ""}`)}
+          {row("Narrator", reads.narrator.label, reads.narrator.description)}
           {row("Notes", [...(reads.notes.book ? ["book note"] : []), ...(reads.notes.chapter ? ["chapter note"] : []), `${reads.notes.speakers} speaker note${reads.notes.speakers === 1 ? "" : "s"}`].join(" · "))}
           {row("Before", reads.before === null ? "first chapter" : reads.before.blocks === 0 ? "nothing directed yet" : `chapter ${String(reads.before.order).padStart(2, "0")} · ${reads.before.blocks} directed`)}
         </div>

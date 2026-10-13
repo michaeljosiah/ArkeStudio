@@ -252,11 +252,21 @@ export class ReadModel {
   /** Fold one domain event. Unknown-to-this-fold events are deliberate no-ops. */
   apply(event: DomainEvent): void {
     switch (event.type) {
+      case "editor-effect.analysis": {
+        const previous = (this.state.effectAnalyses ?? []).filter(row => row.worldId !== event.worldId || row.productionId !== event.productionId);
+        this.state = { ...this.state, effectAnalyses: event.analysis ? [...previous, event.analysis] : previous };
+        return;
+      }
       case "health.changed": {
         this.setHealth(event.component, {
           status: event.status,
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         });
+        return;
+      }
+      case "audiobook.activity": {
+        const runs = [event.run, ...(this.state.app.audiobookActivity ?? []).filter(run => run.id !== event.run.id)].slice(0, 200);
+        this.state = { ...this.state, app: { ...this.state.app, audiobookActivity: runs } };
         return;
       }
       case "job.updated": {
@@ -464,6 +474,7 @@ export class ReadModel {
       case "proposal.resolved":
       case "proposal.blocked":
       case "main-photo.acceptance":
+      case "reference.look-renamed":
       case "authoring.progress":
       case "authoring.status":
       case "permission.pending":

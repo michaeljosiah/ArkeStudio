@@ -61,3 +61,31 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   assert.notEqual(reread.receipt.observedRevisionOrDigest, ending.observedRevisionOrDigest);
   await assert.rejects(chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, 100), /too large/);
 });
+
+// The beats a chapter was grouped by (design turn 201), as an adaptation reads them (SPEC-052 R-15):
+// each placed at the paragraph its first block begins, with its opening words; none for a chapter
+// never grouped, and a section the read does not know refused.
+it("reads a chapter's named beats with where each begins", async () => {
+  const bundle = await fixtureBundle();
+  const production = bundle.productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+  const [grouped, plain] = production.chapters;
+  const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
+  const lease = leases.mint({ worldId: bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => bundle, getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(await tempDir("chapter-beats-")), findAttachment: async () => null,
+    getChapterBody: async () => "The tide came in.\n\nMaren rang the bell.\n\nNobody answered.",
+    getChapterBeats: async (_production, file) => file === grouped!.file
+      ? [{ start: "p1.0", textHash: "h1", name: "The bell", whose: "Maren" }, { start: "title", textHash: "h0" }]
+      : [],
+  });
+  const read = (chapterId: string, section: string) => retrieval.call(lease.token, "get_chapter", { productionId: production.meta.id, chapterId, section });
+  const beats = await read(grouped!.id, "beats");
+  assert.equal(beats.receipt.status, "complete");
+  assert.ok(beats.receipt.target?.id.endsWith(":beats"));
+  const page = beats.result as { items: Array<{ beats: unknown[] }> };
+  assert.deepEqual(page.items[0]!.beats, [{ name: "The bell", whose: "Maren", paragraph: 2, opens: "Maren rang the bell." }, {}]);
+  const none = (await read(plain!.id, "beats")).result as { items: Array<{ beats: unknown[] }> };
+  assert.deepEqual(none.items[0]!.beats, []);
+  await assert.rejects(read(grouped!.id, "cast"), /plan, ending or beats/);
+});

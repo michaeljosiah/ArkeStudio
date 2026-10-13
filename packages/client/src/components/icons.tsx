@@ -108,6 +108,13 @@ export const PanelLeft = icon(
     <path d="M9 3v18" />
   </>,
 );
+/** A pane with a panel down its right: the production conversation's canvas (202c). */
+export const PanelRight = icon(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M15 3v18" />
+  </>,
+);
 /** Three dots: everything else this row can be told to do. */
 export const More = icon(
   <>
@@ -607,10 +614,14 @@ export const Tag = icon(<><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2
 /* Split is not the blade: the tool cuts wherever you click, this one cuts at the playhead — so
    the mark is the line between two pieces rather than a second pair of scissors. */
 export const SplitMark = icon(<><path d="M12 3v18" /><path d="M8 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h4" /><path d="M16 8h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4" /></>);
+/* Group by beats (design turn 201): Lucide's `group`, corner brackets around two offset blocks — paragraphs gathered into one. */
+export const GroupMark = icon(<><path d="M3 7V5c0-1.1.9-2 2-2h2" /><path d="M17 3h2c1.1 0 2 .9 2 2v2" /><path d="M21 17v2c0 1.1-.9 2-2 2h-2" /><path d="M7 21H5c-1.1 0-2-.9-2-2v-2" /><rect width="7" height="5" x="7" y="7" rx="1" /><rect width="7" height="5" x="10" y="12" rx="1" /></>);
 
 /* The branch map's marks (design turn 157): an ending's flag, a warning's triangle, an exclusion. */
 export const Flag = icon(<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></>);
 export const TriangleAlert = icon(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>);
+/* Open eye from the user's design-system bundle, paired with the existing hidden mark. */
+export const Eye = icon(<><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" /><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /></>);
 export const EyeOff = icon(
   <>
     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />

@@ -205,7 +205,7 @@ export const WRITING_LABEL = "Writing";
  */
 export function workingLabel(tool: string): string {
   const key = tool.toLowerCase();
-  // Arke-run tools arrive as `arke.<name>` (the Codex and local Arke harnesses): the name
+  // Arke-run tools arrive as `arke.<name>` (the Codex harness): the name
   // after the dot is the shared tool, so it takes that tool's wording.
   const bare = key.slice(key.lastIndexOf(".") + 1);
   const direct = WORKING_LABELS[key] ?? WORKING_LABELS[bare];
@@ -377,7 +377,7 @@ const REFUSAL_FALLBACK = "use a tool it does not have";
  */
 export function refusalLabel(tool: string): string {
   const key = tool.toLowerCase();
-  // Arke-run tools arrive as `arke.<name>` (the Codex and local Arke harnesses): the name
+  // Arke-run tools arrive as `arke.<name>` (the Codex harness): the name
   // after the dot is the shared tool, so it takes that tool's wording.
   const bare = key.slice(key.lastIndexOf(".") + 1);
   const direct = REFUSAL_LABELS[key] ?? REFUSAL_LABELS[bare];

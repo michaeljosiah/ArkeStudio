@@ -15,7 +15,7 @@ it("keeps Gemini delivery and note out of spoken words, restores block style aft
     const check = checkDirection(text, plan, model);
     assert.ok(check.ok);
     assert.deepEqual(check.parts.map(p => p.text), ["The door opened.", "Stay here.", "She left."]);
-    assert.deepEqual(check.parts.map(p => p.instructions), ["Read warmly and gently. Gently reassuring.", "Read in a whisper. Quiet urgency.", "Read warmly and gently. Gently reassuring."]);
+    assert.deepEqual(check.parts.map(p => p.instructions), ["Warm and gentle. Gently reassuring.", "Whispering. Quiet urgency.", "Warm and gentle. Gently reassuring."]);
     assert.ok(check.parts.every(p => Object.keys(p.voiceSettings).length === 0));
     assert.equal(check.mapped.controls.find(c => c.control === "delivery")?.status, "best-effort");
   }
@@ -30,7 +30,7 @@ it("packs long CJK and emoji passages including style before pricing each reques
   assert.ok(check.parts.length > 1);
   assert.equal(check.parts.map(p => p.text).join(" "), text);
   assert.ok(check.parts.every(p => speechInputFits(p.text, model.limits, p.instructions)));
-  assert.ok(check.parts.every(p => p.instructions === "Read warmly and gently. 穏やかに"));
+  assert.ok(check.parts.every(p => p.instructions === "Warm and gentle. 穏やかに"));
   const quotes = check.parts.map(p => quoteSpeech(model, p.text, { at: "2026-09-27T12:00:00Z" }));
   assert.equal(quotes.reduce((sum, q) => sum + q.authorisedMicroUsd, 0), check.parts.length * 151552);
   const plain = piecesFor(text, model, "wav");
@@ -58,8 +58,9 @@ it("refuses a direction that cannot fit and does not drop a span cut by a byte b
   const check = checkDirection(text, directionPlan(text, { delivery: "warm", speed: 1, cues: [] }), model);
   assert.ok(!check.ok);
   assert.match(check.reason, /no room|cannot fit/);
-  // A future qualified emphasis mapping must still refuse a split which loses its anchor.
-  model.limits.maxSpeechUtf8Bytes = 60;
+  // A future qualified emphasis mapping must still refuse a split which loses its anchor. (53, not
+  // 60, since warm's style became seven bytes shorter: the same room for the words as before.)
+  model.limits.maxSpeechUtf8Bytes = 53;
   model.cadence!.emphasis = "best-effort-capitalization";
   const plan = directionPlan(text, { delivery: "warm", speed: 1, note: "keep it gentle", cues: [{ kind: "emphasis", span: { from: 2, to: text.length, text: text.slice(2) }, level: "strong" }] });
   assert.equal(mapCadence(text, plan.sourceTextHash, plan, model).providerText, "A LONG EMPHATIC STATEMENT.");

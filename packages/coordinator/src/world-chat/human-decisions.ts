@@ -43,6 +43,53 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
       add(`editor:${request.id}`, request.summary.slice(0, 200) || "Editor request", "Only you can accept this timeline edit",
         { kind: "editor-request", productionId, requestId: request.id }, action, blocked ? "blocked" : "pending", blocked ? action.blockedReason : undefined);
     }
+    for (const family of (production.transitionFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      for (const version of family.versions) {
+        const ancestor = [...family.versions].reverse().find(value => value.number <= version.number && value.actionId);
+        const action = ancestor?.actionId ? actionById.get(ancestor.actionId) : undefined;
+        const stale = production.timeline?.status !== "ready" || production.timeline.timeline.revision !== version.baseRevision;
+        const detail = version.conflicts[0] ?? (stale ? "Current changed · Update proposal" : undefined);
+        add(`transitions:${family.id}:${version.id}`, `Crossfades · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",
+          { kind: "transition-proposal", productionId, familyId: family.id, versionId: version.id }, action, family.status !== "pending" ? "settled" : detail ? "blocked" : "pending", detail);
+      }
+    }
+    for (const family of (production.pictureFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      for (const version of family.versions) {
+        const ancestor = [...family.versions].reverse().find(value => value.number <= version.number && value.actionId);
+        const action = ancestor?.actionId ? actionById.get(ancestor.actionId) : undefined;
+        const stale = production.timeline?.status !== "ready" || production.timeline.timeline.revision !== version.baseRevision;
+        const detail = version.conflicts[0] ?? (stale ? "Current changed · Update proposal" : undefined);
+        add(`pictures:${family.id}:${version.id}`, `Picture appearance · Version ${version.number}`, "Review in timeline to adjust and apply this exact arrangement",
+          { kind: "picture-proposal", productionId, familyId: family.id, versionId: version.id }, action, family.status !== "pending" ? "settled" : detail ? "blocked" : "pending", detail);
+      }
+    }
+    for (const family of (production.effectFamilies ?? []).filter(value => value.conversationId === loaded.id)) {
+      const versions = new Map(family.versions.map(version => [version.id, version]));
+      for (const version of family.versions) {
+        // Human successors belong beside the model revision they follow. Falling straight back
+        // to the family's first action put a later Release card above the reply it revised.
+        let ancestor = version;
+        const seen = new Set<string>();
+        while (!ancestor.actionId && ancestor.parentVersionId && !seen.has(ancestor.id)) {
+          seen.add(ancestor.id);
+          const parent = versions.get(ancestor.parentVersionId);
+          if (!parent) break;
+          ancestor = parent;
+        }
+        const actionId = ancestor.actionId ?? family.actionId;
+        const action = actionId ? actionById.get(actionId) : undefined;
+        // An unopened story or measured spine has the same derived revision-zero base as requestBase.
+        const currentRevision = production.timeline?.status === "invalid" ? null : production.timeline?.status === "ready" ? production.timeline.timeline.revision : 0;
+        const stale = currentRevision === null || currentRevision !== version.dependencies.base.revision;
+        const pending = family.status === "pending";
+        const detail = pending ? version.conflicts[0]?.reason ?? version.dependencies.issues[0]?.reason ??
+          (stale ? "Current changed · Update proposal" : undefined) : undefined;
+        const reason = pending ? "Review in timeline to adjust and apply this exact arrangement" : family.status === "discarded" ? "Discarded arrangement history" : "Retained arrangement history";
+        add(`effects:${family.id}:${version.id}`, `Effects · Version ${version.number}`, reason,
+          { kind: "effect-proposal", productionId, familyId: family.id, versionId: version.id }, action,
+          !pending ? "settled" : detail ? "blocked" : "pending", detail?.slice(0, 1000));
+      }
+    }
   }
   for (const staged of bundle.proposals) {
     const action = loaded.actions.find(value => value.authority.kind === "proposal-manager" && value.authority.id === staged.proposal.id);

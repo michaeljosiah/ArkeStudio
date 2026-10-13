@@ -11,7 +11,6 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
-import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { comfyUiWeightCatalogue } from "./comfyui-setup.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
@@ -27,9 +26,11 @@ import {
   describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
-  ProfiledComfyUiEngineService,
+  ComfyUiEngineService,
   Coordinator,
   createStudioHost,
+  createNodeEffectRasterHost,
+  createNodeEffectAudioAnalysisHost,
   type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
@@ -768,12 +769,11 @@ async function initialize(): Promise<{ port: number }> {
    * One implementation, two readers: readiness asks it so a busy machine says so before Generate
    * is pressed, and the dispatch path asks it again after telling the engine to unload.
    */
-  const qwenCudaDevice = await detectQwenCudaDevice();
-  const freeVramMb = (model?: string): Promise<number | null> =>
+  const freeVramMb = (): Promise<number | null> =>
     new Promise((resolve) => {
       execFile(
         "nvidia-smi",
-        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
+        ["--query-gpu=memory.free", "--format=csv,noheader,nounits"],
         { timeout: 5_000, windowsHide: true },
         (err, stdout) => {
           if (err) return resolve(null);
@@ -803,8 +803,7 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
-  const comfyUiEngine = new ProfiledComfyUiEngineService({
+  const comfyUiEngine = new ComfyUiEngineService({
     freeVramMb,
     freeMemMb,
     appRoot,
@@ -856,7 +855,7 @@ async function initialize(): Promise<{ port: number }> {
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
-  }, qwenProfile.model, qwenProfile.launch);
+  });
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
@@ -1047,6 +1046,7 @@ async function initialize(): Promise<{ port: number }> {
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
       voxaClient.synthesize(input, options ?? {}),
     transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
+    transcribeWords: (audio: Uint8Array, options?: { signal?: AbortSignal }) => voxaClient.transcribeWords(audio, options),
   };
 
   const setupEngine = (id: string, healthReady: boolean) => {
@@ -1221,7 +1221,6 @@ async function initialize(): Promise<{ port: number }> {
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
     // The local models the bundled harness cannot see on its own (issue 1247).
-    ...(wiring.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,
@@ -1297,6 +1296,10 @@ async function initialize(): Promise<{ port: number }> {
     ...(ffmpegPath() !== null
       ? {
           ffmpeg: createExportFfmpegRunner(ffmpegPath()!, slateFontPath()),
+          effectAudioAnalysisHost: createNodeEffectAudioAnalysisHost({ ffmpeg: ffmpegPath()! }),
+          ...(ffprobeResolution().path ? { effectRasterHost: createNodeEffectRasterHost({ ffmpeg: ffmpegPath()!,
+            workerPath: join(__dirname, "effect-raster-worker.cjs"),
+            mediaProcess: createMediaProcessRunner({ ffmpeg: ffmpegPath()!, ffprobe: ffprobeResolution().path! }) }) } : {}),
           // The same binary, a different job (#248): arrival-time motion QC reads frame hashes
           // and writes no media. The bounded runner lives in take-qc.ts so it can be tested
           // without a real ffmpeg on the machine running the tests.

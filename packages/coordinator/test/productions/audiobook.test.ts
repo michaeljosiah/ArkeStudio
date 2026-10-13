@@ -454,6 +454,14 @@ describe("the audiobook run (turn 146)", () => {
       assert.ok(takes.every((a) => a.links.includes("neap")), "linked to the chapter");
       const record = await readRecord(worldDir);
       assert.equal(Object.keys(record.takes).length, progress.length);
+      const activity = events.filter(e => e.type === "audiobook.activity").map(e => e.run);
+      assert.equal(activity[0]?.phase, "queued");
+      assert.equal(activity.at(-1)?.phase, "ready");
+      assert.equal(activity.at(-1)?.made, Object.keys(record.takes).length);
+      assert.equal(activity.at(-1)?.worldId, WORLD_ID);
+      assert.equal(activity.at(-1)?.chapterFile, "01-neap");
+      assert.equal(activity.at(-1)?.local, true);
+      assert.equal(new Set(activity.map(run => run.id)).size, 1, "all saved blocks belong to one read operation");
       assert.ok(record.takes["title"]?.reader.provider === "kokoro");
       assert.equal(bundle().productions.find((p) => p.meta.id === LEDGER)?.chapters.find((c) => c.id === "neap")?.audiobook && "takes" in bundle().productions.find((p) => p.meta.id === LEDGER)!.chapters.find((c) => c.id === "neap")!.audiobook!, true, "the summary carries the stamp");
 
@@ -1893,7 +1901,7 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
       const book = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "book.json"), "utf8"));
       assert.equal(book.notes["maren-kest"], note);
-      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 68);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 78);
     }));
 
   it("under performed the narrator reads every line, a narrator that takes no phrase holds the note, and the take and the door say so (R-44, R-45)", () =>
@@ -1927,6 +1935,34 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const after = await openDoor(send, events, "01J8F3K2QW9VZX4N7M0RTYB6E2");
       const row = after.rows.find((candidate) => candidate.chapterId === "neap");
       assert.equal(row?.stale, 1, "the one block that holds Maren's line");
+    }));
+
+  it("a character's narration is the note every book inherits; the book's own wins, and emptying it falls back (design turn 200, R-165, R-166)", () =>
+    withHarness({}, async ({ worldDir, store, events, send }) => {
+      await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: "  low, clipped " });
+      const sheet = await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8");
+      assert.match(sheet, /^narration: low, clipped$/m, "written trimmed onto the sheet");
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 68, "the sheet's new field fences the world past the builds that would drop the sheet");
+      const narrator = { provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide" };
+      const room = { narrator, models: [ELEVEN, KOKORO, FISH, V3], catalogue: [{ provider: "elevenlabs", model: V3.id, voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false }] };
+      const lead = async () => {
+        const prepared = await prepareChapter(store, LEDGER, "neap", room, () => CLOCK, ["p0.0"]);
+        assert.equal(prepared.kind, "ready");
+        return prepared.kind === "ready" ? prepared.prepared.speaking.find((block) => block.block.key === "p0.0")?.parts[0] : undefined;
+      };
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "the book has no note of its own, so the character's leads");
+      const door = await openDoor(send, events);
+      assert.equal(door.voices.find((row) => row.sheet === "maren-kest")?.note, "low, clipped", "the door says the inherited note");
+
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "flat, far off" });
+      assert.ok((await lead())?.startsWith("[flat, far off] "), "the book's own wins for this book");
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: null });
+      assert.ok((await lead())?.startsWith("[low, clipped] "), "emptied, it falls back to the character's");
+
+      await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: null });
+      assert.doesNotMatch(await readFile(join(worldDir, "characters", "maren-kest.md"), "utf8"), /^narration:/m, "cleared, the field goes");
+      assert.ok(!(await lead())?.startsWith("["), "no note anywhere: read plain");
     }));
 
   it("takes follow the reader: a narrator switched back makes its kept takes current again without a call (R-46, R-48)", () =>
@@ -1990,6 +2026,9 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       const note = "穏やかに、低く";
       await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
       const model = geminiSpeechModel("flash");
+      // The test's own sentence for the ordinary reading: the shipped row sends none (2026-10-08),
+      // and what is under test is a style's bytes reserved, not its wording.
+      model.cadence!.deliveryMappings.measured = { settings: {}, instruction: "Read calmly and evenly, at a steady pace." };
       model.limits.maxSpeechUtf8Bytes = 82;
       const narrator = { provider: "google", model: model.id, voiceId: "Charon", label: "Charon" };
       const room = { narrator, models: [model], catalogue: [{ ...narrator, attributes: [], local: false, canClone: false }] };

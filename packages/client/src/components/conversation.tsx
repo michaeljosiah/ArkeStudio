@@ -1,5 +1,5 @@
 import { ProductionStudio } from "./production-studio.js";
-import { StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
+import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
@@ -11,6 +11,8 @@ import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
+import { effectCompositeReplacesAction } from "../lib/editor-effect-proposal-presentation.js";
+import { useEffectReviewNavigation } from "../screens/editor-effect-review.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
@@ -63,7 +65,8 @@ import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin, ChevronDown, ChevronUp, Sparkle } from "./icons.js";
+import { Film, Pin, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
+import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
@@ -122,9 +125,10 @@ export function ConversationTranscript({
   const messages = workspace?.messages ?? [];
   const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   const humanDecisions = workspace?.humanDecisions ?? [];
+  const transcriptActions = (workspace?.actions ?? []).filter(action => !effectCompositeReplacesAction(action, humanDecisions));
   const olderHumanDecisions = humanDecisions.filter(card => !card.turnId || !visibleTurns.has(card.turnId));
   // The message window is bounded; outstanding decisions and running work must stay reachable.
-  const olderActions = (workspace?.actions ?? []).filter((action) =>
+  const olderActions = transcriptActions.filter((action) =>
     !visibleTurns.has(action.turnId) &&
     ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
   );
@@ -150,7 +154,7 @@ export function ConversationTranscript({
       {messages.map((m) => {
         const actions = m.role !== "studio" || m.turnId === undefined
           ? []
-          : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
+          : transcriptActions.filter((action) => action.turnId === m.turnId);
         return (
         <div
           key={m.id}
@@ -780,6 +784,7 @@ export function ProductionConversation({
 }) {
   const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
+  useEffectReviewNavigation(worldId, productionId);
   const [message, setMessage] = useState("");
   const [languageModelId, setLanguageModelId] = useState<string | undefined>();
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
@@ -822,6 +827,7 @@ export function ProductionConversation({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
+  const half = useMediaQuery(ARKE_HALF_QUERY);
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
@@ -874,14 +880,12 @@ export function ProductionConversation({
   const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
   const modelEntry = model ? harnessModelManifestEntry(model, state?.app.manifest?.models) : undefined;
   const authorLocation = modelEntry ? (PROVIDERS[modelEntry.provider].local ? "local" : "cloud")
-    : state?.app.harnessInfo?.generation === "arke" ? "local"
       : ["claude", "codex"].includes(state?.app.harnessInfo?.generation ?? "") ? "cloud" : "model";
   const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   // The effort belongs to a model, so it is kept by the model's reference: this chat's own choice,
   // else what the production kept for that model. Nothing is sent for a model nobody named: the
   // harness's default has no session pinned to it for an effort to apply to.
-  const chipModel = effectiveLanguageModelId ? model : state?.app.harnessModels.find((candidate) => candidate.isDefault);
-  const effortRef = chipModel ? harnessModelReference(chipModel) : effectiveLanguageModelId;
+  const effortRef = model ? harnessModelReference(model) : effectiveLanguageModelId;
   const keptVariant = effortRef !== undefined ? productionVariants(state, productionId)?.[effortRef] : undefined;
   const chatVariant = effortRef !== undefined ? chatVariants[effortRef] : undefined;
   const effectiveVariant = chatVariant ?? keptVariant;
@@ -1265,8 +1269,8 @@ export function ProductionConversation({
       }}
       // Every chat in this production stands in the picker's foot wherever the conversation can
       // remember a choice (design turn 195, rule 2; 195b): this chat's own model, or — with nothing
-      // chosen here and nothing kept for the production — the model in force, the harness's default
-      // included. Only a production that keeps one already offers Clear instead.
+      // chosen here and nothing kept for the production — a known agent choice. Per-provider
+      // defaults cannot identify the unpinned session's model. Only a kept choice offers Clear.
       {...((modelSet || (variantSet && effectiveLanguageModelId !== undefined) || (languageModelId === undefined && rememberedLanguageModel === undefined && effortRef !== undefined)) && worldId && languageUnavailableReason === undefined
         ? { onRemember: () => {
             const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
@@ -1399,10 +1403,14 @@ export function ProductionConversation({
               <span className="fy-mono">{dock.subject}</span>
             </button>
           )}
+          {/* As the hinge half (202) the model is the head's, and the composer keeps one line: its
+              tools measure their row (model-chip.css), so beside the words they had no width. */}
+          {half && modelChip}
           <StudioToggle />
           {dock.onPutAway === undefined ? null : (
-            <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
-              <Pin size={13} />
+            // As the hinge half (202) putting it away is closing the half: a 44 ×, not the pin.
+            <IconButton className="fy-arke__pin" label={half ? "Close Arke" : "Unpin the assistant"} onClick={dock.onPutAway}>
+              {half ? <X size={18} /> : <Pin size={13} />}
             </IconButton>
           )}
         </div>
@@ -1463,7 +1471,7 @@ export function ProductionConversation({
             disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
-            {...(modelChip !== null ? { modelControl: modelChip } : {})}
+            {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
             {...attachProps}
           />
           {/* Only a dock that departs from the promise says anything here (issue 1008). The
@@ -1481,6 +1489,7 @@ export function ProductionConversation({
       {(eyebrow || heading) && <div className="fy-story__chathead">
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
         {heading && <h1 className="fy-story__h1">{heading}</h1>}
+        {responsive && compact && <StudioCanvasPress />}
       </div>}
       {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>

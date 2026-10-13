@@ -1,4 +1,18 @@
-.fy-production-studio-owner { grid-column: 1/-1; min-width: 0; min-height: 0; width: 100%; height: 100%; }
+/* The production chat page's own Studio spans the page; a page's dock is the dock's column. Arke's
+   dock is the 331 column at a page's right (design turns 126, 165k, 194c). Spanning every column, the
+   owner dropped a chapter's dock under the page as a full-width band and halved the chapter above it
+   (0.5.68, 2026-10-08). */
+.fy-production-studio-owner { min-width: 0; min-height: 0; width: 100%; height: 100%; }
+.fy-production-studio-owner[data-dock-owner="false"] { grid-column: 1/-1; }
+/* Closed, the dock fills its column through the chat's mount, as it did as the grid's own child. */
+.fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat { display: flex; height: 100%; min-height: 0; }
+.fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat > .fy-arke { flex: 1; min-height: 0; }
+/* A flex page (.fy-arkewrap: the season, an episode, the takes, the map) has no dock column; the
+   owner is the row's flex item through ArkeEdge's two contents slots, so 100% took the row and left
+   a new season 88 of a 1200 window (installed 0.5.80, 2026-10-09). There the dock keeps .fy-arke's
+   own width, as it did as the row's child before the owner. */
+.fy-arkewrap > div > div > .fy-production-studio-owner[data-dock-owner="true"] { flex: none; width: auto; }
+.fy-arkewrap > div > div > .fy-production-studio-owner[data-dock-owner="true"] .fy-production-studio-chat > .fy-arke { flex: none; }
 .fy-production-studio-inline { min-height: 0; height: 100%; }
 .fy-production-studio-owner [hidden], .fy-production-studio [hidden], .fy-production-studio[hidden] { display: none !important; }
 .fy-production-studio { display: grid; grid-template-columns: minmax(280px, var(--studio-thread-width,420px)) 8px minmax(0,1fr); grid-template-rows: auto minmax(0,1fr); height: 100%; min-height: 480px; min-width: 0; background: var(--background); color: var(--foreground); }
@@ -51,5 +65,25 @@
 
 .fy-production-studio__body .fy-production-preview__stage { height: 560px; max-height: none; }
 .fy-production-studio__dock-divider { position: absolute; left: 0; inset-block: 0; width: 8px; z-index: 2; cursor: col-resize; background: var(--border); touch-action: none; }
-.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,32%); height: 100%; }
+/* One row the height of the page, so the thread scrolls and the composer holds the foot. The row was
+   the thread's own height (9,544 on Saltlight), clipped by the page, and with the Studio closed the
+   composer was out of reach at every width (installed 0.5.72, design turn 202c). */
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,32%); grid-template-rows: minmax(0,1fr); height: 100%; }
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline :is(.fy-story__chat, .fy-story__log) { min-height: 0; }
+.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline .fy-story__side { min-height: 0; overflow-y: auto; }
 @media(max-width:599px) { .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0,1fr); } }
+
+/* The Canvas press (design turn 202c): with the Studio closed, the page's way back to its canvas,
+   at the head's right. Closed, there was none but a card's Show. */
+.fy-studio-canvas { display: none; }
+@media(max-width:1099px) and (min-width:600px) {
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chathead { position: relative; padding-right: 140px; }
+  .fy-studio-canvas { position: absolute; top: 18px; right: 28px; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+}
+/* Open on a Fold7 the canvas is the right half and the transcript the rest of the left, beside
+   the folded rail (202d): the hinge is the divider, so there is no drag. */
+@media(min-width:840px) and (max-width:1099px) {
+  .fy-production-studio:not([data-docked]) { grid-template-columns: minmax(280px, calc(50vw - 64px)) minmax(0, 1fr); }
+  .fy-production-studio:not([data-docked]) .fy-production-studio__divider { display: none; }
+  .fy-production-studio:not([data-docked]) .fy-production-studio__canvas { border-left: 1px solid var(--border); }
+}

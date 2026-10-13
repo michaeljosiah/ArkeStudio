@@ -32,6 +32,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Save provider key | Creates or replaces encrypted `R\credentials.dat`, then restricts its ACL to the current user. Keys are never stored in a world. |
 | Remember or revoke permission | Creates or replaces `R\grants.json`. Revocation marks a grant revoked rather than deleting its history. |
 | Queue or update a job | Appends the complete job state to `R\queue\jobs.jsonl`. |
+| Read a chapter | Appends flushed operation progress to `R\queue\audiobook-reads.jsonl` after read authorization, through provider work, local alignment and saved blocks. Jobs and the ledger remain the source of charge evidence. Startup repairs a torn tail and records unfinished reads as interrupted; it does not resume or send paid requests. The snapshot shows the newest 200 reads. |
 | Finish a metered job | Appends one terminal charge record to `R\ledger.jsonl`, including applicable failures and cancellations. |
 | Record a provider call | Appends one redacted request and response record to `R\provider-calls\calls.jsonl`, then restricts it to the current user — `icacls` on Windows, mode `600` elsewhere. Past 2,000 records or 50 MiB the file is compacted by temporary-file rename, dropping the oldest. A filesystem without ACL support is tolerated. |
 | Run the application | Appends logs under `R\logs\` and replaces `R\run\children.json` as supervised children start and stop. |

@@ -17,7 +17,7 @@ Object.assign(dom.window, {
   innerWidth:390,innerHeight:797,location:{origin:"http://fixture.test"},getComputedStyle:()=>({direction:"ltr"}),
   matchMedia:(query:string)=>({matches:(!query.includes("hover:") || query.includes(coarse?"hover: none":"hover: hover")) && (!query.includes("pointer:") || query.includes(coarse?"pointer: coarse":"pointer: fine")) && [...query.matchAll(/\((min|max)-width: (\d+)px\)/g)].every(([,kind,value])=>kind==='min'?width>=Number(value):width<=Number(value)),addEventListener:(_:string,listener:()=>void)=>listeners.add(listener),removeEventListener:(_:string,listener:()=>void)=>listeners.delete(listener)}),
 });
-Object.assign(dom.HTMLElement.prototype,{getBoundingClientRect:()=>({x:0,y:0,left:0,top:0,right:44,bottom:44,width:44,height:44}),showModal(this:HTMLElement){this.setAttribute("open","");},close(this:HTMLElement){this.removeAttribute("open");},scrollIntoView(){},setPointerCapture(){},releasePointerCapture(){}});
+Object.assign(dom.HTMLElement.prototype,{getBoundingClientRect:()=>({x:0,y:0,left:0,top:0,right:44,bottom:44,width:44,height:44}),showModal(this:HTMLElement){this.setAttribute("open","");},show(this:HTMLElement){this.setAttribute("open","");this.dataset.modeless="";},close(this:HTMLElement){this.removeAttribute("open");delete this.dataset.modeless;},scrollIntoView(){},setPointerCapture(){},releasePointerCapture(){}});
 Object.defineProperty(dom.HTMLElement.prototype,"clientWidth",{configurable:true,get(){return 688;}});
 Object.defineProperty(dom.HTMLElement.prototype,"clientHeight",{configurable:true,get(){return 520;}});
 Object.defineProperty(dom.HTMLElement.prototype,"innerText",{configurable:true,get(){return this.textContent;},set(value){this.textContent=value;}});
@@ -58,6 +58,21 @@ it('Notes and Arke are sheets and resizing keeps the manuscript draft',async()=>
  await act(async()=>props(area).onChange!({target:{value:draftText}} as never));await click(find('[aria-label="Notes"]'));assert.ok(find('.fy-chapter-notes-sheet[open]'));
  await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal((find('.fy-ch__source') as HTMLTextAreaElement).value,draftText);
  await click(find('.fy-chapter-notes-sheet [aria-label="Close"]'));await click(find('[aria-label="Open Arke"]'));assert.ok(find('.fy-season-arke-sheet[open]'));
+ // At 984 the open dock is the hinge half beside the live page, not a drawer over it (turn 202).
+ assert.ok(find('.fy-season-arke-sheet[data-modeless]'),'shown without a modal');assert.equal(document.documentElement.dataset.arkeHalf,'open');
+ assert.equal(find('[aria-label="Open Arke"]'),null,'the rail goes while the half is open');assert.ok(find('.fy-prodrail--folded'),'and the rail folds to its marks');
+ await click(find('[aria-label="Close Arke"]'));assert.equal(find('.fy-season-arke-sheet[open]'),null);assert.equal(document.documentElement.dataset.arkeHalf,undefined);assert.ok(find('[aria-label="Open Arke"]'));
+});
+it('with the half open a passage is asked about in the dock, not from a second bar (202)',async()=>{
+ await mount('p/ledger/story/chapters/neap',984);await openChapter();await click(find('[aria-label="Open Arke"]'));
+ const area=find('.fy-ch__source') as HTMLTextAreaElement;Object.defineProperty(document,'activeElement',{value:area,configurable:true});area.selectionStart=0;area.selectionEnd=31;
+ await act(async()=>document.dispatchEvent(new Event('selectionchange')));
+ assert.equal(find('.fy-passage-ask'),null);assert.match(find('.fy-season-arke-sheet .fy-arke__subject').textContent!,/about this passage/);
+ const field=find('.fy-season-arke-sheet .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
+ await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-season-arke-sheet .fy-arke__subject').textContent!,/about this passage/,'moving into the dock’s field keeps the passage');
+ await click(find('[aria-label="Close Arke"]'));assert.ok(find('.fy-passage-ask'),'put away, the bar under the passage asks again');
+ await act(async()=>{width=700;for(const listener of listeners)listener();});await click(find('[aria-label="Open Arke"]'));
+ assert.ok(find('.fy-season-arke-sheet[open]'));assert.equal(find('.fy-season-arke-sheet[data-modeless]'),null,'below 840 the drawer stays');assert.equal(document.documentElement.dataset.arkeHalf,undefined);
 });
 it('a compact waiting passage has an attended decision without opening Arke',async()=>{
  await mount('p/ledger/story/chapters/neap',390,'waiting');await openChapter();assert.ok(find('.fy-passage-decision'));assert.equal(find('.fy-season-arke-sheet[open]'),null);

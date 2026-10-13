@@ -240,9 +240,9 @@ describe("Listen (turn 186)", () => {
   });
 
   it("serves every file the plan names through the app", () => {
-    const chapters_ = playerChapters({ ...listening(3), chapters: [{ ...listening(3).chapters[0]!, pictures: [{ key: "p1.0", number: 3, file: "artifacts/p.png", at: 14, seconds: 6, short: true }] }] }, (file) => `/media/w/${file}`);
+    const chapters_ = playerChapters({ ...listening(3), chapters: [{ ...listening(3).chapters[0]!, pictures: [{ key: "p1.0", number: 3, file: "artifacts/p.png", at: 14, seconds: 6, short: true, focus: { x: 0.7, y: 0.3 } }] }] }, (file) => `/media/w/${file}`);
     assert.equal(chapters_[0]!.blocks[1]!.src, "/media/w/artifacts/a.wav");
-    assert.deepEqual(chapters_[0]!.pictures, [{ at: 14, src: "/media/w/artifacts/p.png" }]);
+    assert.deepEqual(chapters_[0]!.pictures, [{ at: 14, seconds: 6, src: "/media/w/artifacts/p.png", focus: { x: 0.7, y: 0.3 } }]);
     assert.equal(chapters_[0]!.opening, "/media/w/world-art.png");
   });
 });

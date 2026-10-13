@@ -12,6 +12,7 @@ import {
   orderedShots,
   type ClientMessage,
   type ClientState,
+  type AudiobookActivity,
   type FoundingBuildState,
   type Job,
   type LedgerEntry,
@@ -135,6 +136,39 @@ function activityControl(html: string): string {
   return html.slice(html.lastIndexOf("<button", label), html.indexOf("</button>", label));
 }
 
+it("keeps an aligning chapter in Running after its provider request succeeded, and retains its owned chapter route", () => {
+  const state = quiet();
+  const request = job({ id: "jb_01J8E0000000000000000R1", status: "succeeded", productionId: "bell-watch", params: { purpose: "audiobook" } });
+  const read: AudiobookActivity = {
+    id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_WORLD_ID, productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing",
+    chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "aligning", startedAt: TODAY, updatedAt: TODAY,
+    toMake: 20, made: 6, flagged: 0, requests: 4, request: 2, estimatedMicroUsd: 400000, models: ["Gemini"], local: false, jobs: [{ id: request.id, index: 2, reused: false }],
+  };
+  state.app.jobs = [request]; state.app.audiobookActivity = [read];
+  const html = render(state, "inbox");
+  assert.match(html, /Running · 1/);
+  assert.match(html, /The crossing · Aligning narration/);
+  assert.match(html, /Aligning locally · request 2 of 4/);
+  assert.match(html, /6 of 20 blocks saved/);
+  assert.match(html, /~\$0.40 for this read/);
+  assert.doesNotMatch(html, /voice preview/);
+  assert.equal((html.match(/data-testid="audiobook-activity-row"/g) ?? []).length, 1);
+  state.app.audiobookActivity = [{ ...read, phase: "interrupted", reason: "Studio restarted before this read finished." }];
+  const history = render(state, "inbox");
+  assert.match(history, /Narration interrupted/);
+  assert.match(history, /14 left unread/);
+  assert.doesNotMatch(history, /nothing finished in the last/);
+  const recovered = { ...read, id: "01J8F3K2QW9VZX4N7M0RTYB6HE", phase: "ready" as const, made: 20, request: 4, startedAt: TODAY.replace("09:", "10:"), updatedAt: TODAY.replace("09:", "10:"), jobs: [] };
+  state.app.audiobookActivity.push(recovered);
+  assert.doesNotMatch(render(state, "inbox"), /Needs you · 1/, "a later full read answers the chapter remedy");
+  state.app.jobs = [{ ...request, status: "needs-reconciliation", providerJobId: "accepted-maybe" }];
+  const unknown = render(state, "inbox");
+  assert.match(unknown, /Needs you · 1/);
+  assert.match(unknown, /Resolve request/);
+  assert.match(unknown, /Request 2 needs a decision/);
+  assert.equal((unknown.match(/data-testid="audiobook-activity-row"/g) ?? []).length, 2, "the completed new read cannot settle the older provider outcome");
+});
+
 async function mounted(node: React.ReactNode, run: (container: HTMLElement) => Promise<void>): Promise<void> {
   const container = document.createElement("div");
   document.body.append(container);
@@ -167,12 +201,14 @@ function capture(): ClientMessage[] {
 }
 
 describe("the panel and its tabs (design turn 136, R-20, R-21)", () => {
-  it("orders the tabs What's new, Inbox, Spend, and counts on the labels", () => {
+  it("orders the plain tabs and preserves counts in their accessible names (turn206)", () => {
     const html = render(FIXTURE_STATE, "inbox");
-    const tabs = [...parseHTML(html).document.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent!.trim());
+    const elements = [...parseHTML(html).document.querySelectorAll('[role="tab"]')];
+    const tabs = elements.map((tab) => tab.textContent!.trim());
     assert.equal(tabs.length, 3);
-    assert.match(tabs[0]!, /^What's new/);
-    assert.match(tabs[1]!, /^Inbox · \d+$/, "the Inbox label carries the needs-you count");
+    assert.equal(tabs[0], "What’s new");
+    assert.equal(tabs[1], "Inbox");
+    assert.match(elements[1]!.getAttribute("aria-label")!, /^Inbox · \d+$/, "the accessible Inbox name carries the needs-you count");
     assert.equal(tabs[2], "Spend", "Spend carries no count");
     __setStateForTest(FIXTURE_STATE);
   });
@@ -337,7 +373,7 @@ describe("the two remembered facts (R-25)", () => {
       </MemoryRouter>,
       async (container) => {
         assert.ok(sent.some((m) => m.kind === "mark-whats-new-seen" && m.version === "0.5.50"), "the update is the newest thing read");
-        assert.ok(container.textContent!.includes("What's new · 1"), "counted until the mark comes back");
+        assert.equal(container.querySelector('[role="tab"]')?.getAttribute("aria-label"), "What’s new · 1", "counted until the mark comes back");
       },
     );
   });
@@ -458,7 +494,7 @@ describe("the Inbox's order and its history (R-22)", () => {
     const html = render(state, "inbox");
     assert.ok(html.includes("Nothing running, nothing waiting on you"));
     assert.ok(html.indexOf("today") < html.indexOf("yesterday"), "newest day first");
-    assert.ok(html.includes("last 7 days"));
+    assert.ok(html.includes("Earlier · today"));
     __setStateForTest(FIXTURE_STATE);
   });
 

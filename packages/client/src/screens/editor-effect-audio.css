@@ -1,0 +1,17 @@
+.fx-audio, .fx-protection { display: grid; gap: 12px; min-width: 0; padding-block: 16px; border-top: 1px solid var(--border); }
+.fx-audio h3, .fx-protection h3, .fx-audio h4, .fx-protection h4 { margin: 0; font-size: 14px; }
+.fx-audio p, .fx-protection p { margin: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.fx-audio__note { color: var(--muted-foreground); }
+.fx-audio__select { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
+.fx-audio__select select { width: 100%; min-width: 0; min-height: 44px; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.fx-audio__toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; }
+.fx-audio__toggle input { width: 18px; height: 18px; }
+.fx-audio__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fx-audio button, .fx-protection button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: inherit; cursor: pointer; font: inherit; font-size: 12px; overflow-wrap: anywhere; }
+.fx-audio button:disabled, .fx-protection button:disabled { opacity: .5; cursor: default; }
+.fx-audio summary, .fx-protection summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-size: 13px; }
+.fx-audio details[open] > :not(summary), .fx-protection details[open] > :not(summary) { margin-top: 12px; }
+.fx-cues__row, .fx-protection__rule { display: grid; gap: 10px; border: 1px solid var(--border); border-radius: 6px; padding: 12px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.fx-protection__boundaries { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.fx-protection__passage { display: grid; gap: 10px; }
+.fx-audio :focus-visible, .fx-protection :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

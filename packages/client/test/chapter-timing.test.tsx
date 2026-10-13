@@ -22,6 +22,7 @@ import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, Timi
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { playerChapters } from "../src/components/audiobook-player.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
+import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -120,6 +121,7 @@ afterEach(async () => {
     await act(async () => mounted.root.unmount());
     mounted.container.remove();
   }
+  __clearChapterViewsForTest();
 });
 const q = (m: Mounted, selector: string) => m.container.querySelector(selector) as HTMLElement | null;
 const all = (m: Mounted, selector: string) => [...m.container.querySelectorAll(selector)] as HTMLElement[];

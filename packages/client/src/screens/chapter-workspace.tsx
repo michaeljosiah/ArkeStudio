@@ -1,5 +1,7 @@
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback } from "react";
@@ -47,7 +49,9 @@ import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Chat, ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
+import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
+import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -60,7 +64,7 @@ import { BlockPicturePanel, pictureStart, useChapterPictures } from "../componen
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -1126,8 +1130,10 @@ export function ChapterWorkspace({
   const [searchParams, setSearchParams] = useSearchParams();
   // Timing (design turn 187) is the third view, in the address the same way.
   const viewParam = searchParams.get("view");
-  const view: "manuscript" | "audiobook" | "timing" = viewParam === "audiobook" ? "audiobook" : viewParam === "timing" ? "timing" : "manuscript";
-  const chooseView = (next: "manuscript" | "audiobook" | "timing") =>
+  const view = chapterView(worldId, prodId, chapter.id, viewParam);
+  useEffect(() => { rememberChapterView(worldId, prodId, chapter.id, view); }, [worldId, prodId, chapter.id, view]);
+  const chooseView = (next: "manuscript" | "audiobook" | "timing") => {
+    rememberChapterView(worldId, prodId, chapter.id, next);
     setSearchParams(
       (params) => {
         const copy = new URLSearchParams(params);
@@ -1137,6 +1143,7 @@ export function ChapterWorkspace({
       },
       { replace: true },
     );
+  };
   // The record a run finished with stands until a fresh open replaces it, as the cast's does:
   // the run's last word arrives on its finished event, and what the disk holds now is read
   // again only when the chapter is.
@@ -1162,10 +1169,24 @@ export function ChapterWorkspace({
   // Below 700 the Audiobook view is one column and a block's panel is a sheet (turn 165l).
   const phone = useMediaQuery("(max-width: 599px)");
   const compact = useMediaQuery("(max-width: 1099px)");
+  // On a Fold7 an open dock is the hinge half beside the chapter, not a drawer over it (turn 202).
+  const half = useMediaQuery(ARKE_HALF_QUERY);
   const coarse = useMediaQuery("(pointer: coarse)");
   const [notesOpen, setNotesOpen] = useState(false);
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   const [blockSheet, setBlockSheet] = useState(compact);
+  // The toolbar's compact form follows the room it has, not the window (design turn 203, issue
+  // 1642): 194's one line is drawn while it fits the centre and folds once it would not. At 1200
+  // with Arke open the centre was 823 and the line 1,164, so it ran past the column and the column
+  // scrolled sideways. Folded, it comes back once the line has the room it last measured.
+  const [narrowToolbar, setNarrowToolbar] = useState(compact);
+  const viewLine = useRef<HTMLDivElement>(null);
+  const lineWidth = useRef<number | null>(null);
+  const [readingOpen, setReadingOpen] = useState(false);
+  const closeReadingMenu = () => {
+    setReadingOpen(false);
+    requestAnimationFrame(() => viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]')?.focus({ preventScroll: true }));
+  };
   const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
   // The Timing view's playhead (turn 187a), on the view's clock; a new chapter starts at its head.
   const [playhead, setPlayhead] = useState(0);
@@ -1180,10 +1201,56 @@ export function ChapterWorkspace({
     observer?.observe(node);
     return () => observer?.disconnect();
   }, [compact]);
+  useLayoutEffect(() => {
+    const line = viewLine.current;
+    if (!line) return;
+    const fit = () => {
+      if (compact) {
+        setNarrowToolbar(true);
+        return;
+      }
+      const room = line.clientWidth;
+      if (!(room > 0)) return;
+      const full = line.scrollWidth;
+      setNarrowToolbar((narrow) => {
+        // Folded with no width measured (it was a tablet's a moment ago): unfold once to measure.
+        if (narrow) return lineWidth.current !== null && room < lineWidth.current;
+        if (!(full > room + 1)) return false;
+        lineWidth.current = full;
+        return true;
+      });
+    };
+    fit();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(line);
+    // The line fills after the chapter opens — the record's presses, the price, a count — without
+    // its box changing size, which is all a ResizeObserver hears: measured only on opening, the
+    // line at 1200 with Arke open ran to 1,269 in 823 and stayed unfolded (installed 0.5.74).
+    const filled = typeof MutationObserver === "undefined" ? null : new MutationObserver(fit);
+    filled?.observe(line, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer?.disconnect();
+      filled?.disconnect();
+    };
+  }, [compact, view, narrowToolbar]);
   // Illustrate this chapter (design turn 191b): the proposal this window holds, dashed on the blocks and listed in the dock's card.
   const illustration = useIllustration(worldId, prodId, chapter);
   const illustrationSheet = useIllustrationSheet(illustration.run);
   const [illustrationLookOpen, setIllustrationLookOpen] = useState(false);
+  const [chapterExportOpen, setChapterExportOpen] = useState(false);
+  const chapterExportOpener = useRef<HTMLElement | null>(null);
+  const openChapterExport = () => {
+    const active = document.activeElement;
+    chapterExportOpener.current = active instanceof HTMLElement && active.matches('[data-testid="audiobook-chapter-export"]:not([role="menuitem"])')
+      ? active : document.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+    setChapterExportOpen(true);
+  };
+  const closeChapterExport = () => {
+    setChapterExportOpen(false);
+    // A menu item is gone by the time a modal opens; return to its stable chapter action press.
+    requestAnimationFrame(() => chapterExportOpener.current?.isConnected && chapterExportOpener.current.focus({ preventScroll: true }));
+  };
+  useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
   const [lookToMake, setLookToMake] = useState<{ key: string; name: string; sheet: string; line: string } | null>(null);
   const audiobook = useChapterAudiobook({
@@ -1203,9 +1270,11 @@ export function ChapterWorkspace({
     connection,
     locked: locked || record === null,
     listenLeads: listenLeads(production, chapter.id),
-    compact,
+    compact: narrowToolbar,
     // On a phone the Blocks press and its Reset are in the toolbar's ⋯ (design turn 198, rule 10).
     seamsInMenu: phone,
+    // Folded where the window is not a tablet's, the reading is the ⋯'s first item (design turn 203).
+    ...(narrowToolbar ? { readingInMenu: { open: () => setReadingOpen(true), narrator: narratorName } } : {}),
     // What the Direct and illustrate menu says of each (design turn 194, rule 3), and the run line
     // that takes the menu's place while pictures are read or made.
     illustrate: {
@@ -1220,6 +1289,7 @@ export function ChapterWorkspace({
           : {}),
     },
     looks: { open: () => setIllustrationLookOpen(true), state: lookState(audiobookRecord.record) },
+    export: openChapterExport,
     // Cast the edited paragraphs or the chapter from the view (design turn 198), as the rail does.
     casting: { press: castLinesPress, busy: castingNow },
     // The press waits out the autosave (turn 126's fourth rule, codex on PR 1180): a read of
@@ -1311,6 +1381,7 @@ export function ChapterWorkspace({
     setDockByView((held) => ({ ...held, [view]: open }));
     rememberDock(view, open);
   }, [compact, view]);
+  useHoldArkeHalf(half && dock);
   const [passageLine, setPassageLine] = useState("");
   /*
    * The plan (turn 127): typed where it reads and saved in place, one write for every field.
@@ -1396,14 +1467,15 @@ export function ChapterWorkspace({
   const onSelect = useCallback((text: string | null, paragraph: number | null = null, source?: HTMLTextAreaElement) => {
     const subject = passageSubject(text);
     const at = source === undefined ? askAt(manuscriptRef.current) : askAtSource(manuscriptRef.current, source);
-    // Native selection may collapse when the ask field receives focus. Keep its captured subject.
-    const inAsk = document.activeElement?.closest(".fy-passage-ask");
+    // Native selection may collapse when the ask field receives focus. Keep its captured subject:
+    // the bar's field, or the dock's while it is the hinge half and the bar is not drawn (202).
+    const inAsk = document.activeElement?.closest(half ? ".fy-passage-ask, .fy-season-arke-sheet" : ".fy-passage-ask");
     if (subject !== null || !coarse || !inAsk) setSelection(subject === null ? null : { text: subject, paragraph, ...at });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
     if (subject !== null && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
-  }, [flushSave, coarse]);
+  }, [flushSave, coarse, half]);
   // The words come from the text the editor holds, not the element's value: the two are the same
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
@@ -1805,25 +1877,7 @@ export function ChapterWorkspace({
     onPress: audiobook.seams.press,
     pictured,
   });
-  /*
-   * The Audiobook view's side is the block's panel (165k/146b), and it is never left empty
-   * (turn 188). With nothing chosen it used to show the manuscript's rail, the book and the
-   * chapter's continuity, which is not what this view is about. So entering the view with the panel
-   * beside the blocks chooses the first block, once per chapter, and the rail stays with the
-   * manuscript. Where the panel is a sheet, choosing would open it over the page, so nothing is chosen.
-   */
-  const firstBlock = audiobook.rows[0]?.block.key ?? null;
-  const chosenOnEntry = useRef<string | null>(null);
-  const { selected: chosenBlock, setSelected: chooseBlock } = audiobook;
-  useEffect(() => {
-    if (view !== "audiobook" || blockSheet) {
-      chosenOnEntry.current = null;
-      return;
-    }
-    if (firstBlock === null || chosenOnEntry.current === chapter.id) return;
-    chosenOnEntry.current = chapter.id;
-    if (chosenBlock === null) chooseBlock(firstBlock);
-  }, [view, blockSheet, firstBlock, chapter.id, chosenBlock, chooseBlock]);
+  // A block panel opens only after a block is chosen; entering a chapter leaves paid actions put away.
   // The block's panel, beside the blocks or, on a phone, in a sheet (turn 165): one set of props.
   const blockPanel: Parameters<typeof AudiobookSide>[0] = {
     rows: audiobook.rows,
@@ -1983,7 +2037,7 @@ export function ChapterWorkspace({
           {/* The view row (turn 146): the Chapters door's seg, Manuscript or Audiobook. In Audiobook it
               is the whole head, one line (design turn 194, rule 1): the reading, Notes, the speaker
               filter, then Direct and illustrate, the priced read, Listen and the Arke press. */}
-          <div className="fy-ch__viewline">
+          <div className="fy-ch__viewline" ref={viewLine} data-narrow={view === "audiobook" && narrowToolbar ? "true" : undefined}>
             <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
               <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
                 Manuscript
@@ -2026,12 +2080,14 @@ export function ChapterWorkspace({
             {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}{/* In Audiobook, Notes is the reading's book and chapter note (194, rule 5); the rail's sheet is the Manuscript's. */}{view !== "audiobook" && <button type="button" className="ui-btn ui-btn--secondary" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{phone ? <span className="fy-sr-only">Notes</span> : "Notes"}</button>}</div>}
             {view === "audiobook" && (
               <>
+                {/* Folded, the reading is the ⋯'s first item and opens from there (design turn 203). */}
                 <ReadingMenu
                   reading={production.audiobook?.reading ?? "narrator"}
                   narrator={audiobook.narrator.label ?? narratorName}
                   disabled={audiobook.run?.state === "reading" || connection !== "open"}
                   onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
                   onNarrator={() => setNarratorOpen(true)}
+                  {...(narrowToolbar ? { external: { open: readingOpen, onClose: closeReadingMenu } } : {})}
                 />
                 {/* The book note and the chapter note behind one press (194, rule 5; turn 184, R-53). */}
                 <NotesPress
@@ -2043,15 +2099,17 @@ export function ChapterWorkspace({
                 />
                 {record !== null && <AudiobookFilterMenu filters={audiobook.filters} filter={audiobook.filter} onFilter={audiobook.setFilter} />}
                 {/* Blocks · 3 changed (design turn 198, rule 10): after the filter once a seam is set by hand; on a phone it is in the ⋯. */}
-                {record !== null && !phone && audiobook.seams.label !== null && <BlocksPress label={audiobook.seams.label} changed={audiobook.seams.changed} held={audiobook.seams.held} onReset={audiobook.seams.reset} />}
+                {/* Blocks stands from the start (design turn 201, rule 1); on a phone it is the ⋯ menu's. */}
+                {!phone && audiobook.blocks !== null && <BlocksPress {...audiobook.blocks} />}
                 {/* The paragraphs an edit left to cast (design turn 198h), after the filter; on a phone they head the ⋯ (198j). */}
                 {record !== null && !phone && stagedDraft === undefined && audiobook.castPress}
                 <span className="fy-ch__viewpush" />
                 {/* Below 1100 (194, rule 15) the line ends with the Direct and illustrate ⋯ and the
                     tablet's Arke press; the read and Listen are held at the foot, under the list. */}
-                {stagedDraft === undefined && (compact ? audiobook.headMenu : audiobook.head)}
+                {stagedDraft === undefined && (narrowToolbar ? audiobook.headMenu : audiobook.head)}
+                {stagedDraft === undefined && !phone && <button type="button" className="fy-ab__pill" disabled={connection !== "open"} onClick={openChapterExport} data-testid="audiobook-chapter-export">Export…</button>}
                 {/* Listen (design turn 186): the book from this chapter, after the chapter's own read. */}
-                {stagedDraft === undefined && !compact && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
+                {stagedDraft === undefined && !narrowToolbar && <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />}
                 {!phone && arkePress}
               </>
             )}
@@ -2325,7 +2383,9 @@ export function ChapterWorkspace({
                       : {})}
               />
             )}
-            {selection !== null && !locked && coarse && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {/* With the half open the dock's composer is where a passage is asked about (202): the
+                 selection is its subject, said over the composer, and its prompts are the passage's. */}
+            {selection !== null && !locked && coarse && !(half && dock) && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />
@@ -2343,17 +2403,18 @@ export function ChapterWorkspace({
               the manuscript's rail is hidden there by chapter-responsive.css, not unmounted, so
               Voices keeps its speakers' notes and the narrator's dialog. */}
           <div className="fy-ch__panels">
+          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
-            <ResponsiveSheet sheet={blockSheet} open title="Read the chapter" onClose={audiobook.readSheet.cancel} className="fy-chapter-block-sheet">
+            <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} subtitle={audiobook.readSheet.recovery?.chapter} preserveReturnFocus onClose={audiobook.readSheet.cancel} className={`fy-chapter-review-sheet${audiobook.readSheet.recovery !== null ? " fy-chapter-read-recovery" : ""}`} footer={audiobook.readSheet.recovery !== null ? <ReadSheetActions sheet={audiobook.readSheet} /> : undefined}>
               <aside className="fy-ch__side fy-ch__block-side">
-                <ReadSheet sheet={audiobook.readSheet} />
+                <ReadSheet sheet={audiobook.readSheet} headless footer={audiobook.readSheet.recovery === null} />
               </aside>
-            </ResponsiveSheet>
+            </PageSheet>
           )}
           {/* The Direct sheet (design turn 184a): what the director reads, before it runs. */}
           {view === "audiobook" && audiobook.directOpen && (
-            <ResponsiveSheet sheet={blockSheet} open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-block-sheet">
+            <PageSheet open title="Direct this chapter" onClose={audiobook.closeDirect} className="fy-chapter-review-sheet">
               <aside className="fy-ch__side fy-ch__block-side">
                 <DirectSheet
                   worldId={worldId}
@@ -2372,7 +2433,7 @@ export function ChapterWorkspace({
                   }}
                 />
               </aside>
-            </ResponsiveSheet>
+            </PageSheet>
           )}
           {/* The chapter's Looks (design turn 193a): from the Audiobook head and from the rail's Voices in any view (rule 18). */}
           <LookSheet open={illustrationLookOpen} onClose={() => setIllustrationLookOpen(false)} worldId={worldId} productionId={prodId} chapterFile={chapter.file} chapterOrder={chapter.order} record={audiobookRecord.record === "unreadable" ? null : audiobookRecord.record} blockKeys={audiobook.rows.map((row) => row.block.key)} />
@@ -2542,7 +2603,10 @@ export function ChapterWorkspace({
                     speakers.map((who) => {
                       const key = who.sheet ?? who.speaker;
                       const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
-                      const note = production.audiobook?.notes?.[key];
+                      // The book's own note, else the character's narration (design turn 200, R-166).
+                      const own = production.audiobook?.notes?.[key];
+                      const narration = sheet !== undefined && sheet.type === "character" && !sheet.retired && sheet.narration?.trim() ? sheet.narration.trim() : undefined;
+                      const note = own ?? narration;
                       const model = audiobook.modelOf(audiobook.narrator);
                       const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
                       // A speaker's line may sit inside a block of several turns (design turn 190).
@@ -2558,7 +2622,7 @@ export function ChapterWorkspace({
                           name={sheet?.name ?? who.speaker}
                           lines={who.lines}
                           tone={who.sheet === undefined ? "none" : String(speakerColours.get(who.sheet) ?? "none")}
-                          {...(note !== undefined ? { note } : {})}
+                          {...(note !== undefined ? { note, source: own !== undefined ? "this book" as const : "character" as const } : {})}
                           noteHeld={model === null || performanceNote(note ?? "x", model).mode === "unsupported"}
                           line={line}
                           model={model}
@@ -2784,8 +2848,8 @@ export function ChapterWorkspace({
         {/* Below 1100 (design turn 194, rule 15) Read and Listen are held at the foot, 44 high, in the
             place the toolbar's line gave up: the read's own control (or its price, its progress) at
             the left and Listen at the right, both the width of the room they share. */}
-        {foldedAudiobook && stagedDraft === undefined && (
-          <div className="fy-ab__hold" data-testid="audiobook-hold">
+        {view === "audiobook" && narrowToolbar && stagedDraft === undefined && (
+          <div className="fy-ab__hold" data-testid="audiobook-hold" data-wide={compact ? undefined : "true"}>
             {audiobook.headRead}
             <ListenButton worldId={worldId} production={production} chapterId={chapter.id} solid />
           </div>
@@ -2829,7 +2893,7 @@ export function ChapterWorkspace({
       )}
 
       {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
-      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
+      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
           key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
@@ -2922,7 +2986,7 @@ export function ChapterWorkspace({
               })}
         />
       </ResponsiveSheet>
-      {((compact && !foldedAudiobook) || (!dock && !toolbarDock)) && (
+      {((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>

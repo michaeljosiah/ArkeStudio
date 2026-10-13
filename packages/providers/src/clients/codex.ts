@@ -90,6 +90,14 @@ export class CodexClient implements ProviderClient {
         const when = validReset ? ` It resets ${validReset}. Try again after it resets.` : " Try again after it resets; use Test connection in Providers to check again.";
         throw new ProviderPlanLimitError(`codex: the Codex allowance has been reached.${when}`, validReset);
       }
+      // A turn that finished with no picture is witnessed (an output-stage safety refusal, most
+      // often): rejected and terminal with Codex's own words, never a result held for
+      // reconciliation, which stalled a whole chapter's pictures behind each refusal.
+      // Declared terminal: Codex's sentence is free text, and a word like "unauthorized" or
+      // "try again" in it must not reclassify a refusal the turn already settled.
+      if (err instanceof Error && err.name === "CodexImageRefusedError") {
+        throw Object.assign(new ProviderRequestRejectedError(`codex: ${err.message}`), { failureClass: "terminal" as const });
+      }
       // The queue classifies by message, and only a message it recognises pauses the lane for a
       // sign-in instead of failing the job: this phrase is the one its credential path reads.
       if (err instanceof Error && /not signed in|not available for this login/i.test(err.message)) {

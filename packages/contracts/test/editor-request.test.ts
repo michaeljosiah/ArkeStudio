@@ -9,6 +9,8 @@ import {
   WorldChatTurnResultSchema,
   applyTimelineCommands,
   describeEditorRequestDigest,
+  defaultEffectClip,
+  genericEditorRequestRefusal,
   editorRequestStaleness,
   editorRequestUndone,
   previewEditorRequest,
@@ -28,6 +30,26 @@ it("keeps live-source detachment in direct commands and out of model editor requ
   assert.equal(TimelineCommandSchema.safeParse(command).success, true);
   assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Detach audio", commands: [command] }).success, false);
   assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Move sound", commands: [{ kind: "move-to-frame", clipId: "cl_sound", startFrame: 24 }] }).success, true);
+});
+
+it("does not grant generic requests effect or protection authority (SPEC-053 R-26, R-36)", () => {
+  const effect = defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 120, seed: 7 });
+  const timeline: ProductionTimeline = { ...base, tracks: [...base.tracks,
+    { id: "tr_effects", kind: "effect", name: "Effects", order: 1, muted: false, clips: [], effects: [effect] },
+  ] };
+  for (const command of [
+    { kind: "effect-create", trackId: "tr_effects", effect },
+    { kind: "effect-release", ruleId: "pr_colour" },
+  ]) assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Effects", commands: [command] }).success, false);
+  for (const command of [
+    { kind: "add-track" as const, trackId: "tr_new", trackKind: "effect" as const, name: "Effects" },
+    { kind: "set-track" as const, trackId: "tr_effects", muted: true },
+    { kind: "remove-track" as const, trackId: "tr_effects" },
+  ] as const) {
+    assert.match(genericEditorRequestRefusal(timeline, [command])!, /effects arrangement review/i);
+    assert.equal(previewEditorRequest(timeline, [command]).ok, false);
+  }
+  assert.equal(genericEditorRequestRefusal(timeline, [{ kind: "set-track", trackId: "tr_picture", name: "Film" }]), null);
 });
 
 const REQUEST = "req_01J8G0000000000000000000R1";

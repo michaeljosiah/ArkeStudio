@@ -1,3 +1,4 @@
+import { AudiobookActivityReceipts } from "./audiobook-activity.js";
 import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
@@ -257,6 +258,9 @@ export function QueueToaster() {
       toast.dismiss(id);
     };
     return subscribeQueueResults((result) => {
+      // These are internal requests of the read operation. In particular, do not depend on
+      // React having rendered the new job before the immediately following queue result.
+      if (result.command === "read-audiobook-chapter" || result.command === "read-audiobook-book") return;
       const seed = enqueueNote(result, store.current.jobs, store.current.manifest);
       if (!seed) return;
       for (const jobId of result.acceptedJobIds) {
@@ -300,6 +304,7 @@ export function QueueToaster() {
   useEffect(
     () =>
       subscribeJobReady((job) => {
+        if (typeof job.params.audiobookRunId === "string") return;
         // A single-job notification still on screen already shows this outcome, and re-raising it
         // under the same id replaces that row rather than stacking a second one beside it.
         const existing = noteFor.current.get(job.id);
@@ -323,6 +328,8 @@ export function QueueToaster() {
   );
 
   return (
+    <>
+    <AudiobookActivityReceipts />
     <Toaster
       position="top-center"
       offset={{ top: "calc(44px + var(--space-3))" }}
@@ -352,5 +359,6 @@ export function QueueToaster() {
         },
       }}
     />
+    </>
   );
 }

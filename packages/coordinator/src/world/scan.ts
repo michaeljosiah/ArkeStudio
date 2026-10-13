@@ -7,6 +7,7 @@ import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@a
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { readTraversalFromDirectory } from "../productions/interactive.js";
+import { readEditorRequestFileAt } from "../productions/editor-request-file.js";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -43,7 +44,7 @@ import {
   SelectionsSchema,
   ProductionSpineSchema,
   ProductionTimelineSchema,
-  EditorRequestFileSchema,
+  effectProposalFamilyView,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
@@ -156,7 +157,20 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixty-six is the seams set by hand between a chapter's audiobook blocks (turn 198).
 // Sixty-seven is the hash of each paragraph beside a chapter's cast, so an edit makes stale only
 // the paragraphs it touches (turn 198, part B).
-export const SUPPORTED_SCHEMA_VERSION = 68;
+// Sixty-eight is a character's `narration` on a strict sheet (design turn 200): how a narrator plays
+// them, which a build without the field would drop the sheet over.
+// Sixty-nine is the beats a chapter was grouped by, named on its audiobook record (design turn 201).
+// Seventy is the story a production setup is adapted from, on its strict draft (design turn 205).
+// Seventy-one is a micro drama's Target, on the draft and on season.json (design turn 205).
+// Seventy-two is a saved kit look's optional name (turn 207); seventy-three adds retained
+// audiobook motion and exact-audio word timing to the strict chapter record (turn 208).
+// Seventy-four adds procedural editor effects, independent audio reaction and granular
+// protection, including retained Undo/Redo state (SPEC-053 R-17, R-21).
+// 75: SPEC-053 immutable editor effect families and reviewed human decisions in request v2.
+// 76: SPEC-054 exact-pair crossfades, independent protection and durable transition history.
+// 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
+// 78: expressive audiobook direction: longer character briefs, phrases and vocalizations.
+export const SUPPORTED_SCHEMA_VERSION = 78;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -854,12 +868,24 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
         )
       : { status: "absent" };
 
-    // editor-requests.json — Arke's staged edits and their audit (SPEC-039 R-35). An invalid file
-    // is a world problem and an empty list, never a reason the production fails to open.
-    const editorRequests =
-      (await exists(join(pdir, "editor-requests.json")))
-        ? ((await tryParse(`productions/${id}/editor-requests.json`, (raw) => EditorRequestFileSchema.parse(JSON.parse(raw))))?.requests ?? [])
-        : [];
+    // A damaged authority is not an absent one. Bounded reads preserve pending work instead of
+    // allowing a later writer to replace unreadable families with an empty v1 file.
+    let editorRequests: ProductionBundle["editorRequests"] = [], effectFamilies: NonNullable<ProductionBundle["effectFamilies"]> = [];
+    let transitionFamilies: NonNullable<ProductionBundle["transitionFamilies"]> = [];
+    let pictureFamilies: NonNullable<ProductionBundle["pictureFamilies"]> = [];
+    let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
+    try {
+      const { raw, file } = await readEditorRequestFileAt(dir, id);
+      if (raw !== null) { manifest[`productions/${id}/editor-requests.json`] = sha256(raw); editorRequestState = { status: "ready" }; }
+      editorRequests = file.requests;
+      if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
+      if (file.schemaVersion === 2) transitionFamilies = file.transitionFamilies ?? [];
+      if (file.schemaVersion === 2) pictureFamilies = file.pictureFamilies ?? [];
+    } catch (error) {
+      const message = (error instanceof Error ? error.message : "Editor requests are unavailable").slice(0, 500);
+      editorRequestState = { status: "invalid", message };
+      problems.push({ path: `productions/${id}/editor-requests.json`, message });
+    }
 
     // season.json — the season beside its production (SPEC-023 R-10); null when none.
     const season = (await exists(join(pdir, "season.json")))
@@ -942,6 +968,10 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       cut,
       timeline,
       editorRequests,
+      effectFamilies,
+      transitionFamilies,
+      pictureFamilies,
+      editorRequestState,
       takeMediaInfo,
     });
   }

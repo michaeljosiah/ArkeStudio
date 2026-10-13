@@ -7,6 +7,10 @@ type WireCost = { input?: number; output?: number; [other: string]: unknown };
 export interface WireModel {
   id?: string;
   providerID?: string;
+  /** v2's runtime transport route; retained internally, never a model-picker choice. */
+  package?: string;
+  /** v2's resolved provider endpoint; an SDK package alone can still be a fallback. */
+  settings?: { endpoint?: string };
   name?: string;
   status?: string;
   disabled?: boolean;

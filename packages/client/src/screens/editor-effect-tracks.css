@@ -1,0 +1,30 @@
+.fy-effect-track { --effect-row-height: 44px; }
+.fy-effect-track .fy-effect-track__lane { position: relative; display: block; height: calc(var(--effect-row-count) * var(--effect-row-height) + 8px); box-sizing: border-box; }
+.fy-effect-track__settings, .fy-effect-track__visibility { border: 0; background: transparent; color: var(--muted-foreground); padding: 4px; cursor: pointer; }
+.fy-effect-track__settings.fy-cut-lane-open { display: inline-grid; place-items: center; width: 20px; min-width: 20px; height: 28px; min-height: 28px; padding: 2px; }
+.fy-effect-track__visibility { width: 20px; min-width: 20px; height: 28px; padding: 2px; margin-left: auto; }
+.fy-effect-clip { position: absolute; height: calc(var(--effect-row-height) - 4px); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; min-width: 2px; padding: 3px 12px; border: 1px solid var(--border); border-radius: 5px; background: color-mix(in srgb, var(--timeline-selection) 12%, var(--card)); color: var(--foreground); overflow: hidden; text-align: left; user-select: none; cursor: grab; }
+.fy-effect-clip[aria-pressed=true] { border-color: var(--timeline-selection); box-shadow: inset 0 0 0 1px var(--timeline-selection); }
+.fy-effect-clip:focus-visible, .fy-effect-track :is(button, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-effect-clip__name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; pointer-events: none; }
+.fy-effect-clip__detail { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--muted-foreground); pointer-events: none; }
+.fy-effect-track[data-hidden=true] .fy-effect-clip { background: var(--muted); border-style: dashed; }
+.fy-effect-clip[aria-pressed=true] .fy-pictclip__grip > i, .fy-effect-clip:hover .fy-pictclip__grip > i { opacity: .65; }
+.fy-effect-track__time { position: absolute; right: 8px; bottom: 0; z-index: 3; background: var(--media-overlay-bg); color: var(--media-overlay-fg); padding: 3px 6px; border-radius: 4px; font-size: 10px; pointer-events: none; }
+.fy-effect-track__error { padding: 8px 12px; margin: 0; font-size: 12px; color: var(--destructive); }
+.fy-effect-timing, .fy-effect-lane-settings { padding: 16px 20px 20px; display: grid; gap: 12px; }
+.fy-effect-timing label, .fy-effect-lane-settings label { display: grid; gap: 6px; font-size: 12px; }
+.fy-effect-timing :is(input, select), .fy-effect-lane-settings input { min-height: 36px; width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); font: inherit; }
+.fy-effect-timing button, .fy-effect-lane-settings button { min-height: 36px; padding: 6px 10px; background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
+.fy-effect-timing > div { display: flex; justify-content: flex-end; gap: 8px; }
+.fy-effect-timing > span { font-size: 11px; color: var(--muted-foreground); }
+.fy-effect-timing p { margin: 0; font-size: 12px; }
+.fy-effect-timing button:disabled, .fy-effect-lane-settings button:disabled { opacity: .45; cursor: default; }
+.fy-cutcols[data-compact] .fy-track.fy-effect-track .fy-effect-track__lane, .fy-cutcols[data-phone] .fy-track.fy-effect-track .fy-effect-track__lane { height: calc(var(--effect-row-count) * var(--effect-row-height) + 8px); }
+@media (pointer: coarse), (max-width: 599px) {
+  .fy-effect-track { --effect-row-height: 52px; }
+  .fy-effect-track__settings.fy-cut-lane-open, .fy-effect-track__visibility { min-width: 44px; min-height: 44px; }
+  .fy-effect-clip .fy-effect-clip__grip { display: none; }
+  .fy-effect-clip[aria-pressed=true] .fy-effect-clip__grip { display: grid; width: min(44px, 35%); place-items: center; }
+  .fy-effect-timing :is(button, input, select), .fy-effect-lane-settings :is(button, input) { min-height: 44px; }
+}

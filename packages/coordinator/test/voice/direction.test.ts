@@ -13,7 +13,7 @@ it("compiles a line for one request in the reader's syntax, named by its authore
   const compiled = compileLine(text, input, row("gemini-3.8-flash-tts"), undefined, "hold");
   assert.ok(compiled.ok);
   assert.equal(compiled.line.text, "I’m here. <laugh> You came back.");
-  assert.equal(compiled.line.instructions, "Read coldly and flatly, without warmth. Quietly.");
+  assert.equal(compiled.line.instructions, "Cold and flat. Quietly.");
   assert.deepEqual(compiled.line.held, []);
   assert.equal(compiled.line.directionHash, audiobookDirectionHash(directionPlan(text, input)));
 });

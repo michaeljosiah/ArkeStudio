@@ -1,6 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ConversationActionCard, HumanDecisionCard } from "@arke-studio/contracts";
+import { PanelRight } from "./icons.js";
 
 export type StudioControls = { active: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
   toggle(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
@@ -28,6 +29,11 @@ export function StudioToggle() {
   const studio = useProductionStudio();
   return studio ? <><button type="button" className="fy-studio-toggle" onClick={studio.toggle} aria-pressed={studio.active}>{studio.active ? "Close Studio" : "Studio"}</button>
     {!studio.active && <button type="button" className="fy-studio-toggle" onClick={studio.widen}>Widen dock</button>}</> : null;
+}
+/** The page's way back to its canvas while the Studio is closed (design turn 202c). */
+export function StudioCanvasPress() {
+  const studio = useProductionStudio();
+  return studio && !studio.active ? <button type="button" className="fy-studio-canvas" onClick={studio.toggle}><PanelRight size={16} />Canvas</button> : null;
 }
 export function StudioShow({ action }: { action: ConversationActionCard }) {
   const studio = useProductionStudio();

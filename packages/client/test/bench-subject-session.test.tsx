@@ -328,6 +328,23 @@ async function apply(event: DomainEvent): Promise<void> {
   });
 }
 
+it("Keep names and sends the reviewed take while later results arrive", async () => {
+  const { subject: _subject, ...session } = shotSession();
+  const later = { ...session.takes[0]!, id: "tk_01J8F3K2QW9VZX4N7M0RTYB6HP", n: 2 };
+  session.takes = [...session.takes, { ...later, status: "running", media: undefined }];
+  const bench = await openBench(session);
+  const brief = q(bench, '.fy-bench__brieftext');
+  await act(async () => __setStateForTest(stateWith({ ...session, takes: [session.takes[0]!, later] })));
+  assert.equal(q(bench, '.fy-bench__brieftext'), brief, "completion keeps the workspace mounted");
+  const keep = q(bench, '[data-testid="bench-keep"]');
+  assert.match(keep.textContent ?? "", /Keep take 1/);
+  await act(async () => keep.click());
+  const command = bench.sent.findLast(message => message.kind === "bench-keep");
+  assert.equal(command?.kind, "bench-keep");
+  if (command?.kind === "bench-keep") assert.equal(command.takeId, session.selectedTakeId);
+  assert.match(text(bench), /View latest/);
+});
+
 it("clears requested image dimensions when a world Bench switches to Codex", async () => {
   const { subject: _subject, ...session } = shotSession();
   session.composer.params = { kind: "image", count: 1, tier: "2K", aspect: "16:9" };
@@ -355,7 +372,7 @@ it("opens Arke from a world Bench and sends into that session's conversation wit
   const editor = dq(bench, '[role="textbox"]');
   const key = Object.keys(editor).find(name => name.startsWith("__reactProps$"))!;
   const props = (editor as unknown as Record<string, { onInput(event: { currentTarget: HTMLElement }): void }>)[key]!;
-  Object.defineProperty(editor, "innerText", { configurable: true, value: "A slow piano cue for the title" });
+  Object.defineProperty(editor, "innerText", { configurable: true, writable: true, value: "A slow piano cue for the title" });
   await act(async () => props.onInput({ currentTarget: editor }));
   await act(async () => dq(bench, '[aria-label="Send"]').click());
   const create = bench.sent.findLast(message => message.kind === "world-chat-create");

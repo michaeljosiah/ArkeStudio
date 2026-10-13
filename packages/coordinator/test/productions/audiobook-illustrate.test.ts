@@ -163,19 +163,21 @@ describe("Illustrate this chapter: the proposal (R-101)", () => {
       { illustrate: says((input) => nearest(input, [0, 60, 130, 200])) },
     ));
 
-  it("drops what the model said of a block that is not there, twice, or without words, and names no one the sheet never depicts", () =>
+  it("drops invalid blocks but holds an unresolved identity for confirmation instead of silently discarding it", () =>
     withHarness(
       async ({ events, send }) => {
         await illustrate(send);
         const rows = finished(events).proposal!.rows;
         assert.equal(rows.length, 1);
-        assert.deepEqual(rows[0]!.who.map((entry) => entry.key), ["maren-kest"], "an unknown name is no one");
+        assert.deepEqual(rows[0]!.who.map((entry) => entry.key), ["maren-kest", "her mother"]);
+        assert.deepEqual(rows[0]!.needs, ["her mother"]);
+        assert.match(rows[0]!.shot!.checks.find((check) => check.id === "reference")!.note!, /identity not linked/);
       },
       {
         illustrate: async (input) => ({
           pictures: [
             { block: "p99.9", title: "Nowhere", prompt: "Nowhere.", who: [] },
-            { block: input.blocks[1]!.key, title: "Maren", prompt: "Maren at the rail.", who: ["maren-kest", "nobody"] },
+            { block: input.blocks[1]!.key, title: "Maren", prompt: "Maren at the rail.", who: ["maren-kest", "her mother"] },
             { block: input.blocks[1]!.key, title: "Again", prompt: "The same block twice.", who: [] },
             { block: input.blocks[4]!.key, title: "Empty", prompt: "   ", who: [] },
           ],

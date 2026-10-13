@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { newId, ulid, orderedShots, orderedTrackClips, HumanDecisionCardSchema, type ClientMessage, type HarnessAdapter } from "@arke-studio/contracts";
+import { newId, ulid, orderedShots, orderedTrackClips, defaultEffectClip, storyTimelineFingerprint, ConversationActionCardSchema,
+  HumanDecisionCardSchema, type ClientMessage, type HarnessAdapter } from "@arke-studio/contracts";
 import type { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { sceneFence } from "../../src/world-chat/target-reads.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -10,13 +11,104 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { discardStageReview, retainStageReview } from "../../src/productions/stage-review.js";
-import { stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { requestBase, stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { stageEffectProposals, editEffectProposal, moveEffectProposalHistory, type EffectRequestDependencies } from "../../src/productions/editor-effect-requests.js";
+import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
+import { projectHumanDecisions } from "../../src/world-chat/human-decisions.js";
 import { storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
 import { setOwner } from "../../src/artifacts/filing.js";
 import { assembleStory } from "../productions/assemble.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { receiptBinding } from "./production-context-fixtures.js";
 
 const AT = "2026-10-04T12:00:00.000Z";
+
+it("keeps a Release successor beside its nearest model revision, including missing action records", async t => {
+  const made = await makeTempRoot(), provider = new FsWorldProvider(made.root); t.after(() => provider.close());
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!, service = new WorldChatService(store.dir);
+  const conversation = await service.create({ title: "Revised effects review", entryContext: { kind: "production", productionId: "saltlight" } });
+  const production = store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  await applyHumanTimelineCommand(store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production),
+    commands: [{ kind: "add-track", trackId: "tr_atmosphere", trackKind: "effect", name: "Atmosphere" },
+      { kind: "effect-create", trackId: "tr_atmosphere", effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 7 }) },
+      { kind: "effect-protect", rule: { id: "pr_end", lineageId: "ef_dust", kind: "boundary", boundary: "end" } }] });
+  const actions = [0, 1].map(() => ConversationActionCardSchema.parse({ ...receiptBinding(conversation.id, WORLD_ID),
+    actionKind: "world-chat-effect-proposal", status: "completed", availableDecisions: [] }));
+  const dependencies: EffectRequestDependencies = {
+    async captureDependencies(input) { return { schemaVersion: 1, base: { revision: input.candidate.revision, timelineHash: input.baseTimelineHash }, resolutionHash: "a".repeat(64),
+      profiles: { rendererVersion: "test", catalogueHash: "b".repeat(64), analysisProfileId: "test" }, sources: [], protection: [], reactions: [], issues: [] }; },
+    async validateDependencies() {},
+  };
+  const scope = { kind: "effects-only" as const, target: { kind: "composition" as const }, range: { startFrame: 0, endFrame: 240 },
+    audio: { kind: "off" as const }, direction: "Quiet dust", palette: [{ id: "dust" as const, version: 1 as const }] };
+  let selected = (await stageEffectProposals(store, { productionId: "saltlight", conversationId: conversation.id, actionId: actions[0]!.actionId, now: AT, scope,
+    proposals: [{ summary: "Quiet dust", identities: [], commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { amount: .2 } } }] }] }, dependencies))[0]!;
+  const ref = () => ({ familyId: selected.family.id, versionId: selected.version.id, candidateHash: selected.version.candidateHash, decisionRevision: selected.family.decisionRevision });
+  selected = await editEffectProposal(store, { productionId: "saltlight", ref: ref(), actionId: "adjust-amount", now: AT,
+    intent: { kind: "adjust", commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { amount: .24 } } }] } }, dependencies);
+  for (const direction of ["undo", "redo"] as const) selected = await moveEffectProposalHistory(store,
+    { productionId: "saltlight", ref: ref(), actionId: direction, now: AT, direction }, dependencies);
+  for (const opacity of [.6, .4]) selected = await editEffectProposal(store, { productionId: "saltlight", ref: ref(), actionId: `opacity-${opacity}`, now: AT,
+    intent: { kind: "adjust", commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity } } }] } }, dependencies);
+  assert.equal(selected.version.number, 6);
+  selected = (await stageEffectProposals(store, { productionId: "saltlight", conversationId: conversation.id, actionId: actions[1]!.actionId, now: AT, scope,
+    proposals: [{ summary: "Smaller dust", identities: [], family: { id: selected.family.id, parentVersionId: selected.version.id, candidateHash: selected.version.candidateHash },
+      commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { size: .1 } } }] }] }, dependencies))[0]!;
+  selected = await editEffectProposal(store, { productionId: "saltlight", ref: ref(), actionId: "release-end", now: AT,
+    intent: { kind: "release", ruleId: "pr_end" } }, dependencies);
+  assert.equal(selected.version.number, 8); assert.equal(selected.version.origin, "release");
+  const loaded = { ...(await service.load(conversation.id))!, actions }, bundle = store.getBundle();
+  const cards = async () => (await projectHumanDecisions(store, loaded, bundle, [])).cards.filter(card => card.body.control.kind === "effect-proposal");
+  const projected = await cards();
+  assert.equal(projected.length, 8);
+  assert.deepEqual(projected.map(card => card.turnId), [...Array(6).fill(actions[0]!.turnId), actions[1]!.turnId, actions[1]!.turnId]);
+  assert.equal(projected[7]!.actionId, actions[1]!.actionId);
+  assert.deepEqual(projected[7]!.body.control, { kind: "effect-proposal", productionId: "saltlight", familyId: selected.family.id, versionId: selected.version.id });
+  loaded.actions = [actions[0]!];
+  const missingAction = await cards();
+  assert.equal(missingAction[7]!.turnId, undefined, "a missing nearest action leaves the retained card ungrouped instead of moving it to an older reply");
+  assert.equal(missingAction[7]!.actionId, undefined);
+});
+
+it("an effects proposal against an unopened derived base is pending, while changed or invalid Current is blocked", async t => {
+  const made = await makeTempRoot(), provider = new FsWorldProvider(made.root); t.after(() => provider.close());
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!, service = new WorldChatService(store.dir);
+  const conversation = await service.create({ title: "Unopened effects review", entryContext: { kind: "production", productionId: "saltlight" } });
+  const production = store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  assert.notEqual(production.timeline?.status, "ready");
+  const base = requestBase(store, production).timeline;
+  assert.equal(base.revision, 0);
+  const dependencies: EffectRequestDependencies = {
+    async captureDependencies(input) {
+      return { schemaVersion: 1, base: { revision: input.candidate.revision, timelineHash: input.baseTimelineHash }, resolutionHash: "a".repeat(64),
+        profiles: { rendererVersion: "test", catalogueHash: "b".repeat(64), analysisProfileId: "test" }, sources: [], protection: [], reactions: [], issues: [] };
+    },
+    async validateDependencies() {},
+  };
+  await stageEffectProposals(store, { productionId: "saltlight", conversationId: conversation.id, now: AT,
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" }, direction: "Quiet atmosphere", palette: [{ id: "dust", version: 1 }] },
+    proposals: [{ summary: "An atmosphere lane", identities: [], commands: [{ kind: "add-track", trackKind: "effect", trackId: "tr_atmosphere", name: "Atmosphere" }] }],
+  }, dependencies);
+  const loaded = (await service.load(conversation.id))!;
+  const bundle = structuredClone(store.getBundle()), current = bundle.productions.find(row => row.meta.id === "saltlight")!;
+  const cards = async () => (await projectHumanDecisions(store, loaded, bundle, [])).cards.filter(card => card.body.control.kind === "effect-proposal");
+  assert.equal((await cards())[0]?.status, "pending"); assert.equal((await cards())[0]?.detail, undefined);
+  current.timeline = { status: "ready", timeline: { ...base, revision: 1 } };
+  assert.equal((await cards())[0]?.status, "blocked"); assert.match((await cards())[0]?.detail ?? "", /Current changed/);
+  current.timeline = { status: "invalid", message: "Unreadable timeline" };
+  assert.equal((await cards())[0]?.status, "blocked");
+  assert.match((await cards())[0]!.body.reason, /Review in timeline to adjust and apply/);
+  const control = (await cards())[0]!.body.control;
+  for (const status of ["applied", "discarded"] as const) {
+    current.effectFamilies![0]!.status = status;
+    const terminal = (await cards())[0]!;
+    assert.equal(terminal.status, "settled"); assert.equal(terminal.detail, undefined);
+    assert.equal(terminal.body.reason, status === "applied" ? "Retained arrangement history" : "Discarded arrangement history");
+    assert.deepEqual(terminal.body.control, control, "settling preserves access to the exact retained version");
+  }
+});
 
 it("projects existing authorities and settles screen and thread decisions through their ordinary commands", async t => {
   const made = await makeTempRoot(), provider = new FsWorldProvider(made.root);

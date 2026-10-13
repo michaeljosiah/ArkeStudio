@@ -1,3 +1,4 @@
+import { ProductionTargetSchema } from "./production-target.js";
 import { z } from "zod";
 import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { ChapterAudiobookStateSchema } from "./audiobook.js";
@@ -172,6 +173,14 @@ export const SheetSchema = z
       .strict()
       .optional(),
     voice: VoiceAssignmentSchema.optional(),
+    /**
+     * Characters: how a narrator plays them when one voice reads the book (`performed`, design
+     * turn 200, SPEC-047 R-165). A book's own note for the speaker wins; absent there, this is the
+     * note. Authored within `CADENCE_PHRASE_MAX` (60) and read unbounded, as the role is. Writing
+     * one raises the world to schema 68, so a build that cannot read it refuses the world instead
+     * of dropping the sheet.
+     */
+    narration: z.string().optional(),
     /** References only — the rules themselves are owned by canon, not the sheet (§2.3.2). */
     canonRules: z.array(CanonIdSchema),
     links: z.array(SlugSchema),
@@ -450,6 +459,8 @@ export const SeasonSchema = z
       })
       .strict()
       .optional(),
+    /** Where the season will be watched and what it is held to (design turn 205, SPEC-052 R-6). */
+    target: ProductionTargetSchema.optional(),
   })
   .strict();
 export type Season = z.infer<typeof SeasonSchema>;

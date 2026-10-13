@@ -31,7 +31,7 @@ it("renders one direction into each shipped reader's own syntax, holding what it
     }),
   );
   const gemini = { text: "Don’t you dare walk away from me, Ade. <long pause> Not THIS time. <sigh>",
-    style: "Read coldly and flatly, without warmth. Angry and hurt — quieter, not louder; holding back tears.", held: [] };
+    style: "Cold and flat. Angry and hurt — quieter, not louder; holding back tears.", held: [] };
   assert.deepEqual(table["gemini-3.8-flash-tts"], gemini);
   assert.deepEqual(table["gemini-3.8-flash-lite-tts"], gemini, "both Gemini rows read alike");
   assert.deepEqual(table["eleven-v3"], { text: "[coldly] [angry and hurt — quieter, not louder; holding back tears] Don’t you dare walk away from me, Ade. [long pause] Not THIS time. [sighs]", style: undefined, held: [] },

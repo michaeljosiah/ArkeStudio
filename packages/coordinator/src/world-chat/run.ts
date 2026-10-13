@@ -4,6 +4,7 @@ import {
   worldChatInputRouting,
   applyProductionSetupUpdate,
   type ProductionSetupDraft,
+  type ProductionSetupUpdate,
   type ProductionSetupState,
   REFUSED_TOOLS_MAX,
   PRODUCTION_READINESS_SCHEMA_VERSION,
@@ -37,6 +38,7 @@ import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -80,6 +82,11 @@ export interface RunDeps {
   /** Closing the owning world retires this runner and aborts every request it admitted. */
   closingSignal?: AbortSignal;
   setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
+  /**
+   * Checks a setup turn's update against the world before it is applied, and raises the world past
+   * the builds that cannot read it (design turn 205): Adapt from named by Arke, as by the rail.
+   */
+  checkSetupUpdate?: (update: ProductionSetupUpdate) => Promise<void>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -738,9 +745,12 @@ export class WorldChatRunner {
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
     // A promotion carries its constraints in the same record as the turn, so it writes none here.
-    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
+    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter" || subject?.kind === "effect-arrangement");
     if (constrained) {
-      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
+      if (subject?.kind === "effect-arrangement" && !this.deps.raiseSchemaBoundary) {
+        return { status: "unavailable", reason: "This host cannot preserve effects request scope." };
+      }
+      await this.deps.raiseSchemaBoundary?.(subject?.kind === "effect-arrangement" ? 75 : subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
         { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
         { at },
@@ -1083,6 +1093,8 @@ export class WorldChatRunner {
     });
 
     if (!outcome.ok) return { ok: false, problems: outcome.problems };
+    const effectScopeProblem = effectOnlyTurnProblem(subject, outcome.turn);
+    if (effectScopeProblem) return { ok: false, problems: [{ code: "effects-scope", safeMessage: effectScopeProblem }] };
     let productionSetup: ProductionSetupState | undefined;
     if (folded.entryContext?.kind === "production-setup") {
       const state = folded.productionSetup;
@@ -1090,6 +1102,7 @@ export class WorldChatRunner {
         return { ok: false, problems: [{ code: "setup-stale", safeMessage: "Production so far changed while this reply was being written. Read the latest draft and try again." }] };
       }
       try {
+        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate);
         const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
         productionSetup = { draft, status: "draft", review: null };
       } catch (error) {
@@ -1469,6 +1482,7 @@ const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each qu
 
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
+  if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.`;
   const named = subject.kind === "chapter"
     ? `chapter ${subject.chapterId}`
     : subject.kind === "timeline-clip"

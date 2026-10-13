@@ -2,10 +2,11 @@
 
 Arke uses Ollama to run local language models. There are two paths:
 
-- Authoring sessions use the selected writing harness. With OpenCode, connect its Ollama
-  integration and select a model from the live harness catalogue. OpenCode owns prompts and
+- Authoring sessions use the selected writing harness. OpenCode v2 2.0.26 natively discovers
+  installed Ollama completion models on loopback; select one from the live harness catalogue. OpenCode owns prompts and
   tool calls; Ollama owns inference. A model must appear in that catalogue before Arke can
-  offer it for authoring. Installing a model does not configure a harness integration.
+  offer it for authoring. Discovery reads `/api/tags` and `/api/show`; it does not download models. OpenCode owns
+  configured provider models too, subject to its configuration and credential requirements.
 - Direct language-model jobs use the Ollama provider's `/api/generate` endpoint. The shipped
   manifest maps Arke's model id to the exact Ollama model name through `providerModelId`.
 
@@ -21,13 +22,9 @@ The optional setup entry `ollama-gemma4-12b-balanced` provides the manifest mode
 with Q4_K_M weights. Select it explicitly in Settings; it is not in the automatic
 recommendation order and does not replace standard Gemma 4 12B.
 The catalogue entry enforces that (issue #1289): `explicitChoiceOnly` keeps it out of the
-local default an unchosen agent falls back to, in the coordinator and in Arke's own harness, and
-a session with nothing else installed is refused with where to choose it. The entry also carries
-the model card's sampling (temperature 0.6, top_k 64, top_p 0.9, min_p 0.05, repeat_penalty 1.1),
-which Arke's harness sends with every request: a Hugging Face pull carries only its stop tokens.
-The harness sends `think: false` too — this build reasons before answering even though Ollama
-lists no thinking capability for it, and a one-sentence answer cost 419 tokens and ten times
-the time with thinking left on.
+coordinator's automatic local default. Sampling and tool execution belong to OpenCode; Studio
+no longer has an independent Ollama agent loop. Configure provider/model request options in
+OpenCode when needed.
 Settings names the Uncensored variant and displays its requirements before installation
 (issue #1252). Installation and inference remain unverified by Arke; the persistent
 catalogue caveat states that limitation and the mutable upstream weights independently

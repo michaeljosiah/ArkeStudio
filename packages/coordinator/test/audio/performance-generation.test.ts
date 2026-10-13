@@ -33,7 +33,7 @@ it("prepares a priced Gemini performance with separate style and refuses spans t
   const quote = await preparePerformanceGeneration(store, model, request);
   assert.equal(quote.mapping.providerText, normalizeSpeechText(line.text));
   // The plan names its note by the old key, which still reads (design turn 181): the note as a sentence.
-  assert.match(quote.mapping.instructions!, /warmly.*Quietly confident\./);
+  assert.match(quote.mapping.instructions!, /^Warm and gentle\. Quietly confident\.$/);
   assert.ok(quote.estimatedMicroUsd > 0);
   validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd);
   assert.throws(() => validatePerformanceGeneration(store, model, quote, quote.estimatedMicroUsd - 1), /stale/);

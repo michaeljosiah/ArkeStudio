@@ -46,6 +46,13 @@ const manifest = {
 } as unknown as ModelManifest;
 
 describe("queue notification", () => {
+  it("distinguishes a chapter narration request, a block preview and a real voice preview", () => {
+    const narration = job({ target: { kind: "voice-preview", id: "narrator/google/reader/Kore" }, params: { purpose: "audiobook", audiobookChapterTitle: "The crossing" } });
+    assert.equal(readyNote(narration, manifest, undefined).title, "The crossing, narration request ready");
+    assert.match(readyNote({ ...narration, params: { ...narration.params, hear: true } }, manifest, undefined).title, /block preview ready/);
+    assert.match(readyNote({ ...narration, params: {} }, manifest, undefined).title, /voice preview ready/);
+    assert.equal(subjectOf({ ...narration, params: { purpose: "audiobook" } }), "Chapter narration");
+  });
   it("discloses the Codex allowance on queued, successful, failed and cancelled receipts", () => {
     const image = job({ provider: "codex", model: "codex-image", estimatedMicroUsd: 0 });
     for (const note of [enqueueNote(result(), [image], manifest), readyNote(image, manifest, undefined)]) {

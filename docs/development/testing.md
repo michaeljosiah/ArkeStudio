@@ -98,6 +98,152 @@ Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` wit
 
 ## Select the checks
 
+Browser media import uses contracts/client `test/browser-media-import.test.ts` and coordinator
+`test/artifacts/browser-media-import.test.ts`, `upload-artifacts.test.ts`, `test/productions/editor-import.test.ts`,
+`test/transport.test.ts` and `test/remote-access.test.ts`. These cover selection/cancel, byte/name
+bounds, confined spool cleanup, read-only refusal, the editor fence, unchanged desktop paths and
+remote/model refusal. Run the client dev-session tests from `packages/client`, plus desktop
+`test/transport-auth.test.ts`, `test/preload-auth.test.ts`, `npm run smoke:main --workspace @arke-studio/desktop`
+and `node apps/desktop/scripts/smoke-editor-import.mjs` after building. The latter opens a real
+sandboxed Electron file page and verifies the native File courier and private session capability.
+
+For fixed-cut crossfades (SPEC-054), run client `test/editor-transitions.test.tsx`, contracts `test/editor-transitions.test.ts` and
+coordinator `test/productions/editor-transition-requests.test.ts`. These cover exact ordered
+pairs, short adjacent joins, independent protection, retained manual adjustments, fresh Review
+after release/update, one-step Apply/Undo, source invalidation and schema 76. Coordinator regression
+coverage also requires the derived-write gate to remain available while preparing audio-reactive
+dependencies, then refuses changed Current or pending decisions on re-entry. The real FFmpeg
+crossfade case in `test/media/editor-effect-native.test.ts` compares every frame of an odd-length
+blend with source alpha, scoped effects and an upper picture track against the preview compositor.
+Use `ARKE_EFFECT_NATIVE_REQUIRED=1` and `ARKE_EFFECT_EVIDENCE_DIR` to require and retain it.
+Application acceptance additionally uses an isolated scratch world through the normal join,
+batch, protection, Arke composite and export controls. Compare matching states with approved
+designs 216–219 at desktop, Fold and phone sizes; the design fixture alone is not acceptance.
+Client `test/cut-layout.test.tsx` also checks the inline phone transition Inspector, its retained
+state across Fold resizing, and returning to the timeline without authoring a command.
+For resource-limited local runs, put `--test-concurrency=4` **before the file globs** in each
+workspace's Node test command. Client tests still require `packages/client` as their cwd.
+
+For Air Particles and layer blending (SPEC-055), run contracts
+`test/editor-air-particles.test.ts`, `test/editor-effect-proposal.test.ts` and
+`test/editor-effect-renderer.test.ts`; client `test/editor-air-particles.test.tsx` and
+`test/editor-picture-review.test.tsx`; coordinator
+`test/productions/editor-picture-requests.test.ts`. These exercise deterministic late seeks,
+physics/texture controls, Pattern protection and sticky edits, clip lineage across splits,
+fixed passage protection, explicit Review/Release, exact Apply and one-step Undo.
+Require the native `test/media/editor-effect-native.test.ts` suite with
+`ARKE_EFFECT_NATIVE_REQUIRED=1`; its Screen/Add case compares source alpha, clip opacity,
+scoped/composition effects and crossfades against the shared compositor (at most four
+8-bit channel levels of native rounding). After building, run
+`node --import tsx apps/desktop/scripts/smoke-editor-effects.mjs` for all seven presets
+through the sandboxed Electron file-page worker. Compare live Inspector, phone sheet and
+Arke cards with approved turns 220–223; label locally staged cards as fixtures when no
+model call was made. Keep world media and acceptance captures outside the public repository.
+
+For editor effects T-1 (SPEC-053 accepted), run contracts `test/editor-effects.test.ts`,
+`test/editor-effect-protection.test.ts`, `test/editor-request.test.ts`, `test/timeline.test.ts`
+and `test/render-plan.test.ts`, together with coordinator `test/productions/timeline-effects.test.ts`,
+`test/productions/editor-requests.test.ts`, `test/productions/timeline.test.ts` and the timeline
+migration/world schema tests. These verify authored state, retained phase/fades, granular
+protection, direct-human versus generic acceptance authority, schema-floor persistence and
+legacy compatibility. They do not establish renderer or real-UI acceptance; that evidence is
+recorded with the subsequent implementation slices. Run the root lint/typecheck/build gates
+after the final test edit and run client tests from `packages/client`.
+
+Editor effects T-2 adds contracts `test/editor-effect-renderer.test.ts`, client
+`test/editor-effect-preview.test.ts` and coordinator `test/media/editor-effect-native.test.ts`.
+The native tests use real FFmpeg/FFprobe (`ARKE_FFMPEG`/`ARKE_FFPROBE` or PATH); set
+`ARKE_EFFECT_EVIDENCE_DIR` to retain measured parity evidence. The frame-boundary case covers
+stills, video, scoped alpha and composition alpha at exact
+half-open intervals after gaps, at 24/25/30 fps and inside nonzero export windows. Run
+`node --import tsx scripts/smoke-editor-effects-preview.mjs` for real Chrome decoding, source
+alpha, contained targets, multiple picture layers, all six presets and seek/worker checks.
+`node --import tsx scripts/benchmark-editor-effects.ts --output <report.json>` records the
+runtime, hardware, capability profile, frame digests, near/far seek times, worst overlap raster
+times and process memory. The native production acceptance CI job repeats these measurements
+on Windows and Linux and retains the reports. These fixtures establish renderer behaviour;
+the two real scratch-world manual/Arke music-video passes remain distinct acceptance evidence.
+Host changes also require desktop `smoke:main` and a real sandboxed Electron file-page smoke.
+Run `node --import tsx apps/desktop/scripts/smoke-editor-effects.mjs` after the build to check
+the emitted worker under the built page's CSP and Electron sandbox; `ARKE_EFFECT_SMOKE_REPORT`
+optionally retains its report. This complements `node apps/desktop/scripts/smoke-editor-import.mjs`
+for the private transport/native file bridge.
+
+Editor effects T-3 adds contracts `test/editor-effect-analysis.test.ts`, coordinator
+`test/productions/editor-effect-analysis.test.ts`, `editor-effect-analysis-cache.test.ts`,
+`test/editor-effect-analysis-transport.test.ts` and `test/media/editor-effect-audio-native.test.ts`,
+plus client `test/editor-effect-analysis.test.ts` and `test/editor-effect-readiness.test.tsx`.
+The native tests use real FFmpeg PCM: ordered mixed sample rates/layouts, shared limiting,
+ducking, source windows, muted silence, cancellation and file/executable replacement. The
+`test/media/ffmpeg-graph-probe.test.ts` checks host capability refusals; the native audio fixture
+also runs a graph larger than Windows' argument limit from a file with a spaced path. Exercise
+both FFmpeg 6's legacy graph option and FFmpeg 7–9's option-file syntax in platform checks. Set
+`ARKE_EFFECT_NATIVE_REQUIRED=1` to require FFmpeg, and `ARKE_EFFECT_EVIDENCE_DIR` to retain the
+native report. `node --expose-gc --import tsx scripts/benchmark-editor-effect-analysis.ts
+--output <report.json>` measures streaming DSP, bounded cue/curve preparation, reactive seeking
+and the eight-layer Smoke profile; its `--expect-fixtures-sha256` option gates cross-platform
+feature/pixel identity. CI retains this report alongside native and browser evidence.
+Analysis must leave timeline bytes, revision, Undo and production object identity unchanged.
+Ready metadata and fetched manifests are separate; test stale arrivals and same-fingerprint file
+replacement as well as authored edits. Changes to the manifest route also require the actual
+sandboxed Electron file-page transport smoke and `smoke:main`.
+
+Editor effects T-4 adds client `test/editor-effect-library-tracks.test.tsx`,
+`editor-effect-inspector.test.tsx`, `editor-effect-target-area.test.tsx`,
+`editor-effect-controls.test.tsx`, `editor-effect-integration.test.ts` and
+`editor-effect-draft-analysis.test.tsx`, with the readiness and shared gesture suites. Contracts
+`test/editor-effect-authoring.test.ts` and `editor-effects.test.ts` cover protected response
+selection, explicit beat overrides, uncovered passages and signed retained curve phase.
+Exercise gesture cancellation, stale saved revisions, overlap selection, normalized area/curve
+typing and dragging, exact boundary versus fixed passage protection, and explicit Release.
+Use the real authenticated editor at desktop, Fold and 390/320px phone sizes in both themes;
+keep screenshots of keyboard focus, scrollable Inspector sections, target/source choices and
+export readiness. Real manual authoring evidence is separate from component fixtures.
+
+Editor effects T-5 adds contracts `test/editor-effect-proposal.test.ts`,
+`editor-effect-review.test.ts` and `timeline-trusted-steps.test.ts`; coordinator
+`test/productions/editor-effect-requests.test.ts`, `test/world-chat/effect-proposal-authority.test.ts`,
+`effect-proposal-scope.test.ts`, `effect-proposal-reads.test.ts` and the candidate cases in
+`test/productions/editor-effect-analysis.test.ts`. Run the existing timeline/request, world
+commit/recovery/schema, conversation lifecycle/action/retrieval and transport suites too.
+Check mixed human/model protection, old-parent sticky revisions, exact scoped Release, limits,
+read-only resume, stale media/profile/resolution, crash recovery, and receipt retries after Undo.
+For ordinary effects chat, include `world-chat/action-guide.test.ts` and the after-Apply cases in
+`effect-proposal-authority.test.ts`: no form is required to prepare a bounded proposal, editor
+scope cannot be overridden, invalid bindings are refused, and no review/release/apply authority
+is inherited. Client `editor-effect-preparation-panel.test.tsx` checks authored effect selection
+on ordinary messages as well as passive arrangement preparation.
+Native analysis tests require FFmpeg/FFprobe; use `ARKE_EFFECT_NATIVE_REQUIRED=1` to make missing
+native support fail. The precommit validator must not prepare analysis, and tests must exercise
+an external metadata change while the write gate suppresses watcher adoption.
+
+Editor effects T-6 adds client `editor-effect-arrangement-request.test.ts`,
+`editor-effect-arrangement.test.tsx`, `editor-effect-proposal-card.test.tsx`, and the
+`editor-effect-review-*` tests for exact controller/transport joining, navigation, position,
+readonly legacy trims, source freshness, pending projection and shared playback. Include
+`editor-effect-frozen-analysis.test.tsx`, `editor-effect-integration.test.ts`,
+`human-decisions.test.tsx` and `production-studio.test.tsx`; coordinator
+`test/world-chat/human-decisions.test.ts` checks unsaved revision-zero proposal projection.
+Run the real authenticated editor and configured Arke harness for the two acceptance exports.
+Capture Current before preparation/arrival, the exact reviewed version after a human Review,
+pending adjustment/Undo, sticky revision arrival, explicit Release/review, stale Update and
+one-revision Apply. Check desktop, Fold and 390/320px sheets in both themes, one soundtrack and
+unchanged playhead across comparison. Component fixtures are not evidence of a real model run
+or a delivered video. Verify full-song exports and actual preview captures with FFprobe/FFmpeg.
+
+For the approved editor effects designs 213–215, regenerate with
+`node design-system/editor-effects-213.mjs`, record new turns with
+`node design-system/check-master.mjs --record`, then rebuild the companion with
+`node design-system/build-review.mjs`. Run `node design-system/editor-effects-213.check.mjs`
+for headless Chrome drawings and isolated review interactions; `CHROME` overrides its binary.
+Screenshots and the report go to ignored `.dev/editor-effects-design/`. Inspect desktop,
+Fold, phone, target/time placement, granular protection, audio-source selection, Advanced,
+changed-source and changed-base states, composite cards before/after explicit review entry,
+and revisions arriving without replacing the preview, then run the standard master
+render and companion checks below. Synthetic audio/AI fixtures establish design behaviour
+only, not real analysis, model execution, export parity or installed-app acceptance. See
+[the design notes](../../design-system/editor-effects-213.notes.md).
+
 For design-only production conversation work, turn 196 in the design master is the reference
 for the thirteen card families and Studio layouts (#1424). Generate its companion with
 `npm run design:review`, check it with `npm run design:review -- --check`, and run
@@ -147,6 +293,16 @@ Windows CI shard 2 first checks the Codex file helper's private pipe and indepen
 Windows shard 3 likewise runs `test/harness/owned-child.test.ts` first to verify native process inspection and abrupt-exit cleanup before the full coordinator shard. These preflights retain the ordinary test assertions and remain part of the later full suites.
 
 Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage model override through image-read receipts, canonical provenance, Keep, reopen and cancellation. It uses scripted model responses and PNG fixtures with the real coordinator and world persistence; renderer output and generation quality are separate checks.
+
+Whole-delivery Loop changes need client `test/editor-loop.test.tsx`, `editor-loop-media.test.ts`,
+`playback-engine.test.ts`, `plan-audio.test.tsx`, `cut-layout.test.tsx`,
+`editor-effect-review-transport.test.tsx` and `editor-effect-preview.test.ts`. Run them from
+`packages/client`. The cases cover overshoot, short wraps below media drift tolerances, immediate
+resume of ended sources, stale worker results, absolute effect frames and local-only controls.
+Also exercise the actual Loop button at desktop and 320px width with real short video/audio and
+the long-song effect arrangement, retaining paused frames after wrap and switching
+Current/Suggested without starting another soundtrack. Unit fixtures do not establish real-time
+decoding or visual/audio continuity.
 
 ## Fixtures and cleanup
 
@@ -292,8 +448,8 @@ Host Node loads `better-sqlite3`; desktop uses the Electron native build through
 
 ## Local image generation
 
-Local Qwen Image 2.1 starts an isolated worker after download and has opt-in managed-runtime and provider GPU checks; see
-[Qwen setup and validation](qwen21.md). Its runtime unit tests need Python but no GPU.
+Local Qwen Image 2.1 runs on the ordinary engine and has an opt-in provider GPU check; see
+[Qwen setup and validation](qwen21.md).
 
 Local Krea 2 image generation has an opt-in GPU check and offline custom-node installer tests;
 see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
@@ -306,6 +462,40 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 `test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
+
+For an OpenCode v2 pin change, stage the exact runtime and qualify the actual binary:
+
+```powershell
+npm run prepare:opencode2 --workspace @arke-studio/desktop
+$env:ARKE_TEST_OPENCODE2 = (Resolve-Path apps/desktop/build-resources/opencode2/opencode2.exe).Path
+node --import tsx --test packages/adapter-opencode/test/v2-input-protocol.test.ts packages/adapter-opencode/test/v2-copilot-protocol.test.ts packages/coordinator/test/v2-launch.test.ts
+$env:ARKE_OPENCODE2_CMD = $env:ARKE_TEST_OPENCODE2
+$env:ARKE_LIVE_HARNESS = '1'
+node --import tsx --test packages/adapter-opencode/test/live-credential-store.test.ts
+Remove-Item Env:ARKE_LIVE_HARNESS, Env:ARKE_OPENCODE2_CMD, Env:ARKE_TEST_OPENCODE2
+npm run verify:licenses --workspace @arke-studio/desktop
+npm run smoke:main --workspace @arke-studio/desktop
+```
+
+The tests use disposable profiles, a scripted localhost provider and synthetic credentials.
+They verify authenticated launch, the exact server version, native Ollama discovery with an endpoint-only configuration, pinned
+agent/model configuration, Copilot discovery held pending with no early inference and a native
+Claude Messages response after the route settles, a file-tool loop, outside-directory denial, final text/usage, approval
+confirmation, and durable key add/restart/removal. They make no paid requests and do not qualify
+live cloud-provider inference or OAuth sign-in. Ordinary CI skips the native probes; its protocol
+fixtures still run. The [inbox evidence](conversation-inputs.md#opencode-v2-inbox) does not qualify
+native steering.
+
+Discovery/launcher regressions also reject older and newer v2 versions with no fallback,
+retain the installed version and required pin in the unavailable reason, and create no child.
+
+For the bundled OpenCode Copilot startup race (#1696), run adapter-opencode's package suite
+and coordinator `test/harness/session-files.test.ts`. Adapter `test/v2-model-readiness.test.ts`
+scripts the scoped catalogue protocol: global-ready/location-pending,
+separate Beats/Continuity/Cast locations, default/fallback choices, 503 warm-up, unsupported or
+missing routes, cancellation, deadlines and incorrect scope. It verifies no prompt is sent
+before readiness and failed creation retires the unpublished session. These fixtures make no
+vendor calls; they do not prove account connectivity or repair a permanently failed runtime sync.
 
 Host lifecycle checks include coordinator `test/harness/owned-child-linux.test.ts` and
 `test/harness/owned-child-windows.test.ts`. They use real native processes on their respective
@@ -408,10 +598,13 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
-(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 390, 820, 1440 and 2560
-wide, opens Listen and Export, and checks each layer covers the window from the body with no
-transformed or contained ancestor, Listen leads the head, and the chapter's Voices rail names a
-designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
+(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
+wide, plus 200% text at 1440. Listen covers the window; Export is a native modal on the body,
+within the viewport, with no transformed ancestor or horizontal overflow. The chapter export
+starts at This chapter, blocks an incomplete reading, keeps its options under the missing-block
+read quote, refreshes readiness when saved takes arrive, and returns focus to its stable opener.
+Phone export actions are at least 44px. Listen leads the head, and the chapter's Voices rail names
+a designed voice and never overlaps it. `--out <dir>` keeps the screenshots; `--baseline <rev>`
 renders the changed screens as they were at that revision and asserts nothing.
 
 ## Dialogs and sheets
@@ -785,3 +978,41 @@ live run correlation and per-job frame thumbnails. The focused `approved Stage a
 coordinator case verifies host replay and recovery preserve the immutable video receipt;
 `retained construction` cases preserve human Keep without another renderer handoff.
 The production-card Chrome smoke also checks Stage and run bodies at all four widths.
+
+Audiobook proposal and spend reviews (#1675) use client `test/chapter-audiobook.test.tsx`
+and `test/sheet-stacking.test.tsx`. Run `node scripts/smoke-audiobook-panels.mjs` with Chrome
+installed (`ARKE_CHROME` overrides its path) for the native modal journey at 1800, 1200, 800
+and 390 px: open dock and block, receive an illustration, receive a read quote above it,
+Escape back to the proposal, then accept once. It checks one active dialog, keyboard focus,
+contained price controls and absence of background purchases, and writes screenshots and
+measurements into the printed temporary directory. The fixture uses invented prose and a
+capturing bridge; no installed app, world or paid provider is involved.
+
+Chapter narration Activity (turn 206, #1684) has focused contracts identity/cost tests,
+coordinator `test/productions/audiobook-activity.test.ts` for restart, corruption and stop
+ordering, and `audiobook-grouped.test.ts` for provider success followed by local alignment
+and durable block writes. Client `activity-panel.test.tsx` and
+`queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run
+`node scripts/smoke-audiobook-activity.mjs` with Chrome (`ARKE_CHROME` overrides its path)
+for synthetic screenshots and overflow/action measurements at 1400, 390 and 320 px.
+`node scripts/smoke-audiobook-parity.mjs --output <review-directory>` renders the eight approved
+turn206 frames directly from the master alongside real components at matching viewports. Its
+`paired.html` preserves full frames and separately crops the affected receipt/footer/panel;
+the master chapter background is schematic, while the actual side uses the retained chapter
+screen. The harness uses its own headless Chrome profile and public synthetic content.
+
+
+Chapter export inclusion (turn 209, #1688) has scoped listening/player and video regressions in
+coordinator `test/productions/audiobook-listening.test.ts` and `audiobook-video.test.ts`. They
+cover incomplete/missing chapter refusal, manifests, delivery identity, unchanged encode reuse
+and interrupted-job recovery; client `audiobook-export.test.tsx` covers scope/format changes and
+stale readiness, and `chapter-audiobook.test.tsx` covers the missing-block quote and return.
+Run `node scripts/smoke-chapter-scope-parity.mjs --out <review-directory>` for fourteen literal
+master/full-App pairs: chapter action menus, normal Read, ready Direction, Activity, both export
+formats/scopes, blocked recovery, render progress and desktop/phone return. The bridge validates
+its synthetic events and asserts no export fallback, no implicit read confirmation, no cancellation
+on close, selected-block/focus return and reserved native footers. Use `--frame 209o --width 320`
+or `--frame 209o --text-scale 2` in a separate output directory for supplementary narrow/text-zoom
+captures. Retained detailed destinations and known schematic differences are labelled explicitly
+in `paired.html`; screenshots alone do not establish universal visual parity. Chrome runs headless
+with a dedicated profile; this test never attaches to the installed app or a private world.

@@ -42,3 +42,14 @@ describe("the frames a look is made and chosen by", () => {
     assert.equal(DomainEventSchema.safeParse({ ...answer, usage: { [TAKE]: ["one"] } }).success, false);
   });
 });
+
+it("names a look separately from its generation and requires a fenced rename acknowledgement", () => {
+  const accept = { kind: "accept-character-look", worldId: WORLD, sheetId: "maren-kest", takeId: TAKE };
+  assert.ok(ClientMessageSchema.safeParse({ ...accept, name: "Storm coat" }).success);
+  assert.equal(ClientMessageSchema.safeParse({ ...accept, name: "x".repeat(61) }).success, false);
+  const rename = { kind: "rename-character-look", worldId: WORLD, sheetId: "maren-kest", lookId: TAKE, name: "", expectedName: "Storm coat", requestId: REQ };
+  assert.ok(ClientMessageSchema.safeParse(rename).success);
+  assert.ok(ClientMessageSchema.safeParse({ ...rename, expectedName: null, name: "First name" }).success);
+  assert.equal(ClientMessageSchema.safeParse({ ...rename, expectedName: undefined }).success, false);
+  assert.ok(DomainEventSchema.safeParse({ at: "2026-10-10T10:10:10.000Z", type: "reference.look-renamed", worldId: WORLD, sheetId: "maren-kest", lookId: TAKE, requestId: REQ, error: "This look was renamed elsewhere." }).success);
+});

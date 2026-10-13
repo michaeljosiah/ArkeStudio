@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import {
   applyTimelineCommands,
+  defaultEffectClip,
   seedStoryPictureTimeline,
   type ArtifactSidecar,
   type ClientState,
@@ -92,6 +93,36 @@ afterEach(() => {
 });
 
 describe("the editor's render plan (issue 1158)", () => {
+  it("uses the portrait composition for picture appearance without any procedural effect", async () => {
+    const { production, artifacts } = savedStory(); production.meta.aspect = "9:16";
+    assert.equal(production.timeline?.status, "ready"); if (production.timeline?.status !== "ready") return;
+    const timeline = production.timeline.timeline;
+    timeline.tracks[0]!.clips[0]!.visual = { blendMode: "screen", opacity: .5 };
+    assert.ok(timeline.tracks.every(track => !track.effects?.length));
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok);
+      assert.equal(result.plan.preset, "vertical-master");
+      assert.equal(result.plan.effectRender?.width, 1080); assert.equal(result.plan.effectRender?.height, 1920);
+    } finally { await close(mounted); }
+  });
+  it("uses the production's portrait delivery shape for procedural preview", async () => {
+    const { production, artifacts } = savedStory();
+    production.meta.aspect = "9:16";
+    assert.equal(production.timeline?.status, "ready");
+    if (production.timeline?.status !== "ready") return;
+    production.timeline.timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 20, muted: false, clips: [], effects: [defaultEffectClip({ id: "cl_fx", lineageId: "ef_fx", seed: 42, startFrame: 0, durationFrames: 24 })] });
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan;
+      assert.ok(result?.ok);
+      assert.equal(result.plan.preset, "vertical-master");
+      assert.equal(result.plan.effectRender?.width, 1080);
+      assert.equal(result.plan.effectRender?.height, 1920);
+    } finally { await close(mounted); }
+  });
   it("hands back the same plan while nothing it is made of has changed", async () => {
     const { production, artifacts } = savedStory();
     const mounted = await mount();

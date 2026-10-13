@@ -1,4 +1,6 @@
 import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
+import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
@@ -25,7 +27,7 @@ import { createEngine } from "./application/engine.js";
 import { createLocalWorldRepository } from "./application/local-worlds.js";
 import { createLocalEnginePolicy, LOCAL_ENGINE_CONTEXT } from "./application/local-policy.js";
 import { createStudioStorage, type StudioStorage } from "./application/studio-composition.js";
-import { referenceInputProblem } from "@arke-studio/contracts";
+import { referenceInputProblem, ollamaLlmAvailable } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
 import { withModelValidation } from "./harness/model-validation.js";
@@ -82,7 +84,6 @@ import {
   stagedReferenceKey,
   LedgerEntrySchema,
   OPENCODE_AVAILABILITY,
-  arkeAvailability,
   type Capability,
   type ClientMessage,
   type HarnessAvailability,
@@ -161,6 +162,8 @@ import {
   PICTURE_PROMPT_MAX,
   type PictureWho,
   pictureBench,
+  pictureDetailSkins,
+  type PictureDetailSkin,
   priceLabel,
   type BenchSession,
   type BenchTake,
@@ -194,7 +197,6 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
-  meetsLocalModelMinimum,
   BENCH_DELETE_FILED,
   benchDeleteRefusal,
   engineFloorClause,
@@ -335,8 +337,12 @@ import {
 } from "./productions/audiobook-direction.js";
 import { audiobookDoor, conformDirections, followTakes, quoteNarrator, runAudiobookBook } from "./productions/audiobook-book.js";
 import { resetAudiobookSeams, SeamRefusal, setAudiobookSeam } from "./productions/audiobook-seams.js";
+import { BeatRefusal, groupChapterByBeats, makeAdapterBeatsDeriver, type BeatsDeriver } from "./productions/audiobook-beats.js";
 import { adoptHeardTakes, hearAudiobookLine } from "./productions/audiobook-hear.js";
 import { anyNarrator, audiobookListening, setAudiobookPicture, setAudiobookPictureFocus } from "./productions/audiobook-listening.js";
+import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandidate, quotedMotionSource } from "./productions/audiobook-motion.js";
+import type { AudiobookWordTimingState } from "@arke-studio/contracts";
+import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
@@ -364,7 +370,7 @@ import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
-import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { assembleTimelineScene, applyHumanTimelineCommand, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
@@ -404,6 +410,14 @@ function mediaSessionId(candidateId: string, revision: number): SessionId {
   return `sess_${body}` as SessionId;
 }
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
+import { runEffectExport } from "./productions/editor-effect-export.js";
+import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
+import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
+import { handleTransitionReview } from "./productions/editor-transition-requests.js";
+import { handlePictureReview } from "./productions/editor-picture-requests.js";
+import { handleEffectReview } from "./productions/editor-effect-review.js";
+import type { EffectAudioAnalysisHost } from "./media/node-effect-audio.js";
+import type { EffectRasterHost } from "./media/node-effect-renderer.js";
 import { measureDurationSec, measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
   acceptTake,
@@ -458,6 +472,7 @@ import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
+import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -492,6 +507,7 @@ import {
 import { foldBlueprint } from "./harness/blueprint.js";
 import {
   acceptCharacterLook,
+  renameCharacterLook,
   acceptCharacterSheet,
   acceptLocationView,
   attachCharacterLook,
@@ -616,6 +632,7 @@ import {
   stageSheetRename,
   stageSheetStatus,
   applyVoiceAssignment,
+  applySheetNarration,
 } from "./sheets/authoring.js";
 import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
@@ -898,7 +915,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude" | "codex" | "arke";
+    generation: "v2" | "v1" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -911,12 +928,6 @@ export interface CoordinatorOptions {
    * the shared store v1 silently leaned on is closed by design (issue 327 §2).
    */
   relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
-  /**
-   * Put the local runtime's pulled models in front of the writing harness (issue 1247). Called
-   * with the full list whenever the local-runtime poll finds it changed, including the empty
-   * list when Ollama has stopped. Absent for harnesses that read their own configuration.
-   */
-  publishLocalHarnessModels?: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>;
   harnessUnavailableReason?: string;
   harnessEngineOverride?: import("@arke-studio/contracts").HarnessEngine;
   /** The host's effective launch choice, even if discovery failed before producing metadata. */
@@ -988,6 +999,8 @@ export interface CoordinatorOptions {
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
   ffmpeg?: FfmpegRunner;
+  effectRasterHost?: EffectRasterHost;
+  effectAudioAnalysisHost?: EffectAudioAnalysisHost;
   /**
    * Measuring media on this machine (#253). Wired by the desktop host when it can resolve
    * ffprobe. Absent means nothing can be measured — a master track cannot be assigned and take
@@ -1008,6 +1021,8 @@ export interface CoordinatorOptions {
   voicesDeriver?: VoicesDeriver;
   /** Turn 146: the direction model seam; every control is re-verified against the block's reader regardless (SPEC-047 R-10). */
   directionDeriver?: DirectionDeriver;
+  /** SPEC-047 R-172: the beats model seam; every start is held to the chapter's blocks and every join to the seams' limits regardless. */
+  beatsDeriver?: BeatsDeriver;
   /** Turn 184: the speaker-notes model seam; every note is held to its speaker and its cap regardless (SPEC-047 R-54). */
   speakerNotesDeriver?: SpeakerNotesDeriver;
   /** Turn 191c: the look model seam; every line is held to the chapter's people and blocks regardless (SPEC-047 R-98). */
@@ -1214,14 +1229,8 @@ export class Coordinator {
   private adapterEngineRefresh: Promise<void> = Promise.resolve();
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
-  /** The local models last handed to the harness, so an unchanged poll rewrites nothing (issue 1247). Null: never published. */
-  private publishedLocalHarnessModels: string | null = null;
-  /** The rows behind that fingerprint, for checking a later catalogue read against them. */
-  private publishedLocalHarnessRows: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
   /** Ollama models a local harness turn named in this run, for quitting's release. */
   private readonly harnessOllamaModels = new Set<string>();
-  /** Pulled models the last listing held back for stating less than a 256k context. */
-  private localModelsBelowMinimum = 0;
   /** Whether any cloud language-model key is stored, read with the harness environment (issue 1247). */
   private cloudLlmKeyStored = false;
   /**
@@ -1237,16 +1246,6 @@ export class Coordinator {
    * decision reads the last outcome rather than the moment.
    */
   private catalogueReadOk = false;
-  /**
-   * Whether what Ollama last listed is what the harness catalogue now carries (issue 1247). A
-   * runtime that has not started answering yet and one with nothing pulled both publish no
-   * rows; only the second is a machine with no local model, and a keyless session is not
-   * decided on the first. False again from a changed listing until the fetch that follows its
-   * publication: in between, the catalogue on display describes the old rows.
-   */
-  private localRuntimeListed = false;
-  private localListingMisses = 0;
-  private localListingSucceededAt = 0;
   /** Resolves once the harness's sign-in state has been read for the first time, or once it is known it will not be. */
   private vendorAuthSettled: Promise<void> = Promise.resolve();
   private settleVendorAuth: () => void = () => {};
@@ -1277,6 +1276,7 @@ export class Coordinator {
   private readonly benchTakeActions = new Map<string, Promise<void>>();
   /** Reservations read and advance one session take counter. */
   private readonly benchDispatchActions = new Map<string, Promise<void>>();
+  private readonly benchRefreshes = new Map<string, symbol>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
   /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
@@ -1289,6 +1289,13 @@ export class Coordinator {
   private readonly stagedLines = new Map<string, { worldId: string; productionId: string; matched: MatchedFile[] }>();
   /** `Direct this chapter` runs (turn 146), keyed like the cast's: one per chapter, ended with the world. */
   private readonly directingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /**
+   * Chapters being grouped by beats (design turn 201): a register of their own, replayed as
+   * `audiobook.beats · grouping`. Held in `directingChapters` they were replayed to a window that
+   * joined mid-run as a direction started, and its card said directing… for a direction that never
+   * ran and never finished (0.5.67, 2026-10-08).
+   */
+  private readonly groupingChapters = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /** A chapter being read for its look (turn 191c): one at a time, ended with the world. */
   private readonly derivingLooks = new Map<string, AbortController>();
   /** A picture being made for a block (turn 191a): one at a time a block, ended with the world. */
@@ -1315,6 +1322,7 @@ export class Coordinator {
   private readonly readingAudiobooks = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string; toMake?: number; blocks?: number; made?: number; requests?: number; groups?: string[][]; request?: number }>();
   /** The request each audiobook run is asked under, by run key, so a replayed start names the same one. */
   private readonly audiobookRequests = new Map<string, string>();
+  private readonly audiobookActivity: AudiobookActivityJournal;
   /** `Read the book` runs (turn 146, SPEC-047 R-16), one per production, under the chapters' own runs. */
   private readonly readingBooks = new Map<string, { control: AbortController; worldId: string; productionId: string; requestId: string; chapters?: number; blocks?: number; done?: number }>();
   /**
@@ -1323,6 +1331,10 @@ export class Coordinator {
    * race between enqueue returning and the provider finishing can never lose a block.
    */
   private readonly audiobookJobs = new JobWaiters();
+  private readonly makingMotion = new Map<string, AbortController>();
+  private readonly preparingWordTiming = new Map<string, AbortController>();
+  private readonly wordTimingRequests = new Map<string, string>();
+  private readonly wordTimingProgress = new Map<string, { done: number; total: number; chapters: string[] }>();
   private waitForAudiobookJob(jobId: string): Promise<Job> {
     return this.audiobookJobs.wait(jobId);
   }
@@ -1711,6 +1723,8 @@ export class Coordinator {
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
+            // The sheet fallback is used only when this detail owner's reference does not ride.
+            detailed: pictureDetailSkins(row.shot?.details ?? [], room.people, store.getBundle().sheets),
             requestId: ulid(),
             ceilingMicroUsd: Math.max(0, run.confirmedMicroUsd - progress.spentMicroUsd),
             signal: control.signal,
@@ -1899,7 +1913,18 @@ export class Coordinator {
       this.emit({ at: at(), type: "audiobook.finished", ...ids, ...ending });
       return ending;
     }
+    const runId = ulid();
+    const bundle = store.getBundle();
+    const production = bundle.productions.find(p => p.meta.id === ids.productionId);
+    const chapter = production?.chapters.find(c => c.id === ids.chapterId);
+    let activityRequest = 0;
+    const initial = { id: runId, ...ids, chapterFile: chapter?.file ?? ids.chapterId, chapterTitle: chapter?.title || "Chapter narration", ...(chapter ? { chapterOrder: chapter.order } : {}), productionTitle: production?.meta.title ?? ids.productionId, worldName: bundle.meta.name, scope: options.only ? "block" as const : "chapter" as const, ...(options.only?.length === 1 ? { block: options.only[0]! } : {}), startedAt: at() };
+    try {
     await runAudiobookChapter({
+      activity: async patch => {
+        if (patch.request !== undefined) activityRequest = patch.request;
+        await this.audiobookActivity.update(runId, patch, initial);
+      },
       store,
       worldId: ids.worldId,
       productionId: ids.productionId,
@@ -1946,11 +1971,16 @@ export class Coordinator {
         const queued = await this.enqueueBatch(
           requestId,
           command,
-          inputs.map((input) => ({
-            ...bindDesignedNarrator(input, room.designedBinding),
-            ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
-          })),
+          inputs.map((input) => {
+            const bound = bindDesignedNarrator(input, room.designedBinding);
+            return {
+              ...bound,
+              params: { ...bound.params, audiobookRunId: runId, audiobookChapterTitle: initial.chapterTitle, audiobookScope: initial.scope, audiobookRequest: activityRequest },
+              ...(input.voiceReference && options.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: options.voiceUploadConfirmedFor } : {}),
+            };
+          }),
         );
+        for (const id of queued.jobIds) await this.audiobookActivity.update(runId, { job: { id, index: Math.max(1, activityRequest), reused: false } });
         return { jobIds: queued.jobIds, ...(queued.reason !== undefined ? { reason: queued.reason } : {}) };
       },
       waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
@@ -1997,6 +2027,10 @@ export class Coordinator {
         }
       },
     });
+    } catch (error) {
+      await this.audiobookActivity.update(runId, { phase: signal.aborted ? "stopped" : "interrupted", reason: describeCoordinatorError(error) });
+      throw error;
+    }
     return ending;
   }
 
@@ -3192,6 +3226,7 @@ export class Coordinator {
   /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
   private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
+  private readonly browserMediaImports = new BrowserMediaImports();
   private cataloguePreviews: CataloguePreviewService | null = null;
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3253,6 +3288,8 @@ export class Coordinator {
   private backfillStore: WorldStore | null = null;
 
   private readonly localGpu: LocalGpu;
+  private readonly effectAnalysis: EditorEffectAnalysisService;
+  private readonly effectDependencies: EditorEffectDependencies;
   /**
    * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
    * manifest every consumer reads is the shipped one with these stamped on (`servedManifest`),
@@ -3263,6 +3300,10 @@ export class Coordinator {
   private plannedManifest: { base: ModelManifest; plans: ProviderPlans; manifest: ModelManifest } | null = null;
 
   constructor(private readonly opts: CoordinatorOptions) {
+    this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
+      at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
+    }));
+    this.effectDependencies = new EditorEffectDependencies(this.effectAnalysis);
     // `opts.manifest` is read in a hundred places and handed to services as they are built; a
     // getter makes each of them read the manifest as the author's plans price it, now, rather
     // than as it was when they were built — so a plan switched mid-session reaches every quote.
@@ -3289,6 +3330,7 @@ export class Coordinator {
     const storage = opts.storage ?? createStudioStorage(opts);
     this.secrets = storage.secrets;
     this.readModel = new ReadModel(opts.appVersion);
+    this.audiobookActivity = new AudiobookActivityJournal(opts.appRoot ? join(opts.appRoot, "queue", "audiobook-reads.jsonl") : undefined, run => this.emit({ type: "audiobook.activity", at: run.updatedAt, run }));
     this.changeLog = storage.changeLog;
     this.appLog = storage.appLog;
     storage.onLogChanged(() => this.refreshDiagnosticsLogTail());
@@ -3709,6 +3751,9 @@ export class Coordinator {
         for (const run of this.directingChapters.values()) {
           replayed.push({ at: new Date().toISOString(), type: "direction.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
+        for (const run of this.groupingChapters.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "audiobook.beats", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId, outcome: "grouping" });
+        }
         for (const held of this.heldDirections.values()) replayed.push({ ...held, at: new Date().toISOString() });
         for (const run of this.illustrating.values()) replayed.push({ at: new Date().toISOString(), type: "illustration.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         for (const held of this.heldIllustrations.values()) replayed.push({ ...held, at: new Date().toISOString() });
@@ -3787,6 +3832,7 @@ export class Coordinator {
           return this.opts.provider.serveGenesisMedia(genesis[1]!, genesis[2]!);
         }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
+        if (match?.[2]?.startsWith(".cache/editor-effects/analysis/")) return this.effectAnalysis.serve(this.opts.provider.openStore?.(), match[1]!, match[2]);
         if (!match || !this.opts.provider.serveMedia) return null;
         const file = await this.opts.provider.serveMedia(match[1]!, match[2]!);
         if (!file) return null;
@@ -4097,7 +4143,7 @@ export class Coordinator {
     // stored would be stale by the next rescan (issue 239). Allocation-free when nothing is
     // running, which is nearly always.
     const authoringRuns = this.authoring?.liveRuns() ?? [];
-    return authoringRuns.length === 0 ? state : { ...state, authoringRuns };
+    return { ...state, ...(authoringRuns.length ? { authoringRuns } : {}), effectAnalyses: this.effectAnalysis.project(this.opts.provider.openStore?.()) };
   }
 
   /**
@@ -4199,6 +4245,7 @@ export class Coordinator {
     }
     if (
       parsed.type !== "health.changed" &&
+      parsed.type !== "editor-effect.analysis" &&
       parsed.type !== "appearance.changed" &&
       // The plans live in app settings; the manifest it carries is derived, not a domain record.
       parsed.type !== "provider-plans.changed" &&
@@ -4302,7 +4349,8 @@ export class Coordinator {
           return { ok: false, blockers: [control.signal.aborted ? "the render was cancelled" : describeCoordinatorError(err)] };
         });
         if (result.ok) {
-          sourceFingerprint = `video:${exportId}:${result.made}:${result.files.length}`;
+          const selection = createHash("sha256").update(JSON.stringify([result.scope ?? { kind: "book" }, result.chapterIds ?? []])).digest("hex");
+          sourceFingerprint = `video:${exportId}:${selection}:${result.made}:${result.files.length}`;
           if (last !== undefined) last = { ...last, doneSec: last.totalSec, leftSec: 0 };
           await progress("done", 100, `${result.dir}/${result.files[0]!.name}`, null);
         } else if (control.signal.aborted) await progress("cancelled", 0, null, null);
@@ -4503,6 +4551,7 @@ export class Coordinator {
     await this.seed();
     await this.adapterLibrary?.refresh();
     await this.seedAppConfig();
+    for (const run of (await this.audiobookActivity.load()).reverse()) this.readModel.apply({ type: "audiobook.activity", at: run.updatedAt, run });
     // The engine must be resolved BEFORE queue recovery, not after (SPEC-021 §2.11). Recovery
     // asks the service which engine is configured now, and a null answer means "no engine" —
     // which, run too early, is indistinguishable from "not resolved yet" and fails every
@@ -5169,7 +5218,7 @@ export class Coordinator {
       await Promise.all([
         ...local.map((id) => this.providerService.validate(id).catch(() => {})),
         this.refreshLocalResidency(),
-        this.publishLocalHarnessModels(),
+        this.refreshHarnessModels(),
         // A sign-in surface whose last read faulted is asked again here (issue 1247): a keyless
         // session is refused while it is unread, and nothing else would read it again.
         this.vendorAuthUnread() ? this.refreshVendorAuthTracked() : Promise.resolve(),
@@ -5185,104 +5234,8 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
   }
 
-  /**
-   * What Ollama has pulled, handed to the writing harness when it changes (issue 1247).
-   *
-   * The harness never asks Ollama, so a model somebody pulled from a terminal reaches the
-   * picker only through here. Same cadence as the runtime probe: a pull finishes between
-   * ticks, and a person who just watched one finish will look for the model at once. The
-   * first pass always writes, because the file may still describe last run's models — and
-   * the catalogue is refreshed a moment after the write rather than at once, because the
-   * harness takes about three seconds (measured) to reload its configuration; an immediate
-   * refresh would read the old rows and then cache them. Refreshed and published, not only
-   * invalidated: the screens that show models ask for them on mount and on a harness change,
-   * so a pull that lands while a picker is open would otherwise wait for a Retry.
-   */
-  private publishLocalHarnessModels(): Promise<void> {
-    const publish = this.opts.publishLocalHarnessModels;
-    const client = this.opts.dispatchClients?.["ollama"];
-    if (!publish || !client?.listModels || this.stopping) return Promise.resolve();
-    // Tracked, because the probe that calls this is fire-and-forget: stop() must wait out a
-    // profile write in flight rather than return under it.
-    const work = this.publishLocalHarnessModelsNow(publish, client.listModels.bind(client)).catch(() => {});
-    this.backgroundWork.add(work);
-    void work.finally(() => this.backgroundWork.delete(work));
-    return work;
-  }
-
-  private async publishLocalHarnessModelsNow(
-    publish: (models: readonly import("@arke-studio/contracts").LocalHarnessModel[]) => Promise<void>,
-    list: () => Promise<readonly import("@arke-studio/contracts").LocalHarnessModel[]>,
-  ): Promise<void> {
-    // Not answering is published as nothing pulled — a stale row validates in the picker and
-    // fails on the turn — but remembered apart from it, for the keyless decision below.
-    let models: readonly import("@arke-studio/contracts").LocalHarnessModel[] = [];
-    let listed = true;
-    try {
-      // Only models stating a 256k context are offered to the harness at all (issue 1247). The
-      // filter is here, before the profile is written, so the picker, the catalogue and the
-      // unattended default all see the same set, and a pulled model under the minimum is simply
-      // not a writing model rather than one that is listed and then refused.
-      const pulled = await list();
-      this.localListingMisses = 0;
-      this.localListingSucceededAt = Date.now();
-      models = pulled.filter(meetsLocalModelMinimum);
-      this.localModelsBelowMinimum = pulled.length - models.length;
-    } catch {
-      if (++this.localListingMisses === 1 && this.localRuntimeListed && Date.now() - this.localListingSucceededAt <= 90_000) return;
-      listed = false;
-    }
-    const fingerprint = JSON.stringify(models);
-    if (this.stopping) return;
-    if (fingerprint === this.publishedLocalHarnessModels) {
-      // The catalogue already carries this listing, or the fetch that will is scheduled — unless
-      // that fetch failed, or read the catalogue before the harness had reloaded the profile
-      // (three seconds measured, not promised). Nothing else asks again, and a keyless session
-      // would stay refused past the harness's recovery: asked again on this cadence until the
-      // rows it was handed are the rows it lists.
-      if (this.catalogueReadOk && this.catalogueCarries(models)) { this.localRuntimeListed = listed; return; }
-      this.modelCatalog.invalidate();
-      this.warmModelCatalog(false, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
-      return;
-    }
-    // Pending until the catalogue carries the new rows: a session decided in between would read
-    // the old catalogue as the answer, and go unmodelled to the cloud default on it.
-    this.localRuntimeListed = false;
-    try {
-      await publish(models);
-    } catch (error) {
-      // Left unpublished on purpose: the next tick tries again with whatever is true then —
-      // and a keyless session stops waiting, since nothing better is coming before that.
-      void this.appLog?.append({ kind: "harness.local-models-unpublished", message: error instanceof Error ? error.message : String(error) });
-      this.settleCatalogue();
-      return;
-    }
-    this.publishedLocalHarnessModels = fingerprint;
-    this.publishedLocalHarnessRows = models;
-    // Shutdown may have started during the write; nothing is scheduled past it.
-    if (this.stopping) { this.settleCatalogue(); return; }
-    const timer = setTimeout(() => {
-      this.lifecycleTimers.delete(timer);
-      if (this.stopping) { this.settleCatalogue(); return; }
-      this.modelCatalog.invalidate();
-      // The fetch a keyless session waits on: the first one that can carry the local rows.
-      // Carried only once the fetch lists what was published: a read that beat the reload is
-      // a successful read of the old rows, and the probe above asks again.
-      this.warmModelCatalog(true, () => { this.localRuntimeListed = listed && this.catalogueCarries(models); });
-    }, 5_000);
-    timer.unref?.();
-    this.lifecycleTimers.add(timer);
-  }
-
-  /**
-   * Fetch and publish the harness catalogue now, tracked so stop() waits it out. `settles`
-   * says whether this fetch is the one a keyless session may wait on: the fetch that follows
-   * the first local-model publication is, because only then does the catalogue carry the
-   * local rows; the fetch at harness-ready is only when nothing local will ever be published.
-   * Settled on failure too: a catalogue that cannot be read is an answer, and a session
-   * waiting on it is refused with that reason rather than built on silence.
-   */
-  private warmModelCatalog(settles: boolean, then?: () => void): void {
+  /** Fetch the authoritative harness catalogue; shutdown drains the read and failure settles admission. */
+  private warmModelCatalog(): void {
     // The gate as it is now: a harness that fails and returns while this fetch is out re-arms
     // the gate, and this fetch's answer belongs to the lifecycle that asked, not the new one.
     const settle = this.settleCatalogue;
@@ -5290,35 +5243,16 @@ export class Coordinator {
     this.backgroundWork.add(work);
     void work.finally(() => {
       this.backgroundWork.delete(work);
-      then?.();
-      if (settles) settle();
+      settle();
     });
   }
 
-  /**
-   * Whether the local rows in the harness catalogue are exactly the models handed to it (issue
-   * 1247). Exactly: a row for a model that was deleted is as stale as a missing row for one
-   * that was pulled, and a default chosen from it would name a model that is not there.
-   */
-  private catalogueCarries(published: readonly import("@arke-studio/contracts").LocalHarnessModel[]): boolean {
-    const rows = new Map(this.readModel.getState().app.harnessModels.filter((model) => model.provider === "ollama").map((model) => [model.id, model]));
-    if (rows.size !== published.length) return false;
-    return published.every((model) => {
-      const row = rows.get(model.id);
-      if (!row) return false;
-      // A re-pulled tag keeps its id and may change what it can do; the row must say what
-      // was written, where it says anything. Tools and images are written as stated and
-      // read back as stated; the context length is not compared, because the harness
-      // derives its own input limit from it rather than echoing it.
-      if (row.tools !== undefined && row.tools !== model.tools) return false;
-      if (row.inputModalities !== undefined && row.inputModalities.includes("image") !== model.vision) return false;
-      return true;
-    });
-  }
-
-  /** Whether a local-model publication will happen at all: both the writer and the runtime client are wired. */
-  private localModelsPublishable(): boolean {
-    return this.opts.publishLocalHarnessModels !== undefined && this.opts.dispatchClients?.["ollama"]?.listModels !== undefined;
+  /** OpenCode discovers local models itself; periodically publish its current catalogue to open pickers. */
+  private async refreshHarnessModels(): Promise<void> {
+    if (!this.opts.adapter?.readiness().ready || !this.opts.adapter.capabilities().has("models")) return;
+    const work = this.modelCatalog.get(true).then(() => {}, () => {});
+    this.backgroundWork.add(work);
+    try { await work; } finally { this.backgroundWork.delete(work); }
   }
 
   /** The harness is up: fetch what a keyless session needs before it is built (issue 1247). */
@@ -5326,26 +5260,12 @@ export class Coordinator {
     // A harness coming back after a failure re-opens what that failure settled: the sign-in
     // state on display is still "not started", and a session deciding on it would pin local
     // past a connected account. The catalogue gate re-opens the same way; on that return the
-    // ready-time fetch settles it when the profile already carries the local rows, since no
-    // publication follows an unchanged listing.
+    // ready-time fetch settles it using the returned harness's own catalogue.
     const returning = !this.catalogueGateOpen || !this.vendorAuthGateOpen;
     if (!this.catalogueGateOpen) this.armCatalogueGate();
     if (!this.vendorAuthGateOpen) this.armVendorAuthGate();
-    const recovering = returning && this.publishedLocalHarnessModels !== null;
-    // The returned harness's catalogue is checked against the rows it was handed like any
-    // post-publication read: its first answer may still be the old one, and what the previous
-    // lifecycle had confirmed says nothing about this one. Until it carries them, the probe
-    // keeps asking, and a keyless session is refused rather than run on a cloud-only read.
-    // The same for the sign-in state: the rows on display are the old lifecycle's until this
-    // one's read lands, and a decision in between must wait for it rather than trust them.
-    if (recovering) this.localRuntimeListed = false;
     if (returning) this.vendorAuth.markStale();
-    // A re-armed gate is settled by this fetch whenever no publication will: after a first
-    // publication that failed, the next one is a probe tick away, and a session in between is
-    // refused for the rows being unpublished rather than held past its creation timeout.
-    this.warmModelCatalog(!this.localModelsPublishable() || returning, recovering
-      ? () => { this.localRuntimeListed = this.catalogueCarries(this.publishedLocalHarnessRows); }
-      : undefined);
+    this.warmModelCatalog();
     const settleVendorAuth = this.settleVendorAuth;
     void this.refreshVendorAuthTracked({ patient: true }).finally(() => settleVendorAuth());
   }
@@ -5378,7 +5298,7 @@ export class Coordinator {
     this.settleVendorAuth();
   }
 
-  /** What a keyless session waits on before it is built: the catalogue after the local rows, and the sign-in state. */
+  /** What a keyless session waits on before it is built: the native harness catalogue and sign-in state. */
   private async localDefaultGate(signal?: AbortSignal): Promise<void> {
     // A request stopped while waiting is not built when discovery settles.
     const stopped = signal === undefined ? null : new Promise<never>((_, reject) => {
@@ -5440,15 +5360,15 @@ export class Coordinator {
    *
    * Undefined whenever a cloud key is stored — the harness's own default stands then, as it
    * always has — and whenever the catalogue lists nothing local. Of what it lists, the first
-   * local row that passes the same admission check an explicit choice would: Ollama lists the
-   * model pulled or used most recently first, and a model the hardware gate refuses is never
+   * local row that passes the same admission check an explicit choice would, in the harness's
+   * native inventory order. A model the hardware gate refuses is never
    * chosen quietly. There is no routed text default to prefer — `routing.llm` is retired on
    * load (see app-settings) — so the person's way to choose is the agent override in Settings,
    * which sits above this.
    *
    * Read synchronously from the published catalogue rather than fetched, because this runs
-   * inside the session builder; the catalogue is warmed when the harness comes up and after
-   * every local-model publication for exactly that reason.
+   * inside the session builder; the catalogue is warmed when the harness comes up and during
+   * the runtime poll for exactly that reason.
    */
   /**
    * Whether anything cloud could answer a session: a stored key, or an account connected
@@ -5456,11 +5376,6 @@ export class Coordinator {
    * the credential store and so is read from the published sign-in state.
    */
   private cloudCredentialAvailable(): boolean {
-    // Arke's local harness cannot spend a cloud key, so for it none is ever available: every
-    // session without an explicit model gets the application-validated local default — disabled
-    // models, hardware eligibility and Stage's image input all checked — rather than whatever
-    // model the adapter would pick for itself (issue 1247).
-    if (this.opts.adapter?.id === "arke") return false;
     // Only the connections the harness keeps itself. An `env` connection is Studio's own key as
     // the harness sees it, and the store is read at the command — the published row outlives a
     // cleared key by the length of the relaunch, and a session in that gap must not count it.
@@ -5477,8 +5392,7 @@ export class Coordinator {
    * can. A catalogue that was read and holds nothing local is an answer — the harness default
    * is what such a machine has always run on — but one that failed to read says nothing about
    * what is installed, and a session built on that silence would run on the cloud default with
-   * a local model possibly sitting right there. Ollama not answering is the same silence one
-   * step earlier: the rows it would have brought are not in the catalogue to read.
+   * a local model possibly sitting right there. OpenCode owns Ollama inventory and reports its available models in that catalogue.
    */
   /**
    * Whether the harness's sign-in state could not be read (issue 1247): the surface exists but
@@ -5493,9 +5407,6 @@ export class Coordinator {
 
   private keylessSessionRefusal(needsImages = false, agent?: string): string | null {
     if (this.cloudCredentialAvailable()) return null;
-    // On Arke's own lane a stored key is not missing, only unusable, so the refusal must not tell
-    // the person to add one; what it can say is about Ollama and its models.
-    const localLane = this.opts.adapter?.id === "arke";
     // Unread is not absent: a connected account pinned local by a faulted read would be the
     // wrong lane chosen quietly, and this is retried on the runtime probe's cadence.
     if (this.vendorAuthUnread()) {
@@ -5506,19 +5417,11 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (!adapter?.listModels || !adapter.capabilities().has("models")) return null;
     if (!this.catalogueReadOk) {
-      if (localLane) return "Local's models could not be read, so which model would write is unknown. Check that Ollama is running, then retry models in Settings → Harness → Advanced.";
       return "The harness's models could not be read, and no cloud key is stored, so which model would write is unknown. Retry models in Settings → Harness → Advanced, or add a key.";
     }
-    if (this.localModelsPublishable() && !this.localRuntimeListed) {
-      return "The local models are not available to the harness yet, and no cloud key is stored, so nothing can write. Check that Ollama is running and try again in a moment, or add a key.";
-    }
     const offered = this.readModel.getState().app.harnessModels.some((model) => model.provider === "ollama");
-    // Pulled, but every one held back by the 256k minimum: without this the session would go to
-    // a cloud default with no key and fail without saying the models were there all along. Stage
-    // included — its own fallback would send the person to choose a model that reads images,
-    // when what is wrong is the window.
-    if (!offered && this.localModelsBelowMinimum > 0) {
-      return "None of the pulled local models has a 256k context window, and no cloud key is stored. Pull one that does, such as Gemma 4 12B, or add a key.";
+    if (offered && !ollamaLlmAvailable(this.readModel.getState().app.providers)) {
+      return "Ollama is not available, and no cloud key is stored. Start Ollama and retry, or add a key.";
     }
     // Local rows the default passed over — switched off, or unable to call tools — are not
     // nothing local: a session going unmodelled past them would run on the cloud default with
@@ -5534,7 +5437,6 @@ export class Coordinator {
       return `${localModelPolicy(waiting[0]!.id)!.displayName} runs only where you choose it. Choose it for ${which} in Settings → Harness → Advanced, or install Gemma 4 12B.`;
     }
     if (!needsImages && offered) {
-      if (localLane) return "None of the local models can write here: each is switched off or cannot call tools. Pull a model that calls tools, or switch one on under AI models.";
       return "None of the local models can write here: each is switched off or cannot call tools, and no cloud key is stored. Pull a model that calls tools, switch one on under AI models, or add a key.";
     }
     return null;
@@ -5555,18 +5457,19 @@ export class Coordinator {
     // Rows kept from an earlier read are names, not a catalogue: after a failed refresh they
     // are not chosen from, and the refusal above says why.
     if (!this.catalogueReadOk) return undefined;
-    if (this.localModelsPublishable() && !this.localRuntimeListed) return undefined;
     if (this.vendorAuthUnread()) return undefined;
+    // Native discovery retains its last inventory through outages. The existing runtime
+    // health probe, including its transient-failure grace, owns whether that inventory can run.
+    if (!ollamaLlmAvailable(app.providers)) return undefined;
     // Every roster agent works through tools — reads, edits, world queries — so a model the
     // runtime says cannot call them would take the session and fail its first turn. Nor is a
-    // model whose capabilities were assumed rather than read (its show failed) chosen
+    // model whose tool support was not confirmed chosen
     // unattended: nothing says it completes. Explicit choices are still admitted: unknown is
     // offered, and a stated refusal is one the person can read; a default has no reader.
-    const assumed = new Set(this.publishedLocalHarnessRows.filter((model) => model.assumed).map((model) => model.id));
     // Nor a model the catalogue says waits to be chosen by name: installing a community
     // uncensored variant made it every agent's writer, Content & safety off (issue 1289).
-    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools !== false) &&
-      !assumed.has(model.id) && localModelPolicy(model.id)?.explicitChoiceOnly !== true);
+    const local = app.harnessModels.filter((model) => model.provider === "ollama" && (!needsTools || model.tools === true) &&
+      localModelPolicy(model.id)?.explicitChoiceOnly !== true);
     // Admission lets an unstated modality through — unknown is offered, not withheld — but a
     // default is a choice nobody is looking at, so for Stage a model that says it reads images
     // comes before one that merely does not say it cannot.
@@ -5639,7 +5542,7 @@ export class Coordinator {
     // Capture this before commands can change the saved preference. Failed discovery has no
     // harnessInfo, but Settings must still attach its health failure to the engine we tried.
     const generation = this.opts.harnessInfo?.generation;
-    this.launchEngine = generation === "claude" || generation === "codex" || generation === "arke" ? generation
+    this.launchEngine = generation === "claude" || generation === "codex" ? generation
       : generation === "v1" || generation === "v2" ? "opencode"
       : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
@@ -6855,6 +6758,7 @@ export class Coordinator {
     benchTakeActionHeld = false,
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
+    browserImportStore?: WorldStore,
   ): Promise<void> {
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
@@ -9519,6 +9423,27 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "set-sheet-narration": {
+        // How a narrator plays a character (design turn 200, SPEC-047 R-165): the person's own
+        // action, written straight to the sheet as a voice is. Every book under `performed` that
+        // has no note of its own for them is played with it (R-166), so it is refused while any
+        // story production is being read, as a book's own note is: a run half way through would
+        // make lines under a note that no longer stands.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        if (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id))) {
+          void this.appLog?.append({ kind: "sheet.narration-refused", path: msg.path, message: "a book is being read" });
+          return;
+        }
+        try {
+          await applySheetNarration(store, { path: msg.path, narration: msg.narration });
+        } catch (err) {
+          void this.appLog?.append({ kind: "sheet.narration-failed", path: msg.path, message: err instanceof Error ? err.message : String(err) });
+          return;
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "sheet-refs": {
         const store = this.opts.provider.openStore?.();
         const index = store?.getIndex();
@@ -11841,13 +11766,49 @@ export class Coordinator {
         }
         return;
       }
+      case "editor-effect-analysis": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        this.trackBackground(this.effectAnalysis.request(store, msg.productionId, msg.effectId, msg.action, msg.expectedSourceFingerprint));
+        return;
+      }
+      case "editor-transition-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handleTransitionReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) { await this.conversationActionLifecycle(store).recoverConversation(conversationId); await this.refreshConversationOutcome(store, conversationId); }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "editor-picture-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handlePictureReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) { await this.conversationActionLifecycle(store).recoverConversation(conversationId); await this.refreshConversationOutcome(store, conversationId); }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "editor-effect-proposal": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const { result, conversationId } = await handleEffectReview(store, msg, this.effectDependencies);
+        this.emit(result);
+        if (conversationId) {
+          await this.conversationActionLifecycle(store).recoverConversation(conversationId);
+          await this.refreshConversationOutcome(store, conversationId);
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "timeline-move-picture":
       case "timeline-command":
       case "timeline-history": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         try {
-          const { dropped } = await applyTimelineCommand(
+          const { dropped } = await applyHumanTimelineCommand(
             store,
             msg.productionId,
             msg.kind === "timeline-move-picture"
@@ -12086,7 +12047,10 @@ export class Coordinator {
             const attemptSuffix = requestedExportId ?? stamp;
             const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
             const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${attemptSuffix}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${attemptSuffix}`;
-            const handle = runExport(
+            const effectAnalysis = plan.effectRender ? await this.effectAnalysis.readyForExport(store, msg.productionId, plan.effectRender, plan.revision) : undefined;
+            const handle = plan.effectRender ? runEffectExport(store, plan, `${stem}.mp4`, runner, this.opts.effectRasterHost,
+              (percent) => emitProgress(handle.id, "running", percent, null, null),
+              sidecar === null ? undefined : sidecar(stem), requestedExportId, effectAnalysis) : runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               `${stem}.mp4`,
@@ -14246,7 +14210,7 @@ export class Coordinator {
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
-        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), signal: control.signal, exportId }).catch(
+        const run = exportAudiobookPlayer(store, msg.productionId, { clock: () => new Date().toISOString(), ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}), signal: control.signal, exportId }).catch(
           (err: unknown): { ok: false; blockers: string[] } => {
             void this.appLog?.append({ kind: "audiobook.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
             return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
@@ -14726,6 +14690,11 @@ export class Coordinator {
         if (!chapter) return;
         const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
         if (this.directingChapters.has(key)) return;
+        // A direction made for the blocks before the grouping would name other blocks after it (design turn 201, rule 3).
+        if (this.groupingChapters.has(key)) {
+          this.emit({ at: new Date().toISOString(), type: "direction.finished", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, outcome: "failed", directed: 0, dropped: 0, reason: "grouping by beats · direct when the beats are in" });
+          return;
+        }
         const control = new AbortController();
         this.directingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         const onClose = () => control.abort();
@@ -14842,7 +14811,14 @@ export class Coordinator {
           this.heldDirections.delete(key);
           this.heldProposals.delete(key);
           // A cast written makes the chapter's other standing directions answer to new readers (R-13).
-          if (extras.cast !== undefined) await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+          if (accepted.cast !== undefined) {
+            await this.conformAudiobookDirections(store, msg.worldId, [msg.productionId]);
+            // And every window is told of it, as a cast run or a pin is: a window draws the blocks
+            // from the last cast it heard of, so without this a chapter cast by Direct read its
+            // lines as narration, and each line's take, named with its speaker's note, as stale
+            // the moment it landed (issue 1637). Before the record, so the record is judged by it.
+            this.emit({ at: at(), type: "voices.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, record: accepted.cast });
+          }
           let record = accepted.record;
           if (held !== undefined && held.heard.size > 0) {
             const kept = await adoptHeardTakes(store, msg.productionId, chapter.id, [...held.heard], room, {
@@ -14966,6 +14942,66 @@ export class Coordinator {
         }
         return;
       }
+      case "group-chapter-beats": {
+        // Group by beats (SPEC-047 R-172): the director names each beat's first block and the
+        // blocks of a beat are joined, the chapter's seams replaced. Not while the book or a
+        // chapter of it is read, as the seams are not, nor while this chapter is being directed:
+        // a proposal made for the blocks before would be accepted onto other blocks.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) };
+        const at = () => new Date().toISOString();
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.audiobookBusy(msg.worldId, msg.productionId) || this.directingChapters.has(key) || this.groupingChapters.has(key)) {
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "refused", reason: "reading or directing · beats wait until it ends" });
+          return;
+        }
+        let deriver = this.opts.beatsDeriver ?? null;
+        if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+          deriver = makeAdapterBeatsDeriver(this.opts.adapter, this.sessionInput, this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`);
+        }
+        if (!deriver) {
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "unavailable", reason: "the writing service is not running" });
+          return;
+        }
+        const control = new AbortController();
+        this.groupingChapters.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        // Every window shows the press as grouping until the answer (design turn 201, rule 3).
+        this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: "grouping" });
+        try {
+          const room = await this.directionRoom(store, msg.productionId);
+          const grouped = await groupChapterByBeats(store, msg.productionId, chapter.id, deriver, room, control.signal);
+          // A proposal made for the blocks before the grouping names other blocks now.
+          this.heldDirections.delete(key);
+          this.heldProposals.delete(key);
+          void this.appLog?.append({ kind: "audiobook.beats", chapter: chapter.file, before: grouped.before, after: grouped.after, beats: grouped.beats.length, dropped: grouped.dropped, cut: grouped.cut });
+          this.refreshIfStillOpen(store);
+          this.emit({ at: at(), type: "audiobook.record", ...ids, record: grouped.record });
+          this.emit({
+            at: at(),
+            type: "audiobook.beats",
+            ...ids,
+            outcome: "grouped",
+            before: grouped.before,
+            after: grouped.after,
+            beats: grouped.beats,
+            dropped: grouped.dropped,
+            cut: grouped.cut,
+            ...(grouped.summary !== undefined ? { summary: grouped.summary } : {}),
+          });
+        } catch (err) {
+          if (!(err instanceof BeatRefusal)) void this.appLog?.append({ kind: "audiobook.beats-failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          this.emit({ at: at(), type: "audiobook.beats", ...ids, outcome: err instanceof BeatRefusal ? "refused" : "failed", reason: err instanceof BeatRefusal ? err.message : describeCoordinatorError(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.groupingChapters.delete(key);
+        }
+        return;
+      }
       case "set-audiobook-recorded": {
         // A speaker a person records (design turn 155, SPEC-047 R-37): the book's choice, kept
         // beside the reading. Refused while the book or a chapter of it is being read, as the
@@ -15058,7 +15094,9 @@ export class Coordinator {
       }
       case "draft-audiobook-speaker-notes": {
         // The missing speaker notes drafted from the sheets (design turn 184c, R-54): written at
-        // once, marked as the sheet's, never over a note the author wrote.
+        // once into each character's empty narration (design turn 200, R-170), never over one the
+        // author wrote. A narration reaches every book, so any book being read refuses it, and
+        // the drafts are asked within the book's narrator's tag word cap where it has one.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const answer = (drafted: number, refused?: string) =>
@@ -15074,8 +15112,11 @@ export class Coordinator {
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
-          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: () => (this.audiobookBusy(msg.worldId, msg.productionId) ? "the book is being read" : null) });
-          if (drafted > 0) this.refreshIfStillOpen(store);
+          const { narrator } = await this.audiobookNarrator(store, this.voiceService ?? null, msg.productionId);
+          const words = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model)?.cadence?.tagWords;
+          const reading = () => (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id)) ? "a book is being read" : null);
+          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(words !== undefined ? { words } : {}) });
+          if (drafted > 0) await this.refreshWorldSnapshot(msg.worldId);
           answer(drafted);
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.note-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -15284,7 +15325,7 @@ export class Coordinator {
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
         try {
           // No voice is asked for: what plays is judged by the words alone (codex on PR 1491).
-          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
+          const listening = await audiobookListening(store, msg.productionId, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.scope !== undefined ? { scope: msg.scope } : {}) });
           this.emit({ at: new Date().toISOString(), type: "audiobook.listening", ...ids, listening });
         } catch (err) {
           void this.appLog?.append({ kind: "audiobook.listening-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
@@ -15388,6 +15429,112 @@ export class Coordinator {
         }
         return;
       }
+      case "quote-audiobook-motion":
+      case "make-audiobook-motion":
+      case "stop-audiobook-motion":
+      case "choose-audiobook-motion": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (chapter === undefined) return;
+        const key = `${store.worldId}/${msg.productionId}/${chapter.file}/${msg.block}`;
+        const ids = { requestId: msg.requestId, worldId: store.worldId, productionId: msg.productionId, chapterId: chapter.id, block: msg.block };
+        const { block: _motionBlock, ...recordIds } = ids;
+        const emit = (state: "quoted" | "making" | "review" | "chosen" | "failed", detail: { quote?: import("@arke-studio/contracts").AudiobookMotionQuote; reason?: string } = {}) => this.emit({ at: this.nowIso(), type: "audiobook.motion", ...ids, state, ...detail });
+        if (msg.kind === "stop-audiobook-motion") { this.makingMotion.get(key)?.abort(); return; }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        try {
+          if (msg.kind === "choose-audiobook-motion") {
+            const record = await chooseAudiobookMotion(store, msg.productionId, chapter.file, msg.block, msg.choice, msg.behavior, msg.artifactId);
+            this.emit({ at: this.nowIso(), type: "audiobook.record", ...recordIds, record });
+            this.refreshIfStillOpen(store);
+            emit("chosen"); return;
+          }
+          const input = msg.kind === "make-audiobook-motion" ? msg.quote : msg;
+          const modelId = typeof input.model === "string" ? input.model : input.model.id;
+          const model = this.opts.manifest?.models.find((m) => m.id === modelId);
+          if (model === undefined || !this.benchModelEligible(model)) throw new Error("this motion model is unavailable");
+          const quote = await quoteAudiobookMotion(store, msg.productionId, chapter.file, msg.block, model, input.params, input.prompt);
+          if (msg.kind === "quote-audiobook-motion") { emit("quoted", { quote }); return; }
+          if (this.makingMotion.has(key)) throw new Error("a clip is already being made here");
+          if (quote.sourceHash !== msg.quote.sourceHash || quote.sourceAt !== msg.quote.sourceAt || quote.sourceFile !== msg.quote.sourceFile) throw new Error("the source picture changed · review a new quote");
+          if (quote.estimatedMicroUsd > msg.quote.estimatedMicroUsd) throw new Error("the price changed · review a new quote");
+          this.makingMotion.set(key, control);
+          emit("making", { quote });
+          const made = await this.makeBenchPicture(store, { title: `Chapter ${chapter.order} · motion`, prompt: quote.prompt, model, who: [], requestId: msg.requestId, ceilingMicroUsd: msg.quote.estimatedMicroUsd, signal: control.signal, motion: { params: quote.params, startFrame: quote.sourceFile, sourceHash: quote.sourceHash } });
+          if (!made.ok) throw new Error(made.reason);
+          const record = await saveAudiobookMotionCandidate(store, msg.productionId, chapter.file, msg.block, quote, made.artifact.id);
+          this.emit({ at: this.nowIso(), type: "audiobook.record", ...recordIds, record });
+          this.refreshIfStillOpen(store);
+          emit("review");
+        } catch (error) { emit("failed", { reason: control.signal.aborted ? "stopped · any completed clip remains in Library" : describeCoordinatorError(error) }); }
+        finally { store.closingSignal.removeEventListener("abort", onClose); if (this.makingMotion.get(key) === control) this.makingMotion.delete(key); }
+        return;
+      }
+      case "audiobook-word-timing": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const key = `${store.worldId}/${msg.productionId}`;
+        if (msg.action === "stop") { this.preparingWordTiming.get(key)?.abort(); return; }
+        if (msg.action === "status") {
+          // Opening Activity must not mix or hash every recording just to display a count.
+          const availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
+          const progress = this.wordTimingProgress.get(key) ?? { done: 0, total: 0, chapters: [] };
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...progress, blocks: [] } });
+          return;
+        }
+        const control = new AbortController();
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const failures = new Map<string, string>();
+        let done = 0;
+        let cached: AudiobookWordTimingState["blocks"] = [];
+        const included = (block: { chapterId: string; key: string }) => (msg.chapters === undefined || msg.chapters.includes(block.chapterId)) && (msg.blocks === undefined || msg.blocks.some((pick) => pick.chapterId === block.chapterId && pick.key === block.key));
+        let availability: { ready: boolean; reason?: string } | null | undefined;
+        const report = async (refresh = true) => {
+          if (refresh) {
+          availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
+          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
+          cached = listening.chapters.flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
+          }
+          const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
+          const selected = blocks.filter(included);
+          const progress = this.wordTimingProgress.get(key) ?? { done, total: selected.length, chapters: [...new Set(selected.map((block) => block.chapterId))] };
+          this.emit({ at: this.nowIso(), type: "audiobook.word-timing", worldId: store.worldId, productionId: msg.productionId, requestId: msg.requestId, state: { available: availability?.ready === true, ...(availability?.reason !== undefined ? { reason: availability.reason } : {}), running: this.preparingWordTiming.has(key), ...(this.wordTimingRequests.has(key) ? { runningRequestId: this.wordTimingRequests.get(key) } : {}), ...progress, blocks } });
+          return blocks;
+        };
+        try {
+          if (msg.action === "read" || this.preparingWordTiming.has(key)) { await report(); return; }
+          const availability = await this.voiceService?.wordTimingAvailability();
+          if (availability?.ready !== true) { await report(); return; }
+          this.preparingWordTiming.set(key, control);
+          this.wordTimingRequests.set(key, msg.requestId);
+          const blocks = (await report()).filter(included);
+          this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((block) => block.chapterId))] });
+          for (const block of blocks) {
+            if (control.signal.aborted) break;
+            if (!block.ready) {
+              try {
+                const plan = await planAudiobook(store, msg.productionId, block.chapterId, { narrator: await anyNarrator(store, msg.productionId) });
+                await prepareAudiobookWordTiming(store, msg.productionId, plan, block.key, (audio, signal) => this.voiceService!.transcribeWords(audio, signal), control.signal, this.opts.ffmpeg);
+              } catch (error) { failures.set(`${block.chapterId}/${block.key}`, control.signal.aborted ? "stopped" : describeCoordinatorError(error)); }
+            }
+            done += 1;
+            this.wordTimingProgress.set(key, { done, total: blocks.length, chapters: [...new Set(blocks.map((entry) => entry.chapterId))] });
+            await report(false);
+          }
+        } catch (error) { void this.appLog?.append({ kind: "audiobook.word-timing-failed", message: describeCoordinatorError(error) }); }
+        finally {
+          const owned = this.preparingWordTiming.get(key) === control;
+          if (owned) { this.preparingWordTiming.delete(key); this.wordTimingRequests.delete(key); this.wordTimingProgress.delete(key); }
+          store.closingSignal.removeEventListener("abort", onClose);
+          // Only preparation needs a terminal refresh; read already sent its current plan.
+          if (owned && !store.closingSignal.aborted) await report().catch(() => {});
+        }
+        return;
+      }
       case "make-audiobook-picture": {
         // A suggestion made (design turn 191a, R-99): through the Bench as any image is, on the
         // price the press showed, and filed on the block as its picture — one that keeps the
@@ -15432,6 +15579,7 @@ export class Coordinator {
             model,
             ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),
             who,
+            detailed: pictureDetailSkins(msg.shot?.details ?? [], room.people, store.getBundle().sheets),
             requestId: msg.requestId,
             ceilingMicroUsd: msg.confirmedMicroUsd,
             signal: control.signal,
@@ -16179,6 +16327,30 @@ export class Coordinator {
         }
         return;
       }
+      case "list-designed-voices": {
+        // The project's own voices by name (design turn 204, issue 1635): AI Studio shows no IDs,
+        // and an import by ID was the only way in. Read when the dialog's view asks, page by page
+        // to Google's 50, at most ten pages; a key that changes underneath answers nothing stale.
+        try {
+          const key = await this.credentials?.get("google");
+          if (!key) throw new Error("Connect Google in Settings to list your project's voices.");
+          const client = this.opts.dispatchClients?.google as (DispatchClient & Partial<VoiceDesignClient>) | undefined;
+          if (!client?.listDesignedVoices) throw new Error("Listing Google voices is unavailable on this host.");
+          const voices: Array<{ remoteId: string; name: string; language: string; model: string; expiresAt: string }> = [];
+          let page: string | undefined;
+          for (let n = 0; n < 10; n += 1) {
+            const listed = await client.listDesignedVoices(key, page, AbortSignal.timeout(30_000));
+            for (const voice of listed.voices) voices.push({ remoteId: voice.remoteId, name: voice.name, language: voice.language, model: voice.model, expiresAt: voice.expiresAt });
+            if (listed.nextPageToken === undefined) break;
+            page = listed.nextPageToken;
+          }
+          if (await this.credentials?.get("google") !== key) throw new Error("The Google key changed. List the voices again.");
+          this.emit({ at: this.nowIso(), type: "voice.designed-listed", requestId: msg.requestId, worldId: msg.worldId, voices, reason: null });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "voice.designed-listed", requestId: msg.requestId, worldId: msg.worldId, voices: null, reason: describeCoordinatorError(error) });
+        }
+        return;
+      }
       case "voice-candidates": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.voiceService) return;
@@ -16305,9 +16477,16 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${msg.provider} voice model is available.`);
           return;
         }
+        // The character's narration on the line (design turn 200, R-168): led as a book leads it —
+        // a tag in the words on a tag row, a style beside them on an instruction row, nothing where
+        // the reader takes neither. It names the cached take, so a changed note is heard afresh.
+        const playing = msg.note === undefined ? null : performanceNote(msg.note, model, source.kind === "cloned" ? source.voice.language : undefined);
+        const spokenLine = playing?.mode === "tag" ? { ...line, text: `${playing.tag} ${line.text}` } : line;
+        const noteStyle = playing?.mode === "instruction" ? noteSentence(msg.note!) : undefined;
+        const cacheReference = noteStyle === undefined ? previewReference : [previewReference, `style:${noteStyle}`].filter((part) => part !== undefined).join("|");
         // Queued providers: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
         const format = voiceFormatForModel(model);
-        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id, previewReference);
+        const cached = previewCacheFile(msg.provider, msg.voiceId, spokenLine.text, format, model.id, cacheReference);
         try {
           const bytes = new Uint8Array(
             await readFile(toExtendedLength(join(store.dir, fromPortable(cached)))),
@@ -16367,10 +16546,10 @@ export class Coordinator {
             sheet,
             provider: msg.provider,
             voiceId: msg.voiceId,
-            line,
+            line: spokenLine,
             model,
             ...(voiceReference ? { voiceReference: true } : {}),
-            ...(previewReference !== undefined ? { reference: previewReference } : {}),
+            ...(cacheReference !== undefined ? { reference: cacheReference } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined
               ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
               : {}),
@@ -16387,6 +16566,7 @@ export class Coordinator {
           sheetVersion: sheet.version,
           characterCount: normalizeSpeechText(line.text).length,
           ...(source.kind === "cloned" ? { language: source.voice.language } : {}),
+          ...(noteStyle !== undefined ? { instructions: noteStyle } : {}),
         };
         const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         if (!queued.accepted) {
@@ -16924,6 +17104,31 @@ export class Coordinator {
       case "upload-artifacts": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
+        if (browserImportStore && store !== browserImportStore) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The world changed during import. Choose the files again.");
+          return;
+        }
+        if (msg.browserFiles !== undefined) {
+          if (!store || store.worldId !== msg.worldId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "Open this world's editor before importing media.");
+            return;
+          }
+          if (!store.canWrite()) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "This world is read-only. Reopen it for editing before importing media.");
+            return;
+          }
+          if (msg.sourcePaths !== undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "Choose either browser files or desktop files for one import.");
+            return;
+          }
+          const { browserFiles, ...request } = msg;
+          if (browserFiles.length === 0) { this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true); return; }
+          try {
+            await this.browserMediaImports.run(browserFiles, () => !this.stillOpen(store) || this.stopping,
+              sourcePaths => this.handleClientMessage({ ...request, sourcePaths }, false, false, false, store));
+          } catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
+          return;
+        }
         if (!store || store.worldId !== msg.worldId || (!pick && !msg.sourcePaths)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
@@ -16987,7 +17192,9 @@ export class Coordinator {
              * it the renderer never learns the path — the picker deliberately withholds it — and
              * a large video simply cannot be filed from either shelf.
              */
-            this.emit({
+            // Browser failures already have a correlated result. Their temporary source cannot
+            // be retried after cleanup and must not become a renderer-visible host path.
+            if (!browserImportStore) this.emit({
               at: new Date().toISOString(),
               type: "artifact.notice",
               worldId: msg.worldId,
@@ -18638,6 +18845,7 @@ export class Coordinator {
           file: `takes/${take.id}/${take.media}`,
           kind: lookKind,
           prompt: lookPrompt.trim(),
+          ...(msg.name?.trim() ? { name: msg.name.trim() } : {}),
           ...(take.jobId ? { jobId: take.jobId } : {}),
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
@@ -18667,6 +18875,21 @@ export class Coordinator {
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("look", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "rename-character-look": {
+        const store = this.opts.provider.openStore?.();
+        let error: string | undefined;
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("This world is no longer open.");
+          await renameCharacterLook(store, msg.sheetId, msg.lookId, msg.name, msg.expectedName, { requestId: msg.requestId });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          error = describeCoordinatorError(err);
+          // A stale rename must show the current saved name before the author retries it.
+          if (store?.worldId === msg.worldId) await this.refreshWorldSnapshot(msg.worldId).catch(() => {});
+        }
+        this.emit({ at: new Date().toISOString(), type: "reference.look-renamed", worldId: msg.worldId, sheetId: msg.sheetId, lookId: msg.lookId, requestId: msg.requestId, ...(error !== undefined ? { error } : {}) });
         return;
       }
       case "reject-reference-take": {
@@ -19395,11 +19618,13 @@ export class Coordinator {
    */
   private async makeBenchPicture(
     store: WorldStore,
-    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal },
+    input: { title: string; prompt: string; mood?: string; model: ManifestModel; aspect?: string; who: readonly PictureWho[]; detailed?: readonly PictureDetailSkin[]; requestId: string; ceilingMicroUsd: number; signal?: AbortSignal; motion?: { params: import("@arke-studio/contracts").BenchVideoParams; startFrame: string; sourceHash: string } },
   ): Promise<{ ok: true; sessionId: SessionId; artifact: { id: string; file: string }; costMicroUsd: number | null; estimatedMicroUsd: number } | { ok: false; reason: string; sessionId?: SessionId; provider?: true }> {
+    if (input.signal?.aborted) return { ok: false, reason: "stopped" };
     const worldId = store.worldId;
-    const params = { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
-    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode: "image", brief: input.prompt, title: input.title } }).catch(() => null);
+    const mode = input.motion === undefined ? "image" : "video";
+    const params = input.motion?.params ?? { kind: "image" as const, count: 1, ...(input.aspect !== undefined ? { aspect: input.aspect } : {}) };
+    const opened = await openBenchSession(store.dir, () => this.nowIso(), { fresh: true, defaultModel: { provider: input.model.provider, model: input.model.id }, initial: { mode, brief: input.prompt, title: input.title } }).catch(() => null);
     if (opened === null) return { ok: false, reason: "the Bench could not open a session" };
     const sessionId = opened.session.id;
     const fail = async (reason: string) => {
@@ -19407,7 +19632,13 @@ export class Coordinator {
       this.transport.broadcastSnapshot();
       return { ok: false as const, reason, sessionId };
     };
-    await opened.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    await opened.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief: input.prompt }, { at: this.nowIso(), requestId: `pic-composer:${input.requestId}` });
+    if (input.motion !== undefined) {
+      const bench = await this.benchFor(worldId, sessionId);
+      if (bench === null) return fail("the Bench session is gone");
+      const start = await addBenchReference(bench, store.getBundle(), input.model, { source: { source: "world-file", path: input.motion.startFrame }, worldFile: { read: (file) => quotedMotionSource(store, file, input.motion!.sourceHash) }, lane: "keyframe", requestId: `motion-frame:${input.requestId}`, at: this.nowIso() });
+      if (start.outcome === "refused") return fail(start.reason);
+    }
     // The pictures that ride, each by the name the Bench gives it; a picture it refuses is left
     // off and the take is made without it — the refusal is the Bench's own and is logged.
     const cited: Array<{ name: string; kind: "character" | "place"; token: string }> = [];
@@ -19423,10 +19654,11 @@ export class Coordinator {
       if (outcome.outcome === "refused") void this.appLog?.append({ kind: "bench.reference-refused", worldId, reason: outcome.reason });
       else cited.push({ name: entry.name, kind: entry.kind, token: outcome.token });
     }
-    const brief = pictureBench(input.prompt, cited, input.mood);
+    if (input.signal?.aborted) return fail("stopped");
+    const brief = input.motion === undefined ? pictureBench(input.prompt, cited, input.mood, input.detailed ?? []) : input.prompt;
     const composed = await this.benchFor(worldId, sessionId);
     if (composed === null) return fail("the Bench session is gone");
-    await composed.store.append({ type: "composer-set", mode: "image", provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
+    await composed.store.append({ type: "composer-set", mode, provider: input.model.provider, model: input.model.id, params, brief }, { at: this.nowIso(), requestId: `pic-brief:${input.requestId}` });
     const bench = await this.benchFor(worldId, sessionId);
     if (bench === null) return fail("the Bench session is gone");
     const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
@@ -19445,6 +19677,10 @@ export class Coordinator {
     // The reservation is durable before any job exists, as the Bench's press makes it.
     const reservation = await bench.store.append({ type: "takes-reserved", takes: plan.reserved }, { at: this.nowIso(), requestId: `pic:${input.requestId}` });
     if (reservation.deduplicated) return fail("that picture was already asked for");
+    if (input.signal?.aborted) {
+      for (const take of plan.reserved) await bench.store.append({ type: "take-status", takeId: take.id, status: "cancelled", error: "stopped" }, { at: this.nowIso() });
+      return fail("stopped");
+    }
     const outcome = await enqueueInputs(plan.inputs, async (job) => {
       if (!this.jobQueue) throw new Error("the job queue is unavailable");
       return this.enqueueWithSpeechChecks(job, new Map());
@@ -19460,7 +19696,7 @@ export class Coordinator {
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
     // The take lands through the job's own finalisation; this waits for it to be written to the log.
-    const deadline = Date.now() + PICTURE_WAIT_MS;
+    const deadline = Date.now() + (input.motion === undefined ? PICTURE_WAIT_MS : 45 * 60_000);
     for (;;) {
       if (input.signal?.aborted) {
         // Stop costs nothing more: the job is cancelled where it stands, and what was made stays.
@@ -19668,10 +19904,27 @@ export class Coordinator {
   private async refreshBench(worldId: string, sessionId: SessionId): Promise<void> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return;
-    const bench = await this.benchFor(worldId, sessionId);
-    if (bench) this.readModel.setBench({ worldId, session: bench.session });
-    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
-    this.transport.broadcastSnapshot();
+    const key = `${worldId}/${sessionId}`;
+    const refresh = Symbol();
+    this.benchRefreshes.set(key, refresh);
+    try {
+      const [bench, sessions] = await Promise.all([
+        this.benchFor(worldId, sessionId),
+        discoverBenchSessions(store.dir),
+      ]);
+      if (!this.stillOpen(store) || this.benchRefreshes.get(key) !== refresh) return;
+      // Completion and filing also refresh sessions opened by background chapter work. Those
+      // results belong in the session list, not in the workspace the author is reviewing.
+      // A slower refresh must not restore an older selection after a newer command answered.
+      const active = this.readModel.getState().bench;
+      if (bench && active?.worldId === worldId && active.session.id === sessionId) {
+        this.readModel.setBench({ worldId, session: bench.session });
+      }
+      this.readModel.setBenchSessions(sessions);
+      this.transport.broadcastSnapshot();
+    } finally {
+      if (this.benchRefreshes.get(key) === refresh) this.benchRefreshes.delete(key);
+    }
     // Dispatch itself refreshes Bench while holding the action execution lock. Reconcile in the
     // background so fast completions wait for that dispatch's durable queued outcome.
     this.trackBackground(this.reconcileBenchConversationActions(store, sessionId));
@@ -20444,6 +20697,7 @@ export class Coordinator {
     }, quotePorts);
     return {
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
+      effectDependencies: this.effectDependencies,
       benchGenerationQuotes: benchQuotes,
       benchControls: new BenchChatControls(store, {
         bench: sessionId => this.benchFor(store.worldId, sessionId),
@@ -20988,27 +21242,7 @@ export class Coordinator {
     const detected = this.opts.detectHarnesses
       ? await this.opts.detectHarnesses(claudePath, codexPath).catch(() => [])
       : [];
-    return [OPENCODE_AVAILABILITY, await this.arkeHarnessAvailability(), ...detected];
-  }
-
-  /**
-   * Whether the local harness could write right now (issue 1247). Nothing to install: it is part
-   * of the app, so the only questions are whether Ollama answers and whether it holds a model the
-   * harness can write with — one that states the 256k window and calls tools. Asked of the same
-   * Ollama client the rest of the coordinator uses, so this and the local-model listing agree.
-   */
-  private async arkeHarnessAvailability(): Promise<HarnessAvailability> {
-    const list = this.opts.dispatchClients?.["ollama"]?.listModels;
-    if (!list) return arkeAvailability("Local writing needs Ollama, which is not set up on this machine.");
-    let pulled: readonly import("@arke-studio/contracts").LocalHarnessModel[];
-    try {
-      pulled = await list.call(this.opts.dispatchClients!["ollama"]!);
-    } catch {
-      return arkeAvailability("Ollama is not answering on this machine.");
-    }
-    const usable = pulled.some((model) => meetsLocalModelMinimum(model) && model.tools && model.assumed !== true);
-    return arkeAvailability(usable ? null
-      : "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.");
+    return [OPENCODE_AVAILABILITY, ...detected];
   }
 
   /**
@@ -21097,8 +21331,7 @@ export class Coordinator {
   /**
    * Ollama is its own service and outlives Arke, so the models this run loaded would otherwise
    * hold memory until Ollama's idle timeout: five minutes for dispatch requests, and whatever
-   * OpenCode or Codex asked for. The Arke harness releases its own on dispose; this covers the
-   * rest. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
+   * OpenCode or Codex asked for. It is the same whole-runtime unload a GPU handover makes, so it runs only after a run
    * that used Ollama — one that never did has no claim on another application's models. Called
    * once the queue, harness children and adapter have stopped, so nothing can load after it.
    */
@@ -21107,7 +21340,7 @@ export class Coordinator {
     if (!client?.unload || !this.localGpu.hasRun("Ollama")) return;
     // Only what this run named: the dispatches' models and the harness turns'. A whole-runtime
     // unload also emptied models another application had loaded into the same Ollama (issue
-    // 1289). The Arke harness hands back its own on dispose, whatever it was asked for by.
+    // 1289).
     const only = new Set([...client.usedModels?.() ?? [], ...this.harnessOllamaModels]);
     if (only.size === 0) return;
     const signal = AbortSignal.timeout(OLLAMA_SHUTDOWN_RELEASE_MS);
@@ -21142,6 +21375,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await this.effectAnalysis.stop();
       const setupStopped = this.setup?.dispose();
       await this.adapterLibrary?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
@@ -21158,8 +21392,11 @@ export class Coordinator {
       for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const run of this.castingVoices.values()) run.control.abort();
       for (const run of this.directingChapters.values()) run.control.abort();
+      for (const run of this.groupingChapters.values()) run.control.abort();
       for (const control of this.derivingLooks.values()) control.abort();
       for (const control of this.makingPictures.values()) control.abort();
+      for (const control of this.makingMotion.values()) control.abort();
+      for (const control of this.preparingWordTiming.values()) control.abort();
       for (const run of this.illustrating.values()) run.control.abort();
       for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
@@ -21186,6 +21423,7 @@ export class Coordinator {
       await this.appearanceWrite;
       await this.jobQueue?.waitForIdle();
       await this.jobQueue?.drain();
+      await this.audiobookActivity.drain();
       await Promise.all([...this.supervisors.values()].map((s) => s.stop()));
       await this.opts.adapter?.dispose?.().catch(() => {});
       await this.releaseOllama();

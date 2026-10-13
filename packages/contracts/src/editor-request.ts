@@ -1,5 +1,10 @@
 import { z } from "zod";
+import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
+import { PictureProposalFamilySchema } from "./editor-picture-proposal.js";
 import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema } from "./editor-request-vocabulary.js";
+import { EFFECT_PROPOSAL_BOUNDS, EffectProposalFamilySchema, EffectArrangementScopeSchema, EffectVersionRefSchema } from "./editor-effect-proposal.js";
+export { EDITOR_REQUEST_BOUNDS, EditorRequestIdSchema, type EditorRequestId } from "./editor-request-vocabulary.js";
 import {
   PICTURE_TRACK_ID,
   TimelineClipIdSchema,
@@ -30,20 +35,6 @@ import {
  * about, in one strict JSON file per production, and never appear in global Approvals.
  */
 
-export const EDITOR_REQUEST_BOUNDS = {
-  /** Requests one turn may prepare; a conversation that wants more says so over more turns. */
-  perTurn: 2,
-  commands: 50,
-  summary: 500,
-  /** How many records the file keeps; the oldest decided ones fall off the front. */
-  kept: 200,
-} as const;
-
-export const EditorRequestIdSchema = z
-  .string()
-  .regex(/^req_[0-9A-HJKMNP-TV-Z]{26}$/, "an editor request id is req_ followed by a ULID");
-export type EditorRequestId = z.infer<typeof EditorRequestIdSchema>;
-
 export const EditorRequestStatusSchema = z.enum(["pending", "accepted", "rejected", "stale"]);
 export type EditorRequestStatus = z.infer<typeof EditorRequestStatusSchema>;
 
@@ -71,20 +62,28 @@ export const ModelSceneEditSchema = z.discriminatedUnion("kind", [
 ]);
 export type ModelSceneEdit = z.infer<typeof ModelSceneEditSchema>;
 
-// Live-source detachment is a direct editor action; request ghosts cannot resolve it.
-type PreviewableCommandOption = Exclude<(typeof TimelineCommandSchema.options)[number], { shape: { kind: z.ZodLiteral<"detach-audio"> } }>;
+// This is deliberately an allowlist. A new direct editor command must not silently become a
+// generic model tool or an Accept action, especially protection release (SPEC-053 R-26, R-36).
+const GENERIC_EDITOR_COMMANDS = [
+  "set-performance-source", "move-adjacent", "move-to-order", "move-to-frame", "trim", "split",
+  "duplicate", "delete", "ripple-delete", "switch-take", "place", "set-clip-gain", "set-clip-audio",
+  "set-clip-role", "set-track", "add-track", "remove-track", "add-to-library", "remove-from-library",
+  "set-mix", "add-subtitle-track", "add-cue", "edit-cue", "delete-cue", "import-cues", "set-subtitle-style",
+] as const;
+type GenericEditorCommandKind = (typeof GENERIC_EDITOR_COMMANDS)[number];
+const genericEditorCommandKinds = new Set<string>(GENERIC_EDITOR_COMMANDS);
+type PreviewableCommandOption = Extract<(typeof TimelineCommandSchema.options)[number], { shape: { kind: z.ZodLiteral<GenericEditorCommandKind> } }>;
 const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandSchema.options.filter(
-  (option): option is PreviewableCommandOption => option.shape.kind.value !== "detach-audio",
+  (option): option is PreviewableCommandOption => genericEditorCommandKinds.has(option.shape.kind.value),
 ) as [PreviewableCommandOption, ...PreviewableCommandOption[]]);
 
 /** SPEC-051 R-33: both prompt paths name the actual vocabulary, including explicit exclusions. */
-export const TIMELINE_EDITOR_COMMAND_GUIDE = TimelineCommandSchema.options.map(option => {
+export const TIMELINE_EDITOR_COMMAND_GUIDE = EditorRequestCommandSchema.options.map(option => {
   const kind = option.shape.kind.value;
-  if (kind === "detach-audio") return "detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching";
   return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
-}).join(" | ");
+}).join(" | ") + " | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks";
 /** The shared result shape stays compact; the turn's action guide supplies command fields. */
-export const TIMELINE_EDITOR_COMMAND_NAMES = TimelineCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
+export const TIMELINE_EDITOR_COMMAND_NAMES = EditorRequestCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
 
 /** What the model returns: a summary in the person's terms and the exact commands (R-27, R-34). */
 export const ModelEditorRequestSchema = z
@@ -94,6 +93,19 @@ export const ModelEditorRequestSchema = z
   })
   .strict();
 export type ModelEditorRequest = z.infer<typeof ModelEditorRequestSchema>;
+
+/** Checked again at acceptance: a persisted generic card cannot inherit later effect authority. */
+export function genericEditorRequestRefusal(base: ProductionTimeline, commands: readonly TimelineCommand[]): string | null {
+  for (const command of commands) {
+    if (!genericEditorCommandKinds.has(command.kind)) return "Effects require Review in timeline and Apply reviewed version; generic Accept cannot apply effects or release protection.";
+    if (command.kind === "place" && (command.clip.visual || command.clip.visualOriginId)) return "Picture appearance requires Review in timeline and Apply reviewed version. Place the clip first, then propose its appearance.";
+    if (command.kind === "add-track" && command.trackKind === "effect") return "Effect tracks require the effects arrangement review flow.";
+    if ("trackId" in command && base.tracks.some(track => track.id === command.trackId && track.kind === "effect")) {
+      return "Effect tracks require the effects arrangement review flow.";
+    }
+  }
+  return null;
+}
 
 /** The durable record (R-28). Model output cannot touch it after creation; only a decision moves its status. */
 export const EditorRequestSchema = z
@@ -122,16 +134,29 @@ export const EditorRequestSchema = z
 export type EditorRequest = z.infer<typeof EditorRequestSchema>;
 
 /** `productions/<id>/editor-requests.json`. */
-export const EditorRequestFileSchema = z
+const EditorRequestFileV1Schema = z
   .object({
     schemaVersion: z.literal(1),
     requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept),
   })
   .strict();
+export const EditorRequestFileSchema = z.union([EditorRequestFileV1Schema, z.object({ schemaVersion: z.literal(2),
+  requests: z.array(EditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.kept), effectFamilies: z.array(EffectProposalFamilySchema).max(EDITOR_REQUEST_BOUNDS.kept),
+  transitionFamilies: z.array(TransitionProposalFamilySchema).max(200).optional(),
+  pictureFamilies: z.array(PictureProposalFamilySchema).max(200).optional(),
+}).strict().superRefine((file, ctx) => {
+  if (file.requests.length + file.effectFamilies.reduce((sum, family) => sum + family.versions.length, 0) + [...(file.transitionFamilies ?? []), ...(file.pictureFamilies ?? [])].reduce((sum, family) => sum + family.versions.length, 0) > EFFECT_PROPOSAL_BOUNDS.kept)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "legacy requests and effect versions exceed the combined 200-record limit" });
+  const ids = [...file.requests.map(request => request.id), ...file.effectFamilies.map(family => family.id), ...[...(file.transitionFamilies ?? []), ...(file.pictureFamilies ?? [])].map(family => family.id)];
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "request and effect family IDs must be unique" });
+})]);
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
 /** What the person has selected while they talk to Arke (R-26): the subject of "this". */
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
+  /** Explicit human request scope, separate from prose and model payloads (SPEC-053 R-28). */
+  z.object({ kind: z.literal("effect-arrangement"), scope: EffectArrangementScopeSchema,
+    reviewed: EffectVersionRefSchema.optional(), selectedEffectId: TimelineClipIdSchema.optional() }).strict(),
   z.object({ kind: z.literal("chapter"), chapterId: SlugSchema }).strict(),
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),
@@ -219,6 +244,8 @@ export function previewEditorRequest(
     selections?: readonly TimelineSelectionChange[];
   } = {},
 ): EditorRequestPreview {
+  const refusal = genericEditorRequestRefusal(base, commands);
+  if (refusal !== null) return { ok: false, reason: refusal };
   const switches = commands.filter((command): command is Extract<TimelineCommand, { kind: "switch-take" }> => command.kind === "switch-take");
   const clipCommands = commands.filter((command): command is TimelineClipCommand => command.kind !== "switch-take");
   let next: ProductionTimeline;

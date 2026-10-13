@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { PictureLookSchema } from "./audiobook-look.js";
 import { PictureShotSchema } from "./audiobook-illustrate.js";
+import { AudiobookMotionSchema } from "./audiobook-motion.js";
 
 /**
  * A picture set on a block (design turn 186c, SPEC-047 R-66): it shows from that block until the
@@ -45,6 +46,9 @@ export const AudiobookPictureSchema = z
      * toward it. Kept on the picture, set by dragging in the video's preview; absent is the centre.
      */
     focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().optional(),
+    /** The source still stays in file. A candidate never changes the visual until explicitly chosen. */
+    motion: AudiobookMotionSchema.optional(),
+    motionCandidate: AudiobookMotionSchema.optional(),
   })
   .strict();
 export type AudiobookPicture = z.infer<typeof AudiobookPictureSchema>;

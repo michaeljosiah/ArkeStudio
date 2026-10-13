@@ -40,7 +40,7 @@ export interface SoundCue { kind: "sound"; at: number; sound: Sound }
  * engine's declaration build refuses a type that long (TS7056).
  */
 export type CadenceCue = PauseCue | BreathCue | EmphasisCue | DeliveryMarker | SoundCue;
-export const EXPRESSIVE_DIRECTION_SCHEMA_VERSION = 68;
+export const EXPRESSIVE_DIRECTION_SCHEMA_VERSION = 78;
 export const EXTENDED_SOUNDS: readonly Sound[] = ["snorts", "wheezing", "laughs harder", "starts laughing"];
 export function needsExpressiveDirection(plan: { cues: readonly CadenceCue[] }): boolean {
   return plan.cues.some(cue => cue.kind === "delivery" && (cue.phrase?.length ?? 0) > 60 || cue.kind === "sound" && EXTENDED_SOUNDS.includes(cue.sound));

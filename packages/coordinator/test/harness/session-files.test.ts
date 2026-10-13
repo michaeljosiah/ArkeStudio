@@ -24,6 +24,20 @@ function adapterWithFileFailure(): Pick<
 }
 
 describe("session preparation lifetime", () => {
+  it("returns the prepared model using the session choice before its named agent choice", async () => {
+    const adapter = { createSession: async () => ({ sessionId: "prepared" }) } as unknown as HarnessAdapter;
+    const dir = await tempDir("arke-session-model-");
+    const cases: Array<[SessionConfigInput, string | undefined]> = [
+      [{ model: "openai/cloud", agents: { "canon-author": { model: "ollama/local" } } }, "openai/cloud"],
+      [{ agents: { "canon-author": { model: "ollama/local" } } }, "ollama/local"],
+      [{ agents: { "another-agent": { model: "ollama/local" } } }, undefined],
+    ];
+    for (const [config, expected] of cases) {
+      const session = await createPreparedSession(adapter, dir, Promise.resolve(config), { purpose: "extraction", agent: "canon-author" });
+      assert.equal(session.model, expected);
+    }
+  });
+
   it("abandons the one-use preparation when writing session files fails", async () => {
     const adapter = adapterWithFileFailure();
     await assert.rejects(writeSessionFiles(adapter, await tempDir("arke-session-files-")), /null bytes/i);

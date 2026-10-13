@@ -11,7 +11,7 @@ import {
   type PictureWho,
 } from "@arke-studio/contracts";
 import { clip } from "./audiobook-direction.js";
-import { nameAt, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
+import { personIdentity, resolveChapterPerson, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
 
 /**
  * The picture brief (design turn 193k, SPEC-047 R-120, R-121): the instruction the writing service
@@ -102,7 +102,7 @@ export interface BriefGiven {
   synopsis?: string;
   note?: string;
   lines: readonly BriefLine[];
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance"> & { essence?: string }>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "aliases" | "identity" | "pov"> & { essence?: string }>;
   places: readonly ChapterPlace[];
 }
 
@@ -114,7 +114,7 @@ export function briefGiven(input: BriefGiven): string {
     .map((line) => `[${line.key ?? line.label}] ${line.label}${line.look !== undefined ? `, look "${line.look}"` : ""}: ${line.text}`)
     .join("\n");
   const people = input.people
-    .map((person) => `[${person.key}] ${person.name}${person.essence !== undefined ? ` — ${person.essence}` : ""}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}`)
+    .map((person) => `[${person.key}] ${person.name}${person.essence !== undefined ? ` — ${person.essence}` : ""}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}${personIdentity(person)}`)
     .join("\n");
   const places = input.places.map((entry) => `[${entry.key}] ${entry.name}${entry.look !== undefined ? ` — ${entry.look}` : ""}`).join("\n");
   return `WHAT YOU ARE GIVEN
@@ -126,6 +126,7 @@ ${input.synopsis ?? "no synopsis"}${input.note !== undefined ? `\n${input.note}`
 Place: ${place?.text ?? "not read"}
 ${cast === "" ? "no lines" : cast}
 ## Characters
+Identity candidates only, not everyone in the scene. Resolve viewpoint pronouns, familiar names and relationships from this context and the chapter, and use canonical keys in every field. A remembered or mentioned relative is not automatically in frame. If an identity cannot be resolved, retain the literal name for the author to check; never guess a sheet.
 ${people === "" ? "none" : people}
 ## Places
 ${places === "" ? "none named" : places}`;
@@ -141,6 +142,8 @@ export interface HeldBrief {
   notInFrame: string[];
   expressions: Record<string, string>;
   details: PictureDetail[];
+  /** People whose body parts the camera shows; their references still define identity. */
+  detailPeople?: ChapterPerson[];
   place: ChapterPlace | undefined;
   prompt: string;
 }
@@ -153,8 +156,15 @@ export interface HeldBrief {
  * block's speakers and the people its words name, as before; an empty list is nobody.
  */
 export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]; places: readonly ChapterPlace[]; prompt: string; fallback: () => ChapterPerson[] }): HeldBrief {
-  const find = (key: string): ChapterPerson | undefined => ctx.people.find((person) => person.key === key || person.name.toLowerCase() === key.trim().toLowerCase());
-  const resolve = (keys: readonly string[] | null | undefined): ChapterPerson[] => [...new Map((keys ?? []).flatMap((key) => (find(key) === undefined ? [] : [find(key)!])).map((person) => [person.key, person])).values()];
+  const find = (key: string): ChapterPerson | undefined => {
+    const person = resolveChapterPerson(ctx.people, key);
+    if (person !== undefined) return person.neverDepicted ? undefined : person;
+    const name = key.trim().slice(0, 120);
+    // An unresolved identity remains visible and requires reference confirmation. Dropping it
+    // would turn a failed resolution into a misleading green "Nobody in frame" check.
+    return name === "" ? undefined : { key: name.toLowerCase(), name, neverDepicted: false, first: 0 };
+  };
+  const resolve = (keys: readonly string[] | null | undefined): ChapterPerson[] => [...new Map((keys ?? []).flatMap((key) => (find(key) === undefined ? [] : [find(key)!])).map((person) => [person.key, person])).values()].slice(0, 12);
   const listed = raw.inFrame ?? raw.who;
   const inFrame = (listed === null || listed === undefined ? ctx.fallback() : resolve(listed)).slice(0, 12);
   const inKeys = new Set(inFrame.map((person) => person.key));
@@ -165,6 +175,7 @@ export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]
     return person === undefined ? [] : [{ of: person.key, part, ...(state !== undefined ? { state } : {}) }];
   }).slice(0, 12);
   const detailKeys = new Set(details.map((detail) => detail.of));
+  const detailPeople = resolve((raw.details ?? []).map((detail) => detail.of)).filter((person) => detailKeys.has(person.key));
   const notInFrame = resolve(raw.notInFrame).map((person) => person.key).filter((key) => !inKeys.has(key) && !detailKeys.has(key));
   const expressions: Record<string, string> = {};
   for (const [key, words] of Object.entries(raw.expressions ?? {})) {
@@ -174,7 +185,7 @@ export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]
   }
   const place = raw.place === null || raw.place === undefined ? undefined : ctx.places.find((candidate) => candidate.key === raw.place);
   const frame = clip(raw.frame ?? "", PICTURE_FRAME_MAX) ?? openingFrame(ctx.prompt) ?? "";
-  return { frame, inFrame, notInFrame, expressions, details, place, prompt: ctx.prompt };
+  return { frame, inFrame, notInFrame, expressions, details, detailPeople, place, prompt: ctx.prompt };
 }
 
 /** The frame word a prompt opens with, from its first words. */
@@ -184,24 +195,27 @@ function openingFrame(prompt: string): string | undefined {
 
 /**
  * Who rides (design turn 193, rule 12; R-120): who is in frame. A detail shot has nobody in frame
- * and no reference rides — not a person, not the place; a frame with nobody in it carries the
+ * and carries only the people whose details are shown, not the place; a frame with nobody in it carries the
  * place's view alone; otherwise each person in frame, and the place where one is named.
  */
-export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place">): Array<{ key: string; name: string; sheet?: string; kind: "character" | "place"; billing?: string }> {
-  if (frameWord(held.frame) === "Detail") return [];
+export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place" | "detailPeople">): Array<{ key: string; name: string; sheet?: string; kind: "character" | "place"; billing?: string }> {
+  const detail = frameWord(held.frame) === "Detail";
+  const people = [...new Map([...(detail ? [] : held.inFrame), ...(held.detailPeople ?? [])].map((person) => [person.key, person])).values()];
   return [
-    ...held.inFrame.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
-    ...(held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, sheet: held.place.key, kind: "place" as const }]),
-  ];
+    ...people.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
+    ...(detail || held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, sheet: held.place.key, kind: "place" as const }]),
+  ].slice(0, 24);
 }
 
 // ---------------------------------------------------------------------------
 // The seven checks (rule 14, R-121)
 // ---------------------------------------------------------------------------
 
-/** Whether a person is named in words: their whole name, or their first name where it is a name of its own. */
-export function namedInText(text: string, person: Pick<ChapterPerson, "name">): boolean {
-  if (nameAt(text, person.name) >= 0) return true;
+/** Whether a person is named: a full name, familiar name or given name, never a shared surname alone. */
+export function namedInText(text: string, person: Pick<ChapterPerson, "name" | "aliases">): boolean {
+  const contains = (name: string): boolean => name !== "" && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
+  // Relatives are identity context too; mentioning one person's surname cannot place the family.
+  if ([person.name, ...(person.aliases ?? [])].some(contains)) return true;
   // "Maren" for Maren Kest, as written with its capital: never a title or an article ("The Chorister").
   const first = person.name.trim().split(/\s+/)[0] ?? "";
   if (first.length < 3 || first === person.name.trim() || TITLES.has(first.toLowerCase()) || !/^\p{Lu}/u.test(first)) return false;
@@ -249,19 +263,20 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
 
   // (1) Someone named is in frame or a detail, and each in frame has a reference.
   const strays = input.people.filter((person) => !inKeys.has(person.key) && !detailKeys.has(person.key) && !held.notInFrame.includes(person.key) && namedInText(held.prompt, person));
-  const lacking = held.inFrame.filter((person) => (who.find((entry) => entry.key === person.key)?.reference ?? null) === null);
-  const withReference = held.inFrame.length - lacking.length;
-  const count = held.inFrame.length;
+  const shown = briefRiders(held).filter((person) => person.kind === "character");
+  const lacking = shown.filter((person) => (who.find((entry) => entry.key === person.key)?.reference ?? null) === null);
+  const withReference = shown.length - lacking.length;
+  const count = shown.length;
   checks.push({
     id: "reference",
-    ok: strays.length === 0 && (detail || lacking.length === 0),
-    label: detail ? "Detail" : count === 0 ? "Nobody in frame" : `${withReference} of ${count} in frame ${count === 1 ? "has" : "have"} a reference`,
+    ok: strays.length === 0 && lacking.length === 0,
+    label: count === 0 ? (detail ? "Detail" : "Nobody in frame") : `${withReference} of ${count} ${detail ? "shown in detail" : "in frame"} ${count === 1 ? "has" : "have"} a reference`,
     ...(strays.length > 0
       ? { note: `names ${strays.map((person) => person.name).join(", ")}, not in frame` }
-      : lacking.length > 0 && !detail
-        ? { note: lacking.map((person) => `${person.name} · no reference`).join(", ") }
-        : detail
-          ? { note: "nobody in frame, so no reference rides" }
+      : lacking.length > 0
+        ? { note: lacking.map((person) => `${person.name} · ${person.sheet === undefined ? "identity not linked · confirm the character" : "no reference"}`).join(", ") }
+        : detail && count === 0
+          ? { note: "no character detail identified" }
           : count === 0
             ? { note: held.place !== undefined ? "place only" : "no reference rides" }
             : {}),

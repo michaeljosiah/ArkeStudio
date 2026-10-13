@@ -670,6 +670,29 @@ describe("multimedia admission (issue 305 §5.2)", () => {
   });
 });
 
+describe("review selection (issue 1674)", () => {
+  it("keeps an explicit choice through out-of-order completion, filing and replay", () => {
+    const events: BenchEventEnvelope[] = [env(1, {
+      type: "takes-reserved",
+      takes: [TK, TK2].map((id, index) => ({ id: id as never, n: index + 1, requestId: `r${index}`,
+        request: SNAPSHOT, createdAt: META.createdAt })),
+    })];
+    assert.equal(foldBenchSession(META, events).selectedTakeId, TK2, "a new dispatch shows its latest reservation");
+    events.push(env(2, { type: "take-selected", takeId: TK as never }));
+    for (const id of [TK, TK2]) {
+      events.push(env(events.length + 1, { type: "take-completed", takeId: id as never,
+        media: { file: "take.png", hash: "sha256:beefbeef" }, completedAt: META.createdAt }));
+      assert.equal(foldBenchSession(META, events).selectedTakeId, TK);
+    }
+    events.push(env(5, { type: "take-selected", takeId: TK2 as never }));
+    events.push(env(6, { type: "take-filed", takeId: TK as never, artifactId: AR as never }));
+    const replayed = foldBenchSession(META, events);
+    assert.equal(replayed.selectedTakeId, TK2, "late filing of the previous choice leaves the next review alone");
+    assert.equal(replayed.takes[0]!.disposition, "filed");
+    assert.equal(replayed.takes[1]!.status, "succeeded");
+  });
+});
+
 describe("the summary", () => {
   it("counts running and failed takes without carrying them", () => {
     const session = foldBenchSession(META, [

@@ -24,7 +24,7 @@ import { referenceBudgetFor } from "../references/generate.js";
 import type { WorldStore } from "../world/store.js";
 import { clip } from "./audiobook-direction.js";
 import { listeningBlocks } from "./audiobook-listening.js";
-import { blockSpeakers } from "./audiobook-look.js";
+import { blockSpeakers, type ChapterPerson } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
 import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
@@ -69,7 +69,7 @@ export interface IllustrateDeriverInput {
   /** The chapter's reading note (193k, rule 5). */
   note?: string;
   lines: readonly BriefLine[];
-  people: ReadonlyArray<{ key: string; name: string; appearance?: string; essence?: string }>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "essence" | "aliases" | "identity" | "pov">>;
   places: ReadonlyArray<{ key: string; name: string; look?: string }>;
   never: readonly string[];
   /** Where a picture already stands, in seconds: kept clear of. */
@@ -169,7 +169,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     }
     seen.add(entry.block);
     // Held to the chapter as Suggest picture's answer is (R-120): who is in and out of frame, expressions, details.
-    const held = holdBrief(entry, { people: visible, places: room.places, prompt, fallback: () => [] });
+    const held = holdBrief(entry, { people: room.people, places: room.places, prompt, fallback: () => [] });
     const title = clip(entry.title ?? "", PICTURE_TITLE_MAX) ?? clip(prompt, 40)!;
     candidates.push({ index, at: clock.starts[index] ?? 0, title, prompt, held });
   }  // In reading order whatever order the model gave them; then the rules.
@@ -186,7 +186,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     for (const position of kept) {
       const candidate = candidates[position]!;
       const own = ownLooksThatRide(store, room.look, room.own(plan.blocks[candidate.index]!.block.key));
-      const changes = ownLookChanges(store, room.look, candidate.held.inFrame.map((person) => person.key), own, referenceBudgetFor(model) > 0);
+      const changes = ownLookChanges(store, room.look, briefRiders(candidate.held).filter((person) => person.kind === "character").map((person) => person.key), own, referenceBudgetFor(model) > 0);
       if (changes.length === 0) continue;
       try {
         rewritten.set(candidate.index, await rewritePictureClothing(rewrite, candidate.held.prompt, changes, maxChars, signal));
@@ -198,16 +198,16 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
   const rows: IllustrationRow[] = kept.map((position) => {
     const candidate = candidates[position]!;
     const planned = plan.blocks[candidate.index]!;
-    // Who rides is who is in frame (rule 12): a detail carries no one, a frame with nobody in it the
+    // Who rides is who is shown, including the owners of body details; a frame with nobody in it the
     // place; a look held on the block for its picture alone rides for that person (R-146).
     const own = ownLooksThatRide(store, room.look, room.own(planned.block.key));
     const who = pictureWho(store, model, briefRiders(candidate.held), { look: room.look, frame: candidate.held.frame, own });
     // Rule 4 where a look image rides: no skin, cut or body in the words (2026-10-04).
     const held = { ...candidate.held, prompt: neutralWhereLooksRide(rewritten.get(candidate.index) ?? candidate.held.prompt, who) };
-    const needs = who.filter((entry) => entry.kind === "character" && entry.sheet !== undefined && entry.reference === null).map((entry) => entry.name);
+    const needs = who.filter((entry) => entry.kind === "character" && entry.reference === null).map((entry) => entry.name);
     const picks = ridingPicks(who);
     const keys = held.inFrame.map((person) => person.key);
-    const stamp = pictureLookFor(room.look, keys, picks, library);
+    const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
     const used = lookLinesFor(room.look, [...keys, ...held.details.map((detail) => detail.of)], { ...ownLookPicks(own), ...picks }, library);
     const checks = pictureChecks({ held, who, people: visible, lines: used, block: planned.block.text, mood: room.mood });
     const shot = { frame: held.frame, inFrame: keys, notInFrame: held.notInFrame, expressions: held.expressions, details: held.details, checks };    return {

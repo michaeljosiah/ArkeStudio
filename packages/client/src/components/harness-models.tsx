@@ -20,7 +20,7 @@ export function harnessModelLabel(state: ClientState | null, model: ModelInfo): 
 
 export function runningHarnessLabel(state: ClientState | null): string {
   const generation = state?.app.harnessInfo?.generation;
-  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex" : generation === "arke" ? "Local"
+  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex"
     : generation === "v1" || generation === "v2" ? "OpenCode" : "the running harness";
 }
 

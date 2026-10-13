@@ -1257,7 +1257,8 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           take.media = event.media;
           if (event.cost !== undefined) take.cost = event.cost;
           take.completedAt = event.completedAt;
-          session.selectedTakeId = take.id;
+          // Reservation and explicit selection own the wall. A background completion must not
+          // replace the take being reviewed, including when the journal is replayed on Keep.
           // A start frame is spent by the take that used it. Nothing used to retire one, so it
           // sat in the lane for every request after — invisible unless the Keyframe tab happened
           // to be open, and fatal to the next request that also carried references, which is

@@ -780,7 +780,10 @@ describe("the model World Chat answers with", () => {
     assert.doesNotMatch(html, /Ask the harness|THIS TURN|CHAT AGENT/);
   });
 
-  it("says nothing when there is no model to name", () => {
-    assert.doesNotMatch(render(undefined, []), /fy-mchip/);
+  it("names the unresolved harness default without inventing a model or offering a menu", () => {
+    const html = render(undefined, []), start = html.indexOf("fy-cx__bar"), bar = html.slice(start, html.indexOf("fy-cx__send", start));
+    assert.match(bar, /fy-mchip__btn--fixed/);
+    assert.match(bar, /Language model: Harness default. Chosen by the harness/);
+    assert.doesNotMatch(bar, /aria-haspopup/);
   });
 });

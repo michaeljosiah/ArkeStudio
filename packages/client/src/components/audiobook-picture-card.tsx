@@ -50,7 +50,7 @@ const viewOf = (who: Pick<PictureWho, "look">): (typeof VIEWS)[number] => (who.l
  * it, `Full body · no close view`. Where people rode different images the line names who rode which,
  * by the names the rows use (`Ade close view · Tunde full body`), because one bare word for each
  * would say two images rode without saying whose; the card never claims one view for a picture that
- * mixed them. Then `Place view`, `no reference`, and a detail's `no reference · no faces`.
+ * mixed them. Then `Place view`, `no reference`, and `no faces` on a detail.
  */
 export function ridesLabel(
   who: readonly PictureWho[],
@@ -62,15 +62,16 @@ export function ridesLabel(
     hasClose?: (who: PictureWho) => boolean | undefined;
   } = {},
 ): string {
-  if (shot !== undefined && frameWord(shot.frame) === "Detail") return "no reference · no faces";
+  const detail = shot !== undefined && frameWord(shot.frame) === "Detail";
   const people = who.filter((entry) => entry.kind === "character" && entry.carried);
-  if (people.length === 0) return who.some((entry) => entry.kind === "place" && entry.carried) ? "Place view" : "no reference";
+  if (people.length === 0) return detail ? "no reference · no faces" : who.some((entry) => entry.kind === "place" && entry.carried) ? "Place view" : "no reference";
   const labelOf = options.labelOf ?? ((entry: PictureWho) => entry.name);
   const groups = VIEWS.map((view) => ({ view, people: people.filter((entry) => viewOf(entry) === view) })).filter((group) => group.people.length > 0);
   const parts = groups.length === 1 ? [groups[0]!.view] : groups.map((group) => `${group.people.map(labelOf).join(", ")} ${group.view}`);
   // The frame asked for faces and a look could only give its full body (rule 8): the line says why.
   const word = frameWord(shot?.frame);
   if (word !== null && CLOSE_FRAMES.has(word) && people.some((entry) => entry.look?.view === "full" && options.hasClose?.(entry) === false)) parts.push("no close view");
+  if (detail) parts.push("no faces");
   const line = parts.join(" · ");
   return `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
 }
@@ -185,7 +186,7 @@ function LookMenu({ id, label, who, kit, slug, chapter, mode, onMode, chosen, of
         {looks.map((look) => (
           <button key={look.id} type="button" className={cx("fy-pcard__tile", chosen === look.id && "fy-pcard__tile--on")} aria-pressed={chosen === look.id} disabled={off || who.sheet === undefined} title={lookClothing(look)} onClick={() => onChoose(look.id)} data-testid="picture-card-look-tile" data-look={look.id}>
             <img src={mediaUrl(slug, `references/${who.sheet}/${look.file}`)} alt="" />
-            <span>{lookName(look)}</span>
+            <span>{lookName(look, looks)}</span>
           </button>
         ))}
         {/* The main photo for this picture alone has to be there to ride; as the chapter's choice it is choosing none. */}
@@ -244,7 +245,7 @@ function InFrameRow({ who, label, full, kits, slug, shot, onMake, menu }: {
           )
         ) : (
           <span>
-            {who.kind === "place" ? "place" : look !== undefined ? `${lookName(look)} · ${who.look?.view === "close" ? "close view" : "full body"}` : "main photo"}
+            {who.kind === "place" ? "place" : look !== undefined ? `${lookName(look, kit?.looks)} · ${who.look?.view === "close" ? "close view" : "full body"}` : "main photo"}
             {who.carried ? "" : " · over the limit"}
           </span>
         )}
@@ -288,7 +289,7 @@ export function PicturePress({ onChoose, children }: { onChoose: (() => void) | 
  * pressed, and the checks; Remove (or Discard), Edit prompt and Generate — Make again once a
  * picture is set — in the panel's foot.
  */
-export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose, chapter }: {
+export function PictureCard({ world, worldId, state, onEdit, offline, picture = null, onRemove, onChoose, chapter, mediaActions }: {
   world: Pick<WorldBundle, "meta" | "referenceKits" | "sheets">;
   worldId: string;
   state: PictureSuggestionState;
@@ -296,6 +297,8 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   offline: boolean;
   /** The picture set on the block, drawn in the slot. */
   picture?: string | null;
+  /** Turn 208 places the saved picture's motion choice immediately below its media. */
+  mediaActions?: ReactNode;
   onRemove?: () => void;
   /** Pick another picture from the world: the picture is the press. */
   onChoose?: () => void;
@@ -415,8 +418,9 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const lookLabel = (key: string, lookId: string): string => {
     if (lookId === MAIN_PHOTO_LOOK) return "main photo";
     const sheet = suggestion.who.find((who) => who.key === key)?.sheet;
-    const look = world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks?.find((candidate) => candidate.id === lookId);
-    return look === undefined ? "another look" : lookName(look);
+    const looks = world.referenceKits.find((kit) => kit.sheetId === sheet)?.looks;
+    const look = looks?.find((candidate) => candidate.id === lookId);
+    return look === undefined ? "another look" : lookName(look, looks);
   };
   const updatingNow = answered?.state === "working";
   const updateRefused = answered?.state === "refused" ? answered.refused : null;
@@ -494,7 +498,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         };
   return (
     <div className="fy-sugg fy-pcard" data-testid="suggest-card">
-      <div className="fy-pcard__top">
+      <div className={cx("fy-pcard__top", mediaActions !== undefined && "fy-pcard__top--motion")}>
         {picture !== null ? (
           <PicturePress onChoose={busy ? undefined : onChoose}>
             <img className="fy-pcard__img" src={picture} alt="" data-testid="picture-card-picture" />
@@ -504,6 +508,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <span className="fy-mono">{suggestion.aspect ?? ""}</span>
           </div>
         )}
+        {mediaActions}
         <div className="fy-pcard__facts" data-testid="picture-card-facts">
           {shot !== undefined && shot.frame !== "" && (
             <div className="fy-pcard__fact">

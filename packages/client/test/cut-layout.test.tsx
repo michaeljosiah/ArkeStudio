@@ -4,13 +4,15 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
+import { applyTimelineCommands, createEffectProposalFamily, defaultEffectClip, effectProposalFamilyView, type ClientMessage, type TimelineClip } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest, importEditorMedia } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest, __stateForTest, importEditorMedia } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { startClipGesture, type GestureUpdate } from "../src/screens/editor-gesture.js";
 import { cutLayoutFixture } from "./cut-layout-fixture.js";
 import { AddToLibraryDialog } from "../src/screens/editor-library.js";
+import { useEffectProposalReview } from "../src/screens/editor-effect-review.js";
+import { appendEffectProposalTestModel, effectProposalTestFence, grantEffectProposalTestReview, EFFECT_REVIEW_TEST_AT } from "./effect-proposal-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
 let width = 390;
@@ -34,22 +36,167 @@ let root: Root | null = null;
 let sent: ClientMessage[] = [];
 const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
-async function mount(size = 390, remote = false, tail?: number) {
+let review: ReturnType<typeof useEffectProposalReview> | null = null;
+function ReviewProbe() { review = useEffectProposalReview(fixture.world!.meta.worldId, "saltlight"); return null; }
+async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false, withTransition = false) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
   const bridge = { connect() {}, subscribe() { return () => {}; }, send(raw: string) { sent.push(JSON.parse(raw)); } } as unknown as ArkeBridge;
   Object.assign(dom.window, { arke: remote ? undefined : bridge });
   const state = cutLayoutFixture(), timeline = state.world!.productions[0]!.timeline;
+  if (withTransition && timeline?.status === "ready") {
+    Object.getPrototypeOf(document.createElement("canvas")).getContext = () => null;
+    Object.assign(globalThis, { requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
+    const track = timeline.timeline.tracks.find(track => track.kind === "picture")!;
+    const still = { ...state.world!.artifacts[0]!, id: "ar_01J8G0000000000000000000ZX", kind: "image" as const, file: "harbour.png" };
+    state.world!.artifacts.push(still);
+    for (const clip of track.clips.slice(0, 2)) clip.source = { kind: "artifact", artifactId: still.id, label: "Harbour" };
+    timeline.timeline.transitions = [{ type: "crossfade", trackId: track.id, leftClipId: track.clips[0]!.id, rightClipId: track.clips[1]!.id, durationFrames: 24, protectJoin: false, protectDuration: true }];
+    timeline.timeline.history = { undo: [], redo: [] };
+  }
   if (tail !== undefined && timeline?.status === "ready") timeline.timeline.tracks[0]!.endFrame = tail;
-  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App /></MemoryRouter>); });
+  if (withEffect && timeline?.status === "ready") {
+    // Canvas/worker pixels have separate browser parity coverage; this fixture exercises real Cut event ownership.
+    Object.getPrototypeOf(document.createElement("canvas")).getContext = () => null;
+    Object.assign(globalThis, { requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
+    timeline.timeline = applyTimelineCommands(timeline.timeline, [
+      { kind: "add-track", trackId: "tr_effects", trackKind: "effect", name: "Atmosphere" },
+      { kind: "effect-create", trackId: "tr_effects", effect: defaultEffectClip({ id: "cl_dust", lineageId: "ef_dust", startFrame: 0, durationFrames: 240, seed: 9 }) },
+    ], { effectAuthority: "human" });
+  }
+  await act(async () => { __setBridgeForTest(bridge); __setStateForTest(state); __connectionStatusForTest("open"); root!.render(<MemoryRouter initialEntries={[base + "/cut"]}><App />{withReview && <ReviewProbe />}</MemoryRouter>); });
+  return state;
 }
-afterEach(async () => { await act(async () => root?.unmount()); root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
+afterEach(async () => { await act(async () => { review?.close(); root?.unmount(); }); review = null; root = null; dom.document.body.replaceChildren(); dom.document.head.replaceChildren(); __setBridgeForTest(null); __connectionStatusForTest("closed"); });
 const find = (selector: string) => dom.document.querySelector<HTMLElement>(selector)!;
 const click = async (element: HTMLElement) => { assert.ok(element); await act(async () => element.click()); };
 function props(element: HTMLElement): Record<string, (event: never) => void> { const key = Object.keys(element).find(name => name.startsWith('__reactProps$'))!; return (element as unknown as Record<string, Record<string, (event: never) => void>>)[key]!; }
 function pointer(target: EventTarget, type: string, x: number, y = 20) { const event = new dom.Event(type, { bubbles: true }); Object.assign(event, { button: 0, pointerId: 1, pointerType: "touch", clientX: x, clientY: y }); target.dispatchEvent(event); }
 const timelineCommands = () => sent.filter((m): m is Extract<ClientMessage, { kind: "timeline-command" }> => m.kind === "timeline-command").flatMap(m => m.commands);
+
+it("phone transition controls stay inline below the picture and retain their draft across Fold resizing", async () => {
+  await mount(390, false, undefined, false, false, true);
+  await click(find(".xf-join-trigger.has"));
+  assert.ok(find(".fy-cutcols[data-transition-panel] .xf-phone-navigation"));
+  assert.equal(document.querySelector(".fy-cut-trim-sheet[open]"), null);
+  const inspector = find(".xf-inspector");
+  await click([...inspector.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Protect settings…")!);
+  await act(async () => { width = 984; listeners.forEach(listener => listener()); });
+  assert.equal(find(".xf-inspector"), inspector);
+  assert.match(inspector.textContent!, /Protect from Arke/);
+  await act(async () => { width = 390; listeners.forEach(listener => listener()); });
+  assert.equal(find(".xf-inspector"), inspector);
+  await click([...document.querySelectorAll<HTMLElement>(".xf-phone-navigation button")].find(button => button.textContent === "Done")!);
+  assert.equal(document.querySelector(".fy-cutcols[data-transition-panel]"), null);
+  assert.deepEqual(timelineCommands(), []);
+});
+
+for (const viewport of [320, 390, 984, 1360]) it(`proposal and Inspector navigation returns to the same review at ${viewport}px`, async () => {
+  const state = await mount(viewport, false, undefined, true, true);
+  const production = state.world!.productions[0]!, timeline = production.timeline;
+  assert.ok(timeline?.status === "ready");
+  let family = createEffectProposalFamily({ id: "req_01J8G000000000000000000001", productionId: "saltlight", conversationId: "cv_01J8G0000000000000000000C1",
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" },
+      palette: [{ id: "dust", version: 1 }], direction: "Quiet dust" }, base: timeline.timeline,
+    timelineHash: effectProposalTestFence(timeline.timeline).base.timelineHash, baseId: "base_first", at: EFFECT_REVIEW_TEST_AT });
+  family = appendEffectProposalTestModel(family, timeline.timeline, { summary: "Quiet dust", identities: [], commands: [
+    { kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { amount: 0.15 } } },
+  ] });
+  const reviewed = grantEffectProposalTestReview(family), savedTimeline = JSON.stringify(timeline.timeline);
+  production.effectFamilies = [effectProposalFamilyView(reviewed.family)];
+  await act(async () => __setStateForTest(structuredClone(state)));
+  await act(async () => { assert.equal(review!.review(reviewed.ref), true); });
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "editor-effect-proposal"); if (command.kind !== "editor-effect-proposal") return;
+  await act(async () => __applyEventForTest({ type: "editor-effect.proposal-result", worldId: state.world!.meta.worldId, productionId: "saltlight",
+    at: EFFECT_REVIEW_TEST_AT, requestId: command.requestId, outcome: "reviewed", ref: reviewed.ref, grant: reviewed.grant }));
+  assert.deepEqual(review!.active!.ref, reviewed.ref);
+  await act(async () => { const event = new dom.Event("keydown", { bubbles: true, cancelable: true }); Object.assign(event, { key: "ArrowRight" }); find('[aria-label="Seek"]').dispatchEvent(event); });
+  await click(find('[aria-label="Loop whole video"]'));
+  const clock = find('[aria-label="Seek"]').getAttribute("aria-valuetext"), serial = review!.active!.activationSerial, sentCount = sent.length;
+  assert.equal(find('[aria-label="Seek"]').getAttribute("aria-valuenow"), "1", "hold a nonzero clock during navigation");
+  const changes = [...document.querySelectorAll<HTMLElement>(".fy-effect-review-bar button")].find(button => /\d+ changes?$/.test(button.textContent!))!;
+  await click(changes);
+  for (let round = 0; round < 2; round++) {
+    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Changes/Back must show Arke");
+    else assert.equal(find("#cut-arke-panel").hidden, false);
+    // Exercise the exact controller operation used by the connected card's Inspect effect button.
+    await act(async () => { assert.equal(review!.inspect(reviewed.ref, "cl_dust"), true); });
+    assert.equal(!!find(".fy-cut-arke-sheet[open]"), false, "Inspect must leave Arke rather than cover an open sheet");
+    assert.ok(find(".fx-inspector"));
+    if (viewport < 600) assert.ok(find(".fy-cut-trim-sheet[open]"));
+    const back = [...document.querySelectorAll<HTMLElement>("#cut-inspector-panel button")].find(button => button.textContent === "Back to proposal · Version 1")!;
+    await click(back);
+    assert.equal(!!find(".fy-cut-trim-sheet[open]"), false, "Back must close the newer Inspector sheet");
+    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Back must uncover the same proposal sheet");
+    else assert.equal(find("#cut-arke-panel").hidden, false);
+    assert.deepEqual(review!.state.cardFocus!.ref, reviewed.ref);
+    assert.deepEqual(review!.active!.ref, reviewed.ref);
+    assert.equal(review!.active!.comparison, "suggested");
+    assert.equal(review!.active!.activationSerial, serial);
+    assert.equal(find('[aria-label="Seek"]').getAttribute("aria-valuetext"), clock);
+    assert.equal(find('[aria-label="Loop whole video"]').getAttribute("aria-pressed"), "true");
+    assert.ok(find('[aria-label="Play"]'), "panel navigation must not start playback");
+    assert.equal(sent.length, sentCount, "navigation must not write, reactivate Review or author an edit");
+    const current = __stateForTest().state?.world?.productions[0]?.timeline;
+    assert.ok(current?.status === "ready");
+    assert.equal(JSON.stringify(current.timeline), savedTimeline);
+  }
+});
+
+for (const viewport of [320, 390, 900, 1360]) it(`Loop is reachable at ${viewport}px without moving the playhead or authoring edits`, async () => {
+  await mount(viewport);
+  const controls = document.querySelectorAll<HTMLButtonElement>('[aria-label="Loop whole video"]');
+  assert.equal(controls.length, 1);
+  const control = controls[0]!, clock = find('[aria-label="Seek"]');
+  assert.ok(control.closest(viewport < 1100 ? ".fy-cut-clock" : ".fy-timeline__toolbar"));
+  const at = clock.getAttribute("aria-valuenow");
+  assert.equal(control.getAttribute("aria-pressed"), "false");
+  await click(control);
+  assert.equal(control.getAttribute("aria-pressed"), "true");
+  assert.equal(clock.getAttribute("aria-valuenow"), at);
+  assert.ok(find('[aria-label="Play"]'), "enabling Loop does not start playback");
+  assert.deepEqual(timelineCommands(), []);
+});
+
+it("an effect lane click keeps its selection, Inspector and explicit preview area control", async () => {
+  await mount(1360, false, undefined, true);
+  const effect = find('[data-effect="cl_dust"]'), seek = find('[aria-label="Seek"]');
+  const heldTime = seek.getAttribute("aria-valuenow");
+  assert.equal(effect.getAttribute("aria-pressed"), "false");
+  assert.equal(find(".fx-target-area__toggle"), null);
+  // Click the real descendant so both the effect row and enclosing timeline canvas receive the event.
+  await click(find('[data-effect="cl_dust"] .fy-effect-clip__name'));
+  assert.equal(effect.getAttribute("aria-pressed"), "true");
+  assert.ok(find('.fx-inspector'), "the selected effect must keep its Inspector after canvas bubbling");
+  const toggle = find(".fx-target-area__toggle");
+  assert.equal(toggle.textContent, "Edit emitting area");
+  await click(toggle);
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.ok(find(".fx-target-area"));
+  assert.equal(effect.getAttribute("aria-pressed"), "true");
+  assert.equal(seek.getAttribute("aria-valuenow"), heldTime);
+  assert.equal(timelineCommands().length, 0, "selection and overlay inspection must not author an edit");
+});
+
+it("adding an effect selects it after the coordinator snapshot arrives", async () => {
+  const state = await mount(1360, false, undefined, true);
+  await click([...document.querySelectorAll<HTMLElement>('button')].find(button => button.textContent === "Effects")!);
+  await click(find(".fy-effect-library__add"));
+  await act(async () => { find(".fy-effect-add").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  const commands = timelineCommands(), creation = commands.find(command => command.kind === "effect-create");
+  assert.ok(creation?.kind === "effect-create");
+  assert.equal(find(`[data-effect="${creation.effect.id}"]`), null, "the saved timeline is still awaiting the reply");
+  const next = structuredClone(state), timeline = next.world!.productions[0]!.timeline;
+  assert.ok(timeline?.status === "ready");
+  timeline.timeline = applyTimelineCommands(timeline.timeline, commands.filter(command => command.kind !== "switch-take"), { effectAuthority: "human" });
+  await act(async () => { __setStateForTest(next); });
+  assert.equal(find(`[data-effect="${creation.effect.id}"]`).getAttribute("aria-pressed"), "true");
+  assert.ok(find(".fx-inspector"));
+  assert.equal(find(".fx-target-area__toggle").textContent, "Edit emitting area");
+  assert.equal(timelineCommands().length, commands.length, "accepting the snapshot must not issue another edit");
+});
 
 it("touch moves require a picked clip and at least eight pixels", () => {
   const target = document.createElement("button"); document.body.append(target);

@@ -62,6 +62,8 @@ export interface HarnessOptions {
   /** False: a job the queue failed before any provider call (attempt 0). */
   reached?: boolean;
   prepare?: (worldDir: string) => Promise<void>;
+  /** Motion tests exercise the same Bench reservation and filing seam with a measured video. */
+  videoOutput?: boolean;
 }
 
 export async function withHarness(run: (h: Harness) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -88,6 +90,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     credentialsFileName: "credentials.dev.dat",
     manifest: { manifestVersion: 1, generated: "2026-10-03", models },
     observeEvent: (event) => events.push(event),
+    ...(options.videoOutput ? { mediaProbe: { durationSec: async () => 5, info: async () => ({ durationSec: 5, width: 864, height: 480, hasVideo: true, hasAudio: true }) } } : {}),
     pictureDeriver:
       options.picture ??
       (async (input) => {
@@ -100,6 +103,7 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
     ...(options.illustrate !== undefined ? { illustrateDeriver: options.illustrate } : {}),
     ...(options.rewrite !== undefined ? { promptRewriter: options.rewrite } : {}),
   });
+  if (options.videoOutput) (coordinator as unknown as { readModel: { apply(event: DomainEvent): void } }).readModel.apply({ at: CLOCK, type: "provider.status", providers: [{ id: "fal", configured: true, validation: "valid", probes: [{ capability: "video", available: true }], fault: null }] });
   // Every job made a submission call, as a provider refusal does: `attempt` is how a run tells one.
   const jobs: Array<{ id: string; attempt: number }> = [];
   (coordinator as unknown as { jobQueue: unknown }).jobQueue = {
@@ -124,10 +128,11 @@ export async function withHarness(run: (h: Harness) => Promise<void>, options: H
           return { id };
         }
         await mkdir(join(worldDir, input.landing.dir), { recursive: true });
-        const bytes = pngBytes();
-        await writeFile(join(worldDir, input.landing.dir, "made.png"), bytes);
+        const bytes = options.videoOutput ? Buffer.from("synthetic video fixture") : pngBytes();
+        const output = options.videoOutput ? "made.mp4" : "made.png";
+        await writeFile(join(worldDir, input.landing.dir, output), bytes);
         await bench.append(
-          { type: "take-completed", takeId: takeId as never, media: { file: "made.png", hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
+          { type: "take-completed", takeId: takeId as never, media: { file: output, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` }, cost: { estimatedMicroUsd: input.estimatedMicroUsd, actualMicroUsd: input.estimatedMicroUsd }, completedAt: CLOCK },
           { at: CLOCK },
         );
         return { id };

@@ -6,7 +6,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
-  ConversationIdSchema, productionSetupProblems, ulid,
+  ADAPTATION_KINDS, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -15,6 +15,7 @@ import { ConversationTranscript, languageChoiceReason } from "../components/conv
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
+import { ProductionTargetCard } from "../components/production-target-card.js";
 import { Button } from "../components/ui.js";
 import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
@@ -93,7 +94,8 @@ export function ProductionSetupScreen() {
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   if (!setupId) return <p role="alert">This production setup address is invalid.</p>;
   const draft = setup?.draft;
-  const problems = draft ? productionSetupProblems(draft, world?.sheets ?? []) : [];
+  const problems = draft ? productionSetupProblems(draft, world?.sheets ?? [], world?.productions ?? []) : [];
+  const stories = adaptableStories(world?.productions ?? []);
   const update = (fields: NonNullable<Extract<ProductionSetupCommand["action"], { operation: "update" }>["update"]["fields"]>) => {
     if (draft) command({ operation: "update", update: { expectedRevision: draft.revision, fields } });
   };
@@ -165,13 +167,18 @@ export function ProductionSetupScreen() {
                   {[24, 25, 30].map(rate => <option key={rate} value={rate}>{rate} fps</option>)}
                 </select></label>
               </div>
-              {draft.kind === "microdrama" && <div className="fy-production-setup__delivery">
-                <label>Episode min · seconds<input type="number" min={1} key={`min-${draft.revision}`} defaultValue={draft.defaults?.episodeSecondsMin ?? ""}
-                  onBlur={event => { if (event.target.value) update({ defaults: { episodeSecondsMin: Number(event.target.value) } }); }} /></label>
-                <label>Episode max · seconds<input type="number" min={1} key={`max-${draft.revision}`} defaultValue={draft.defaults?.episodeSecondsMax ?? ""}
-                  onBlur={event => { if (event.target.value) update({ defaults: { episodeSecondsMax: Number(event.target.value) } }); }} /></label>
-              </div>}
+              {/* Adapt from (design turn 205, SPEC-052 R-1): a story of this world the production is
+                  made from. Offered for a micro drama or a film while the world has a story with
+                  chapters, and kept in view while a source is set, so it can always be cleared. */}
+              {((ADAPTATION_KINDS.includes(draft.kind) && stories.length > 0) || draft.source) && <label>Adapt from<select value={draft.source?.productionId ?? ""}
+                onChange={event => update({ source: event.target.value ? { productionId: event.target.value } : null })}>
+                <option value="">Nothing — start from an idea</option>
+                {stories.map(story => <option key={story.id} value={story.id}>{story.title} · {story.kind} · {story.chapters} chapter{story.chapters === 1 ? "" : "s"} · {story.words.toLocaleString("en-GB")} words</option>)}
+                {draft.source && !stories.some(story => story.id === draft.source!.productionId) && <option value={draft.source.productionId}>{draft.source.productionId} · no longer here</option>}
+              </select></label>}
             </fieldset>
+            {/* Where it will be watched, and the numbers that follow (design turn 205, SPEC-052 R-6). */}
+            {draft.kind === "microdrama" && <ProductionTargetCard draft={draft} update={update} disabled={!!pending || running || locked} />}
             {/* The production's own models (design turn 153), written with the production. Each
                 row follows Settings until chosen here — Settings, not the world: the world's
                 choice was for making the world. */}

@@ -37,7 +37,7 @@ The grouped-read confirmation includes v4 request previews (endpoint and JSON). 
 labelled previews; provider-call records in Activity remain the evidence of actual HTTP calls.
 The preview shows tags explicitly and the existing controls identify held direction.
 
-The audiobook raises the world reader boundary to 68 when it first saves a character brief
+The audiobook raises the world reader boundary to 78 when it first saves a character brief
 over sixty characters, a delivery phrase over sixty, or a newly supported vocalization.
 An older reader must not silently discard these records. Merely opening a world does not
 raise it.

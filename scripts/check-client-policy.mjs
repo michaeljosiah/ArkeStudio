@@ -147,11 +147,18 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // keyed by edition and manifest digest; paired-device notifications keep one on/off preference,
   // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
   // (turn 194); the model picker remembers the last three models picked on this device (turn 195);
-  // the audiobook's show page reads back the place the player kept, a chapter and a time (turn 199).
+  // the audiobook's show page reads back the place the player kept, a chapter and a time (turn 199);
+  // effects review retains a validated version/receipt reference, comparison and position (SPEC-053
+  // R-38), which convey no authority without the coordinator's matching human review grant.
   // Each strips that one word; keys, auth and decryption still fail.
   const stripped = new Map([
     [join("lib", "chapter-dock.ts"), "localStorage"],
     [join("lib", "dev-session.ts"), "sessionStorage"],
+    [join("screens", "editor-effect-review.ts"), "sessionStorage"],
+    // SPEC-054: a version/Review grant reference only; server verification owns authority.
+    [join("lib", "editor-transition-review.ts"), "sessionStorage"],
+    // SPEC-055: the same validated version/Review reference, never credentials or authority.
+    [join("lib", "editor-picture-review.ts"), "sessionStorage"],
     [join("lib", "continuity.ts"), "sessionStorage"],
     [join("lib", "storyboard-layout.ts"), "localStorage"],
     [join("lib", "publication-preferences.ts"), "localStorage"],

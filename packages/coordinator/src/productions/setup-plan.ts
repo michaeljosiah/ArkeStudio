@@ -23,7 +23,7 @@ export function setupSourceDigest(bundle: WorldBundle): string {
 export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDraft, at: string): ProductionCreationPlan {
   const draft = ProductionSetupDraftSchema.parse(raw);
   if (draft.worldId !== bundle.meta.worldId) throw new Error("This setup belongs to another world.");
-  const problems = productionSetupProblems(draft, bundle.sheets);
+  const problems = productionSetupProblems(draft, bundle.sheets, bundle.productions);
   if (problems.length) throw new Error(problems.join("\n"));
   if (!normalizeAspect(draft.aspect)) throw new Error("Choose a valid aspect, such as 16:9 or 9:16.");
   const base = planProductionCreation(bundle, {
@@ -65,6 +65,8 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     const { arcNotes: _arcNotes, ...narrative } = draft.narrative;
     base.initialSeason = SeasonSchema.parse({
       ...base.initialSeason, ...narrative,
+      // The Target travels with the season it describes (SPEC-052 R-6).
+      ...(draft.target ? { target: draft.target } : {}),
       arcs: draft.arcs.map(arc => ({
         ...arc,
         ...(arc.setup ? { setup: episodeId(arc.setup) } : {}),

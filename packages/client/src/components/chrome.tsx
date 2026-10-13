@@ -72,7 +72,7 @@ export function AppChrome({
   // and the person does not have yet. Warning wins when both apply.
   const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
   const fresh = state
-    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
+    ? arrivedSince(state.app.jobs, seen.inboxSeenAt, state.app.audiobookActivity) ||
       unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
     : false;
   const panel = useActivityPanel();

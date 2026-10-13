@@ -5,6 +5,7 @@ import {
   FrameRunIdSchema,
   orderedShots,
   canonicalSceneFlow,
+  chapterParagraphs,
   isGraphScene,
   productionFrameRate,
   seedFirstPictureTimeline,
@@ -14,6 +15,7 @@ import {
   storyShotFrames,
   storyTimelineFingerprint,
   summariseVoices,
+  pictureJoins, transitionStill, maxCrossfadeFrames,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
@@ -30,6 +32,8 @@ import type { QueryLease } from "./lease.js";
 import type { DispatchPlanReadRecord } from "../productions/plans.js";
 
 import { audioCutReadRows, editorRequestReadRows, performanceReadRows, voiceSampleReadRows, productionReadFence, type ProductionReadRow } from "./production-reads.js";
+import { effectReadRows } from "./effect-proposal-reads.js";
+import { sha256 } from "../world/text-files.js";
 import { productionTakeImageSources } from "./production-take-images.js";
 
 const DEFAULT_LIMIT = 8;
@@ -79,6 +83,8 @@ export interface TargetReadDeps {
   readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
   /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
   readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
+  /** The beats a chapter was grouped by for its audiobook (design turn 201), the units an adaptation judges (SPEC-052 R-17). */
+  readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -304,10 +310,18 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
       { key: "01:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
-        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined } } },
+        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
         ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
         ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
+        ...(track.effects ?? []).flatMap(effect => effectReadRows(`41:effect:${track.id}:${effect.id}`, effect)),
       ]),
+      ...(timeline.effectProtection ?? []).map(rule => { const { baselineFingerprint, ...scope } = rule;
+        return { key: `42:protection:${rule.id}`, value: { kind: "effect-protection", rule: scope, baselineHash: sha256(baselineFingerprint) } }; }),
+      ...(timeline.transitions ?? []).map((transition, index) => ({ key: `43:transition:${padded(index)}`, value: { kind: "transition", transition } })),
+      ...pictureJoins(timeline.tracks, clip => transitionStill(clip, artifacts)).map((join, index) => ({ key: `44:join:${padded(index)}`, value: {
+        kind: "picture-join", trackId: join.trackId, leftClipId: join.leftClipId, rightClipId: join.rightClipId, cutFrame: join.cutFrame,
+        labels: [join.left.source.label, join.right.source.label], ...(join.reason ? { ineligible: join.reason } : { maxDurationFrames: maxCrossfadeFrames(timeline.tracks, timeline.transitions ?? [], join) }),
+      } })),
     );
   }
   if (production !== undefined) {
@@ -732,7 +746,7 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending") throw new TargetReadError("section must be plan or ending");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats") throw new TargetReadError("section must be plan, ending or beats");
         if (section === "plan") {
           readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
           rows = chapter ? [{ key: "plan", value: chapter }] : [];
@@ -740,6 +754,23 @@ export class WorldChatTargetReads {
           break;
         }
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
+        if (section === "beats") {
+          // The beats the audiobook's director named (design turn 201), each placed at the paragraph
+          // its first block begins: a key is `p<paragraph>.<n>`. They are the units an adaptation
+          // judges (SPEC-052 R-17); a chapter never grouped by beats has none, and says so.
+          const beats = chapter && this.deps.getChapterBeats ? await this.deps.getChapterBeats(productionId, chapter.file) : null;
+          const paragraphs = chapterParagraphs(body ?? "");
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:beats`);
+          rows = chapter ? [{ key: "beats", value: { chapterId: chapter.id, title: chapter.title, beats: (beats ?? []).map((beat) => {
+            const at = /^p(\d+)\./.exec(beat.start);
+            const paragraph = at ? Number(at[1]) : null;
+            const opens = paragraph !== null ? paragraphs[paragraph]?.slice(0, 160) : undefined;
+            return { ...(beat.name !== undefined ? { name: beat.name } : {}), ...(beat.whose !== undefined ? { whose: beat.whose } : {}),
+              ...(paragraph !== null ? { paragraph: paragraph + 1 } : {}), ...(opens !== undefined ? { opens } : {}) };
+          }) } }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         if (section === "ending") {
           if (chapter && body === null) throw new TargetReadError("The previous chapter could not be read.");
           const paragraphs = (body ?? "").trim().split(/\n\s*\n/).slice(-3).join("\n\n");

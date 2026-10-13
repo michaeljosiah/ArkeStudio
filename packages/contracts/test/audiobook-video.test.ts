@@ -236,6 +236,9 @@ describe("the audiobook as a video (turn 197)", () => {
     assert.equal(videoFileName("Na love or Juju", { kind: "book", part: null }), "na-love-or-juju.mp4");
     assert.equal(videoFileName("Na love or Juju", { kind: "book", part: 2 }), "na-love-or-juju-part-2.mp4");
     assert.equal(videoFolderName("Na love or Juju", "2026-10-04T20:41:00.000Z"), "na-love-or-juju-video-20261004");
+    const long = "A very long book title ".repeat(5);
+    assert.notEqual(videoFolderName(long, "2026-10-04", { kind: "chapter", chapterId: "one" }), videoFolderName(long, "2026-10-04", { kind: "chapter", chapterId: "two" }));
+    assert.notEqual(videoFolderName(long, "2026-10-04", { kind: "chapter", chapterId: "one" }), videoFolderName(long, "2026-10-04"));
     assert.equal(videoFileName("Café · Ñandú!", { kind: "chapter", order: 12, title: "" }), "cafe-nandu-12-audiobook.mp4");
   });
 

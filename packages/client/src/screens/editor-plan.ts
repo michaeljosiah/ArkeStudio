@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import {
   buildRenderPlan,
+  defaultExportPreset,
   legacyArtifactScopeRefusal,
   type ArtifactSidecar,
   type ProductionBundle,
@@ -89,7 +90,10 @@ export function useRenderPlan({
       artifacts: artifacts ?? [],
       timeline: previewState,
       scope: { kind: "production" },
-      preset: "review-cut",
+      // The software compositor has a real composition size; a portrait production must preview
+      // the same portrait frame its default delivery uses, inside the responsive viewer box.
+      preset: previewState.status === "ready" && (previewState.timeline.transitions?.length || previewState.timeline.tracks.some(track => track.effects?.length || track.clips.some(clip => clip.visual)))
+        ? defaultExportPreset(production.meta) : "review-cut",
       // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
       // preview with it (round nine). Hiding captions leaves the film.
       ...(subtitleView !== null && !subtitleHidden ? { subtitles: { trackId: subtitleView, mode: "none" as const } } : {}),

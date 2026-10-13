@@ -1,0 +1,21 @@
+.fx-curves { min-width: 0; }
+.fx-curves__tabs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1); margin: var(--space-2) 0; }
+.fx-curves__tabs button[aria-selected="true"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.fx-curves__graph { position: relative; height: 110px; margin: var(--space-4) var(--space-3) var(--space-3); border: 1px solid var(--border); background: var(--muted); }
+.fx-curves__graph svg { width: 100%; height: 100%; overflow: visible; }
+.fx-curves__graph polyline { fill: none; stroke: var(--foreground); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.fx-curves__grid { fill: none; stroke: var(--border); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.fx-curves .fx-curves__point { position: absolute; min-width: 28px; width: 28px; min-height: 28px; height: 28px; padding: 0; transform: translate(-50%, -50%); border-radius: 50%; border: 0; background: transparent; touch-action: none; cursor: grab; }
+.fx-curves__point::after { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: var(--background); border: 2px solid var(--foreground); }
+.fx-curves__point[aria-pressed="true"]::after { background: var(--timeline-selection); }
+.fx-curves__bounds { display: flex; justify-content: space-between; gap: var(--space-2); font-size: 10px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.fx-curves__actions { margin: var(--space-3) 0; }
+.fx-curves__fields { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.fx-curves__replace { margin-top: var(--space-2); padding: var(--space-2); border: 1px solid var(--border); background: var(--muted); font-size: 12px; }
+.fx-curves__replace p { margin: 0 0 var(--space-2); }
+.fx-curves__replace button { margin: var(--space-1); }
+@media (max-width: 600px), (pointer: coarse) {
+  .fx-curves__graph { height: 140px; margin-left: 22px; margin-right: 22px; }
+  .fx-curves .fx-curves__point { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+  .fx-curves__point::after { inset: 15px; }
+}

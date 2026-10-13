@@ -415,7 +415,7 @@ export function carriedSubjects(references: readonly CompiledReference[]): strin
  * caption is claimed more than once — a lone look carries no number to read.
  */
 export function lookPickerLabels(looks: readonly CharacterLook[]): Map<string, string> {
-  const caption = (look: CharacterLook): string => lookTileLabel(look.prompt, look.kind);
+  const caption = (look: CharacterLook): string => (look.name ?? lookTileLabel(look.prompt, look.kind));
   const claims = new Map<string, number>();
   for (const look of looks) claims.set(caption(look), (claims.get(caption(look)) ?? 0) + 1);
   const seen = new Map<string, number>();

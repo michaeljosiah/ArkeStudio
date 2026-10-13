@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { KOKORO_VOICE_MODEL, type VoiceCandidate } from "@arke-studio/contracts";
+import { AcousticWordsSchema, KOKORO_VOICE_MODEL, type AcousticWords, type VoiceCandidate } from "@arke-studio/contracts";
 import { isWavContentType, transcriptionWav } from "./wav.js";
 
 export { decodeWav, encodePcm16Wav, isWavContentType, resample, transcriptionWav, TRANSCRIPTION_RATE } from "./wav.js";
@@ -42,6 +42,7 @@ export const SidecarHealthSchema = z
       .optional(),
     /** A model failed verification: running but unable to serve (§2.10). */
     unavailableReason: z.string().optional(),
+    wordTiming: z.object({ ready: z.boolean(), reason: z.string().optional() }).strict().optional(),
   })
   .strict();
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
@@ -225,6 +226,15 @@ export class VoxaClient {
         return body.text ?? "";
       },
     );
+  }
+
+  /** Native acoustic word bounds, never the sentence-duration estimate used by older sidecars. */
+  async transcribeWords(audio: Uint8Array, options: VoxaRequestOptions = {}): Promise<AcousticWords> {
+    const wav = await transcriptionWav(audio);
+    return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res) => {
+      if (res.status >= 400) throw new Error(`voxa: word timing failed (HTTP ${res.status})`);
+      return AcousticWordsSchema.parse(await res.json());
+    }, this.requests.signal, Math.max(this.timeouts.stt, 300_000));
   }
 
   /** Cancel active and queued work before replacing the supervised process. Future calls remain valid. */

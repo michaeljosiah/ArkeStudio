@@ -251,7 +251,9 @@
 
 /* The edge: the Inspector above Arke, one column (turn 122). */
 .bm-side { width: 360px; flex: none; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
-.bm-side > .fy-arke { width: auto; flex: 1; min-height: 0; border-left: 0; }
+.bm-side > .fy-arke, .bm-side .fy-production-studio-chat > .fy-arke { width: auto; flex: 1; min-height: 0; border-left: 0; }
+/* Under the Inspector the dock's owner takes what the column has left, not the column's whole height. */
+.bm-side > .fy-production-studio-owner { flex: 1; height: auto; }
 .bm-insp { flex: none; max-height: 50%; display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--border); background: var(--background); }
 .bm-insp__head { flex: none; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 16px; }
 .bm-insp__head > b { font: var(--type-ui); font-weight: var(--weight-semibold); }

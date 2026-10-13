@@ -1,3 +1,4 @@
+import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
@@ -8,6 +9,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { EffectAnalysisProjectionSchema } from "./editor-effect-analysis.js";
 import { ImageInspectionSettingsSchema } from "./world-chat-images.js";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
@@ -21,6 +23,9 @@ import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
 import { TimelineStateSchema } from "./timeline.js";
 import { EditorRequestSchema } from "./editor-request.js";
+import { EffectProposalFamilyViewSchema } from "./editor-effect-proposal.js";
+import { TransitionProposalFamilySchema } from "./editor-transition-proposal.js";
+import { PictureProposalFamilySchema } from "./editor-picture-proposal.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
@@ -152,7 +157,7 @@ export const WorldSummarySchema = z
 export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 
 /** A production with everything its screens render. */
-export const ProductionBundleSchema = z
+export const ProductionBundleSchema = valueSchema(z
   .object({
     rehearsals: z.array(RehearsalSessionSchema).default([]),
     rehearsalHashes: z.record(z.string(), z.string()).optional(),
@@ -207,6 +212,11 @@ export const ProductionBundleSchema = z
     timeline: TimelineStateSchema.optional(),
     /** `editor-requests.json` — Arke's staged edits and their compact audit (SPEC-039 R-35, R-36). */
     editorRequests: z.array(EditorRequestSchema).default([]),
+    effectFamilies: z.array(EffectProposalFamilyViewSchema).optional(),
+    transitionFamilies: z.array(TransitionProposalFamilySchema).optional(),
+    pictureFamilies: z.array(PictureProposalFamilySchema).optional(),
+    editorRequestState: z.discriminatedUnion("status", [z.object({ status: z.literal("absent") }).strict(),
+      z.object({ status: z.literal("ready") }).strict(), z.object({ status: z.literal("invalid"), message: z.string().max(500) }).strict()]).optional(),
     /**
      * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
      * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration
@@ -214,7 +224,7 @@ export const ProductionBundleSchema = z
      */
     takeMediaInfo: z.record(TakeIdSchema, TakeMediaInfoRecordSchema).default({}),
   })
-  .strict();
+  .strict());
 export type ProductionBundle = z.infer<typeof ProductionBundleSchema>;
 
 /** A staged proposal plus its advisory ripple preview, as the panel renders it. */
@@ -398,6 +408,7 @@ export const ClientStateSchema = valueSchema(z
         version: z.string(),
         health: AppHealthSchema,
         jobs: z.array(JobSchema),
+        audiobookActivity: z.array(AudiobookActivitySchema).optional(),
         ledger: z.array(LedgerEntrySchema),
         /**
          * True when the ledger file exists and the read that produced `ledger` failed
@@ -484,7 +495,7 @@ export const ClientStateSchema = valueSchema(z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude", "codex", "arke"]),
+            generation: z.enum(["v2", "v1", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),
@@ -581,6 +592,8 @@ export const ClientStateSchema = valueSchema(z
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),
+    /** Disposable audio readiness; feature arrays travel only through authenticated media. */
+    effectAnalyses: z.array(EffectAnalysisProjectionSchema).optional(),
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
     /**

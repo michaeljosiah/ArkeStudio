@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, it } from "node:test";
 import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -116,6 +117,28 @@ it("understanding and proposal tabs preserve their mounted controls", async () =
   await click("Close Studio"); assert.equal(dom.document.querySelector('[aria-label="Proposal draft"]'), proposal);
 });
 
+it("an incoming effects arrangement leaves the unpinned canvas, full card and unsent text where the person put them", async () => {
+  const made = await setup(); await click("Studio"); await click("What it understood");
+  const note = dom.document.querySelector('[aria-label="Understanding note"]');
+  const input = dom.document.querySelector('[aria-label="Unsent words"]') as unknown as HTMLTextAreaElement;
+  await act(async () => { input.value = "Leave this passage quiet"; input.dispatchEvent(new dom.window.Event("input", { bubbles: true })); });
+  const next: ConversationActionCard = { ...card(), conversationId: made.action.conversationId, actionKind: "world-chat-effect-proposal",
+    shown: { ...made.action.shown, productionPreview: undefined, title: "Atmosphere arrangement" }, targets: [{ kind: "production", id: production.meta.id }] };
+  await made.update([made.action, next]);
+  const selected = [...dom.document.querySelectorAll('[aria-label="Canvas views"] button')].find(button => button.getAttribute("aria-pressed") === "true");
+  assert.equal(selected?.textContent, "What it understood", "arrival cannot steal an unpinned canvas");
+  assert.equal(dom.document.querySelector('[aria-label="Understanding note"]'), note);
+  assert.equal(dom.document.querySelector('[aria-label="Unsent words"]'), input); assert.equal(input.value, "Leave this passage quiet");
+  assert.equal(made.sent.length, 0, "arrival grants no editor review or transport authority");
+  await click("Open full size");
+  const fullCard = dom.document.querySelector('.fy-production-studio__full-card article');
+  await made.update([made.action, next, { ...next, actionId: newId("act"), shown: { ...next.shown, title: "Atmosphere revision" } }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio__full-card article'), fullCard);
+  await click("Close Studio");
+  await made.update([made.action, next, { ...next, actionId: newId("act") }]);
+  assert.equal(dom.document.querySelector('.fy-production-studio'), null, "arrival cannot open a closed Studio");
+});
+
 it("the proposal canvas opens the existing human card and returns to live state after settlement", async () => {
   __setStateForTest(state);
   const container = dom.document.createElement("div"); dom.document.body.append(container);
@@ -141,6 +164,27 @@ it("a closed Studio draws no canvas, so a docked screen is never rendered twice"
   assert.equal(dom.document.querySelector(".fy-production-studio"), null);
   await click("Studio"); assert.ok(dom.document.querySelector(".fy-production-studio"));
   await click("Close Studio"); assert.equal(dom.document.querySelector(".fy-production-studio"), null);
+});
+
+it("a page's dock is its column, not a band under the page: only the production page's own Studio spans the grid", async () => {
+  // Spanning every column, the owner of a chapter's dock dropped it under the chapter as a
+  // full-width band and halved the chapter (0.5.68, 2026-10-08); the master draws the dock as the
+  // 331 column at the right (126, 165k, 194c).
+  const css = readFileSync(new URL("../src/components/production-studio.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }));
+  const spanning = rules.filter((rule) => /grid-column:\s*1\s*\/\s*-1/.test(rule.body) && rule.selector.includes("fy-production-studio-owner"));
+  assert.deepEqual(spanning.map((rule) => rule.selector), ['.fy-production-studio-owner[data-dock-owner="false"]']);
+  // With the Studio closed the page's conversation is one row the page's height, so its thread
+  // scrolls and the composer holds the foot: an auto row grew to the thread (9,544 on Saltlight),
+  // the page clipped it, and the composer was out of reach (installed 0.5.72, design turn 202c).
+  // A rule's comment rides in front of its selector here, so the selector is matched at its end.
+  const inline = rules.find((rule) => rule.selector.endsWith('.fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div'));
+  assert.match(inline?.body ?? "", /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+  assert.ok(rules.some((rule) => rule.selector.includes(".fy-production-studio-inline :is(.fy-story__chat, .fy-story__log)") && /min-height:\s*0/.test(rule.body)));
+  await setup();
+  const owner = dom.document.querySelector(".fy-production-studio-owner")!;
+  assert.equal(owner.getAttribute("data-dock-owner"), "true");
+  assert.ok(owner.querySelector(".fy-production-studio-chat"), "the dock's mount is named for the page's dock rules");
 });
 
 it("opens on a staged proposal, the newest thing a wrap-up leaves", async () => {

@@ -130,7 +130,8 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.match(container.textContent!, /Generate · ~\$0\.10/);
     // Sent as (design turn 181): the style beside the words, exactly as the reader gets them.
     const sentAs = container.querySelector('[data-testid="sent-as"]')!.textContent!;
-    assert.match(sentAs, /style Read calmly and evenly, at a steady pace\./);
+    // Gemini's ordinary reading sends no style of its own (2026-10-08): the words go alone.
+    assert.doesNotMatch(sentAs, /style /);
     assert.ok(sentAs.includes(`text ${LINE}`), "the words as sent");
     assert.equal(request.cadencePlan.delivery, "measured", "Gemini reads measured, so the door asks for it");
   });

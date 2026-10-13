@@ -28,6 +28,7 @@ Object.assign(dom.window, {
 Object.assign(dom.HTMLElement.prototype, {
   focus() { Object.defineProperty(dom.document, "activeElement", { value: this, configurable: true }); }, scrollIntoView() {},
   showModal(this: HTMLElement) { this.setAttribute("open", ""); },
+  show(this: HTMLElement) { this.setAttribute("open", ""); },
   close(this: HTMLElement) { this.removeAttribute("open"); },
 });
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });

@@ -19,6 +19,8 @@ export interface AudiobookPlayerBlock {
   /** When `audio` is absent, each block's own take plays. */
   src?: string;
   sentences: ReadonlyArray<{ at: number; text: string }>;
+  /** Validated acoustic intervals on the chapter clock; absent/stale uses estimated phrase timing. */
+  words?: ReadonlyArray<{ text: string; startSec: number; endSec: number }>;
 }
 
 export interface AudiobookPlayerChapter {
@@ -31,7 +33,16 @@ export interface AudiobookPlayerChapter {
   audio?: AudiobookPlayerAudio[];
   blocks: AudiobookPlayerBlock[];
   gaps: ReadonlyArray<{ at: number; from: number; to: number }>;
-  pictures: ReadonlyArray<{ at: number; src: string }>;
+  pictures: ReadonlyArray<{
+    at: number;
+    src: string;
+    /** The picture's hold on the chapter clock. Older packages derive it from the next picture. */
+    seconds?: number;
+    /** Normalized position in the source still; Slow push keeps this point still. */
+    focus?: { x: number; y: number };
+    motion?: { src: string; seconds: number; behavior: "repeat" | "hold" };
+    motionProblem?: string;
+  }>;
   /** What shows before the chapter's first picture. */
   opening: string | null;
 }
@@ -42,10 +53,12 @@ export interface AudiobookPlayerOptions {
   /** The book's cover, shown where a chapter has no picture. */
   cover?: string | null;
   chapters: AudiobookPlayerChapter[];
-  /** Where the listener's place, speed, sleep choice and Text are kept on this device; none keeps nothing. */
+  /** Where place, speed, sleep, Text and Slow push choice are kept on this device; none keeps nothing. */
   storageKey?: string | null;
   /** Listen on a chapter: start there, at the kept place when it is in that chapter. */
   chapterId?: string;
+  /** An explicit preview start on the selected chapter's clock; never changes a saved listening place. */
+  startAt?: number;
   /** Play at once rather than open on the poster. */
   autoplay?: boolean;
   /** With `autoplay`: still open on Continue when a place is kept on this device. */

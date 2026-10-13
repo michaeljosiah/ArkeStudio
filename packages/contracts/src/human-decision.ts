@@ -31,6 +31,9 @@ export type HumanDecisionControl =
   | { kind: "plan"; productionId: string; planId: string; passIndex: number; gate: "continue" | "reconfirm"; capMicroUsd: number; estimatedMicroUsd: number }
   | { kind: "proposal"; proposalId: string }
   | { kind: "editor-request"; productionId: string; requestId: string }
+  | { kind: "transition-proposal"; productionId: string; familyId: string; versionId: string }
+  | { kind: "picture-proposal"; productionId: string; familyId: string; versionId: string }
+  | { kind: "effect-proposal"; productionId: string; familyId: string; versionId: string }
   | { kind: "extraction"; artifactId: string }
   | { kind: "voice-sample"; review: VoiceSampleReview }
   | { kind: "performance-review"; productionId: string; performanceId: string }
@@ -44,6 +47,9 @@ export const HumanDecisionControlSchema: z.ZodType<HumanDecisionControl> = z.dis
     capMicroUsd: z.number().int().nonnegative(), estimatedMicroUsd: z.number().int().nonnegative() }).strict(),
   z.object({ kind: z.literal("proposal"), proposalId: ProposalIdSchema }).strict(),
   z.object({ kind: z.literal("editor-request"), productionId: SlugSchema, requestId: z.string().min(1).max(100) }).strict(),
+  z.object({ kind: z.literal("transition-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("picture-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("effect-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
   z.object({ kind: z.literal("extraction"), artifactId: ArtifactIdSchema }).strict(),
   z.object({ kind: z.literal("voice-sample"), review: VoiceSampleReviewSchema }).strict(),
   z.object({ kind: z.literal("performance-review"), productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),

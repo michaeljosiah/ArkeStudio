@@ -61,7 +61,7 @@ import {
 } from "./arke-actions.js";
 import { ArkeReadTargetSchema } from "./arke-reads.js";
 import { ProductionPlanRequestSchema, ProductionPlanCardSchema } from "./production-readiness.js";
-import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
+import { ModelWorldChatActionSchema, editorProposalActionCount, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -1745,7 +1745,7 @@ export const TURN_RESULT_BOUNDS = {
   groupOperations: 6,
   actions: 12,
   productionActions: 24,
-  productionEditorRequests: 6,
+  productionEditorRequests: 2,
 } as const;
 
 const WorldChatTurnResultObjectSchema = z
@@ -1782,11 +1782,16 @@ const WorldChatTurnResultObjectSchema = z
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
   .strict();
-export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema);
+const editorProposalLimit = (turn: { editorRequests: readonly unknown[]; actions: readonly ModelWorldChatAction[] }, ctx: z.RefinementCtx) => {
+  const count = turn.editorRequests.length + editorProposalActionCount(turn.actions);
+  if (count > EDITOR_REQUEST_BOUNDS.perTurn) ctx.addIssue({ code: z.ZodIssueCode.custom,
+    message: `${count} editor proposals exceed the ${EDITOR_REQUEST_BOUNDS.perTurn}-per-turn limit across actions and editorRequests` });
+};
+export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.superRefine(editorProposalLimit));
 export const ProductionChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.extend({
   actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.productionActions).default([]),
   editorRequests: z.array(ModelEditorRequestSchema).max(TURN_RESULT_BOUNDS.productionEditorRequests).default([]),
-}));
+}).superRefine(editorProposalLimit));
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -2752,6 +2757,12 @@ const exampleWorldActions = {
   "production-audio-generation": { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-performance-command": { kind: "production-performance-command", productionId: "saltlight", command: { operation: "clear-selection", lineKey: `sh_${EXAMPLE_ULID}` }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-edit": { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute the music track", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-transitions-propose": { kind: "production-transitions-propose", productionId: "saltlight", proposal: { summary: "Add gentle crossfades", commands: [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_first", rightClipId: "cl_second", durationFrames: 24 }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-pictures-propose": { kind: "production-pictures-propose", productionId: "saltlight", proposal: { summary: "Lighten the overlay", commands: [{ kind: "picture-appearance", clipId: "cl_overlay", patch: { blendMode: "screen", opacity: 0.8 } }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-effects-propose": { kind: "production-effects-propose", productionId: "saltlight",
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" },
+      direction: "Soften the existing dust", palette: [{ id: "dust", version: 1 }] }, proposal: { summary: "Soften the atmosphere",
+    commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity: .35 } } }], identities: [] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-cue": { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "music", outputIndex: 0 }, after: ["music"], trackId: "tr_music", startFrame: 0, durationFrames: 240, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
@@ -2853,6 +2864,9 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-audio-generation": "Quote a shot voice line, a generated performance, a scene table read, a speaking character sample, or local sample preparation. Read the exact source, assigned voice and current production first. Audition, rights, performance review and purge remain human controls.",
   "production-performance-command": "Propose a kept performance's duration, place its selected audio with explicit timing, or clear a line's selection. Versions, review and source hashes are frozen by the coordinator.",
   "production-audio-edit": "Propose typed timeline audio changes: tracks, gains, mute, roles and mix ducking. The person reviews and applies the ordinary editor request atomically.",
+  "production-transitions-propose": "Prepare a crossfade composite card in ordinary chat. Read complete get_timeline and list_editor_requests and cite receipts. Use transition-set {trackId,leftClipId,rightClipId,durationFrames} or transition-remove for exact ordered touching still-image pairs. Preserve every cut, total duration and audio. One second is the default; floor half before the cut and ceil half after, at least two frames, no overlapping neighboring windows. Skip videos/gaps and keep protected values. For revisions include family {id,parentVersionId,candidateHash}; manual adjustments and Keep Current remain sticky. After Apply omit family. Never apply, review or release protection. Maximum 50 commands and two editor proposals per turn.",
+  "production-pictures-propose": "Prepare a picture-appearance composite card in chat. Read complete get_timeline and list_editor_requests and cite receipts. Use picture-appearance {clipId,patch:{blendMode:normal|screen|add,opacity:0..1}} for existing picture clips. Preserve placement, cuts, sources and sound. Read protected settings and retained manual decisions. For revisions include family {id,parentVersionId,candidateHash}; adjusted values and Keep Current stay sticky. Never review, apply or release protection. A person chooses Review in timeline, edits Suggested and applies the exact version. Counts toward the shared maximum two editor proposals per turn.",
+  "production-effects-propose": "Prepare an effects-only composite card from ordinary chat or the exact attached effect-arrangement subject. Without that subject, include scope with the proposed visual target, exact range, optional audio or Off, palette and direction resolved from the request and current timeline; ask only for genuinely ambiguous bindings. An attached subject cannot be overridden. Read complete get_timeline and list_editor_requests, preserve protected and Adjusted by you scopes, Keep current, Exclude and source bindings. Use family id, parentVersionId and candidateHash only to revise a pending version; after Apply, omit family and propose against Current. New effect aliases need new-effect identity claims; later additions reuse allocated slots or request explicit new-slot permission. Protect/release are inert requestedActions only. Never apply, activate Suggested or grant revision permission. Air Particles uses preset id air-particles v1, appearance texture/softness/depth/blendMode, motion airflow/particleDeflections/boundary (soft-bounce or open-flow), and seed for explicit New pattern. Do not change Pattern unless requested. Clip blending uses production-pictures-propose. Creative commands use the shared effect catalogue and 50-command bound; all editor proposal paths together allow two per turn.",
   "production-audio-cue": "Stage a cue on a named existing audio track at an explicit frame and duration. For a new result, name an earlier generation action ref and include it in after; approval waits for that result. Sound effects are unavailable.",
 } as const satisfies Record<ModelWorldChatAction["kind"], string>;
 
@@ -3202,6 +3216,7 @@ Only a thread held to a production: an editor request prepares exact timeline co
 ${JSON.stringify(exampleEditorRequest)}
 
 summary names concrete changes. Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Fields and choices are in the action guide. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
+
 
 ### Scene edits
 

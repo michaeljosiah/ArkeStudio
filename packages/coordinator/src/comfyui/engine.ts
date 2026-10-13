@@ -1140,9 +1140,8 @@ export class ComfyUiEngineService {
           reasonKind: "verification",
         };
       }
-      // Qwen's guard is a single Python module. Verify its bytes even in an external
-      // installation, where a marker can outlive a modification to the installed code.
-      const ref = bundled || node.id === "ArkeQwen21Runtime"
+      // A bundled worker node is a single Python module: its bytes are its identity.
+      const ref = bundled
         ? await this.deps.hashFile(join(nodeDir, "__init__.py"), hashSignal, true)
         : await this.deps.readNodeRef(nodeDir).catch(() => null);
       if (generation !== this.verificationGeneration) {

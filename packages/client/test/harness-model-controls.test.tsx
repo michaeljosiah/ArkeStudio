@@ -4,7 +4,7 @@ import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { arkeAvailability, OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
+import { OPENCODE_AVAILABILITY, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { AgentsPanel } from "../src/screens/agents.js";
 import { SettingsHarnessScreen, SettingsLayout } from "../src/screens/shell.js";
 import { ProductionConversation } from "../src/components/conversation.js";
@@ -493,41 +493,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(container.textContent!, /models from Claude Code/, "the pending selection must not relabel the running catalog");
   });
 
-  it("shows the local harness as built in: named Local, running, with no executable to choose (issue 1247)", async () => {
-    const state = modelState();
-    state.app.harnessInfo = { generation: "arke", source: "bundled", version: null, beta: false };
-    state.app.research = { ...state.app.research, web: true };
-    state.app.harness = {
-      engine: "arke", claudePath: null, codexPath: null, launchOverride: null,
-      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(null)],
-    };
-    await mount(state, <SettingsHarnessScreen />);
-    const tabs = [...container.querySelectorAll('[role="tab"]')];
-    assert.match(tabs.find((tab) => tab.textContent!.includes("Local"))!.textContent!, /running now/);
-    assert.match(container.textContent!, /Ships with Arke Studio/);
-    assert.doesNotMatch(container.textContent!, /Choose…/, "nothing to locate: the harness is part of the app");
-    assert.doesNotMatch(container.textContent!, /Searches, reads, and cites pages/, "Local has no web tools, so the switch does not promise them");
-    assert.match(container.textContent!, /On, but Local stays offline/);
-    await press("Advanced · which model runs each writing agent");
-    assert.match(container.textContent!, /models from Local/);
-  });
 
-  it("says why the local harness cannot be chosen, in the coordinator's words", async () => {
-    const state = modelState();
-    const reason = "No pulled model has a 256k context window and calls tools. Pull one, such as Gemma 4 12B.";
-    state.app.harness = {
-      engine: "opencode", claudePath: null, codexPath: null, launchOverride: null,
-      harnesses: [OPENCODE_AVAILABILITY, arkeAvailability(reason)],
-    };
-    await mount(state, <SettingsHarnessScreen />, "/settings/harness?harness=arke");
-    assert.match(container.textContent!, /No pulled model has a 256k context window/);
-    assert.match(container.textContent!, /unavailable for now/);
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((item) => item.textContent!.includes("Local"))!;
-    assert.match(tab.textContent!, /unavailable/);
-    assert.doesNotMatch(container.textContent!, /not here/, "it ships with the app; what is missing is Ollama or a model");
-    const use = [...container.querySelectorAll("button")].find((button) => button.textContent === "Use this")!;
-    assert.equal(use.disabled, true);
-  });
 
   it("shows a failed launch without metadata on its attempted engine after the saved choice changes", async () => {
     const state = modelState();
@@ -674,16 +640,34 @@ describe("the model chip on a conversation page (turn 190e)", () => {
     assert.equal(isSet(), false);
   });
 
-  it("offers Every chat in this production with nothing chosen and nothing kept, keeping the model in force (195b, local.15)", async () => {
+  it("does not name or remember a provider default as the unpinned session's model", async () => {
     const state = modelState();
-    state.app.harnessModels = state.app.harnessModels.map((model) => (model.id === "opus[1m]" ? { ...model, isDefault: true } : model));
+    state.app.harnessModels = state.app.harnessModels.map((model) => ({ ...model, isDefault: true, variants: { names: ["low", "high"], default: "high" } }));
     state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
     await mount(state, pageConversation());
     assert.equal(isSet(), false, "the harness's default is in force, chosen by nobody");
+    assert.equal(chip().textContent, "Harness default");
+    assert.equal(container.querySelector('button[aria-label="Effort"]'), null, "no effort belongs to an unidentified runtime model");
     await openChip();
-    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models", "Every chat in this production"], "Clear is offered only once the production keeps one");
+    assert.deepEqual([...dialogRoot(container).querySelectorAll(".fy-mpick__foot button")].map((button) => button.textContent), ["Manage models"], "a provider preference cannot become a saved production choice");
+    assert.equal(dialogRoot(container).querySelector('[role="option"][aria-selected="true"]'), null);
+    await act(async () => chip().click());
+    await say("Explain the scene");
+    const turn = sent.findLast((message) => message.kind === "world-chat-send");
+    assert.ok(turn?.kind === "world-chat-send");
+    assert.equal(turn.modelId, undefined, "the real harness fallback still resolves the unpinned send");
+    assert.equal(turn.variant, undefined);
+    assert.equal(sent.some((message) => message.kind === "set-production-model"), false);
+  });
+
+  it("can remember a known agent model when the production has no choice", async () => {
+    const state = modelState();
+    state.world!.productions.find((production) => production.meta.id === "saltlight")!.meta.models = {};
+    state.app.agents = state.app.agents.map((agent) => agent.name === "world-builder" ? { ...agent, model: OPUS } : agent);
+    await mount(state, pageConversation());
+    assert.equal(chip().textContent, "Opus");
     await chipPress(/Every chat in this production/);
-    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS), "the default becomes the production's choice");
+    assert.ok(sent.some((message) => message.kind === "set-production-model" && message.capability === "llm" && message.modelId === OPUS));
   });
 
   describe("the effort (design turn 195)", () => {

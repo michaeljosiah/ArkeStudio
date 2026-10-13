@@ -243,7 +243,8 @@
 .fy-chat__runsummary[data-state="pending"] > summary > span { background: var(--muted-foreground); }
 .fy-chat__runsummary[data-state="cancelled"] > summary > span { background: var(--muted-foreground); }
 .fy-chat__runsummary .fy-chat__runreport { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
-.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) > .fy-arke,
+.fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-production-studio-chat > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__pin::after { left: auto; right: 0; transform: none; }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__head { min-height: 60px; }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-arke__name { font-size: 16px; font-weight: 500; }
