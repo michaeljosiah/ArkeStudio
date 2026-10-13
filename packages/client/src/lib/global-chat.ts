@@ -143,12 +143,13 @@ export class GlobalChatController {
   }
   close() { this.pending = null; this.changed({ open: false, stopCapture: this.snapshot.stopCapture + 1, switching: false }); }
   stopDictation() { this.changed({ stopCapture: this.snapshot.stopCapture + 1 }); }
-  reconcileConversations(worldId: string, ids: ReadonlySet<string>) {
+  reconcileConversations(worldId: string, ids: ReadonlySet<string>, loadedId?: string | null) {
     const before = this.listedConversations.get(worldId);
     this.listedConversations.set(worldId, ids);
-    // A workspace can arrive before its summary. Only a removed known row proves deletion.
-    if (!before) return;
-    const removed = new Set([...before].filter(id => !ids.has(id)));
+    // The first complete snapshot validates cached identities from the previous window. A
+    // currently loaded workspace may precede its new summary, so retain that arrival.
+    const known = before ?? new Set([...this.conversationIds].filter(([key]) => key.startsWith(worldId + ":")).map(([, id]) => id));
+    const removed = new Set([...known].filter(id => !ids.has(id) && (before !== undefined || id !== loadedId)));
     for (const [key, id] of this.conversationIds) if (key.startsWith(worldId + ":") && removed.has(id)) {
       this.conversationIds.delete(key); this.values.delete(`${worldId}:conversation:${id}`);
     }

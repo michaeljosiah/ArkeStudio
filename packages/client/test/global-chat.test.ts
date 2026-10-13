@@ -60,6 +60,15 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.equal(owner.getSnapshot().selected?.entry.kind, "world"); assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
     assert.equal(owner.value(history.key, "draft", ""), ""); assert.equal(owner.value(production.key, "draft", ""), "");
   });
+  it("the initial snapshot drops a deleted restored thread but permits a loaded workspace awaiting its summary", () => {
+    let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
+    const original = new GlobalChatController(storage); original.open(production); original.reportConversation(production.key, CHAT_ID);
+    const restored = new GlobalChatController(storage), arriving = new GlobalChatController(storage);
+    restored.reconcileConversations(production.worldId, new Set());
+    assert.equal(restored.getSnapshot().selected?.entry.kind, "world"); assert.equal(restored.getSnapshot().selected?.conversationId, undefined);
+    arriving.reconcileConversations(production.worldId, new Set(), CHAT_ID);
+    assert.equal(arriving.getSnapshot().selected?.conversationId, CHAT_ID);
+  });
   it("an explicit new conversation leaves the old thread's draft recoverable", () => {
     const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID);
     owner.setValue(production.key, "draft", "Keep this in the old conversation"); owner.startNew(production);

@@ -7,7 +7,7 @@ import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   ADAPTATION_KINDS, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
@@ -41,6 +41,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const setupId = idResult.success ? idResult.data : null;
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const onSetupPage = !embedded || location.pathname === `/w/${worldId}/productions/setup/${setupId}`;
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
   const readReplies = useReadReplies(workspace);
@@ -83,9 +85,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
       setPending(null);
     }
     setFailure(result.detail ?? null);
-    if (result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
-    if (result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
-  }), [worldId, setupId, navigate]);
+    if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
+    if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
+  }), [worldId, setupId, navigate, onSetupPage]);
   useEffect(() => {
     if (!world || !worldId || !setupId || connection !== "open") return;
     const key = `${worldId}/${setupId}`;
@@ -101,8 +103,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     }
   }, [connection]);
   useEffect(() => {
-    if (setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
-  }, [setup?.status, setup?.productionId, worldId, navigate]);
+    if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
+  }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   if (!setupId) return <p role="alert">This production setup address is invalid.</p>;
   const draft = setup?.draft;
