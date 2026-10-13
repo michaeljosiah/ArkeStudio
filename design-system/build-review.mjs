@@ -696,6 +696,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "global-chat-224.native-review.html", what: "Turn 224 revision 3: actual Develop page and native composer/model controls compared with the proposed global Chat host. Build using global-chat-224.native-build.mjs.", state: "proposed · awaiting author approval" },
   { file: "global-chat-224.review.html", what: "Design turn 224: persistent contextual Chat, navigation, drafts, phone and world boundary. Interactive isolated fixture.", state: "proposed · awaiting author approval" },
   { file: "air-particles-220.review.html", what: "Approved Air Particles, physics, blend modes, protection and Arke review: turns 220–223.", state: "approved · SPEC-055" },
   { file: "crossfade-216.review.html", what: "Approved crossfade designs 216–219 and isolated prototype: fixed cuts, bulk authoring, protection and Arke review.", state: "approved · SPEC-054 implementation" },
