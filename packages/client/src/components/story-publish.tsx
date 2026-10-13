@@ -97,13 +97,14 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
   const [edition, setEdition] = useState<StoryEdition | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [finding, setFinding] = useState<StoryStyleFinding | null>(null), [replacement, setReplacement] = useState("");
   const [changed, setChanged] = useState(false), [applied, setApplied] = useState<string[]>([]);
-  const asked = useRef<string | null>(null), loading = useRef<string | null>(null), dirty = useRef(false), operation = useRef(""), pendingImpact = useRef<string[]>([]);
+  const asked = useRef<string | null>(null), loading = useRef<string | null>(null), dirty = useRef(false), operation = useRef(""), pendingImpact = useRef<string[]>([]), watching = useRef<string | null>(null);
   const connection = useStore().connection, world = useWorld();
   const sourceStamp = JSON.stringify(chapters.map(chapter => [chapter.id, chapter.hash, chapter.version, chapter.audiobook]));
   const priorSource = useRef(sourceStamp);
   const update = (patch: Partial<StoryPublicationSettings>) => { dirty.current = true; setSettings(value => ({ ...value, ...patch })); setReview(null); setChanged(edition !== null); };
   const request = (input: StoryPublishAction) => {
     setError(null); operation.current = input.action; setBusy(input.action !== "cancel");
+    if (["review", "decide", "preview"].includes(input.action)) watching.current = null;
     asked.current = publishStory(worldId, production.meta.id, input);
     if (!asked.current) { setBusy(false); setError("Connect to the host to continue."); }
   };
@@ -115,7 +116,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
         if (answer.result.error) setError(answer.result.error);
         return;
       }
-      if (answer.requestId !== asked.current) return;
+      if (answer.requestId !== asked.current && (!answer.result.edition || answer.result.edition.id !== watching.current)) return;
       const result = answer.result;
       if (result.error) { setError(result.error); setBusy(false); return; }
       if (result.review) {
@@ -124,7 +125,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
         if (operation.current === "review" || operation.current === "decide") { setChanged(false); setStep("Formatting & style"); }
       }
       if (result.edition) {
-        setEdition(result.edition); setBusy(result.edition.status === "creating");
+        watching.current = result.edition.id; setEdition(result.edition); setBusy(result.edition.status === "creating");
         setChanged(false); setStep(result.edition.status === "ready" ? "Files" : "Preview");
       }
     });
@@ -168,7 +169,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
         <fieldset><legend>Create files for</legend>{(["epub", "m4b"] as const).map(format => <label className="fy-publish-choice" key={format}><input type="checkbox" checked={settings.outputs.includes(format)} onChange={event => update({ outputs: event.target.checked ? [...settings.outputs, format] : settings.outputs.filter(value => value !== format) })} /><span><strong>{format === "epub" ? "Read · EPUB" : "Listen · M4B"}</strong><small>{format === "epub" ? "Send to Kindle or use another book reader" : "Arke’s chosen narration and character voices, as produced"}</small></span></label>)}</fieldset>
         <p className="fy-publish-muted">Creates private files on your host. No upload or new narration is started.</p>
         {onOtherExports && <Button variant="ghost" onClick={onOtherExports}>Other exports</Button>}
-        <StoryEditionLibrary worldId={worldId} productionId={production.meta.id} onPreview={row => { setEdition(row); setSettings(row.settings); setStep(row.status === "ready" ? "Files" : "Preview"); }} />
+        <StoryEditionLibrary worldId={worldId} productionId={production.meta.id} onPreview={row => { watching.current = row.id; setBusy(row.status === "creating"); setEdition(row); setSettings(row.settings); setStep(row.status === "ready" ? "Files" : "Preview"); }} />
       </>}
       {step === "Chapters" && <><p>Chapters stay in manuscript order. Empty or incomplete chapters must be fixed or explicitly left out.</p>
         {chapters.map(chapter => <label className="fy-publish-choice" key={chapter.id}><input type="checkbox" checked={settings.chapterIds.includes(chapter.id)} onChange={event => update({ chapterIds: event.target.checked ? chapters.filter(row => row.id === chapter.id || settings.chapterIds.includes(row.id)).map(row => row.id) : settings.chapterIds.filter(id => id !== chapter.id) })} /><span><strong>{chapter.order}. {chapter.title}</strong><small>{chapter.words ?? 0} words</small></span></label>)}

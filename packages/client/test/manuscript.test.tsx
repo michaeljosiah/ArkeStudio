@@ -306,4 +306,20 @@ describe("Publish review (turn 224)", () => {
     assert.ok(button(m, /^Apply to manuscript$/), "a refused write leaves the proposal visible");
     assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter"), false, "applying text never generates narration");
   });
+  it("reopens a running edition and follows its original operation through completion", async () => {
+    const m = await mount(inkbound()); await press(m, "export-manuscript");
+    const list = m.sent.find(message => message.kind === "list-story-publications");
+    assert.ok(list && list.kind === "list-story-publications");
+    const edition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      createdAt: "2026-10-13T12:00:00Z", fingerprint: "c".repeat(64), status: "creating" as const, phase: "Preparing EPUB", files: [],
+      settings: { title: "Inkbound", author: "", language: "en", description: "", label: "Private edition", cover: null, chapterIds: ["neap"], outputs: ["epub"] as "epub"[], avoidEmDashes: false } };
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.editions", requestId: list.requestId, editions: [edition] }));
+    await act(async () => button(m, /^View preparation$/)!.click());
+    assert.ok(button(m, /^Cancel preparation$/), "reopened work retains cancellation");
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      requestId: list.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready" } } }));
+    assert.ok(button(m, /^Create edition$/), "completion from the original request updates the reopened view");
+    assert.equal(button(m, /^Cancel preparation$/), undefined);
+  });
+
 });
