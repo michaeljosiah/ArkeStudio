@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { lstat, open, stat, unlink, writeFile } from "node:fs/promises";
-import { relative, sep } from "node:path";
 import { buildFfmpegArgs, containedPictureRect, effectCapabilityProblem, effectRenderCapabilityProblem, ulid, EFFECT_ANALYSIS_PROFILE, EffectFeatureManifestSchema, effectAudioSourceFingerprintMaterial, effectManifestFingerprintMaterial, prepareEffectReactions, type EffectFeatureManifest, type EffectAlphaInput, type EffectClip, type ExportPlan } from "@arke-studio/contracts";
 import { runExport, type ExportHandle, type ExportSidecar, type FfmpegRunner } from "../takes/export.js";
 import type { EffectRasterHost } from "../media/node-effect-renderer.js";
@@ -8,7 +7,6 @@ import { partitionEffectBlendLayers, type PictureBlendMode } from "@arke-studio/
 import { hashMediaFile } from "../media/node-media-host.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { WorldStore } from "../world/store.js";
-import { toExtendedLength } from "../world/paths.js";
 
 const MAX_INTERMEDIATE_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_GROUPS = 128;
@@ -36,14 +34,24 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
   } catch (error) { analysisError = error instanceof Error ? error : new Error(String(error)); }
   if (plan.effectRender) plan.effectRender.pictureLayers = plan.effectRender.pictureLayers.filter(layer => layer.startFrame < plan.effectRender!.endFrame && layer.endFrame > plan.effectRender!.startFrame);
   const derivedPaths: string[] = [], identities = new Map<string, string>();
-  const ownedFiles = new Map<string, { dev: number; ino: number }>(), stages: string[] = [];
-  const ownedPath = (path: string, create = false) => containedWorldFilePath(store.dir, path, create, "effect-export");
-  const remember = async (path: string) => { const info = await lstat(path); ownedFiles.set(path, { dev: info.dev, ino: info.ino }); };
+  const ownedFiles = new Map<string, { dev: bigint; ino: bigint; portable: string }>(), stages: string[] = [];
+  const portablePaths = new Map<string, string>();
+  const ownedPath = async (portable: string, create = false) => {
+    const path = await containedWorldFilePath(store.dir, portable, create, "effect-export");
+    portablePaths.set(path, portable); return path;
+  };
+  const remember = async (path: string) => {
+    const portable = portablePaths.get(path);
+    if (!portable) throw new Error("Effect export file has no validated authority path");
+    const info = await lstat(path, { bigint: true }); ownedFiles.set(path, { dev: info.dev, ino: info.ino, portable });
+  };
   const discard = async (path: string) => {
     try {
-      await ownedPath(relative(toExtendedLength(store.dir), toExtendedLength(path)).split(sep).join("/"));
-      const current = await lstat(path), owned = ownedFiles.get(path);
-      if (owned && current.dev === owned.dev && current.ino === owned.ino) await unlink(path);
+      const owned = ownedFiles.get(path);
+      if (!owned) return;
+      const validated = await ownedPath(owned.portable);
+      const current = await lstat(validated, { bigint: true });
+      if (current.dev === owned.dev && current.ino === owned.ino) await unlink(validated);
     } catch { /* A disappeared or redirected cache path is no longer ours to remove. */ }
   };
   const sources = [...new Set([...(plan.effectRender?.pictureLayers.flatMap(layer => layer.path ? [layer.path] : []) ?? []), ...plan.audio.map(clip => clip.path), ...Object.values(manifests).flatMap(manifest => manifest.descriptor.sources.map(source => source.path))])];
@@ -154,7 +162,7 @@ export function runEffectExport(store: WorldStore, authored: ExportPlan, outName
     async cleanupStaging() { for (const path of stages) await discard(path); },
     async rollbackOutput(path) {
       const source = stages[0] && ownedFiles.get(stages[0]);
-      if (source) { ownedFiles.set(path, source); await discard(path); }
+      if (source) { ownedFiles.set(path, { ...source, portable: `exports/${outName}` }); await discard(path); }
     },
     async cleanup() { for (const path of derivedPaths) await discard(path); },
   });
