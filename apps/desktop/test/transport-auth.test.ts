@@ -4,7 +4,7 @@ import { authenticatedMediaHeaders, desktopTransportOrigins } from "../src/trans
 
 it("authenticates this window's world and genesis media without putting the token in URLs", () => {
   const session = { port: 43210, token: "a".repeat(64) };
-  for (const prefix of ["media/world", "genesis-media/draft"]) {
+  for (const prefix of ["media/world", "genesis-media/draft", "story-edition-media/edition", "story-preview-media/edition"]) {
     const request = { url: `http://127.0.0.1:43210/${prefix}/clip.mp4`, webContentsId: 7, requestHeaders: { Range: "bytes=4-8" } };
     assert.deepEqual(authenticatedMediaHeaders(request, session, 7), { Range: "bytes=4-8", Authorization: `Bearer ${session.token}` });
     assert.equal(request.url.includes(session.token), false);

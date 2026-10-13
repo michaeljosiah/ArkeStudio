@@ -175,8 +175,9 @@ function html(runs: readonly ManuscriptRun[]): string {
  * container, the package with title, language and identifier, a navigation document, one XHTML
  * file a chapter, and a stylesheet of a few lines.
  */
-export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; language: string; modified: string }): Uint8Array {
+export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; language: string; modified: string; author?: string; description?: string; cover?: { bytes: Uint8Array; mediaType: "image/jpeg" | "image/png" } }): Uint8Array {
   const utf8 = (text: string) => new TextEncoder().encode(text);
+  const coverName = opts.cover?.mediaType === "image/png" ? "cover.png" : "cover.jpg";
   const chapterFile = (index: number) => `chapter-${index + 1}.xhtml`;
   const chapters = doc.chapters.map((chapter, index) => {
     let first = true;
@@ -193,7 +194,7 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
       .join("\n");
     return { name: `OEBPS/${chapterFile(index)}`, data: utf8(xhtml(chapter.title, `<section epub:type="chapter"><h1>${xml(chapter.title)}</h1>\n${blocks}</section>`, opts.language)) };
   });
-  const title = xhtml(doc.title, `<section epub:type="titlepage"><h1 class="title">${xml(doc.title)}</h1><p class="subtitle">${xml(doc.subtitle)}</p></section>`, opts.language);
+  const title = xhtml(doc.title, `<section epub:type="titlepage"><h1 class="title">${xml(doc.title)}</h1><p class="subtitle">${xml(opts.author ?? doc.subtitle)}</p></section>`, opts.language);
   const nav = xhtml(
     "Contents",
     `<nav epub:type="toc" id="toc"><h1>Contents</h1><ol><li><a href="title.xhtml">${xml(doc.title)}</a></li>` +
@@ -203,11 +204,12 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
   );
   const modified = opts.modified.replace(/\.\d{3}Z$/, "Z");
   const manifest =
+    (opts.cover ? '<item id="cover-image" href="' + coverName + '" media-type="' + opts.cover.mediaType + '" properties="cover-image"/><item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>' : '') +
     '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
     '<item id="css" href="style.css" media-type="text/css"/>' +
     '<item id="title" href="title.xhtml" media-type="application/xhtml+xml"/>' +
     doc.chapters.map((_, index) => `<item id="c${index + 1}" href="${chapterFile(index)}" media-type="application/xhtml+xml"/>`).join("");
-  const spine = '<itemref idref="title"/>' + doc.chapters.map((_, index) => `<itemref idref="c${index + 1}"/>`).join("");
+  const spine = (opts.cover ? '<itemref idref="cover"/>' : '') + '<itemref idref="title"/>' + doc.chapters.map((_, index) => `<itemref idref="c${index + 1}"/>`).join("");
   const opf =
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
     '<package version="3.0" unique-identifier="pub-id" xmlns="http://www.idpf.org/2007/opf">' +
@@ -215,6 +217,8 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
     `<dc:identifier id="pub-id">${xml(opts.identifier)}</dc:identifier>` +
     `<dc:title>${xml(doc.title)}</dc:title>` +
     `<dc:language>${xml(opts.language)}</dc:language>` +
+    (opts.author ? `<dc:creator>${xml(opts.author)}</dc:creator>` : "") +
+    (opts.description ? `<dc:description>${xml(opts.description)}</dc:description>` : "") +
     `<meta property="dcterms:modified">${xml(modified)}</meta>` +
     "</metadata>" +
     `<manifest>${manifest}</manifest><spine>${spine}</spine></package>`;
@@ -229,6 +233,7 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
     { name: "OEBPS/nav.xhtml", data: utf8(nav) },
     { name: "OEBPS/style.css", data: utf8(EPUB_CSS) },
     { name: "OEBPS/title.xhtml", data: utf8(title) },
+    ...(opts.cover ? [{ name: "OEBPS/" + coverName, data: opts.cover.bytes }, { name: "OEBPS/cover.xhtml", data: utf8(xhtml(doc.title, `<section epub:type="cover"><img src="${coverName}" alt="${xml(doc.title)}" style="max-width:100%;height:auto"/></section>`, opts.language)) }] : []),
     ...chapters,
   ]);
 }

@@ -773,7 +773,7 @@ export async function saveChapter(
   productionId: string,
   chapterFile: string,
   body: string,
-  options: { baseHash?: string; source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { baseHash?: string; source?: string; requestId?: string; precondition?: WorldStatePrecondition; newVersion?: true } = {},
 ): Promise<{ version: number; hash: string }> {
   return store.gateOp(async () => {
     const path = `productions/${productionId}/chapters/${chapterFile}.md`;
@@ -807,7 +807,7 @@ export async function saveChapter(
       kind: "chapter-save",
       source: options.source ?? "editor",
       ...(options.requestId ? { requestId: options.requestId } : {}),
-      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }, ...progressFiles],
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: options.newVersion !== true }, ...progressFiles],
     });
     // The base the next save must name is the bytes this commit wrote — the committer stamps
     // `updated` and `version` on the way through, so it is not what was handed over, and it is

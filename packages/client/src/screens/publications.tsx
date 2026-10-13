@@ -1,3 +1,4 @@
+import { StoryEditionLibrary } from "../components/story-publish.js";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import type { PublicationJob, PublicationPlayback } from "@arke-studio/contracts";
@@ -164,12 +165,13 @@ export function PublicationsScreen() {
       <Button disabled={!bridge || busy} onClick={() => void open("zip")}>Open ZIP</Button>
       <Button variant="ghost" disabled={!bridge || busy} onClick={() => void open("directory")}>Open folder</Button>
     </div>
-    {!bridge && <p>Open publications in the desktop app.</p>}
+    {!bridge && <p>Open video publication packages in the desktop app.</p>}
     {busy && <p role="status">Verifying publication…</p>}
     {error && <p role="alert">{error}</p>}
     {[publication, pending].filter((item): item is PublicationPlayback => item !== null).map(item => <div key={item.sessionId} hidden={item === pending}>
       <PublicationVideo publication={item} {...(item === pending ? { onReady: () => { setPublication(item); setPending(null); finish(); }, onFailure: failed } : {})} />
     </div>)}
+    <StoryEditionLibrary />
     <PublicationJobs onOpen={id => void open({ operationId: id })} />
     {openWorld && <WebPackages worldId={openWorld} />}
     </main>

@@ -8,6 +8,47 @@ Track the remaining work in [issue #1228](https://github.com/michaeljosiah/ArkeS
 The opt-in [book/audio interoperability spike](publication-interop.md) records external-format
 fixtures and reader evidence; it does not add supported application profiles.
 
+The [private story publishing design review](../../design-system/publish-private-review.html)
+records approved turn 224 (revision 2, 2026-10-13). Story and Audiobook now share a Publish sheet
+for standalone EPUB and AAC M4B files. This is separate from the video-v1 manifest/player protocol;
+the protocol still refuses unsupported book/audio profiles.
+
+The coordinator's publications/story.ts owns host-local editions under
+<appRoot>/story-publications/<edition UUID>/. story-review.ts checks every explicitly selected
+chapter in manuscript order against a fresh world scan. Audiobook readiness uses the existing
+block plan, kept takes, measured durations, recorded-take clearance and chapter mix. Missing,
+stale, flagged or misplaced material blocks audio; users can fix it, leave out a chapter, or
+choose book only. Publishing never starts speech generation.
+
+Formatting & style has an optional Avoid em dashes rule, off by default. Each suggestion shows
+exact source text, an editable proposal and potentially affected recordings. Apply uses the
+ordinary base-hash-guarded manuscript save with a new restorable version. Keep stores a decision
+for that exact paragraph/rule/selection. Stale proposals refuse. Existing audio dependency checks
+identify changed spoken blocks; presentation-only changes do not invent replacement narration.
+
+Prepare preview captures source receipts and media through the existing publication capture
+boundary, then builds the actual EPUB/M4B outside the world write gate. The EPUB preview reads
+its packaged XHTML in a sandboxed frame. Audio uses the existing mix semantics, with ordered
+chapter markers and optional PNG/JPEG cover art. Create edition rechecks source identity and
+output hashes before marking the files ready. Failed/cancelled preparations retain captured
+inputs for retry; incomplete files are not delivered. Completed files are immutable to the app
+and remain usable after the source world moves or closes. Missing/changed files are refused. Desktop Locate restores only a file whose digest matches the same edition; it cannot substitute a different book.
+
+Private story previews use a separate authenticated media route. Native Save and download delivery
+require a ready edition after Create has rechecked the source; preview playback does not approve
+delivery. Reconnecting reloads the selected saved operation. Audio preparation removes temporary
+chapter WAVs and encoder metadata after success, failure or cancellation, retaining captured inputs
+for retry. Readiness checks apply to selected chapters and their shared narration dependencies.
+
+Publications lists private editions across worlds. Authenticated media delivery supports range
+requests, including paired remote browsers. Desktop Save uses a main-process dialog and resolves
+only inventoried edition files; the renderer cannot supply arbitrary host paths. Browser Save
+uses a download response. Send to Kindle is an explicit manual EPUB handoff. M4B import uses an
+external audiobook app and does not promise Kindle audio, Amazon delivery receipts or synchronized
+reading/listening positions. MP3/WAV export and a new portable book/audio player profile remain
+later work. Physical Kindle/phone import, offline listening, seek and resume need device acceptance
+testing; encoder and layout checks alone do not establish these.
+
 `packages/contracts/src/publication.ts` exports the video manifest schema, compatibility reader,
 portable asset path rules and dependency receipt/fingerprint helpers. The owning tests are
 `packages/contracts/test/publication.test.ts`. These are new output contracts; no existing world
