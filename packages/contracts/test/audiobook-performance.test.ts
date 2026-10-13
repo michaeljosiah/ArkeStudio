@@ -115,7 +115,7 @@ test("grouped performed requests carry context once and identity only at changes
 
 
 test("temporary delivery resets at a grouped paragraph boundary even for the same speaker", () => {
-  const reader = { ...model, cadence: { ...model.cadence!, deliveries: ["measured", "whispered"], deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" } } } };
+  const reader: ManifestModel = { ...model, cadence: { ...model.cadence!, deliveries: ["measured", "whispered"], deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" } } } };
   const book = { reading: "performed" as const, notes: { Jace: "lower British register" } };
   const first = compileAudiobookPerformance({ key: "a", paragraph: 0, text: "Quiet.", speaker: "Jace" }, book,
     { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1, delivery: "whispered", cues: [] }, reader)!;
@@ -123,3 +123,4 @@ test("temporary delivery resets at a grouped paragraph boundary even for the sam
   const text = groupedText(packTurns([first, second].map((p, i) => ({ key: String(i), reader: "calen", parts: p.parts.map((text, j) => ({ text, performance: p.passages[j] })) })), "deltas"));
   assert.equal(text, "[same narrator throughout] [lower British register] [whispers] Quiet.\n\n[normal speaking voice] [lower British register] Move.");
 });
+
