@@ -1,6 +1,6 @@
 # Global contextual Chat
 
-The author approved design turn 225 on 13 October 2026, with its model-choice bullet removed.
+The author approved revision 6, originally numbered turn 224 and now master turn 225, on 13 October 2026, with its model-choice bullet removed.
 Revision 6 amends the recovered turn 195 reference and implements the global entry point in
 ArkeStudio PR #1737. The OpenCode image-handoff increment remains the separate PR #1736.
 

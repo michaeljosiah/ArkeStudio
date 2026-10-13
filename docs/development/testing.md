@@ -1,6 +1,6 @@
 # Running and validating changes
 
-Global Chat (approved turn 224 revision 6, restored/amended model turn 195)
+Global Chat (master turn 225, approved as turn 224 revision 6; restored/amended model turn 195)
 uses client test/global-chat.test.ts for scope/draft/transcription/recovery and the existing conversation suites.
 Build global-chat-224.native-build.mjs, then run global-chat-224.application-check.mjs with
 fine pointer and --touch for the actual App lifecycle, overlays, scoped send and simulated keyboard.
