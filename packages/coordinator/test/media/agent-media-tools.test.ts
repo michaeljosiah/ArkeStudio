@@ -63,3 +63,10 @@ test("native high-entropy RGBA footage fits the 1024px frame profile before rend
   const frame = await tools.frame(video, 0, 0, 1, signal());
   assert.ok(frame.bytes.length > 3_000_000); assert.ok(frame.bytes.length <= 5 * 1024 * 1024); assert.equal(decodePng(frame.bytes).width, 1024);
 });
+test("native GIF artifacts expose their metadata and decoded frame timestamps", { skip: !available }, async () => {
+  const folder = await tempDir("arke-gif-frame-"), gif = join(folder, "animated.gif");
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=80x48:rate=5:duration=1", gif]);
+  const inventory = await tools.probe(gif, signal()); assert.equal(inventory.streams[0]!.codec, "gif");
+  const frame = await tools.frame(gif, 0, .3, 1, signal()); assert.ok(frame.sourceTimeSec >= .3 && frame.sourceTimeSec < 1);
+  assert.equal(decodePng(frame.bytes).width, 1024);
+});

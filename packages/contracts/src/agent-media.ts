@@ -58,7 +58,7 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),
   audio: AudioSignalSchema.optional(), coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples"]),
   limitations: z.array(z.string().min(1).max(500)).min(1).max(8) }).strict().superRefine((value, context) => {
-    if (value.sourceEndSec !== null && value.sourceEndSec <= value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
+    if (value.sourceEndSec !== null && value.sourceEndSec < value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
     if (value.coverage === "sampled-frames-only" && (!value.range || !value.frames || value.audio) ||
       value.coverage === "decoded-audio-samples" && (!value.range || !value.audio || value.frames) ||
       value.coverage === "metadata-only" && (value.frames || value.audio || value.range)) {

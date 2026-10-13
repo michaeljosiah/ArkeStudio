@@ -12,7 +12,7 @@ export interface AgentMediaTools {
   }>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
 }
-const FORMATS = "mov,matroska,webm,wav,mp3,ogg,flac,aac,image2,png_pipe,jpeg_pipe,webp_pipe";
+const FORMATS = "mov,matroska,webm,wav,mp3,ogg,flac,aac,gif,image2,png_pipe,jpeg_pipe,webp_pipe";
 const finite = (value: unknown): number | null => {
   if (typeof value !== "number" && (typeof value !== "string" || value.trim() === "")) return null;
   const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null;

@@ -26,14 +26,17 @@ identification and listening/performance judgments are explicitly unmeasured. Ra
 local; these tools do not send an audio attachment to a model.
 
 Receipts persist as `media.receipt`, replay into the bounded workspace projection, and raise
-the world reader boundary to schema 78. Each observation records the profile and decoder version.
+the world reader boundary to schema 78. Each observation records the profile and both ffprobe
+and ffmpeg versions, including when the host resolves them to different installations.
 There is no cross-run evidence cache: every call verifies current source bytes. A later cache
-must key decoder/profile/source/stream/interval and revalidate identity before reuse.
+must key probe/decoder/profile/source/stream/interval and revalidate identity before reuse.
 
-Validation includes original-rate stereo with known silence/full-scale samples and real VFR
-seeking, typed coverage checks, leased MCP image blocks, disclosures, changed bytes, cancellation,
+Validation includes original-rate stereo with known silence/full-scale samples, real VFR
+seeking, portrait video, high-entropy RGBA PNGs and generated GIFs, typed coverage checks,
+leased MCP image blocks, final privacy revalidation, disclosures, changed bytes, cancellation,
 explicit streams, segment offsets and budgets. Native fixture tests can be required with
 `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1` and `ARKE_FFMPEG`/`ARKE_FFPROBE` host paths.
+Take-review frame counts deduplicate exact source/stream/time/rendition identities across receipts.
 
 Next increments remain local timestamped transcription with separate derivative provenance,
 continuous-motion/flicker/sync coverage, measured true peak/loudness, sound/voice listening
