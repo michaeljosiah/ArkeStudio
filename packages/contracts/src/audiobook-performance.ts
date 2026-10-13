@@ -1,6 +1,6 @@
 import type { AudiobookBlock, AudiobookBook } from "./audiobook.js";
 import { audiobookNoteKey } from "./audiobook.js";
-import { isPointCue, normalizeSpeechText, performanceNote, readingNotesLead, sentAs, type CadenceCue, type CadencePlan, type HeldControl } from "./cadence.js";
+import { isPointCue, markerSegments, normalizeSpeechText, performanceNote, readingNotesLead, sentAs, type CadenceCue, type CadencePlan, type HeldControl } from "./cadence.js";
 import type { ManifestModel } from "./manifest.js";
 import { speechInputFits, splitSpeechInput } from "./speech-input.js";
 
@@ -60,17 +60,26 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
       const hash = plan?.sourceTextHash ?? `sha256:${"0".repeat(64)}`;
       const local: CadencePlan = { schemaVersion: 1, sourceTextHash: hash, speed: plan?.speed ?? 1, cues,
         ...(plan?.delivery !== undefined ? { delivery: plan.delivery } : {}), ...(plan?.note !== undefined ? { note: plan.note } : {}) };
-      const mapped = sentAs(words, local, model);
-      const tagged = `${identity} ${mapped.text}`;
-      if (!speechInputFits([lead, tagged].filter(Boolean).join(" "), model.limits)) {
-        // Split source words, never bracket syntax, then rebase their direction and repeat
-        // the speaker identity. Re-rendering also counts the tags added at each new seam.
-        if (words.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
-        for (const piece of splitSpeechInput(words, { maxPromptChars: Math.floor(words.length / 2) })) render(from + piece.from, from + piece.to);
-        return;
+      const segments = markerSegments(words, local, model);
+      for (const segment of segments) {
+        const mapped = sentAs(segment.text, segment.plan, model);
+        // A parts-only marker has no inline reset. Restate normal delivery and character
+        // identity before each segment so a whisper cannot spill into the following words.
+        const tagged = `${identity} ${segments.length > 1 ? "[normal speaking voice] " : ""}${mapped.text}`;
+        if (!speechInputFits([lead, tagged].filter(Boolean).join(" "), model.limits)) {
+          if (segment.text.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
+          for (const piece of splitSpeechInput(segment.text, { maxPromptChars: Math.floor(segment.text.length / 2) })) render(from + segment.from + piece.from, from + segment.from + piece.to);
+          continue;
+        }
+        held.push(...mapped.held.map(control => {
+          if (control.cueIndex === undefined) return control;
+          const cue = segment.plan.cues[control.cueIndex]!;
+          const index = cues.findIndex(original => original.kind === cue.kind && (isPointCue(original) && isPointCue(cue)
+            ? original.at === segment.from + cue.at : !isPointCue(original) && !isPointCue(cue) && original.span.from === segment.from + cue.span.from));
+          return { ...control, cueIndex: cueIndices[index]! };
+        }));
+        append(tagged);
       }
-      held.push(...mapped.held.map(control => control.cueIndex === undefined ? control : { ...control, cueIndex: cueIndices[control.cueIndex]! }));
-      append(tagged);
     };
     render(from, to);
     offset = to;

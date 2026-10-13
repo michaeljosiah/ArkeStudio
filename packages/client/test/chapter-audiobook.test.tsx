@@ -1961,11 +1961,12 @@ describe("grouped reads (design turn 185)", () => {
     assert.ok(Number(displayedPrice) > 0.02, "the price includes repeated narrator direction, not just the short source paragraphs");
     if (requests === "per-paragraph") return;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
-    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", previews: [{ request: 1, endpoint: "/v1/text-to-speech/calen?output_format=pcm_24000", body: { model_id: "eleven_v4", text: "[same narrator, original voice and accent] Authoritative neighbour.\n\nTarget." } }], voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));
     const sheet = q(m, '[data-testid="read-sheet"]')!;
     assert.match(sheet.textContent!, /Request 1 · preview/);
     const body = JSON.parse(sheet.querySelector("pre")!.textContent!);
     assert.equal(body.model_id, "eleven_v4");
+    assert.match(body.text, /Authoritative neighbour/);
     assert.match(body.text, /original voice and accent/);
     assert.match(body.text, /\n\n/);
     assert.equal(body.voice_settings, undefined, "the selected voice keeps its settings");

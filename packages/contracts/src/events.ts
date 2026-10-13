@@ -1175,6 +1175,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("audiobook.priced"),
+      previews: z.array(z.object({ request: z.number().int().positive(), endpoint: z.string(), body: z.object({ model_id: z.string(), text: z.string(), voice_settings: z.record(z.number()).optional() }).strict() }).strict()).optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterId: SlugSchema,

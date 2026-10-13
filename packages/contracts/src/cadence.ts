@@ -230,7 +230,7 @@ export function tagFits(text: string, model: CadenceRow): boolean {
 }
 
 /** Why a row holds words too long for its tag. */
-function tagHold(model: CadenceRow): string {
+export function tagHold(model: CadenceRow): string {
   const words = model.cadence?.tagWords;
   return words === undefined ? `a tag takes ${tagCharacterLimit(model)} characters` : `a tag takes ${words} word${words === 1 ? "" : "s"} on this reader`;
 }

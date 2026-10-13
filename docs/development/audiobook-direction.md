@@ -33,14 +33,16 @@ and character billing can group when the model declares the capability. The exac
 text, including tags and paragraph separators, must fit the model's request cap. A re-read
 with neighbours falls back to the single-block route when the combined request exceeds it.
 
-The grouped-read confirmation includes v4 request previews (endpoint and JSON). These are
+The read confirmation includes v4 request previews (endpoint and JSON) from the coordinator’s
+priced run, including the neighbours paid for on a scoped re-read. These are
 labelled previews; provider-call records in Activity remain the evidence of actual HTTP calls.
 The preview shows tags explicitly and the existing controls identify held direction.
 
 The audiobook raises the world reader boundary to 78 when it first saves a character brief
 over sixty characters, a delivery phrase over sixty, or a newly supported vocalization.
 An older reader must not silently discard these records. Merely opening a world does not
-raise it.
+raise it. Performance quotes carrying new cue formats raise the boundary before their first
+durable write, including sealed world-chat quotes and native preparation.
 
 Regression coverage: contracts `audiobook-performance`, `audiobook-performed`, `cadence`,
 `voice-direction` and `grouped-reads`; providers `clients` and `manifest`; coordinator

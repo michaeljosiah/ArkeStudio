@@ -73,3 +73,17 @@ test("grouping accounts for every compiled tag and paragraph separator", () => {
   assert.ok(groups.every(g => groupedText(g.turns).length <= 10000));
   assert.match(groupedText(groups[0]!.turns), /\n\n/);
 });
+
+ test("a mid-row whisper retains its marker, resets delivery and keeps character identity", () => {
+  const text = "Hold. Stay quiet. Move.";
+  const whispered: ManifestModel = { ...model, cadence: { ...model.cadence!, deliveries: ["measured", "whispered"], deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" } } } };
+  const result = compileAudiobookPerformance({ key: "p0.0", paragraph: 0, text, speaker: "Jace" },
+    { reading: "performed", notes: { Jace: "low, controlled" } }, { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1, delivery: "measured",
+      cues: [{ kind: "delivery", span: { from: 6, to: 17, text: "Stay quiet." }, delivery: "whispered" }, { kind: "pause", at: 17, length: "short" }] }, whispered)!;
+  assert.match(result.text, /\[whispers\] Stay quiet\./);
+  assert.match(result.text, /\[normal speaking voice\] Move\./);
+  assert.equal(result.text.split("[low, controlled]").length - 1, 3);
+  assert.equal(result.text.split("[short pause]").length - 1, 1);
+  assert.equal(result.text.replace(/\[[^\]]*\]\s*/g, ""), text);
+  assert.deepEqual(result.held, []);
+});

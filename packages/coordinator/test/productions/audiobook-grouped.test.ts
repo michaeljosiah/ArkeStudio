@@ -459,6 +459,7 @@ it("Eleven v4 prices one continuous request and keeps durable cuts for its block
     assert.ok(quote.requests !== undefined && quote.requests < quote.characters);
     await h.run({ confirmationToken: quote.confirmationToken });
     assert.equal(h.sent.length, 1);
+    assert.equal(quote.previews?.[0]?.body.text, h.sent[0]!.params["text"]);
     assert.match(String(h.sent[0]!.params["text"]), /\n\n/);
     assert.equal(h.sent[0]!.params["audioFormat"], "wav");
     assert.equal(h.sent[0]!.estimatedMicroUsd, String(h.sent[0]!.params["text"]).length * 80);
@@ -616,12 +617,14 @@ describe("a chapter read grouped (design turn 185)", () => {
     try {
       const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
       const middle = plan.blocks[2]!.block.key;
-      const h = await harness(store);
+      const h = await harness(store, { model: SHIPPED_MANIFEST.models.find(m => m.id === "eleven_v4")! });
       await h.run({ only: [middle] });
       const card = priced(h.events)!;
       assert.equal(card.requests, 1);
       await h.run({ only: [middle], confirmationToken: card.confirmationToken });
       assert.deepEqual(h.sent[0]!.params["blocks"], [plan.blocks[1]!.block.key, middle, plan.blocks[3]!.block.key]);
+      assert.equal(card.previews?.length, 1);
+      assert.equal(card.previews[0]!.body.text, h.sent[0]!.params["text"], "the preview includes the paid neighbours");
       const record = await recordOf(worldDir);
       assert.deepEqual(Object.keys(record.takes), [middle]);
       assert.equal(record.takes[middle]?.costMicroUsd, 1_000, "the request is the kept block's");

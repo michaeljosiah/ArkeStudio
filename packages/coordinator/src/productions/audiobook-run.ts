@@ -75,7 +75,7 @@ class FreePlanEnded extends Error {
 
 export type AudiobookRunEvent =
   | { type: "started"; toMake: number; blocks: number; requests?: number; groups?: string[][] }
-  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number }
+  | { type: "priced"; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; toCast?: number; previews?: Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"] }
   | { type: "request"; index: number; of: number; keys: string[] }
   | { type: "progress"; block: string; outcome: "made" | "adopted" | "flagged"; reason?: string; made: number; toMake: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed" | "refused"; made: number; flagged: number; record?: ChapterAudiobook; reason?: string };
@@ -771,6 +771,21 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  const previews: NonNullable<Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"]> = [];
+  const previewGroups = new Map(groups.flatMap(group => group.kept.map(block => [block, group] as const)));
+  let previewRequest = 0;
+  for (const block of misses) {
+    const group = previewGroups.get(block);
+    if (group && group.kept[0] !== block) continue;
+    const texts = group ? [groupedText(group.turns)] : block.parts;
+    for (const [index, text] of texts.entries()) {
+      previewRequest++;
+      if (block.model.provider !== "elevenlabs" || block.model.id !== "eleven_v4") continue;
+      const settings = group ? undefined : block.direction?.perPart[index]?.voiceSettings ?? block.direction?.voiceSettings;
+      previews.push({ request: previewRequest, endpoint: `/v1/text-to-speech/${encodeURIComponent(block.reader.voiceId)}?output_format=pcm_24000`,
+        body: { model_id: block.model.id, text, ...(settings && Object.keys(settings).length ? { voice_settings: settings } : {}) } });
+    }
+  }
   // Cast first (design turn 198, R-69): the price is asked as the cast stands, saying what will be
   // cast; once answered — or where nothing is asked — the paragraphs are cast and the read is
   // prepared again from the new cast, so it reads what the cast now says.
@@ -778,7 +793,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
     const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
     if (asks && deps.confirmationToken !== asked) {
-      emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
       return;
     }
     const refused = await deps.castFirst();
@@ -827,7 +842,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
     return;
   }
 

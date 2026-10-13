@@ -1,4 +1,4 @@
-import { soloTurns, groupedText, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
@@ -686,7 +686,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     const groupOf = new Map(groups.flatMap((group) => group.keys.map((key) => [key, group] as const)));
     // Each request numbered in reading order, a block alone counted as one.
     let requests = 0;
-    const numbered: Array<{ keys: string[]; seconds: number; request: number; estimatedMicroUsd: number; preview?: { endpoint: string; body: { model_id: string; text: string } } }> = [];
+    const numbered: Array<{ keys: string[]; seconds: number; request: number; estimatedMicroUsd: number }> = [];
     let perParagraph = 0;
     for (const row of rows) {
       if (!toRead(row)) continue;
@@ -699,7 +699,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (group.keys[0] !== row.block.key) continue;
       requests += 1;
       const model = modelOf(row.speaker)!;
-      numbered.push({ ...(model.id === "eleven_v4" ? { preview: { endpoint: `/v1/text-to-speech/${encodeURIComponent(row.speaker.voiceId)}?output_format=pcm_24000`, body: { model_id: model.id, text: groupedText(group.turns) } } } : {}), keys: group.keys, seconds: group.seconds, request: requests, estimatedMicroUsd: speechPlanLabel(model) !== null ? 0 : quoteGroupedSpeech(model, group.turns).expectedMicroUsd });
+      numbered.push({ keys: group.keys, seconds: group.seconds, request: requests, estimatedMicroUsd: speechPlanLabel(model) !== null ? 0 : quoteGroupedSpeech(model, group.turns).expectedMicroUsd });
     }
     return { groups: numbered, requests, perParagraph, groupOf: new Map(numbered.flatMap((group) => group.keys.map((key) => [key, group] as const))) };
   }, [rows, modelOf, providers, requestsSetting, body, world?.clonedVoices]);
@@ -1212,7 +1212,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // request, Google's free day where it is known, the estimate.
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
-        ...(grouping.groups.length > 0 ? { previews: grouping.groups.flatMap(group => group.preview === undefined ? [] : [{ request: group.request, ...group.preview }]) } : {}),
+        ...(run.price.previews !== undefined ? { previews: run.price.previews } : {}),
         token: run.price.confirmationToken,
         recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
         title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
