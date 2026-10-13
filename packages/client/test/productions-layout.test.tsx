@@ -74,8 +74,8 @@ it("gives episodic and branching productions their own page destinations", async
   await mount("p/saltlight", episodicLayoutFixture());
   assert.deepEqual(labels(), ["Overview", "Episodes", "Story structure", "Cast", "Artifacts", "Generate", "Cut"]);
   await click(".fy-season-arke");
-  assert.ok(dom.document.querySelector(".fy-season-arke-sheet[open] .fy-arke"));
-  await click('.fy-page-sheet [aria-label="Close"]');
+  assert.ok(dom.document.querySelector(".fy-global-chat[open] .fy-arke"));
+  await click('.fy-global-chat [aria-label="Close Chat"]');
   const state = productionsLayoutFixture(); state.world!.productions[1]!.meta.kind = "interactive";
   await act(async () => __setStateForTest(state));
   assert.ok(labels().includes("Branch map"));
@@ -129,13 +129,14 @@ it("holds step two's creation actions on a phone and preserves WATCH's setup con
 });
 
 
-it("keeps the episode assistant in a compact sheet after opening an episode", async () => {
+it("opens the episode assistant in the shared Chat panel", async () => {
   await mount("p/saltlight/episodes/ep_watch-1", episodicLayoutFixture());
   assert.ok(dom.document.querySelector('[data-screen="episode-detail"]'));
   assert.equal(dom.document.querySelector(".fy-arkewrap > .fy-arke"), null);
   await click(".fy-season-arke");
-  assert.ok(dom.document.querySelector(".fy-season-arke-sheet[open] .fy-arke"));
-  assert.match(dom.document.querySelector(".fy-season-arke-sheet")!.textContent!, /Episode 01/);
+  assert.ok(dom.document.querySelector(".fy-global-chat[open] .fy-arke"));
+  assert.match(dom.document.querySelector(".fy-global-chat")!.textContent!, /Episode 01/);
+  assert.equal(dom.document.querySelector(".fy-season-arke-sheet[open]"), null);
 });
 
 it("gives desktop cards one keyboard destination and focuses the opened switch menu", async () => {

@@ -1,5 +1,5 @@
 /* The chat's model chip, in the composer's tool row (design turns 190e and 195). */
-.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; --mchip-name-min: 40px; }
+.fy-mchip { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: min-content; --mchip-name-min: 40px; }
 /* The tool row keeps send whole, however narrow: the model's name is ellipsed first, and only once it
    is down to its floor does the effort give way. In the 331 production dock the two chips stood at
    their full width and the effort ran under send (local.15). The effort's shrink is a token so it
@@ -8,11 +8,9 @@
    GPT-…, Clau…) beside the mark. local.15's floor of 76 for the whole chip left the name 15px, one
    letter and the ellipsis (F…, local.16). The chip's parts around the name are fixed, so its floor
    is theirs plus the name's: padding 15, mark 20 and its gap 7, the chevron's gap 7 and the chevron
-   12 make 61; the dot adds 13; a bare chip has no mark and pads 21, so 40. */
+   12 make 61; a bare chip has no mark and pads 21, so 40. */
 .fy-mchip__btn { --mchip-parts: 61px; }
-.fy-mchip__btn--set { --mchip-parts: 74px; }
 .fy-mchip__btn--bare { --mchip-parts: 40px; }
-.fy-mchip__btn--bare.fy-mchip__btn--set { --mchip-parts: 53px; }
 .fy-mchip > .fy-mchip__btn { min-width: 0; flex: 0 1 auto; }
 /* No floor wider than the chip itself: a name shorter than the floor (o3) keeps its own width rather
    than a gap before the chevron. calc-size is Chromium's; the plain floor before it is the fallback. */
@@ -45,6 +43,15 @@
    And whatever the row cannot hold is cut at its own edge, never drawn under send; the margin keeps
    attach's pull to the edge and the chips' focus rings. */
 .fy-cx__bar:has(.fy-mchip) { container: cx-tools / inline-size; }
+/* Keep a compact toolbar's controls whole. The optional read toggle becomes its named
+   speaker; a repeated agent label yields. Where the chips still cannot fit, tools wrap
+   inside the toolbar rather than one chip drawing over the next control. */
+@container cx-tools (max-width: 395px) {
+  .fy-cx__left:has(> .fy-mchip) { flex-wrap: wrap; row-gap: 4px; }
+  .fy-cx__left:has(> .fy-mchip) > .fy-cx__tool { flex: none; width: 29px; }
+  .fy-cx__left:has(> .fy-mchip) > .fy-cx__tool > span,
+  .fy-cx__left:has(> .fy-mchip) > .fy-cx__agent { display: none; }
+}
 .fy-cx__left:has(> .fy-mchip) { overflow: clip; overflow-clip-margin: 8px; }
 .fy-cx__left:has(> .fy-mchip) > :is(.fy-cx__busy, .fy-cx__agent) { flex: 0 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrower than 195b's 356 composer (the dock: 302 to 331), the row tightens to the frames' 6 between
@@ -57,6 +64,14 @@
   .fy-mchip > .fy-mchip__btn--effort.fy-mchip__btn--unset { width: 32px; padding: 0; justify-content: center; flex-shrink: 0; }
   .fy-mchip__btn--unset > .fy-mchip__name { display: none; }
   .fy-mchip__btn--unset > .fy-mchip__gauge { display: inline-flex; }
+}
+/* Touch controls reserve 44px for Send/Attach/Voice, so the same compact effort treatment
+   starts earlier. Keep the read speaker beside the pair instead of alone on a third row. */
+@media (pointer: coarse) {
+  @container cx-tools (max-width: 395px) {
+    .fy-mchip > .fy-mchip__btn--effort { padding: 0 10px; }
+    .fy-mchip > .fy-mchip__btn--effort > svg { display: none; }
+  }
 }
 .fy-mchip__btn {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 9px 0 6px;
@@ -78,7 +93,6 @@
 /* The chip whose menu is open wears the ring, as 195b draws it. */
 .fy-mchip__btn[aria-expanded="true"] { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 1px; }
 .fy-mchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-mchip__btn--set::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); flex: none; }
 /* The tool row's tips (the chips' and the microphone's; body-tip.tsx), drawn on the body for the same
    reason as the menus: the composer clips what hangs off it. A short tip sits on one line; a reason
    long enough to need two gets two, inside the window. */

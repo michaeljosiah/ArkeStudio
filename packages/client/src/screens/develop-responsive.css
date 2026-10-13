@@ -16,7 +16,8 @@
      editor none: the placeholder stood a word a line under the paperclip, and Read replies pushed
      send off the screen (installed app, 2026-10-05). */
   .fy-cx:has(.fy-mchip) { grid-template-columns: minmax(0, 1fr); }
-  .fy-cx:has(.fy-mchip) > .fy-cx__bar { padding: 0 4px 4px; }
+  .fy-cx:has(.fy-mchip) > .fy-cx__bar { padding: 8px 4px; }
+  .fy-cx__bar:has(.fy-mchip) { height: auto; min-height: 60px; align-items: center; }
   .fy-cx__editorwrap { min-width: 0; }
   .fy-cx__editor { min-height: 44px; max-height: 160px; padding: 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); }
   .fy-cx__placeholder { padding: 14px; font: 400 var(--text-sm)/1.5 var(--font-sans); }
@@ -24,6 +25,7 @@
   .fy-cx__left { gap: 4px; }
   .fy-cx__agent { display: none; }
   .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send, .fy-cx__chipx) { width: 44px; height: 44px; min-width: 44px; flex: none; }
+  .fy-cx__attach { margin-left: 0; }
   .fy-cx__send { border-radius: 50%; }
   .fy-cx__attachplus { display: none; }
   .fy-cx__attachclip { display: block; }

@@ -1,3 +1,6 @@
+import { GlobalConversationEntry } from "./global-chat.js";
+import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "./global-chat-context.js";
+import { useClientRender } from "./production-studio-context.js";
 import { ProductionStudio } from "./production-studio.js";
 import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
@@ -13,7 +16,7 @@ import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
 import { effectCompositeReplacesAction } from "../lib/editor-effect-proposal-presentation.js";
 import { useEffectReviewNavigation } from "../screens/editor-effect-review.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import type {
   ConversationActionCard,
@@ -667,25 +670,7 @@ export type DockAsk = {
   typed?: string;
 };
 
-export function ProductionConversation({
-  worldId,
-  productionId,
-  placeholder,
-  eyebrow,
-  heading,
-  emptyLine,
-  footer,
-  pointsEmpty,
-  entry,
-  openingNote,
-  side,
-  openWith,
-  dock,
-  onSelectShot,
-  subject,
-  contextSummary,
-  stagedTitle,
-}: {
+export type ProductionConversationProps = {
   worldId: string | undefined;
   productionId: string | undefined;
   placeholder: string;
@@ -781,15 +766,43 @@ export function ProductionConversation({
   onSelectShot?: (shotId: string) => void;
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
-}) {
+};
+
+export function ProductionConversation(props: ProductionConversationProps) {
+  const global = useGlobalChat(), client = useClientRender(), world = useStore().state?.world;
+  if (global && client && world && props.worldId === world.meta.worldId) return <GlobalConversationEntry props={props} world={{ worldId: world.meta.worldId, name: world.meta.name }} />;
+  return <ProductionConversationBody {...props} />;
+}
+
+export function ProductionConversationBody({
+  worldId,
+  productionId,
+  placeholder,
+  eyebrow,
+  heading,
+  emptyLine,
+  footer,
+  pointsEmpty,
+  entry,
+  openingNote,
+  side,
+  openWith,
+  dock,
+  onSelectShot,
+  subject,
+  contextSummary,
+  stagedTitle,
+}: ProductionConversationProps) {
   const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
   useEffectReviewNavigation(worldId, productionId);
-  const [message, setMessage] = useState("");
-  const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  const presentation = useConversationPresentation();
+  const mediaNavigation = useConversationNavigationGuard();
+  const [message, setMessage] = useConversationState("draft", "");
+  const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
-  const [chatVariants, setChatVariants] = useState<Readonly<Record<string, string>>>({});
-  const pendingRemember = useRef<string | undefined>(undefined);
+  const [chatVariants, setChatVariants] = useConversationState<Readonly<Record<string, string>>>("variants", {});
+  const [pendingRemember, setPendingRemember] = useConversationState<string | undefined>("pendingRemember", undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -808,7 +821,7 @@ export function ProductionConversation({
    */
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
-  const [opening, setOpening] = useState<{
+  const [opening, setOpening] = useConversationState<{
     text: string;
     attach?: boolean;
     files?: readonly File[];
@@ -821,7 +834,8 @@ export function ProductionConversation({
     replyOnly?: boolean;
     /** Told the request id once the line is sent into the thread this opened. */
     onSent?: (requestId: string) => void;
-  } | null>(null);
+  } | null>("opening", null);
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
@@ -831,9 +845,9 @@ export function ProductionConversation({
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
-  const [omittedAttachments, setOmittedAttachments] = useState<ReadonlySet<string>>(new Set());
-  const [attachmentTrouble, setAttachmentTrouble] = useState<readonly { name: string; reason: string }[]>([]);
-  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
+  const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
+  const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
+  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const hasContext = entry !== undefined || !!productionId;
   const contextKey = JSON.stringify(context);
@@ -852,11 +866,12 @@ export function ProductionConversation({
    * (review 2026-08-22). The handover latch resets with it, for the same reason.
    */
   useEffect(() => {
+    if (presentation) return;
     setMessage("");
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
     setChatVariants({});
-    pendingRemember.current = undefined;
+    setPendingRemember(undefined);
     setOpening(previous => { previous?.onAttached?.([]); return null; });
     setBusyMedia(null);
     setMediaRefusal(null);
@@ -870,11 +885,11 @@ export function ProductionConversation({
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
   // Keep the chosen model visible until the authoritative save arrives, including legacy ids.
   useEffect(() => {
-    if (pendingRemember.current !== undefined && pendingRemember.current === rememberedLanguageModel) {
-      if (languageModelId === pendingRemember.current) setLanguageModelId(undefined);
-      pendingRemember.current = undefined;
+    if (pendingRemember !== undefined && pendingRemember === rememberedLanguageModel) {
+      if (languageModelId === pendingRemember) setLanguageModelId(undefined);
+      setPendingRemember(undefined);
     }
-  }, [languageModelId, rememberedLanguageModel]);
+  }, [languageModelId, rememberedLanguageModel, pendingRemember]);
   const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
   const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
   const model = effectiveLanguageModelId ? findHarnessModel(effectiveLanguageModelId, state?.app.harnessModels ?? [], state?.app.manifest?.models) : undefined;
@@ -894,9 +909,15 @@ export function ProductionConversation({
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
-    return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
-  }, [state?.world?.conversations, contextKey]);
-  const conversationId = thread?.id ?? null;
+    if (presentation?.newThread && !presentation.conversationId) {
+      // The global owner's create-result binds the exact request, including while another
+      // world is open. An unrelated workspace arrival cannot identify this new thread.
+      return null;
+    }
+    return presentation?.conversationId ? rows.find(row => row.id === presentation.conversationId) ?? null : [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  }, [state?.world?.conversations, state?.worldChat?.conversationId, contextKey, presentation?.conversationId, presentation?.newThread, opening?.was]);
+  const conversationId = presentation?.conversationId ?? thread?.id ?? null;
+  useEffect(() => { presentation?.owner.reportConversation(presentation.key, conversationId); }, [presentation?.owner, presentation?.key, conversationId]);
 
   useEffect(
     () =>
@@ -906,16 +927,17 @@ export function ProductionConversation({
           answer.conversationId !== mediaRequest.current.conversationId ||
           answer.worldId !== worldId
         ) return;
+        const requestedPath = mediaRequest.current.path;
         mediaRequest.current = null;
         setBusyMedia(null);
         if (answer.sessionId) {
           setMediaRefusal(null);
-          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+          if (mediaNavigation.allows(requestedPath)) void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
         } else {
           setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
         }
       }),
-    [navigate, worldId],
+    [navigate, worldId, mediaNavigation.allows],
   );
 
   const openMedia = (point: WorldChatPoint) => {
@@ -926,7 +948,7 @@ export function ProductionConversation({
     }
     const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
     if (!requestId) return;
-    mediaRequest.current = { requestId, candidateId: point.id, conversationId };
+    mediaRequest.current = { requestId, candidateId: point.id, conversationId, path: mediaNavigation.path };
     setBusyMedia(point.id);
     setMediaRefusal(null);
   };
@@ -938,6 +960,14 @@ export function ProductionConversation({
   }, [worldId, conversationId]);
 
   const workspace = state?.worldChat ?? null;
+  const createThread = (title: string, retry?: string) => {
+    if (!worldId) return false;
+    const requestId = retry ?? (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
+    presentation?.owner.trackCreateRequest(presentation.key, requestId);
+    const sent = createWorldChat(worldId, title, requestId, context);
+    if (!sent) presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
+    return sent;
+  };
   useEffect(() => {
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
@@ -951,9 +981,10 @@ export function ProductionConversation({
       const requestId = sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false, undefined, opening.variant);
       if (requestId === null) return;
       opening.onSent?.(requestId);
+      if (languageModelId === opening.modelId && chatVariant === opening.variant) { setLanguageModelId(undefined); setChatVariants({}); }
     }
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId, conversationId, connection]);
+  }, [opening, worldId, workspace?.conversationId, conversationId, connection, languageModelId, chatVariant]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   const readReplies = useReadReplies(loaded);
   const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
@@ -993,7 +1024,7 @@ export function ProductionConversation({
       ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
       ...(chatVariant !== undefined ? { variant: chatVariant } : {}),
     });
-    createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
+    createThread(conversationTitle(openWith));
     // context is derived from route params and rebuilt each render; the latch above is what
     // makes this safe to leave out of the dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1010,7 +1041,7 @@ export function ProductionConversation({
     /** The request a line lost on the way goes again under — or, opening a thread, its create. */
     again?: string,
   ): boolean => {
-    if (!text || !worldId || !hasContext) return false;
+    if (!text || !worldId || !hasContext || presentation?.scopeMissing) return false;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
     // Nor over a line just sent that the thread has not shown yet (codex on PR 1232): the runner
@@ -1028,7 +1059,7 @@ export function ProductionConversation({
       // Nothing is waited on for a create that never left (codex on PR 1232).
       // A create made again after it was lost goes under its first request, which the coordinator
       // makes at most once (codex on PR 1232).
-      if (!createWorldChat(worldId, conversationTitle(text), again ?? crypto.randomUUID(), context)) return false;
+      if (!createThread(conversationTitle(text), again)) return false;
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
       setOpening({
         text,
@@ -1039,8 +1070,6 @@ export function ProductionConversation({
         ...(replyOnly ? { replyOnly: true } : {}),
         ...(onSent !== undefined ? { onSent } : {}),
       });
-      setLanguageModelId(undefined);
-      setChatVariants({});
       return true;
     }
     // Only the turn's explicit choice travels as an override. The coordinator resolves the
@@ -1071,7 +1100,11 @@ export function ProductionConversation({
       return;
     }
     const prefix = dock?.subjectPrefix;
-    if (say(prefix === undefined ? text : `${prefix} ${text}`)) setMessage("");
+    // Creating the thread is not sending its first turn. Keep the persisted draft until
+    // sendWorldChat accepts it, so a refresh during creation cannot lose the author's words.
+    const submitted = message;
+    say(prefix === undefined ? text : `${prefix} ${text}`, false, subject,
+      () => setMessage(current => current === submitted ? "" : current));
   };
 
   /*
@@ -1233,7 +1266,7 @@ export function ProductionConversation({
     ...(worldId ? { onAttachFiles: (files: readonly File[]) => {
       if (opening || running) return Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })));
       if (conversationId) return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
-      if (!createWorldChat(worldId, "Production references", crypto.randomUUID(), context)) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
+      if (!createThread("Production references")) return Promise.resolve(files.map(file => ({ name: file.name, reason: "The studio is disconnected. Attach the file again when it reconnects." })));
       return new Promise<readonly {name:string;reason:string}[]>(resolve => setOpening({ text: "", files, was: workspace?.conversationId ?? null, onAttached: resolve }));
     } } : {}),
     ...(worldId
@@ -1242,7 +1275,7 @@ export function ProductionConversation({
           if (conversationId) worldChatAttachFiles(worldId, conversationId);
           else {
             setOpening({ text: "", attach: true, was: workspace?.conversationId ?? null });
-            createWorldChat(worldId, "Production references", crypto.randomUUID(), context);
+            createThread("Production references");
           }
         } }
       : {}),
@@ -1276,7 +1309,7 @@ export function ProductionConversation({
             const kept = languageModelId ?? effectiveLanguageModelId ?? effortRef;
             if (kept === undefined) return;
             // Only a model chosen here waits for its save to land; an effort alone leaves the model as it is.
-            if (languageModelId !== undefined) pendingRemember.current = kept;
+            if (languageModelId !== undefined) setPendingRemember(kept);
             setProductionModel(worldId, productionId, "llm", kept, chatVariant);
           } }
         : {})}
@@ -1468,7 +1501,7 @@ export function ProductionConversation({
             busy={running || opening !== null || echo !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             focusRequest={focusRequest}
-            disabledReason={languageUnavailableReason}
+            disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             readReplies={readReplies.composer}
             {...(modelChip !== null && !half ? { modelControl: modelChip } : {})}
@@ -1502,7 +1535,7 @@ export function ProductionConversation({
         </button>}
         {modelStatus}
         <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
-          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={languageUnavailableReason}
+          agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}

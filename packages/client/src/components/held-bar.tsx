@@ -1,3 +1,4 @@
+import { useConversationPresentation } from "./global-chat-context.js";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -9,7 +10,9 @@ export function HeldBar({ children, className = "", query = "(max-width: 599px)"
   className?: string;
   query?: string;
 }) {
-  const held = useMediaQuery(query);
+  const matches = useMediaQuery(query);
+  const presentation = useConversationPresentation();
+  const held = matches && (!presentation || !presentation.inPanel && presentation.hasHome);
   const keyboard = useKeyboardInset();
   const anchor = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);

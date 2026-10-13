@@ -63,14 +63,15 @@ it('Notes and Arke are sheets and resizing keeps the manuscript draft',async()=>
  assert.equal(find('[aria-label="Open Arke"]'),null,'the rail goes while the half is open');assert.ok(find('.fy-prodrail--folded'),'and the rail folds to its marks');
  await click(find('[aria-label="Close Arke"]'));assert.equal(find('.fy-season-arke-sheet[open]'),null);assert.equal(document.documentElement.dataset.arkeHalf,undefined);assert.ok(find('[aria-label="Open Arke"]'));
 });
-it('with the half open a passage is asked about in the dock, not from a second bar (202)',async()=>{
+it('with the half open a selected passage is adopted explicitly into global Chat (224)',async()=>{
  await mount('p/ledger/story/chapters/neap',984);await openChapter();await click(find('[aria-label="Open Arke"]'));
  const area=find('.fy-ch__source') as HTMLTextAreaElement;Object.defineProperty(document,'activeElement',{value:area,configurable:true});area.selectionStart=0;area.selectionEnd=31;
  await act(async()=>document.dispatchEvent(new Event('selectionchange')));
- assert.equal(find('.fy-passage-ask'),null);assert.match(find('.fy-season-arke-sheet .fy-arke__subject').textContent!,/about this passage/);
- const field=find('.fy-season-arke-sheet .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
- await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-season-arke-sheet .fy-arke__subject').textContent!,/about this passage/,'moving into the dock’s field keeps the passage');
- await click(find('[aria-label="Close Arke"]'));assert.ok(find('.fy-passage-ask'),'put away, the bar under the passage asks again');
+ assert.equal(find('.fy-passage-ask'),null);await click(find('[data-global-chat-trigger]'));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/);
+ const field=find('.fy-global-chat .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
+ await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/,'moving into the dock’s field keeps the passage');
+ await click(find('[aria-label="Close Chat"]'));
+ await click(find('[aria-label="Close Arke"]'));assert.equal(find('.fy-global-chat[open]'),null,'the retained passage chat is closed');
  await act(async()=>{width=700;for(const listener of listeners)listener();});await click(find('[aria-label="Open Arke"]'));
  assert.ok(find('.fy-season-arke-sheet[open]'));assert.equal(find('.fy-season-arke-sheet[data-modeless]'),null,'below 840 the drawer stays');assert.equal(document.documentElement.dataset.arkeHalf,undefined);
 });
@@ -94,8 +95,8 @@ it('a newer chapter title closes the Notes editor without writing its stale draf
  await act(async()=>blur({currentTarget:field} as never));
  assert.equal(sent.filter(m=>m.kind==='edit-chapter-plan').length,0);assert.match(find('.fy-ch__plan').textContent!,/Name from another window/);
 });
-for(const route of ['neap/','01-chapter'])it('chapter alias '+route+' keeps only the deep phone chrome',async()=>{
- await mount('p/ledger/story/chapters/'+route);await openChapter();assert.equal(document.querySelectorAll('.fy-titlebar').length,0);assert.ok(find('[data-screen="chapter"]'));
+for(const route of ['neap/','01-chapter'])it('chapter alias '+route+' keeps the shared Chat control above the deep phone chrome',async()=>{
+ await mount('p/ledger/story/chapters/'+route);await openChapter();assert.equal(document.querySelectorAll('.fy-titlebar').length,1);assert.ok(find('[data-global-chat-trigger]'));assert.ok(find('[data-screen="chapter"]'));
 });
 it('Fold source selections position the ask at the captured line rather than after the textarea',async()=>{
  await mount('p/ledger/story/chapters/neap',984);await openChapter();const area=find('.fy-ch__source') as HTMLTextAreaElement;

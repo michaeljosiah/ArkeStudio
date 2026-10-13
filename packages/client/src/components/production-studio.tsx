@@ -1,3 +1,4 @@
+import { useConversationPresentation } from "./global-chat-context.js";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { orderedShots, type ConversationActionCard, type WorldBundle, type WorldChatContext, type WorldChatWorkspace } from "@arke-studio/contracts";
@@ -15,10 +16,12 @@ const VIEW_NAMES: Partial<Record<StudioFocus["view"], string>> = {
 };
 
 /** A presentation owner. The same conversation and each full-size card keep one portal instance. */
-export function ProductionStudio({ world, productionId, entry, workspace, docked, understanding, proposal, children }: {
+export function ProductionStudio({ world, productionId, entry, workspace, docked: originalDocked, understanding, proposal, children }: {
   world: WorldBundle | null | undefined; productionId?: string; entry: WorldChatContext; workspace: WorldChatWorkspace | null;
   docked: boolean; understanding: ReactNode; proposal?: ReactNode; children: ReactNode;
 }) {
+  const presentation = useConversationPresentation();
+  const docked = originalDocked || (presentation?.inPanel === true && !presentation.hasHome);
   const proposalDecisions = workspace?.humanDecisions?.filter(card => card.worldId === world?.meta.worldId && card.body.control.kind === "proposal") ?? [];
   const hasProposal = !!proposal || proposalDecisions.length > 0;
   /** A staged proposal is what a wrap-up becomes, so the canvas opens on it (turns 89, 91). */
@@ -39,6 +42,9 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const [chatHost] = useState(() => { const element = host(); if (element) element.className = "fy-production-studio-chat"; return element; });
   const [understandingHost] = useState(host), [proposalHost] = useState(host);
   const returnId = useRef<string | null>(null), drag = useRef<{ x: number; width: number } | null>(null);
+  // A page's resting canvas must not become a floating Studio merely because navigation
+  // detached its chat. Explicit Show/full-card reviews can still use the native Studio.
+  const showStudio = active && !(presentation?.inPanel && !presentation.hasHome && fullCardId === null && returnId.current === null);
   const production = world?.productions.find(p => p.meta.id === productionId);
   // Read as the transcript reads them: a workspace that never went through the schema's default
   // has no list, and a throw here takes the whole dock with it.
@@ -68,9 +74,10 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
     if (!pinned && hasProposal) { setFocus(current => ({ ...current, view: "proposal" })); setFullCardId(null); }
   }, [hasProposal, key]);
   useLayoutEffect(() => {
-    const target = active ? thread.current : inline.current;
+    const target = presentation?.panelHost ?? (active ? thread.current : inline.current);
     if (target && chatHost) target.appendChild(chatHost);
-  }, [active, chatHost]);
+    return () => { chatHost?.remove(); };
+  }, [active, chatHost, presentation?.panelHost]);
   useLayoutEffect(() => {
     // A closed Studio draws no canvas, so its slots are gone. A host with nowhere to show waits in
     // the hidden lot, still mounted so its unsaved controls survive, rather than being left wherever
@@ -131,7 +138,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   // Closed, the Studio draws nothing. Kept mounted behind `hidden`, every production screen with a
   // dock rendered a second, invisible copy of its own storyboard or Cut beneath the real one: the
   // 200-shot scene paid for it twice, and the copy's clips and menus answered the page's queries.
-  const studio = !active ? null : <section className="fy-production-studio" data-docked={docked || undefined} data-phone-view={phoneView}
+  const studio = !showStudio ? null : <section className="fy-production-studio" data-docked={docked || undefined} data-phone-view={phoneView}
     aria-label="Production Chat Studio" style={{ "--studio-thread-width": `${width}px` } as CSSProperties}>
     <header className="fy-production-studio__head"><strong>Production conversation · {production?.meta.title ?? "Studio"}</strong>
       <button type="button" className="fy-production-studio__switch" onClick={() => setPhoneView(phoneView === "thread" ? "canvas" : "thread")}>{phoneView === "thread" ? "Canvas" : "Conversation"}</button>
@@ -167,7 +174,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
       </div>
     </div>
   </section>;
-  return <ProductionStudioContext.Provider value={controls}><div className="fy-production-studio-owner" data-wide={wide && !active || undefined} data-dock-owner={docked ? "true" : "false"} style={{ "--studio-thread-width": `${width}px` } as CSSProperties}>
+  return <ProductionStudioContext.Provider value={controls}><div className="fy-production-studio-owner" data-global-chat-hosted={presentation?.inPanel || undefined} data-wide={wide && !active || undefined} data-dock-owner={docked ? "true" : "false"} style={{ "--studio-thread-width": `${width}px` } as CSSProperties}>
     <div ref={inline} className="fy-production-studio-inline" hidden={active}>
       {wide && <div className="fy-production-studio__dock-divider" role="separator" aria-label="Dock width" aria-orientation="vertical" aria-valuenow={Math.round(width)} tabIndex={0}
         onKeyDown={e => { if (["ArrowLeft","ArrowRight"].includes(e.key)) { e.preventDefault(); resize(width + (e.key === "ArrowLeft" ? 20 : -20)); } }}

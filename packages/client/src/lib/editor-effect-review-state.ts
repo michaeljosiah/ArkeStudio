@@ -17,7 +17,7 @@ export interface ActiveEffectReview extends EffectReviewSelection {
   activationSerial: number;
 }
 export interface EffectReviewError { requestId: string; ref: EffectVersionRef; reason: string }
-export interface EffectReviewRequest { requestId: string; operation: EffectReviewOperation; generation: number }
+export interface EffectReviewRequest { requestId: string; operation: EffectReviewOperation; generation: number; originPath?: string }
 export interface EffectReviewState {
   active: ActiveEffectReview | null;
   pending: EffectReviewRequest | null;
@@ -28,7 +28,7 @@ export interface EffectReviewState {
   canUndo: boolean;
   canRedo: boolean;
 }
-interface WaitingReview { selection: EffectReviewSelection; generation: number; explicit: boolean }
+interface WaitingReview { selection: EffectReviewSelection; generation: number; explicit: boolean; originPath?: string }
 export interface EffectReviewSavedState {
   schemaVersion: 1;
   ref: EffectVersionRef;
@@ -77,7 +77,7 @@ export class EffectReviewSession {
   private waiting: WaitingReview | null = null;
   private restore: EffectReviewSavedState | null;
   constructor(private readonly persist: (value: EffectReviewSavedState | null) => void = () => {}, restored: EffectReviewSavedState | null = null,
-    private readonly activated: (active: ActiveEffectReview) => void = () => {}) { this.restore = restored; }
+    private readonly activated: (active: ActiveEffectReview, originPath?: string) => void = () => {}) { this.restore = restored; }
   getSnapshot = (): EffectReviewState => this.state;
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   canRelease(): boolean { return this.listeners.size === 0 && this.state.pending === null; }
@@ -145,11 +145,11 @@ export class EffectReviewSession {
       }
     }
     this.publish(this.assessed(next)); this.save();
-    if (activate) this.activated(activate);
+    if (activate) this.activated(activate, waiting?.originPath);
   }
-  begin(requestId: string, operation: EffectReviewOperation): boolean {
+  begin(requestId: string, operation: EffectReviewOperation, originPath?: string): boolean {
     if (this.state.pending) return false;
-    this.publish({ ...this.state, pending: { requestId, operation, generation: this.generation }, error: null });
+    this.publish({ ...this.state, pending: { requestId, operation, generation: this.generation, ...(originPath ? { originPath } : {}) }, error: null });
     return true;
   }
   refused(requestId: string, reason: string): void {
@@ -173,7 +173,7 @@ export class EffectReviewSession {
       result.ref.familyId === operation.ref.familyId && sameEffectVersion(result.ref, result.grant) &&
       (!explicit || sameEffectVersion(result.ref, operation.ref))) {
       this.waiting = { selection: { ref: result.ref, grant: result.grant, comparison: explicit ? "suggested" : active!.comparison,
-        position: active?.position ?? null }, generation: pending.generation, explicit };
+        position: active?.position ?? null }, generation: pending.generation, explicit, ...(pending.originPath ? { originPath: pending.originPath } : {}) };
       this.reconcile();
     } else this.publish({ ...this.state, pending: null });
   }

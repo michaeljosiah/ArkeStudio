@@ -102,7 +102,7 @@
   .fy-chat__composer .fy-cx { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 3px; border-radius: 16px; }
   .fy-chat__composer .fy-cx__editorwrap { flex: 1; min-width: 60px; }
   .fy-chat__composer .fy-cx__editor { padding: 12px 10px; min-height: 44px; max-height: 100px; font-size: var(--text-sm); }
-  .fy-chat__composer .fy-cx__placeholder { padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+  .fy-chat__composer .fy-cx__placeholder { position: absolute; padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
   .fy-chat__composer .fy-cx__bar, .fy-chat__composer .fy-cx__left { display: contents; }
   .fy-chat__composer .fy-cx__agent { display: none; }
   .fy-chat__composer :is(.fy-cx__strip, .fy-cx__busy, .fy-cx__reason, .fy-cx__drop) { flex-basis: 100%; }

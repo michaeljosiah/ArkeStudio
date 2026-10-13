@@ -1,0 +1,69 @@
+/* Approved turn 224. One mounted transcript, whether at home or in the global panel. */
+.fy-global-chat { position: fixed; inset: 44px 0 0 auto; margin: 0; padding: 0; width: var(--global-chat-width, 400px); max-width: 100%; height: calc(100dvh - 44px); max-height: none; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: var(--background); color: var(--foreground); z-index: 70; overflow: visible; }
+.fy-global-chat > .fy-page-sheet__grab { display: none; }
+.fy-global-chat > .fy-page-sheet__body { height: 100%; padding: 0; overflow: hidden; }
+.fy-global-chat-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.fy-global-chat-panel > header { display: flex; align-items: flex-start; gap: 8px; padding: 18px 16px; border-bottom: 1px solid var(--border); flex: none; }
+.fy-global-chat-panel > header > div { flex: 1; min-width: 0; }
+.fy-global-chat-panel h2 { margin: 0 0 6px; font: var(--type-ui); font-weight: 600; }
+.fy-global-chat-panel header p { margin: 0; font: var(--type-label); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.fy-global-chat-panel header > button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
+.fy-global-chat-panel header > button:hover { background: var(--secondary); color: var(--foreground); }
+.fy-global-chat-conversation { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.fy-global-chat-conversation > div, .fy-global-chat-conversation > .fy-production-studio-chat { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.fy-global-chat :is(.fy-story__chat, .fy-arke) { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0 12px 16px; border: 0; }
+.fy-global-chat :is(.fy-story__chathead, .fy-develop-model, .fy-arke__head, .fy-studio-toggle) { display: none; }
+.fy-global-chat :is(.fy-story__log, .fy-arke__log) { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 0; }
+.fy-global-chat :is(.fy-develop-composer, .fy-story-composer, .fy-arke__foot) { position: static; flex: none; padding: 12px 0 0; }
+.fy-global-chat .fy-arke__strip { flex: none; }
+.fy-global-chat .fy-story__side { display: none; }
+.fy-global-chat :is(.fy-chat__wrap, .fy-gate, .fy-gate__main) { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: 100%; width: 100%; }
+.fy-global-chat :is(.fy-chat__history, .fy-gate__side, .fy-gate__head, .fy-chat__phonehead, .fy-chat__phonesub) { display: none; }
+.fy-global-chat :is(.fy-chatnav, .fy-chatnav__drawer-scrim) { display: none; }
+.fy-global-chat .fy-gate__body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 12px; }
+.fy-global-chat .fy-chat__composer { flex: none; padding: 12px; }
+.fy-global-chat .fy-production-setup__log { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 12px; }
+.fy-global-chat .fy-production-setup__composer { flex: none; padding: 12px; }
+.fy-conversation-panel-home, .fy-conversation-panel-home > div { display: flex; flex: 1; flex-direction: column; min-height: 0; height: 100%; }
+.fy-global-chat-page-canvas { padding: 24px; overflow: auto; }
+.fy-global-chat-boundary { padding: 12px 16px; background: var(--secondary); border-bottom: 1px solid var(--border); font: var(--type-label); flex: none; }
+.fy-global-chat-boundary p { margin: 0 0 8px; }
+.fy-global-chat-boundary button, .fy-global-chat-history button { font: var(--type-label); padding: 8px 10px; border: 1px solid var(--border); background: var(--background); border-radius: 6px; color: var(--foreground); cursor: pointer; }
+.fy-global-chat-history { flex: none; max-height: 35vh; overflow: auto; display: grid; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.fy-global-chat-history button { text-align: left; }
+.fy-global-chat-history-row { display: flex; gap: 4px; }
+.fy-global-chat-history-row > button:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fy-global-chat-history-row > button:last-child { width: 36px; flex: none; display: grid; place-items: center; }
+.fy-global-chat-resize { position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; }
+.fy-global-chat-resize:focus-visible { background: var(--border); }
+.fy-global-chat-slot { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.fy-story > .fy-global-chat-slot { grid-column: 1 / -1; }
+.fy-global-chat-slot > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fy-global-chat-owner-body { height: 100%; width: 100%; min-height: 0; display: flex; flex-direction: column; }
+.fy-global-chat-owner-body > .fy-production-studio-owner { flex: 1; height: 100%; min-height: 0; }
+.fy-global-chat .fy-cx__busy { flex: 0 1 auto; min-width: 0; max-width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-global-chat-expand { align-self: flex-end; flex: none; font: var(--type-label); padding: 6px 10px; margin: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); cursor: pointer; }
+[data-global-chat-hosted] .fy-production-studio { grid-template-columns: minmax(0, 1fr); }
+[data-global-chat-hosted] :is(.fy-production-studio__thread, .fy-production-studio__divider) { display: none; }
+.fy-global-chat-slot:has(> div:empty) > .fy-global-chat-expand { align-self: flex-start; }
+@media (min-width: 1100px) {
+  body[data-global-chat-open="true"] :is(.fy-prodwrap, .fy-worldapp > .fy-content) { margin-right: var(--global-chat-width, 400px); }
+}
+@media (max-width: 1099px) { .fy-global-chat { box-shadow: var(--shadow-lg); } .fy-global-chat-resize { display: none; } }
+@media (max-width: 599px) {
+  body[data-global-chat-enabled="true"] #root .fy-titlebar { display: flex; height: 48px; min-height: 48px; }
+  .fy-global-chat { inset: 48px 0 var(--chat-keyboard, 0px); width: 100%; height: calc(100dvh - 48px - var(--chat-keyboard, 0px)); border-left: 0; }
+  .fy-global-chat::backdrop { background: transparent; }
+  .fy-global-chat-panel header > button { width: 44px; height: 44px; }
+  .fy-global-chat .fy-cx :is(.fy-cx__attach,.fy-cx__mic,.fy-cx__send) { width: 44px; min-width: 44px; height: 44px; }
+  .fy-global-chat .fy-cx__attach { margin-left: 0; }
+  .fy-global-chat .fy-cx__bar { min-height: 60px; height: auto; padding-top: 8px; padding-bottom: 8px; }
+  .fy-global-chat .fy-mchip__btn--effort { padding: 0 10px; }
+  .fy-global-chat .fy-mchip__btn--effort > svg { display: none; }
+  .fy-global-chat :is(.fy-chat__composer, .fy-arke__foot, .fy-story-composer) { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .fy-global-chat .fy-chat__composer .fy-cx { display: block; padding: 0; }
+  .fy-global-chat .fy-chat__composer .fy-cx__editorwrap { display: grid; min-width: 0; }
+  .fy-global-chat .fy-chat__composer .fy-cx__placeholder { position: relative; left: 0; top: 0; padding: 14px; white-space: normal; }
+  .fy-global-chat .fy-chat__composer :is(.fy-cx__bar, .fy-cx__left) { display: flex; }
+  .fy-global-chat .fy-chat__composer .fy-cx__bar { height: auto; padding: 8px 4px; }
+}

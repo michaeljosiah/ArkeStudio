@@ -3,9 +3,12 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, type ClientMessage, type ClientState, type ProductionSetupState } from "@arke-studio/contracts";
-import { ProductionSetupScreen } from "../src/screens/production-setup.js";
+import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
+import { GlobalWorldChatEntry } from "../src/components/global-chat.js";
+import { GlobalChatContext } from "../src/components/global-chat-context.js";
+import { GlobalChatController } from "../src/lib/global-chat.js";
 import { NewProductionScreen } from "../src/screens/world.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -83,6 +86,40 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("the global entry retains the canonical setup route rather than treating its ID as a missing chat", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    function Entry() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={ID} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Entry /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`);
+    assert.equal(owner.getSnapshot().selected?.kind, "setup");
+  });
+  for (const status of ["created", "discarded"] as const) it(`a direct embedded setup chat follows its ${status} result`, async () => {
+    const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    function Direct() { const location = useLocation(); return <><p data-test-route>{location.pathname}</p><ProductionSetupView embedded={{ worldId: FIXTURE_WORLD_ID, setupId: ID }} /></>; }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${ID}`]}><Direct /></MemoryRouter>); });
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "production-setup" }> => message.kind === "production-setup"); assert.ok(request);
+    await answer(request, { ...draft(), status, ...(status === "created" ? { productionId: "the-crossing-2" } : {}) });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, status === "created" ? `/w/${FIXTURE_WORLD_ID}/p/the-crossing-2` : `/w/${FIXTURE_WORLD_ID}/productions`);
+  });
+  for (const status of ["created", "discarded"] as const) it(`a retained embedded setup cannot redirect the Bible after ${status}`, async () => {
+    const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container); root = createRoot(container);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    function Retained() {
+      const navigate = useNavigate(), location = useLocation();
+      return <><button onClick={() => navigate(`/w/${FIXTURE_WORLD_ID}/bible`)}>Go to Bible</button><p data-test-route>{location.pathname}</p>
+        <ProductionSetupView embedded={{ worldId: FIXTURE_WORLD_ID, setupId: ID }} /></>;
+    }
+    await act(async () => { __setStateForTest(fixture(draft()), { connection: "open" }); root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Retained /></MemoryRouter>); });
+    await click(container, "Go to Bible");
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "production-setup" }> => message.kind === "production-setup"); assert.ok(request);
+    await answer(request, { ...draft(), status, ...(status === "created" ? { productionId: "the-crossing-2" } : {}) });
+    assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/bible`);
+  });
   it("offers the running harness catalog and can reset a removed explicit model (#1123)", async () => {
     const state = fixture(draft());
     state.app.health.harness = { status: "healthy" };

@@ -154,6 +154,8 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   const stripped = new Map([
     [join("lib", "chapter-dock.ts"), "localStorage"],
     [join("lib", "dev-session.ts"), "sessionStorage"],
+    // SPEC-051 / approved turn 224: thread/draft/model presentation only, never credentials or authority.
+    [join("lib", "global-chat.ts"), "sessionStorage"],
     [join("screens", "editor-effect-review.ts"), "sessionStorage"],
     // SPEC-054: a version/Review grant reference only; server verification owns authority.
     [join("lib", "editor-transition-review.ts"), "sessionStorage"],
