@@ -4,7 +4,6 @@ import { act, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { ManifestModel, VoiceDirectionInput } from "@arke-studio/contracts";
-import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import {
   BenchVoiceDirection,
   benchDirectionSummary,
@@ -159,7 +158,8 @@ describe("the Bench's Voice brief (design turn 181)", () => {
 
   it("limits phrases to the selected reader without silently truncating them", async () => {
     for (const [id, limit] of [["eleven-v3", 60], ["eleven_v4", 160]] as const) {
-      const model = SHIPPED_MANIFEST.models.find((model) => model.id === id)!;
+      const model: ManifestModel = { ...GEMINI, id, provider: "elevenlabs", cadence: { ...GEMINI.cadence!,
+        phrase: "best-effort-tag", tagSyntax: "bracket", ...(id === "eleven_v4" ? { tagChars: limit } : {}) } };
       const said = calls();
       const m = await mount(<MarkerMenu text={LINE} base={{ speed: 1, cues: [] }} model={model}
         at={benchMarkerAt(LINE, 0, 6)} onApply={(cues) => said.direction.push({ speed: 1, cues: cues ?? [] })} onClose={() => {}} />);
