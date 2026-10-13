@@ -192,7 +192,9 @@ describe("scene detail owns the workspace", () => {
     // Stepping to the next shot on the filmstrip is the same selection Arke shares.
     await click(q(mounted, '[aria-label="Next shot"]')!);
     assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+    await click(q(mounted, '[data-global-chat-trigger]')!);
+    assert.match(dom.document.querySelector('.fy-global-chat[open] .fy-arke__name')?.textContent ?? "", /Shot 13/);
+    await click(dom.document.querySelector('.fy-global-chat [aria-label="Close Chat"]') as HTMLElement);
     await click(q(mounted, '[aria-label="Previous shot"]')!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
 
@@ -316,7 +318,8 @@ describe("scene detail owns the workspace", () => {
       all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")?.getAttribute("aria-checked"),
       "true",
     );
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+    await click(q(mounted, '[data-global-chat-trigger]')!);
+    assert.match(dom.document.querySelector('.fy-global-chat[open] .fy-arke__name')?.textContent ?? "", /Shot 13/);
   });
   }
 
