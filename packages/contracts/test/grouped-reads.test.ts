@@ -74,8 +74,8 @@ describe("grouped reads (design turn 185)", () => {
     const turns = [{ text: "First block.", instructions: "Whisper." }, { text: "Second block." }];
     const at = "2026-10-03T00:00:00.000Z";
     const quote = quoteGroupedSpeech(model, turns, { at });
-    assert.equal(groupedText(turns), "First block. Second block.");
-    assert.deepEqual(quote, quoteSpeech(model, "First block. Second block.", { at, instructions: "Whisper." }));
+    assert.equal(groupedText(turns), "First block.\n\nSecond block.");
+    assert.deepEqual(quote, quoteSpeech(model, "First block.\n\nSecond block.", { at, instructions: "Whisper." }));
     // One lead-in and tail for the request, not one a block: two blocks priced together cost less than apart.
     const apart = turns.reduce((sum, turn) => sum + quoteSpeech(model, turn.text, { at, ...(turn.instructions ? { instructions: turn.instructions } : {}) }).expectedMicroUsd, 0);
     assert.ok(quote.expectedMicroUsd < apart);

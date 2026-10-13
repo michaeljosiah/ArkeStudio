@@ -12,7 +12,7 @@ import {
   withBenchDirection,
 } from "../src/components/bench-voice-direction.js";
 import { BenchBrief } from "../src/components/bench-brief.js";
-import type { MarkerAt } from "../src/components/voice-direction.js";
+import { MarkerMenu, type MarkerAt } from "../src/components/voice-direction.js";
 
 /**
  * The Bench's Voice brief directed in place (design turn 181a–d): plates on the words, the note,
@@ -154,6 +154,28 @@ describe("the Bench's Voice brief (design turn 181)", () => {
     const short = [...menu.querySelectorAll("button")].find((button) => button.textContent === "pause · short") as HTMLButtonElement;
     await act(async () => short.click());
     assert.deepEqual(said.direction[0]?.cues[0], { kind: "pause", at: after("Ade."), length: "short" });
+  });
+
+  it("limits phrases to the selected reader without silently truncating them", async () => {
+    for (const [id, limit] of [["eleven-v3", 60], ["eleven_v4", 160]] as const) {
+      const model: ManifestModel = { ...GEMINI, id, provider: "elevenlabs", cadence: { ...GEMINI.cadence!,
+        phrase: "best-effort-tag", tagSyntax: "bracket", ...(id === "eleven_v4" ? { tagChars: limit } : {}) } };
+      const said = calls();
+      const m = await mount(<MarkerMenu text={LINE} base={{ speed: 1, cues: [] }} model={model}
+        at={benchMarkerAt(LINE, 0, 6)} onApply={(cues) => said.direction.push({ speed: 1, cues: cues ?? [] })} onClose={() => {}} />);
+      const button = [...m.container.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Phrase…")) as HTMLButtonElement;
+      await act(async () => button.click());
+      const input = m.container.querySelector('input[aria-label="Phrase"]')!;
+      const props = () => (input as unknown as Record<string, { maxLength: number; onChange: (event: unknown) => void; onKeyDown: (event: unknown) => void }>)[Object.keys(input).find((key) => key.startsWith("__reactProps"))!]!;
+      assert.equal(props().maxLength, limit);
+      await act(async () => props().onChange({ target: { value: "x".repeat(limit + 1) } }));
+      await act(async () => props().onKeyDown({ key: "Enter", preventDefault() {} }));
+      assert.equal(said.direction.length, 0, "an oversized paste cannot be silently shortened and applied");
+      const phrase = "quietly holding back tears";
+      await act(async () => props().onChange({ target: { value: phrase } }));
+      await act(async () => props().onKeyDown({ key: "Enter", preventDefault() {} }));
+      if (id === "eleven_v4") assert.equal(said.direction[0]?.cues[0]?.kind, "delivery", "v4 accepts a descriptive phrase longer than two words");
+    }
   });
 
   it("[ in the words opens the menu rather than typing", async () => {

@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientMessage, ManifestModel } from "@arke-studio/contracts";
-import { CharacterVoiceScreen } from "../src/screens/character-voice.js";
+import { CharacterVoiceScreen, narrationLimit } from "../src/screens/character-voice.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -28,6 +28,12 @@ const props = (element: Element) => {
   const key = Object.keys(element).find((k) => k.startsWith("__reactProps$"))!;
   return (element as unknown as Record<string, { onChange(event: { target: { value: string } }): void; onBlur(): void; onFocus?(): void }>)[key]!;
 };
+
+it("instruction readers report the full character-brief limit", () => {
+  assert.equal(narrationLimit({ ...V4, cadence: { ...V4.cadence!, phrase: "best-effort-instruction", tagWords: undefined } }), "300 characters");
+  assert.equal(narrationLimit({ ...V4, cadence: { ...V4.cadence!, tagWords: undefined } }), "60 characters");
+  assert.equal(narrationLimit({ ...V4, cadence: { ...V4.cadence!, tagChars: 160, tagWords: undefined } }), "300 characters");
+});
 
 it("Narration is the Voice tab's third use: help asked for, written in place, tried and heard before it is kept, held past the book's narrator's limit (design turn 200)", async (t) => {
   const state = structuredClone(FIXTURE_STATE);

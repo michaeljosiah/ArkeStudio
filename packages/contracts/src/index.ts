@@ -184,6 +184,9 @@ export * from "./turn-action-sequencing.js";
 export * from "./human-decision.js";
 export * from "./production-readiness.js";
 export * from "./production-card-preview.js";
+export { compileAudiobookPerformance } from "./audiobook-performance.js";
+
+export { EXPRESSIVE_PHRASES } from "./direction-tags.js";
 export * from "./browser-media-import.js";
 export * from "./editor-transitions.js";
 export * from "./editor-transition-proposal.js";
