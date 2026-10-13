@@ -130,9 +130,15 @@ try {
   socket = new WebSocket(targets.find(target => target.type === "page").webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   let id = 0; const pending = new Map();
-  socket.onmessage = ({ data }) => { const message = JSON.parse(data), request = pending.get(message.id); if (!request) return; pending.delete(message.id); message.error ? request.reject(new Error(JSON.stringify(message.error))) : request.resolve(message.result); };
-  const cdp = (method, params = {}) => new Promise((resolve, reject) => { const next = ++id; pending.set(next, { resolve, reject }); socket.send(JSON.stringify({ id: next, method, params })); });
+  socket.onmessage = ({ data }) => { const message = JSON.parse(data), request = pending.get(message.id); if (!request) return; pending.delete(message.id); clearTimeout(request.timer); message.error ? request.reject(new Error(JSON.stringify(message.error))) : request.resolve(message.result); };
+  socket.onclose = () => { for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error("Effect preview browser connection closed")); } pending.clear(); };
+  const cdp = (method, params = {}) => new Promise((resolve, reject) => {
+    const next = ++id;
+    const timer = setTimeout(() => { pending.delete(next); reject(new Error(`Effect preview ${method} timed out after 20000ms`)); }, 20000);
+    pending.set(next, { resolve, reject, timer }); socket.send(JSON.stringify({ id: next, method, params }));
+  });
   const js = async expression => { const response = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (response.exceptionDetails) throw new Error(JSON.stringify(response.exceptionDetails)); return response.result.value; };
+  console.log("[effect-preview] browser connected; verifying target alpha");
   await cdp("Page.navigate", { url: origin });
   await until(() => js("window.preview?.frame()==='120'"));
   assert.equal(await js("window.preview.error()"), undefined);
@@ -146,6 +152,7 @@ try {
   assert.ok(matte.some((value, index) => index % 4 === 0 && value > 0 && Math.floor(index / 4) % 320 >= 115 && Math.floor(index / 4) % 320 < 140), "scoped particles appear on visible target");
   const records = [];
   for (const preset of ["dust", "embers", "snow", "lights", "rain", "smoke"]) {
+    console.log(`[effect-preview] ${preset} worker parity and seeks`);
     await js(`window.preview.mount(${JSON.stringify(preset)},'gap')`);
     await until(() => js("window.preview.frame()==='120'"));
     const pixels = Uint8ClampedArray.from(await js("window.preview.pixels()"));
@@ -159,6 +166,7 @@ try {
     assert.deepEqual(Uint8ClampedArray.from(await js("window.preview.pixels()")), expected, `${preset}: seek race keeps latest frame`);
     records.push({ preset, frame: 120, sha256: createHash("sha256").update(pixels).digest("hex"), differingBytes: 0 });
   }
+  console.log("[effect-preview] prepared audio reactions");
   await js("window.preview.reactive()");
   const reactionRecords = [];
   for (const frame of [240, 241, 173, 240, 359]) {
@@ -170,6 +178,7 @@ try {
     assert.notDeepEqual(expected, reactivePixels(frame, {}), "reaction fixture must differ from its base atmosphere");
     reactionRecords.push({ frame, sha256: sha(actual), differingBytes: 0 });
   }
+  console.log("[effect-preview] worker analysis epochs");
   const epochs = await js("window.preview.epochs()");
   assert.deepEqual(Uint8ClampedArray.from(epochs.ready), reactivePixels(240));
   assert.deepEqual(Uint8ClampedArray.from(epochs.base), reactivePixels(240, {}));
@@ -178,6 +187,7 @@ try {
   const reaction = { startFrame: reactive.startFrame, endFrame: reactive.endFrame, property: "speed", sources: Object.values(reactive.sources.manifestsByKey).map(row => ({ binding: row.descriptor.binding, manifestKey: row.manifestKey })),
     records: reactionRecords, staleEpochRejected: true, baseEpoch: epochs.baseEpoch };
   for (const sourceRate of [24, 30]) {
+  console.log(`[effect-preview] ${sourceRate}fps decoder and source-end holds`);
   await js(`window.preview.mount('smoke','video${sourceRate}')`);
   try { assert.equal(await until(() => js("window.preview.frame() || window.preview.error()")), "120"); }
   catch (error) {
@@ -203,6 +213,7 @@ try {
   }
   const sourceClock = [];
   for (const [mode, expected] of [["labels-in", [1, 2, 4, 5, 6, 7, 9, 10]], ["labels-tail", [27, 28, 29, 29, 29, 29, 29, 29]]]) {
+    console.log(`[effect-preview] ${mode} physical frame clock`);
     await js(`window.preview.mount('dust',${JSON.stringify(mode)})`);
     await until(() => js("window.preview.frame()==='120'"));
     const actual = [];
