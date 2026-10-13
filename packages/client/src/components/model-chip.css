@@ -8,11 +8,9 @@
    GPT-…, Clau…) beside the mark. local.15's floor of 76 for the whole chip left the name 15px, one
    letter and the ellipsis (F…, local.16). The chip's parts around the name are fixed, so its floor
    is theirs plus the name's: padding 15, mark 20 and its gap 7, the chevron's gap 7 and the chevron
-   12 make 61; the dot adds 13; a bare chip has no mark and pads 21, so 40. */
+   12 make 61; a bare chip has no mark and pads 21, so 40. */
 .fy-mchip__btn { --mchip-parts: 61px; }
-.fy-mchip__btn--set { --mchip-parts: 74px; }
 .fy-mchip__btn--bare { --mchip-parts: 40px; }
-.fy-mchip__btn--bare.fy-mchip__btn--set { --mchip-parts: 53px; }
 .fy-mchip > .fy-mchip__btn { min-width: 0; flex: 0 1 auto; }
 /* No floor wider than the chip itself: a name shorter than the floor (o3) keeps its own width rather
    than a gap before the chevron. calc-size is Chromium's; the plain floor before it is the fallback. */
@@ -95,7 +93,6 @@
 /* The chip whose menu is open wears the ring, as 195b draws it. */
 .fy-mchip__btn[aria-expanded="true"] { outline: 2px solid var(--ring, var(--foreground)); outline-offset: 1px; }
 .fy-mchip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-mchip__btn--set::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); flex: none; }
 /* The tool row's tips (the chips' and the microphone's; body-tip.tsx), drawn on the body for the same
    reason as the menus: the composer clips what hangs off it. A short tip sits on one line; a reason
    long enough to need two gets two, inside the window. */

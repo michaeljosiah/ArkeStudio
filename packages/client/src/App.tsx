@@ -1,3 +1,4 @@
+import { GlobalChatProvider } from "./components/global-chat.js";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
 import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
@@ -226,7 +227,9 @@ function SettingsRoutes() {
   );
 }
 
-export function App() {
+export function App() { return <GlobalChatProvider><AppRoutes /></GlobalChatProvider>; }
+
+function AppRoutes() {
   const location = useLocation();
   useThemePreference();
   // A background notification's click opens the panel over whatever is showing (SPEC-014 R-20).

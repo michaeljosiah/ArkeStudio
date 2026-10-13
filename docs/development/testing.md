@@ -1,6 +1,13 @@
 # Running and validating changes
 
-Shared composer/model layout (restored design turn 195, global Chat proposal turn 224)
+Global Chat (approved turn 224 revision 6, restored/amended model turn 195)
+uses client test/global-chat.test.ts for scope/draft/transcription/recovery and the existing conversation suites.
+Build global-chat-224.native-build.mjs, then run global-chat-224.application-check.mjs with
+fine pointer and --touch for the actual App lifecycle, overlays, scoped send and simulated keyboard.
+The bridge and media are deterministic fakes; installed microphone/codec/Voxa and physical keyboard
+acceptance remain host checks.
+
+Shared composer/model layout
 uses `test/composer-row-layout.test.tsx`, `test/composer.test.tsx`, `test/model-picker.test.tsx`
 and `test/harness-model-controls.test.tsx` from the client directory. The whole-page design
 verification commands are in `design-system/global-chat-224.notes.md`: build the native and
@@ -8,7 +15,7 @@ master readers, then run `global-chat-224.parity-check.mjs` with mouse and `--to
 They compare matching native/master specimens and measure empty/multiline drafts, clipping,
 overlap, at least 8px above/below toolbar controls, icon centring, centre hit targets and picker bounds. A negative control reproduces the original
 desktop screenshot regression. Reports are local `.dev/` evidence, not agent/coordinator
-acceptance. New global Chat implementation still requires author design approval.
+acceptance. The author approved implementation on 2026-10-13.
 
 Production Chat end-to-end acceptance (#1427, SPEC-051 R-1..R-3) uses coordinator
 `test/world-chat/production-acceptance.test.ts`. The same thirteen-step scenario runs with

@@ -4612,8 +4612,8 @@ export function readProsePage(
   return requestId;
 }
 
-export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
-  send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
+export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): boolean {
+  return send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
 }
 
 /** A clip staged for a clone: what 74c can draw about it, and nothing about where it lives. */

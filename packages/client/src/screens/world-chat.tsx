@@ -1,3 +1,6 @@
+import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { useClientRender } from "../components/production-studio-context.js";
+import { useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
@@ -459,6 +462,16 @@ type Opening =
 
 export function WorldChatScreen() {
   const { worldId, conversationId } = useParams();
+  const global = useGlobalChat(), client = useClientRender();
+  if (global && client && worldId) return <GlobalWorldChatEntry worldId={worldId} conversationId={conversationId} />;
+  return <WorldChatView />;
+}
+
+export function WorldChatView({ embedded }: { embedded?: { worldId: string; conversationId?: string; onConversationChange(id: string): void } }) {
+  const route = useParams(), presentation = useConversationPresentation();
+  const inPanel = presentation?.inPanel === true;
+  const worldId = embedded?.worldId ?? route.worldId, conversationId = embedded ? embedded.conversationId : route.conversationId;
+
   useOpenWorldGuard(worldId);
   const { state, connection } = useStore();
   const navigate = useNavigate();
@@ -466,7 +479,7 @@ export function WorldChatScreen() {
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [understoodOpen, setUnderstoodOpen] = useState(false);
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useConversationState("draft", "");
   /**
    * Chips taken off the composer, for this visit only.
    *
@@ -504,7 +517,7 @@ export function WorldChatScreen() {
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
   useEffect(() => {
-    if (row?.entryContext?.kind === "production-setup") {
+    if (!embedded && row?.entryContext?.kind === "production-setup") {
       void navigate(`/w/${worldId}/productions/setup/${row.id}`, { replace: true });
     }
   }, [row?.entryContext?.kind, row?.id, worldId, navigate]);
@@ -582,7 +595,8 @@ export function WorldChatScreen() {
         setDeferredTrouble,
       );
     }
-    navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
+    if (embedded) embedded.onConversationChange(opened);
+    else navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
   }, [opening, opened, worldId, connection, navigate]);
 
   /**
@@ -822,7 +836,7 @@ export function WorldChatScreen() {
   // sheet's copy of every reply — the phone's only way to them — is gone.
   const rowMenu = menuRow && <RowMenuPanel worldId={worldId!} row={menuRow} menu={menu!}
     onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />;
-  if (phone && !conversationId) return <div data-screen="world-chat" className="fy-chat__listpage">
+  if (phone && !conversationId && !inPanel) return <div data-screen="world-chat" className="fy-chat__listpage">
     <HistoryRail worldId={worldId!} live={live} archived={archived} currentId={undefined} phoneList open onToggle={() => {}}
       onNew={() => hold({ kind: "new" })} menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />
     {starting && <div role="status">Starting…</div>}{rowMenu}
@@ -831,7 +845,7 @@ export function WorldChatScreen() {
   return (
     <div
       data-screen={conversationId ? "world-chat-conversation" : "world-chat"}
-      className="fy-chat__wrap"
+      className={cx("fy-chat__wrap", embedded && "fy-chat__wrap--embedded")}
     >
       <div className="fy-gate">
         {fold && historyOpen && <button className="fy-chatnav__drawer-scrim" aria-label="Close history" onClick={() => setHistoryOpen(false)} />}
@@ -932,7 +946,7 @@ export function WorldChatScreen() {
           </div>
 
           <HeldBar className="fy-chat__composer">
-            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
+            {(phone || inPanel) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
               <span><b>What I’ve understood <span>· {carried} of {points.length} ready</span></b><span>{[...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
             </button>}
             <Composer
@@ -961,7 +975,7 @@ export function WorldChatScreen() {
               // refuses a named model outside a production (issue 1403) and there is no world-level
               // language choice to remember one in, so the chip says which model answers and
               // offers no menu.
-              modelControl={<ModelChip readOnly state={state} value={state?.app.agents.find((agent) => agent.name === "world-builder")?.model} set={false} onPick={() => {}} />}
+              modelControl={state?.app.agents.find(agent => agent.name === "world-builder")?.model ? <ModelChip readOnly state={state} value={state.app.agents.find(agent => agent.name === "world-builder")?.model} set={false} onPick={() => {}} /> : undefined}
               {...(worldId && !wrappingUp
                 ? {
                     onAttach: () => {
@@ -1036,7 +1050,7 @@ export function WorldChatScreen() {
           {!fold && <div style={{ flex: 1, minHeight: 16 }} />}
           <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
         </div>}
-        <PageSheet className="fy-understood-sheet" open={phone && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
+        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
           <div className="fy-panel__count">{carried} of {points.length} ready</div>
           {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           {understoodBody}{decisionNotices}

@@ -1,0 +1,95 @@
+// Actual App + global owner. Bridge, media capture and transcription are deterministic local fakes.
+import fs from 'node:fs';import path from 'node:path';import {spawn} from 'node:child_process';import {fileURLToPath,pathToFileURL} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url)),out=path.resolve(here,'../.dev/global-chat-design/native'),touch=process.argv.includes('--touch');
+const report={checks:[],errors:[]},profile=fs.mkdtempSync(path.join(out,'application-chrome-'));
+const proc=spawn(process.env.CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--disable-gpu','--no-first-run','--allow-file-access-from-files','--remote-debugging-port=0',`--user-data-dir=${profile}`,`--blink-settings=primaryPointerType=${touch?2:4},availablePointerTypes=${touch?2:4},primaryHoverType=${touch?0:2},availableHoverTypes=${touch?0:2}`,'about:blank'],{windowsHide:true,stdio:'ignore'});
+const delay=ms=>new Promise(r=>setTimeout(r,ms));let ws;
+try {
+ let target;for(let i=0;i<80&&!target;i++){try{const port=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];target=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t=>t.type==='page')?.webSocketDebuggerUrl;}catch{}if(!target)await delay(150);}
+ if(!target)throw Error('Chrome not ready');ws=new WebSocket(target);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});let id=0;const pending=new Map();
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')report.errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text);if(pending.has(m.id)){const {r,j}=pending.get(m.id);pending.delete(m.id);m.error?j(Error(JSON.stringify(m.error))):r(m.result);}};
+ const send=(method,params={})=>new Promise((r,j)=>{const n=++id;pending.set(n,{r,j});ws.send(JSON.stringify({id:n,method,params}));});
+ const js=async expression=>{const r=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+ const page=expression=>js(`(()=>{const w=document.getElementById('native-preview').contentWindow,d=w.document;return ${expression};})()`);
+ const check=async(label,expression)=>{const value=await page(expression);report.checks.push({label,value});if(!value){console.log(JSON.stringify(await page(`(()=>({selected:JSON.parse(w.sessionStorage.getItem('arke.global-chat.v1')||'null'),oldConnected:w.testChatNode?.isConnected,currentParent:d.querySelector('.fy-production-studio-chat')?.parentElement?.className,editor:d.querySelector('.fy-global-chat .fy-cx__editor')?.innerText,nodes:d.querySelectorAll('.fy-production-studio-chat').length,commands:w.nativeDesignCommands.slice(-8)}))()`)));throw Error(label);}};
+ const capture=async name=>{const b=await js(`(()=>{const b=document.getElementById('native-preview').getBoundingClientRect();return {x:b.x+scrollX,y:b.y+scrollY,width:b.width,height:b.height};})()`);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{...b,scale:1}});fs.writeFileSync(path.join(out,name+'-'+(touch?'touch':'mouse')+'.png'),Buffer.from(r.data,'base64'));};
+ await send('Page.enable');await send('Runtime.enable');await send('Emulation.setDeviceMetricsOverride',{width:touch?470:1500,height:1100,deviceScaleFactor:1,mobile:false});
+ await send('Page.navigate',{url:pathToFileURL(path.join(here,'global-chat-224.native-review.html')).href});
+ for(let i=0;i<80;i++){if(await page('typeof w.nativeDesignReady==="function"').catch(()=>false))break;await delay(100);}await page('w.nativeDesignReady()');
+ if(touch){await js('document.getElementById("native-preview").style.width="390px"');await delay(150);}
+ await page('w.nativeDesignSetMode("proposed")');await delay(200);
+ await check('One actual mounted production conversation','d.querySelectorAll(".fy-production-studio-chat").length===1');
+ await check('Header names the production','d.querySelector(".fy-global-chat header").textContent.includes("Saltlight")');
+ await page('(()=>{w.testChatNode=d.querySelector(".fy-production-studio-chat");w.testDraft="Keep the bells quiet.";d.querySelector(".fy-global-chat .fy-cx__editor").focus();})()');
+ await send('Input.insertText',{text:'Keep the bells quiet.'});await delay(100);
+ await check('Native typing updates the controlled draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText===w.testDraft&&Object.values(JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).drafts).includes(w.testDraft)');
+ await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/overview`)');await delay(350);
+ await check('Navigation preserves the same transcript DOM and draft','d.querySelector(".fy-global-chat .fy-production-studio-chat")===w.testChatNode&&d.querySelector(".fy-global-chat .fy-cx__editor").innerText===w.testDraft');
+ await check('A resting canvas does not turn into a floating Studio','!d.querySelector(".fy-production-studio[data-docked=true]")');
+ await page('(()=>{const state=structuredClone(w.nativeDesignFixture);state.worldChat.runStatus="running";state.worldChat.runStartedAt="2026-10-13T12:00:00Z";w.nativeDesignSetState(state);})()');await delay(100);
+ await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}`)');await delay(350);
+ await check('An active run stays in its original production on World navigation','d.querySelector(".fy-global-chat header").textContent.includes("Saltlight")&&d.querySelector(".fy-global-chat .fy-production-studio-chat")===w.testChatNode');
+ await check('Use this page is explicit','[...d.querySelectorAll(".fy-global-chat button")].some(e=>e.textContent==="Use this page")');
+ await page('w.nativeDesignSetState(structuredClone(w.nativeDesignFixture))');await delay(100);
+ await page('(()=>{w.nativeDesignAllowTestInput();w.stoppedTracks=0;Object.defineProperty(w.navigator,"mediaDevices",{configurable:true,value:{getUserMedia:async()=>({getTracks:()=>[{stop:()=>w.stoppedTracks++}]})}});w.MediaRecorder=class{state="inactive";mimeType="audio/webm";start(){this.state="recording"}stop(){this.state="inactive";w.queueMicrotask(()=>{this.ondataavailable?.({data:new w.Blob(["local fake audio"])});this.onstop?.();})}};})()');
+ await page('d.querySelector(".fy-global-chat [aria-label=Dictate]").click()');await delay(120);
+ await check('Real dictation control enters listening','!!d.querySelector(".fy-global-chat [data-listening=true]")');
+ await page('[...d.querySelectorAll(".fy-global-chat button")].find(e=>e.textContent==="Use this page").click()');await delay(180);
+ await check('Switch waits for dictation and releases tracks','w.stoppedTracks>0&&d.querySelector(".fy-global-chat").textContent.includes("Finishing dictation")&&d.querySelector(".fy-global-chat header").textContent.includes("Saltlight")');
+ await page('(()=>{const request=w.nativeDesignCommands.findLast(e=>e.kind==="transcribe-dictation");if(!request)throw Error("No transcription request");w.nativeDesignSetState(structuredClone(w.nativeDesignFixture),{dictation:{[request.requestId]:{text:"Add a pause.",error:null}}});})()');await delay(250);
+ await check('Finished dictation switches to World without auto-sending','d.querySelector(".fy-global-chat header h2").textContent==="World Chat"&&!w.nativeDesignCommands.some(e=>e.kind==="world-chat-send")');
+ await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(80);await page('d.querySelector(".fy-global-chat-history-row>button").click()');await delay(200);
+ await check('Returning to the durable thread retains typed plus dictated draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('w.nativeDesignSetMode("closed")');await check('Closing hides the sheet without cancelling the run','!d.querySelector(".fy-global-chat[open]")&&!w.nativeDesignCommands.some(e=>e.kind==="world-chat-cancel")');
+ await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`)');await delay(250);await page('w.nativeDesignSetMode("proposed")');
+ await check('Reopening the same context resumes the draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('d.querySelector(".fy-mchip__btn").click()');await delay(80);await page('[...d.querySelectorAll(".fy-mpick__row")].find(e=>e.textContent.includes("GPT-5.4")).click()');await delay(100);
+ await check('Chat-specific selection keeps the provider mark and has no bullet','!!d.querySelector(".fy-mchip .fy-mark")&&w.getComputedStyle(d.querySelector(".fy-mchip__btn"),"::before").content==="none"');
+ if(touch){
+  await check('Only the workspace beneath the phone sheet is inert','[...d.querySelectorAll("#root [data-screen]")].every(e=>e.inert)&&!d.querySelector("[data-global-chat-trigger]").closest("[inert]")');
+  await page('(()=>{Object.defineProperty(w.visualViewport,"height",{configurable:true,value:500});w.visualViewport.dispatchEvent(new w.Event("resize"));})()');await delay(150);
+  await check('Composer clears the simulated on-screen keyboard','d.querySelector(".fy-global-chat .fy-cx").getBoundingClientRect().bottom<=500.6');
+  await page('(()=>{delete w.visualViewport.height;w.visualViewport.dispatchEvent(new w.Event("resize"));})()');await delay(150);
+ }
+ await page('(()=>{d.activeElement?.blur();w.scrollTo(0,0);})()');await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:1,y:1});
+ await send('Emulation.setDeviceMetricsOverride',{width:touch?470:1500,height:1600,deviceScaleFactor:1,mobile:false});await js('window.scrollTo(0,0)');await delay(100);
+ await capture('implemented-chat');
+ // Reload the iframe, retaining only its browser storage. The backend fixture still owns the thread.
+ await page('w.location.reload()');await delay(300);
+ for(let i=0;i<80;i++){if(await page('typeof w.nativeDesignReady==="function" ? w.nativeDesignReady().then(()=>true) : false').catch(()=>false))break;await delay(100);}await delay(200);
+ await check('Refresh restores selected thread, open panel and unsent draft','d.querySelector("[data-global-chat-trigger]").getAttribute("aria-expanded")==="true"&&d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('w.nativeDesignAllowTestInput()');
+ await page('(()=>{const state=structuredClone(w.nativeDesignFixture);state.world.meta.worldId="01J8F3K2QW9VZX4N7M0RTYB6HD";state.world.meta.name="The Stillwater";w.nativeDesignSetState(state);w.nativeDesignNavigate(`/w/${state.world.meta.worldId}`);})()');await delay(250);
+ await check('World switching pauses the prior live conversation','d.querySelector(".fy-global-chat").textContent.includes("another world")&&!d.querySelector(".fy-global-chat .fy-cx")');
+ await page('[...d.querySelectorAll(".fy-global-chat button")].find(e=>e.textContent.includes("Open this world")).click()');await delay(180);
+ await check('Explicit new-world adoption starts with a separate draft','d.querySelector(".fy-global-chat header").textContent.includes("The Stillwater")&&d.querySelector(".fy-global-chat .fy-cx__editor").innerText===""');
+ await page('(()=>{w.nativeDesignSetState(structuredClone(w.nativeDesignFixture));w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`);})()');await delay(250);
+ await page('[...d.querySelectorAll(".fy-global-chat button")].find(e=>e.textContent.includes("Open this world")).click()');await delay(180);
+ await check('Returning to the prior world retains its original draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('d.querySelector("[data-activity-bell]").click()');await delay(120);
+ await check('Activity temporarily covers the same chat without losing its draft','d.querySelector("[data-global-chat-trigger]").getAttribute("aria-expanded")==="true"');
+ await page('d.querySelector("[data-activity-bell]").click()');await delay(120);
+ await check('Dismissing Activity restores the retained chat','!!d.querySelector(".fy-global-chat[open]")&&d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('d.querySelector("[aria-label=Settings]").click()');await delay(160);
+ await check('Settings leaves the conversation mounted','d.querySelectorAll(".fy-production-studio-chat").length===1');
+ await page('w.nativeDesignNavigate(`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/story`)');await delay(160);
+ await check('Leaving Settings restores the draft','d.querySelector(".fy-global-chat .fy-cx__editor").innerText==="Keep the bells quiet. Add a pause."');
+ await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
+ await check('Send captures the visible conversation rather than a previously viewed world','(()=>{const sent=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-send");return sent?.worldId===w.nativeDesignFixture.world.meta.worldId&&sent?.conversationId===w.nativeDesignFixture.worldChat.conversationId&&sent?.text==="Keep the bells quiet. Add a pause.";})()');
+ await page('d.querySelector(".fy-global-chat [aria-label=Conversations]").click()');await delay(60);
+ await page('[...d.querySelectorAll(".fy-global-chat-history button")].find(e=>e.textContent==="New conversation").click()');await delay(120);
+ await check('New conversation starts empty without adopting the old thread','d.querySelector(".fy-global-chat .fy-cx__editor").innerText===""&&JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.newThread===true');
+ await page('d.querySelector(".fy-global-chat .fy-cx__editor").focus()');await send('Input.insertText',{text:'Give the bells a new ending.'});await delay(70);
+ await page('d.querySelector(".fy-global-chat [aria-label=Send]").click()');await delay(100);
+ await check('The first line creates a scoped conversation before sending','(()=>{const create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");return create?.worldId===w.nativeDesignFixture.world.meta.worldId&&create?.entryContext?.productionId==="saltlight"&&w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send").length===1;})()');
+ await page('(()=>{const state=structuredClone(w.nativeDesignFixture),create=w.nativeDesignCommands.findLast(e=>e.kind==="world-chat-create");const id="cv_01J8F0000000000000000000C9";state.world.conversations.push({...state.world.conversations[0],id,title:"A new ending",entryContext:create.entryContext});state.worldChat={...state.worldChat,conversationId:id,turns:[],runStatus:"idle"};w.testNewConversation=id;w.nativeDesignSetState(state);})()');await delay(180);
+ await check('Creation delivers the held first line once to the new conversation','(()=>{const sends=w.nativeDesignCommands.filter(e=>e.kind==="world-chat-send");return sends.length===2&&sends[1].conversationId===w.testNewConversation&&sends[1].text==="Give the bells a new ending."&&JSON.parse(w.sessionStorage.getItem("arke.global-chat.v1")).selected.conversationId===w.testNewConversation;})()');
+ await page('w.nativeDesignSetMode("closed")');
+ await page('(()=>{const scene=w.nativeDesignFixture.world.productions.find(p=>p.meta.id==="saltlight").scenes[0],shot=scene.shots[0];w.testShotPath=`/w/${w.nativeDesignFixture.world.meta.worldId}/p/saltlight/scenes/${scene.id}/shots/${shot.id}`;w.nativeDesignNavigate(w.testShotPath);})()');await delay(200);
+ await check('Chat remains visible on a deep shot page','[...d.querySelectorAll("[data-global-chat-trigger]")].some(e=>e.getBoundingClientRect().width>0)');
+ await page('w.nativeDesignSetMode("proposed")');await delay(100);
+ await check('A shot opens its exact context without a model selector','d.querySelector(".fy-global-chat header h2").textContent==="Shot Chat"&&!d.querySelector(".fy-global-chat .fy-mchip")');
+ await page('w.nativeDesignSetMode("closed")');await page('w.nativeDesignNavigate(w.testShotPath+"?view=stage")');await delay(150);await page('w.nativeDesignSetMode("proposed")');
+ await check('Stage opens its matching context','d.querySelector(".fy-global-chat header h2").textContent==="Stage Chat"');
+ if(report.errors.length)throw Error(report.errors.join('\n'));console.log(`${report.checks.length} application lifecycle checks passed (${touch?'coarse':'fine'} pointer)`);
+} finally {fs.writeFileSync(path.join(out,'application-'+(touch?'touch':'mouse')+'.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

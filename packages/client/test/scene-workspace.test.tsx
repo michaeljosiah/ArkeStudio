@@ -1140,8 +1140,9 @@ describe("the shell collapses rather than demanding the width (R-28)", () => {
     assert.match(rail.textContent ?? "", /Ask Arke/);
 
     await click(rail);
-    assert.ok(q(mounted, ".fy-arke"), "and back again");
-    assert.equal(q(mounted, ".fy-sw__rail"), null);
+    assert.ok(dom.document.querySelector('.fy-global-chat[open] .fy-arke'), "and back in the shared panel");
+    assert.equal(dom.document.querySelectorAll('.fy-arke').length, 1, "one conversation owner");
+    assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "opening Chat preserves the work");
   });
 });
 

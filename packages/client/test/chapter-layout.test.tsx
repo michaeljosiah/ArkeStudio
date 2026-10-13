@@ -94,8 +94,8 @@ it('a newer chapter title closes the Notes editor without writing its stale draf
  await act(async()=>blur({currentTarget:field} as never));
  assert.equal(sent.filter(m=>m.kind==='edit-chapter-plan').length,0);assert.match(find('.fy-ch__plan').textContent!,/Name from another window/);
 });
-for(const route of ['neap/','01-chapter'])it('chapter alias '+route+' keeps only the deep phone chrome',async()=>{
- await mount('p/ledger/story/chapters/'+route);await openChapter();assert.equal(document.querySelectorAll('.fy-titlebar').length,0);assert.ok(find('[data-screen="chapter"]'));
+for(const route of ['neap/','01-chapter'])it('chapter alias '+route+' keeps the shared Chat control above the deep phone chrome',async()=>{
+ await mount('p/ledger/story/chapters/'+route);await openChapter();assert.equal(document.querySelectorAll('.fy-titlebar').length,1);assert.ok(find('[data-global-chat-trigger]'));assert.ok(find('[data-screen="chapter"]'));
 });
 it('Fold source selections position the ask at the captured line rather than after the textarea',async()=>{
  await mount('p/ledger/story/chapters/neap',984);await openChapter();const area=find('.fy-ch__source') as HTMLTextAreaElement;

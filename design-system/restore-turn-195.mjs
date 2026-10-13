@@ -1,3 +1,4 @@
+import { amendModelChoice } from './model-choice-amendment.mjs';
 // Recover the recorded drawing, not a reconstruction. All other turns are preserved verbatim.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,8 +12,9 @@ const normalized=s=>s.replaceAll('\r\n','\n').trim();
 const hash=s=>createHash('sha256').update(normalized(s)).digest('hex');
 const sections=s=>new Map([...s.matchAll(/<section class="dv-turn" id="(t\d+)"/g)].map((m,i,all)=>[m[1],s.slice(m.index,all[i+1]?.index??s.lastIndexOf('</body>'))]));
 const original=git(source,'design-system/Arke Studio.dc.html'),restored=git(restoration,'design-system/Arke Studio.dc.html');
-const turn=sections(original).get('t195'),restoredTurn=sections(restored).get('t195');
-if(!turn||hash(turn)!==hash(restoredTurn))throw Error('Original and restoration PR turn 195 differ');
+const historicalTurn=sections(original).get('t195'),restoredTurn=sections(restored).get('t195');
+const turn=amendModelChoice(historicalTurn);
+if(!turn||hash(historicalTurn)!==hash(restoredTurn))throw Error('Original and restoration PR turn 195 differ');
 const css=s=>s.split(/\r?\n/).filter(l=>l==='/* t195 */'||l.startsWith('.v195')).join('\n');
 if(!css(original)||hash(css(original))!==hash(css(restored)))throw Error('Original and restoration PR styles differ');
 const file=path.join(here,'Arke Studio.dc.html');let current=fs.readFileSync(file,'utf8');const before=sections(current);
@@ -35,6 +37,6 @@ for(const frame of ['195b','195e','195g'])if(!build.includes(`frame: "${frame}"`
  build=build.replace('const SCREENS = [','const SCREENS = [\n'+oldBuild.slice(start,end));
 }
 fs.writeFileSync(buildFile,build);
-const proof={source,restoration,sectionSha256:hash(turn),stylesSha256:hash(css(original)),frames:[...turn.matchAll(/class="dv-opt" id="(195[a-g])"/g)].map(m=>m[1]),rules:(turn.match(/class="dv-rule"/g)||[]).length,preservedTurns:before.size};
+const proof={source,restoration,sectionSha256:hash(historicalTurn),approvedSectionSha256:hash(turn),amendment:"Author-approved model-choice bullet removal, 2026-10-13",stylesSha256:hash(css(original)),frames:[...turn.matchAll(/class="dv-opt" id="(195[a-g])"/g)].map(m=>m[1]),rules:(turn.match(/class="dv-rule"/g)||[]).length,preservedTurns:before.size};
 fs.mkdirSync(path.join(root,'.dev/global-chat-design'),{recursive:true});fs.writeFileSync(path.join(root,'.dev/global-chat-design/restoration-proof.json'),JSON.stringify(proof,null,2));
 console.log(JSON.stringify(proof));

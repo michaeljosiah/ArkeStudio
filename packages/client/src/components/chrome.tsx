@@ -1,6 +1,8 @@
 import { useMediaQuery } from "../lib/media-query.js";
 import { useNavigate } from "react-router";
-import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { Bell, ChevronLeft, Cog, Inbox, Message } from "./icons.js";
+import { useSyncExternalStore } from "react";
+import { useGlobalChat } from "./global-chat-context.js";
 import { AccountControl } from "./account-menu.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
@@ -64,6 +66,9 @@ export function AppChrome({
   const navigate = useNavigate();
   const phone = useMediaQuery("(max-width: 599px)");
   const { state } = useStore();
+  const chat = useGlobalChat();
+  const chatView = useSyncExternalStore(chat?.subscribe ?? (() => () => {}), chat?.getSnapshot ?? (() => null), () => null);
+  const chatRunning = !!chatView?.selected && state?.worldChat?.conversationId === chatView.selected.conversationId && state?.worldChat?.runStatus === "running";
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
   const attention = state ? computeNeedsYou(state).length > 0 : false;
@@ -114,6 +119,11 @@ export function AppChrome({
         {aside}
         {controls && (
           <>
+            <button type="button" className={cx("fy-iconbtn", chatView?.open && "fy-iconbtn--current")} title="Chat" aria-label="Chat"
+              aria-expanded={chatView?.open ?? false} data-global-chat-trigger=""
+              onClick={() => chatView?.open ? chat?.close() : chat?.open()}>
+              <Message size={13} />{chatRunning && <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />}
+            </button>
             {/* Proposals sits before activity: AppChrome's own settlement is that activity and
                 settings sit together, in that order, so a new icon prepends rather than splits. */}
             {openWorldId && (

@@ -26,9 +26,9 @@ try {
  await page('w.nativeDesignSetMode("existing")');await capture('existing-page');
  await page('w.nativeDesignSetMode("proposed")');
  await check('One existing conversation mount',`document.getElementById('native-preview').contentDocument.querySelectorAll('.fy-production-studio-chat').length===1`);
- await check('Native composer remains in proposed panel',`!!document.getElementById('native-preview').contentDocument.querySelector('.gc224-native-panel .fy-cx')`);
- await check('Desktop canvas fits beside the panel',`(()=>{const d=document.getElementById('native-preview').contentDocument;return d.querySelector('.fy-production-studio__canvas').getBoundingClientRect().right<=d.querySelector('.gc224-native-panel').getBoundingClientRect().left+1;})()`);
- await check('Chat prepends existing header icon set',`document.getElementById('native-preview').contentDocument.querySelector('.fy-titlebar__side--right').firstElementChild.matches('[data-native-chat-trigger]')`);
+ await check('Native composer remains in proposed panel',`!!document.getElementById('native-preview').contentDocument.querySelector('.fy-global-chat .fy-cx')`);
+ await check('Desktop canvas fits beside the panel',`(()=>{const d=document.getElementById('native-preview').contentDocument;return d.querySelector('.fy-production-studio__canvas').getBoundingClientRect().right<=d.querySelector('.fy-global-chat').getBoundingClientRect().left+1;})()`);
+ await check('Chat prepends existing header icon set',`document.getElementById('native-preview').contentDocument.querySelector('.fy-titlebar__side--right').firstElementChild.matches('[data-global-chat-trigger]')`);
  await capture('proposed-page');
  await page('d.querySelector(".fy-mchip__btn").click()');await delay(150);
  await check('Native grouped model picker opens',`!!document.getElementById('native-preview').contentDocument.querySelector('.fy-mpick__search')`);
@@ -40,10 +40,10 @@ try {
  await page('d.querySelector(".fy-mchip__btn--effort").click()');await delay(100);await capture('effort-picker');
  await page('d.dispatchEvent(new w.KeyboardEvent("keydown",{key:"Escape",bubbles:true}))');await delay(100);
  await page('w.nativeDesignSetMode("closed")');
- await check('Closing restores original mounted conversation',`(()=>{const d=document.getElementById('native-preview').contentDocument;return !d.querySelector('.gc224-native-panel')&&d.querySelectorAll('.fy-production-studio-chat').length===1&&d.querySelector('.fy-mchip__btn').textContent.includes('GPT-5.4');})()`);
+ await check('Closing restores original mounted conversation',`(()=>{const d=document.getElementById('native-preview').contentDocument;return !d.querySelector('.fy-global-chat[open]')&&d.querySelectorAll('.fy-production-studio-chat').length===1&&d.querySelector('.fy-mchip__btn').textContent.includes('GPT-5.4');})()`);
  await page('w.nativeDesignSetMode("proposed")');await capture('proposed-final');
- report.geometry=await page('JSON.stringify([...d.querySelectorAll(".gc224-native-panel,.fy-cx,.fy-mchip,.fy-production-studio__canvas,.fy-production-studio__thread,.fy-story")].map(e=>({cls:e.className,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,x:e.getBoundingClientRect().x,y:e.getBoundingClientRect().y})))');
- await check('Persistent Chat remains visible above panel',`(()=>{const d=document.getElementById('native-preview').contentDocument;const b=d.querySelector('[data-native-chat-trigger]').getBoundingClientRect();return b.right<=d.defaultView.innerWidth&&b.top>=0&&b.width>0&&d.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest('[data-native-chat-trigger]')!==null;})()`);
+ report.geometry=await page('JSON.stringify([...d.querySelectorAll(".fy-global-chat,.fy-cx,.fy-mchip,.fy-production-studio__canvas,.fy-production-studio__thread,.fy-story")].map(e=>({cls:e.className,width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height,x:e.getBoundingClientRect().x,y:e.getBoundingClientRect().y})))');
+ await check('Persistent Chat remains visible above panel',`(()=>{const d=document.getElementById('native-preview').contentDocument;const b=d.querySelector('[data-global-chat-trigger]').getBoundingClientRect();return b.right<=d.defaultView.innerWidth&&b.top>=0&&b.width>0&&d.elementFromPoint(b.x+b.width/2,b.y+b.height/2)?.closest('[data-global-chat-trigger]')!==null;})()`);
  if(report.errors.length)throw Error(report.errors.join('\n'));
  console.log(`${report.checks.length} native comparison checks passed`);
 } finally {fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

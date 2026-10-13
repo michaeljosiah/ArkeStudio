@@ -19,6 +19,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { BodyLayer } from "../components/body-layer.js";
 import { StudioInlineContext } from "../components/production-studio-context.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
@@ -253,6 +254,7 @@ function ProductionSwitcher({
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
+  const globalChat = useGlobalChat();
   const { worldId, prodId, episodeId, sceneId, shotId, chapterId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
@@ -754,7 +756,7 @@ export function ProductionLayout() {
   );
   return (
     <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-cut-route={cutRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
-      {!sceneDeepPhone && <AppChrome
+      {(!sceneDeepPhone || globalChat) && <AppChrome
         // A chapter's Audiobook and Timing views draw no page head (design turn 194, rule 2): the
         // chapter's title is the bar's last crumb there, as the frames draw it.
         {...(crumbChapter !== undefined ? { menu: <><span className="fy-titlebar__sep" aria-hidden="true">›</span><span className="fy-titlebar__crumb">{crumbChapter.title}</span></> } : {})}

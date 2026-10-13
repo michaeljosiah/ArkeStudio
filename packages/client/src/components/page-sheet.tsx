@@ -86,7 +86,7 @@ export function PageSheet({ open, onClose, title, subtitle, children, footer, cl
   }, [open, mounted, resetKey]);
   if (!mounted || (!open && !keepMounted)) return null;
   return createPortal(
-    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1 } : {})}
+    <dialog ref={ref} className={["fy-page-sheet", className].filter(Boolean).join(" ")} {...(headless ? { "aria-label": title } : { "aria-labelledby": heading })} {...(modeless ? { tabIndex: -1, open: showing } : {})}
       onFocusCapture={(event) => { if (preserveReturnFocus && !coveredNow.current && event.target instanceof HTMLElement) lastFocus.current = event.target; }}
       onCancel={(event) => { event.preventDefault(); event.stopPropagation(); onClose(); }}
       onClick={(event) => {

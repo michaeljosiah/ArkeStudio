@@ -1,3 +1,6 @@
+import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { useClientRender } from "../components/production-studio-context.js";
+import { ConversationPanelContent, useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
 import { HeldBar } from "../components/held-bar.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
@@ -23,9 +26,16 @@ import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../c
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
+  const { worldId, setupId } = useParams(), global = useGlobalChat(), client = useClientRender();
+  if (worldId && setupId && ConversationIdSchema.safeParse(setupId).success && global && client) return <GlobalWorldChatEntry worldId={worldId} conversationId={setupId} />;
+  return <ProductionSetupView />;
+}
+
+export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
   const phone = useMediaQuery("(max-width: 599px)");
   const [outlineOpen,setOutlineOpen] = useState(false);
-  const { worldId, setupId: routeId } = useParams();
+  const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;
+  const presentation = useConversationPresentation();
   const world = useOpenWorldGuard(worldId);
   const idResult = ConversationIdSchema.safeParse(routeId);
   const setupId = idResult.success ? idResult.data : null;
@@ -34,13 +44,15 @@ export function ProductionSetupScreen() {
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
   const readReplies = useReadReplies(workspace);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useConversationState("draft", "");
   const [failure, setFailure] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [tab, setTab] = useState<"conversation" | "outline">("conversation");
   const [modelId, setModelId] = useState("");
   const pendingRef = useRef<{ requestId: string; operation: string } | null>(null);
   const opened = useRef<string | null>(null);
+  useEffect(() => { if (setupId) presentation?.owner.reportConversation(presentation.key, setupId); }, [presentation?.owner, presentation?.key, setupId]);
+  useEffect(() => { if (presentation?.inPanel) setTab("outline"); }, [presentation?.inPanel]);
   const inheritedModel = state?.app.agents.find(agent => agent.name === "world-builder")?.model;
   const unavailable = languageChoiceReason(state, modelId || inheritedModel);
   const progress = useWorldChatProgress(setupId ?? undefined, workspace?.runStartedAt ?? null);
@@ -120,7 +132,7 @@ export function ProductionSetupScreen() {
       </div>
       {failure && <p className="fy-production-setup__notice" role="alert">{failure}</p>}
       <div className="fy-production-setup__panels" data-active={tab}>
-        <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke">
+        <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke"><ConversationPanelContent>
           <div className="fy-production-setup__log">
             <ConversationTranscript workspace={workspace} autoRead={readReplies.autoRead} running={running} progress={progress}
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
@@ -144,7 +156,7 @@ export function ProductionSetupScreen() {
               onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} readReplies={readReplies.composer} />
             <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>
           </HeldBar>
-        </section>
+        </ConversationPanelContent></section>
         <ResponsiveSheet sheet={phone} open={outlineOpen} onClose={() => setOutlineOpen(false)} title="Production so far" className="fy-setup-outline-sheet">
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>

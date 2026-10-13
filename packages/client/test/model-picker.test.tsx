@@ -463,7 +463,7 @@ describe("the chip", () => {
     assert.equal(chip().disabled, true, "and while the harness is starting");
   });
 
-  it("carries the dot when the choice is this chat's own, before the mark", async () => {
+  it("retains chat-specific choice state for the picker actions (approved turn 224)", async () => {
     await mount(<Holder chip={{ set: true }} />);
     assert.ok(chip().className.includes("fy-mchip__btn--set"));
   });

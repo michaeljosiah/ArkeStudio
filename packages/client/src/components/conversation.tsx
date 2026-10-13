@@ -1,3 +1,6 @@
+import { GlobalConversationEntry } from "./global-chat.js";
+import { useConversationPresentation, useConversationState, useGlobalChat } from "./global-chat-context.js";
+import { useClientRender } from "./production-studio-context.js";
 import { ProductionStudio } from "./production-studio.js";
 import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
 import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-run-card.js";
@@ -667,25 +670,7 @@ export type DockAsk = {
   typed?: string;
 };
 
-export function ProductionConversation({
-  worldId,
-  productionId,
-  placeholder,
-  eyebrow,
-  heading,
-  emptyLine,
-  footer,
-  pointsEmpty,
-  entry,
-  openingNote,
-  side,
-  openWith,
-  dock,
-  onSelectShot,
-  subject,
-  contextSummary,
-  stagedTitle,
-}: {
+export type ProductionConversationProps = {
   worldId: string | undefined;
   productionId: string | undefined;
   placeholder: string;
@@ -781,14 +766,41 @@ export function ProductionConversation({
   onSelectShot?: (shotId: string) => void;
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
-}) {
+};
+
+export function ProductionConversation(props: ProductionConversationProps) {
+  const global = useGlobalChat(), client = useClientRender(), world = useStore().state?.world;
+  if (global && client && world && props.worldId === world.meta.worldId) return <GlobalConversationEntry props={props} world={{ worldId: world.meta.worldId, name: world.meta.name }} />;
+  return <ProductionConversationBody {...props} />;
+}
+
+export function ProductionConversationBody({
+  worldId,
+  productionId,
+  placeholder,
+  eyebrow,
+  heading,
+  emptyLine,
+  footer,
+  pointsEmpty,
+  entry,
+  openingNote,
+  side,
+  openWith,
+  dock,
+  onSelectShot,
+  subject,
+  contextSummary,
+  stagedTitle,
+}: ProductionConversationProps) {
   const { state, connection, rejoins, worldChatHolds } = useStore();
   const navigate = useNavigate();
   useEffectReviewNavigation(worldId, productionId);
-  const [message, setMessage] = useState("");
-  const [languageModelId, setLanguageModelId] = useState<string | undefined>();
+  const presentation = useConversationPresentation();
+  const [message, setMessage] = useConversationState("draft", "");
+  const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
   /** This chat's own effort per model, by the model's reference (design turn 195): chosen with the model, spent with it. */
-  const [chatVariants, setChatVariants] = useState<Readonly<Record<string, string>>>({});
+  const [chatVariants, setChatVariants] = useConversationState<Readonly<Record<string, string>>>("variants", {});
   const pendingRemember = useRef<string | undefined>(undefined);
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
@@ -852,6 +864,7 @@ export function ProductionConversation({
    * (review 2026-08-22). The handover latch resets with it, for the same reason.
    */
   useEffect(() => {
+    if (presentation) return;
     setMessage("");
     setOmittedAttachments(new Set());
     setLanguageModelId(undefined);
@@ -894,9 +907,14 @@ export function ProductionConversation({
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
-    return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
-  }, [state?.world?.conversations, contextKey]);
+    if (presentation?.newThread && !presentation.conversationId) {
+      const created = state?.worldChat?.conversationId;
+      return opening && created && created !== opening.was ? rows.find(row => row.id === created) ?? null : null;
+    }
+    return presentation?.conversationId ? rows.find(row => row.id === presentation.conversationId) ?? null : [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  }, [state?.world?.conversations, state?.worldChat?.conversationId, contextKey, presentation?.conversationId, presentation?.newThread, opening?.was]);
   const conversationId = thread?.id ?? null;
+  useEffect(() => { presentation?.owner.reportConversation(presentation.key, conversationId); }, [presentation?.owner, presentation?.key, conversationId]);
 
   useEffect(
     () =>

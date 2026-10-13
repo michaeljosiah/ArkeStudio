@@ -74,10 +74,10 @@ it('keeps the rejection pending when the connection is lost', async () => {
   assert.ok(find('.fy-reject-take .fy-page-sheet__foot button:last-child').hasAttribute('disabled'));
   assert.equal(sent.filter(m=>m.kind==='reject-take').length,0);
 });
-for(const size of [390,984]) it('starts Arke in a sheet at ' + size, async () => {
+for(const size of [390,984]) it('opens the shared Chat panel from Generate at ' + size, async () => {
   await mount(undefined,size); assert.equal(find('.fy-scene-dock[open]'),null);
   await click(find('.fy-generate-wrap > .fy-sw__rail'));
-  assert.ok(find('.fy-scene-dock[open] .fy-arke'));
+  assert.ok(find('.fy-global-chat[open] .fy-arke')); assert.equal(find('.fy-scene-dock[open]'),null);
 });
 it('uses the styled Shot control and a named Add reference on the phone bench',async()=>{
   await mount('/generate?view=bench&shot=sh_12');
