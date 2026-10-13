@@ -10,6 +10,23 @@ const vision: WireModel = { id: "vision", providerID: "ollama", package: "@openc
   settings: { baseURL: "http://127.0.0.1:11434/v1" }, capabilities: { tools: true, input: ["text", "image"] } };
 const png = { type: "image" as const, mimeType: "image/png" as const, data: "cGl4ZWxz" };
 
+it("scoped image capability works without a global cache and refuses duplicate Copilot rows", async t => {
+  const stub = new StubOpenCodeV2(); await stub.start();
+  const adapter = new OpenCodeV2Adapter({ baseUrl: () => stub.baseUrl(), password: () => STUB_V2_PASSWORD });
+  t.after(async () => { await adapter.dispose(); await stub.stop(); });
+  const hosted = { ...vision, providerID: "hosted" };
+  stub.modelResponse = directory => ({ models: directory ? [hosted] : [] });
+  adapter.prepareSession({ preparationId: "uncached", model: "hosted/vision" });
+  const first = await adapter.createSession({ purpose: "world-chat", agent: "world-builder", cwd: "/world/scratch", preparationId: "uncached" });
+  assert.equal(adapter.imageInputForSession(first.sessionId), true);
+  const copilot = { ...hosted, providerID: "github-copilot", package: "@opencode/ai/providers/anthropic", settings: { endpoint: "messages" } };
+  stub.modelResponse = () => ({ models: [copilot, { ...copilot, capabilities: { input: ["text"] } }] });
+  adapter.prepareSession({ preparationId: "ambiguous", model: "github-copilot/vision" });
+  const second = await adapter.createSession({ purpose: "world-chat", agent: "world-builder", cwd: "/world/scratch", preparationId: "ambiguous" });
+  assert.equal(adapter.imageInputForSession(second.sessionId), false);
+  await assert.rejects(adapter.dispatchAsync({ sessionId: second.sessionId, parts: [png] }), /cannot inspect images/);
+});
+
 it("pins image capability to the session's scoped model and sends inline native attachments", async t => {
   const nativeFetch = globalThis.fetch;
   t.mock.method(globalThis, "fetch", (input: Parameters<typeof fetch>[0], init?: RequestInit) =>

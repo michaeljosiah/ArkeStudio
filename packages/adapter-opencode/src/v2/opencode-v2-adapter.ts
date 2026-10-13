@@ -196,7 +196,6 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   /** Every catalogue row's window by `provider/id`, so a pinned session can be budgeted from its own model. */
   private readonly modelWindows = new Map<string, number>();
   /** A global row only admits the scoped verification below; it never proves destination. */
-  private readonly visionModels = new Set<string>();
   /**
    * The pinned model's window per session, taken at creation from the catalogue as it stood
    * then. Null is a pinned model whose window the catalogue did not state: the caller's floor
@@ -293,20 +292,16 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       if (row !== null) window = modelMetadata(row).inputTokenLimit ?? null;
       // Only a pinned selection identifies where these bytes will go. A global default or a
       // model name is not evidence for this location; failed/unknown metadata stays unreadable.
-      if (model !== null && (modelMetadata(row ?? {}).inputModalities?.includes("image") === true ||
-        this.visionModels.has(`${model.providerID}/${model.id}`))) {
+      if (model !== null) {
         try {
           const signal = AbortSignal.any([AbortSignal.timeout(5_000), ...(input.signal ? [input.signal] : [])]);
           const scopedLocation = location ?? session.location?.directory;
-          let rows = row ? [row] : null;
-          if (rows === null) {
-            const envelope = await this.http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
-              { location: scopedLocation, signal });
-            if (scopedLocation !== undefined && !sameDirectory(envelope?.location?.directory, scopedLocation)) {
-              throw new Error("OpenCode image catalog did not confirm the session location");
-            }
-            rows = envelope?.data;
+          const envelope = await this.http.req<{ data: WireModel[]; location?: { directory?: string } }>("GET", "/api/model", undefined,
+            { location: scopedLocation, signal });
+          if (scopedLocation !== undefined && !sameDirectory(envelope?.location?.directory, scopedLocation)) {
+            throw new Error("OpenCode image catalog did not confirm the session location");
           }
+          const rows = envelope?.data;
           const matches = Array.isArray(rows) ? rows.filter(item => item.providerID === model.providerID && item.id === model.id) : [];
           const selected = matches.length === 1 ? matches[0] : undefined;
           image = await qualifySessionImageInput(selected ?? null, model.providerID, signal);
@@ -570,12 +565,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     const out: ModelInfo[] = [];
     this.lastKnownWindow = null;
     this.modelWindows.clear();
-    this.visionModels.clear();
     for (const row of rows) {
       if (!row.id || !row.providerID || !modelEnabled(row)) continue;
       const key = `${row.providerID}/${row.id}`;
       const metadata = modelMetadata(row);
-      if (metadata.inputModalities?.includes("image")) this.visionModels.add(key);
       if (metadata.inputTokenLimit !== undefined) this.modelWindows.set(key, metadata.inputTokenLimit);
       if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
