@@ -15113,9 +15113,10 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService ?? null, msg.productionId);
-          const words = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model)?.cadence?.tagWords;
+          const model = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model);
+          const words = model?.cadence?.tagWords;
           const reading = () => (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id)) ? "a book is being read" : null);
-          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(words !== undefined ? { words } : {}) });
+          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(model !== undefined ? { model } : {}), ...(words !== undefined ? { words } : {}) });
           if (drafted > 0) await this.refreshWorldSnapshot(msg.worldId);
           answer(drafted);
         } catch (err) {

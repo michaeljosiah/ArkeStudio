@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router";
 import {
   PERFORMANCE_NOTE_MAX,
   tagCharacterLimit,
+  performanceNoteLimit,
   DEFAULT_NARRATOR,
   HOSTED_READER_LABELS,
   designatedVoiceSample,
@@ -325,10 +326,10 @@ interface NarrationReader {
 }
 
 /** A narrator's limit as data (R-168): words on a row with a tag word cap, else characters, or none. */
-function narrationLimit(row: ManifestModel | undefined): string {
+export function narrationLimit(row: ManifestModel | undefined): string {
   const cap = row?.cadence;
   if (cap?.phrase === undefined || cap.phrase === "unsupported") return "no note";
-  return cap.tagWords !== undefined ? `${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${tagCharacterLimit(row ?? {})}`;
+  return cap.tagWords !== undefined ? `${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${performanceNoteLimit(row ?? {})} characters`;
 }
 
 /** Why the narrator holds this note, as one clause (R-168), or null when it plays it. */

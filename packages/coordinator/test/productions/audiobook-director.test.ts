@@ -18,6 +18,7 @@ import { devCipher } from "../../src/credentials/dev-cipher.js";
 import {
   DIRECTION_CONTEXT_BOUNDS,
   acceptDirections,
+  draftSpeakerNotes,
   directionPromptFor,
   renderDirectionContext,
   spokenAt,
@@ -371,7 +372,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
       note: "tag", noteChars: 160, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
     assert.match(prompt, /takes a note to 160 characters/);
     const asking = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, asks: { speakerNotes: [{ key: "ade", name: "Ade" }] }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4",
-      deliveries: ["warm"], note: "tag", noteChars: 160, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+        deliveries: ["warm"], note: "tag", noteChars: 160, speakerNoteChars: 300, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
     assert.match(asking, /Inspect natural pauses/);
     assert.match(asking, /preserving|Preserve the selected narrator/);
     assert.match(asking, /how the narrator plays them, at most 300 characters/, "a speaker's note leads every line as a tag, so it meets the same cap");
@@ -564,6 +565,17 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.equal(again.speakerNotes, undefined, "no speaker without a note, so none is asked for or proposed");
       },
     ));
+
+  it("drafted briefs respect legacy readers before accepting a longer v4 performance", () => withDirector({}, async ({ store, worldDir }) => {
+    const note = "same narrator, slightly higher register, clipped articulation, preserve familiar timbre";
+    const ask: SpeakerNotesDeriver = async input => {
+      assert.ok(input.characters === 60 || input.characters === 300);
+      return { notes: { "maren-kest": note } };
+    };
+    assert.equal((await draftSpeakerNotes(store, LEDGER, ask, undefined, { model: V3 })).drafted, 0);
+    assert.equal((await draftSpeakerNotes(store, LEDGER, ask, undefined, { model: SHIPPED_MANIFEST.models.find(model => model.id === "eleven_v4")! })).drafted, 1);
+    assert.equal(await readNarration(worldDir, "maren-kest"), note);
+  }));
 
   it("Draft from the sheets fills each character's empty narration at once and leaves the book's own notes alone (design turn 200)", () => {
     const asked: string[][] = [];

@@ -6,6 +6,8 @@ import {
   CADENCE_PHRASE_MAX,
   PERFORMANCE_NOTE_MAX,
   tagCharacterLimit,
+  performanceNoteLimit,
+  performanceNote,
   DeliverySchema,
   SOUNDS,
   SoundSchema,
@@ -120,6 +122,7 @@ export interface DirectionBlockInput {
   /** A tag reader's word cap for the note and a marker's phrase, where its row declares one. */
   noteWords?: number;
   noteChars?: number;
+  speakerNoteChars?: number;
   pause: boolean;
   breath: boolean;
   emphasis: boolean;
@@ -249,7 +252,8 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
   const chapterNote = input.asks?.chapterNote === true;
   const speakerNotes = input.asks?.speakerNotes ?? [];
   const speakerWords = speakerNoteWords(input.blocks);
-  const speakerCap = speakerWords === undefined ? `at most ${PERFORMANCE_NOTE_MAX} characters` : `${speakerWords} words at most`;
+  const speakerChars = Math.min(PERFORMANCE_NOTE_MAX, ...input.blocks.map(block => block.speakerNoteChars ?? (block.note === "instruction" ? PERFORMANCE_NOTE_MAX : 60)));
+  const speakerCap = speakerWords === undefined ? `at most ${speakerChars} characters` : `${speakerWords} words at most`;
   const extra = [
     ...(chapterNote ? [`"chapterNote": "<the chapter's mood and pace as a voice carries it, a short phrase>"`] : []),
     ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : []),
@@ -776,6 +780,7 @@ export async function directChapter(
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",
             noteChars: tagCharacterLimit(block.model),
+            speakerNoteChars: performanceNoteLimit(block.model),
             ...(support.note.words !== undefined ? { noteWords: support.note.words } : {}),
             pause: support.pause.status !== "unsupported",
             breath: support.breath.status !== "unsupported",
@@ -809,7 +814,9 @@ export async function directChapter(
         }
         const note = normalizeSpeechText(value);
         const words = speakerNoteWords(pass.map((block) => block.model.cadence?.tagWords !== undefined ? { noteWords: block.model.cadence.tagWords } : {}));
-        if (note.length > PERFORMANCE_NOTE_MAX || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
+        if (pass.some(block => note.length > performanceNoteLimit(block.model)
+          || block.model.cadence?.phrase === "best-effort-tag" && performanceNote(note, block.model, block.language).mode === "unsupported")
+          || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
         else if (note !== "") speakerNotes[key] = note;
       }
     }
@@ -926,6 +933,7 @@ export async function acceptDirections(
 const RawSpeakerNotesSchema = z.object({ notes: z.record(z.string(), z.string()) });
 export type RawSpeakerNotes = z.infer<typeof RawSpeakerNotesSchema>;
 export interface SpeakerNotesInput {
+  characters?: number;
   speakers: Array<{ key: string; name: string; essence?: string; voice?: string }>;
   /**
    * The narrator's tag word cap, where it has one (design turn 200, R-170): a draft is the
@@ -940,11 +948,11 @@ function buildSpeakerNotesPrompt(input: SpeakerNotesInput, retryNote?: string): 
     .map((speaker) => [`[${speaker.key}] ${speaker.name}`, ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []), ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : [])].join("\n"))
     .join("\n\n");
   return `One narrator reads an audiobook and plays every character. From each character's sheet below, write how the narrator plays them: a direction in a few words — register, pace, accent, manner — never words they say. Respond with ONLY a JSON object:
-{"notes": {"<the character's key>": "<at most ${PERFORMANCE_NOTE_MAX} characters>"}}
+{"notes": {"<the character's key>": "<at most ${input.characters ?? 60} characters>"}}
 
 Rules — enforced mechanically after you answer:
 - Describe how the selected narrator performs each character, preserving the narrator's identity and timbre. Use concise audible clauses separated by commas or semicolons; each clause at most 160 characters. Narration keeps the narrator's original accent.
-- Use only the keys listed. At most ${PERFORMANCE_NOTE_MAX} characters a note${input.words !== undefined ? ` and ${input.words} words` : ""}; a longer one is dropped.
+- Use only the keys listed. At most ${input.characters ?? 60} characters a note${input.words !== undefined ? ` and ${input.words} words` : ""}; a longer one is dropped.
 - Leave a character out when the sheet says nothing of how they sound or carry themselves.
 ${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## Characters
@@ -964,7 +972,7 @@ export function makeAdapterSpeakerNotesDeriver(adapter: HarnessAdapter, sessionI
  * What verifies is written at once into the character's empty `narration` (R-170), where every
  * book that reads them inherits it; a narration or a book's note the author wrote is never replaced.
  */
-export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal, options: { blocked?: () => string | null; words?: number } = {}): Promise<{ drafted: number }> {
+export async function draftSpeakerNotes(store: WorldStore, productionId: string, deriver: SpeakerNotesDeriver, signal?: AbortSignal, options: { blocked?: () => string | null; words?: number; model?: ManifestModel } = {}): Promise<{ drafted: number }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const held = await readAudiobookBook(store, productionId);
@@ -987,13 +995,15 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
     }
   }
   if (wanted.size === 0) return { drafted: 0 };
-  const raw = await deriver({ speakers: [...wanted.values()].slice(0, 40), ...(options.words !== undefined ? { words: options.words } : {}) }, signal);
+  const characters = options.model === undefined ? 60 : performanceNoteLimit(options.model);
+  const raw = await deriver({ speakers: [...wanted.values()].slice(0, 40), characters, ...(options.words !== undefined ? { words: options.words } : {}) }, signal);
   if (signal?.aborted) throw new Error("stopped");
   const drafted: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw.notes)) {
     if (!wanted.has(key)) continue;
     const note = normalizeSpeechText(value);
-    if (note !== "" && note.length <= PERFORMANCE_NOTE_MAX && (options.words === undefined || tagWordCount(note) <= options.words)) drafted[key] = note;
+    if (note !== "" && note.length <= characters && (options.words === undefined || tagWordCount(note) <= options.words)
+      && (options.model?.cadence?.phrase !== "best-effort-tag" || performanceNote(note, options.model).mode !== "unsupported")) drafted[key] = note;
   }
   if (Object.keys(drafted).length === 0) return { drafted: 0 };
   // A read begun while the model worked was prepared under the notes as they were (codex on PR

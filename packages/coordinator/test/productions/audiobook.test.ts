@@ -28,7 +28,7 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { geminiSpeechModel } from "@arke-studio/providers";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
-import { assignReaders, audiobookBookPath, audiobookPath, legacyAudiobookPath } from "../../src/productions/audiobook.js";
+import { assignReaders, audiobookBookPath, audiobookPath, legacyAudiobookPath, emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { checkDirection, directionPlan, renderParts } from "../../src/voice/direction.js";
 import { verifyDirections, type DirectionDeriver, type DirectableBlock } from "../../src/productions/audiobook-direction.js";
 import { bookPriceLines } from "../../src/productions/audiobook-book.js";
@@ -291,6 +291,13 @@ describe("a part already in the queue (codex on PR 1180)", () => {
     const found = priorPartJob([job("j1", "failed"), job("j2", "running")], identity, 0);
     assert.equal(found?.kind, "running");
     assert.equal(found?.job.id, "j2");
+  });
+
+  it("does not adopt MP3 or unknown-format jobs for a WAV read", () => {
+    const wavIdentity: PartIdentity = { ...identity, audioFormat: "wav" };
+    const mp3 = job("old", "succeeded", { landedFiles: ["old.mp3"] }, { audioFormat: "mp3" });
+    assert.equal(priorPartJob([mp3, job("unknown", "running")], wavIdentity, 0), null);
+    assert.equal(priorPartJob([job("wav", "running", {}, { audioFormat: "wav" })], wavIdentity, 0)?.kind, "running");
   });
 
   it("adopts bounded speech only under the same compiled words, style and part boundaries", () => {
@@ -1730,6 +1737,18 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       assert.ok(written?.record, written?.refused);
       assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 43);
       assert.equal((await readRecord(worldDir)).direction["title"]?.plan.delivery, undefined);
+    }));
+
+  it("a block note past sixty characters uses the note key and its legacy compatibility boundary", () =>
+    withHarness({}, async ({ worldDir, store }) => {
+      const note = "quiet and measured, letting the last words carry uncertainty without changing the narrator";
+      const record = emptyAudiobook(1, `sha256:${"0".repeat(64)}`, CLOCK);
+      record.direction.title = { textHash: audiobookTextHash("Neap"), at: CLOCK, plan: directionPlan("Neap", { delivery: "measured", note, speed: 1, cues: [] }) };
+      await writeAudiobook(store, LEDGER, "01-neap", record);
+      const raw = JSON.parse(await readFile(recordPath(worldDir), "utf8"));
+      assert.equal(raw.direction.title.plan.note, note);
+      assert.equal(raw.direction.title.plan.phrase, undefined);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 43);
     }));
 
   it("a chapter read pressed while the book is being read is refused in a word, and a chapter its own run holds is left to that run (codex on PR 1187)", async () => {

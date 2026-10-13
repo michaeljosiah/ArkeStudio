@@ -32,6 +32,7 @@ import {
   type Job,
   type ManifestModel,
   type VoiceCandidate,
+  type VoiceAudioFormat,
 } from "@arke-studio/contracts";
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
@@ -224,6 +225,7 @@ class RecordWriteError extends Error {}
 
 /** What names one part's job, frozen into its params so a later run can find it (R-16). */
 export interface PartIdentity {
+  audioFormat?: VoiceAudioFormat;
   productionId: string;
   chapterId: string;
   block: string;
@@ -262,6 +264,7 @@ export function priorPartJob(jobs: readonly Job[], identity: PartIdentity, part:
       job.params["voiceId"] === identity.voiceId &&
       job.params["part"] === part &&
       job.params["parts"] === identity.parts &&
+      (identity.audioFormat === undefined || job.params["audioFormat"] === identity.audioFormat) &&
       (identity.compiledSpeechHash === undefined || job.params["compiledSpeechHash"] === identity.compiledSpeechHash) &&
       (identity.reference === undefined || (job.params["voiceClipHash"] ?? null) === identity.reference) &&
       (job.params["directionHash"] ?? null) === identity.directionHash,
@@ -1201,6 +1204,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         let firstJob: string | undefined;
         const textHash = audiobookTextHash(block.text);
         const identity: PartIdentity = {
+          audioFormat: block.format,
           productionId,
           chapterId: plan.chapter.id,
           block: block.block.key,

@@ -19,7 +19,6 @@ import {
   audiobookRecordingKey,
   audiobookHeading,
   audiobookTextHash,
-  CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   normalizeSpeechText,
   voiceDisplayLabel,
@@ -199,7 +198,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   let renamed = false;
   for (const [key, entry] of Object.entries(direction)) {
     const { note, ...plan } = entry.plan;
-    const fits = note === undefined || note.length <= CADENCE_PHRASE_MAX;
+    const fits = note === undefined || note.length <= 60;
     if (!fits || plan.delivery === undefined || plan.cues.some((cue) => cue.kind === "sound")) renamed = true;
     onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
   }
