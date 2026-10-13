@@ -1,3 +1,4 @@
+import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
@@ -2002,7 +2003,7 @@ export class Coordinator {
             this.emit({ at: at(), type: "audiobook.started", ...ids, requestId, toMake: event.toMake, blocks: event.blocks, ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.groups !== undefined ? { groups: event.groups } : {}) });
             return;
           case "priced":
-            this.emit({ at: at(), type: "audiobook.priced", ...ids, characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) });
+            this.emit({ at: at(), type: "audiobook.priced", ...ids, ...(event.previews !== undefined ? { previews: event.previews } : {}), characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, ...(event.notices.length > 0 ? { notices: event.notices } : {}), ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) });
             return;
           case "request":
             if (held !== undefined) held.request = event.index;
@@ -12647,7 +12648,7 @@ export class Coordinator {
         // before it cannot parse, and that build drops the line and would number its next event
         // over it: the world is raised first, as the audiobook's direction raises it.
         if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
+          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? EXPRESSIVE_DIRECTION_SCHEMA_VERSION : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
         }
         await bench.store.append(
           {
@@ -15095,7 +15096,7 @@ export class Coordinator {
           const held = await readAudiobookBook(store, msg.productionId);
           const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
           const { [msg.speaker]: _was, ...others } = base.notes ?? {};
-          const notes = msg.note === null ? others : { ...others, [msg.speaker]: msg.note.trim().slice(0, 60) };
+          const notes = msg.note === null ? others : { ...others, [msg.speaker]: msg.note.trim() };
           // A note the author writes is theirs (design turn 184c, R-54): it no longer reads as the sheet's.
           const { [msg.speaker]: _source, ...sources } = base.noteSources ?? {};
           const { notes: _notes, noteSources: _sources, ...rest } = base;
@@ -15162,9 +15163,10 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService ?? null, msg.productionId);
-          const words = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model)?.cadence?.tagWords;
+          const model = this.opts.manifest?.models.find((m) => m.provider === narrator.provider && m.id === narrator.model);
+          const words = model?.cadence?.tagWords;
           const reading = () => (this.storyProductionIds(store).some((id) => this.audiobookBusy(msg.worldId, id)) ? "a book is being read" : null);
-          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(words !== undefined ? { words } : {}) });
+          const { drafted } = await draftSpeakerNotes(store, msg.productionId, deriver, control.signal, { blocked: reading, ...(model !== undefined ? { model } : {}), ...(words !== undefined ? { words } : {}) });
           if (drafted > 0) await this.refreshWorldSnapshot(msg.worldId);
           answer(drafted);
         } catch (err) {

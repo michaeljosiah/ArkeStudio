@@ -28,7 +28,7 @@ import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./au
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -1244,7 +1244,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("set-sheet-narration"),
       worldId: UlidSchema,
       path: z.string().min(1),
-      narration: z.string().trim().max(CADENCE_PHRASE_MAX).nullable(),
+      narration: z.string().trim().max(PERFORMANCE_NOTE_MAX).nullable(),
     })
     .strict(),
   /** SPEC-007 R-16: a sheet's computed detail — refs and incoming links from the index. */
@@ -1991,7 +1991,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * them, the note leading it as a book sends it — a tag, a style, or held where the reader
        * takes neither.
        */
-      note: z.string().trim().min(1).max(CADENCE_PHRASE_MAX).optional(),
+      note: z.string().trim().min(1).max(PERFORMANCE_NOTE_MAX).optional(),
     })
     .strict(),
   /** SPEC-011 R-17: local push-to-talk transcription. Audio goes to loopback, nowhere else. */
@@ -3224,7 +3224,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * carries; null takes it away. Changing it makes that speaker's lines stale (R-45).
    */
   z
-    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(CADENCE_PHRASE_MAX).nullable() })
+    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(PERFORMANCE_NOTE_MAX).nullable() })
     .strict(),
   /**
    * The book's own narrator (design turn 155h, SPEC-047 R-46), or null for the app's. Written

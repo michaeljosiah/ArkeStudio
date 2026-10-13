@@ -60,3 +60,14 @@ it("an author's note longer than a tag is held on a tag reader, not refused; a r
   const kokoro = checkDirection(text, directionPlan(text, { delivery: "measured", speed: 1, cues: [], note: "flat" }), row("kokoro-82m"), undefined, "strict");
   assert.deepEqual(kokoro, { ok: false, reason: "note · Kokoro 82M no note" });
 });
+
+it("holds an over-limit v4 note while accepting the authored 300-character note", () => {
+  const input = { speed: 1, cues: [], note: "x".repeat(161) };
+  const checked = checkDirection(text, directionPlan(text, input), row("eleven_v4"), undefined, "strict");
+  assert.ok(checked.ok);
+  assert.deepEqual(checked.held, [{ control: "note", reason: "a tag takes 160 characters" }]);
+  const line = compileLine(text, input, row("eleven_v4"), undefined, "strict");
+  assert.ok(line.ok);
+  assert.deepEqual(line.line.held, checked.held);
+  assert.equal(line.line.text, text);
+});

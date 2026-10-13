@@ -285,19 +285,17 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // style, nor SSML), so a direction's speed is held rather than sent and silently ignored.
       // The wire id is the row's id. Its realtime sibling, eleven_v4_turbo, is not a reader here:
       // nothing in Arke reads live, and a row is a price and a behaviour someone has to check.
-      // A note rides as a tag of two words at most (`tagWords`). Measured 2026-10-07 on the
-      // pepper scene of Na Love or Juju, six short lines a run: `[warmly]` alone, and with a
-      // note of one or two words, read clean; three or four words had one or two of six said
-      // twice ("No. No.") or wrong; five or more, four to six of six, and once the note aloud.
+      // Issue 1753: descriptive tags are supported; bound their characters, not their word count.
+      // WAV at 24 kHz permits the existing local alignment and durable block splitting.
       id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4",
-      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 10000 },
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "wav", maxPromptChars: 10000 },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: null,
-        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag", tagWords: 2,
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160, groupable: true,
         sounds: ELEVEN_V3_SOUNDS,
-        deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
-          breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
-          warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+        deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" },
+          breaking: { settings: {}, tag: "crying" }, cold: { settings: {}, tag: "coldly" },
+          warm: { settings: {}, tag: "warmly" }, urgent: { settings: {}, tag: "urgent" } } },
     },
     {
       // Read 2026-09-13: https://mistral.ai/pricing/api/ — $0.016 per 1,000 characters = 16 micro-USD

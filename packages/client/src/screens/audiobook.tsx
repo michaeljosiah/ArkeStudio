@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { useNavigate, useParams } from "react-router";
 import {
   CADENCE_NOTE_MAX,
-  CADENCE_PHRASE_MAX,
+  PERFORMANCE_NOTE_MAX,
   DEFAULT_NARRATOR,
   SPEECH_TOKEN_ESTIMATE,
   freePlanAskCopy,
@@ -882,7 +882,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
                         <span className="fy-abshow__v">
                           <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
                           <small className={cx(voice.noteHeld === true && "fy-abshow__w")}>
-                            {voice.noteHeld === true ? "note · not on this reader" : `${voice.note?.length ?? 0} / ${CADENCE_PHRASE_MAX}${source === undefined ? "" : ` · ${source}`}`}
+                            {voice.noteHeld === true ? "note · not on this reader" : `${voice.note?.length ?? 0} / ${PERFORMANCE_NOTE_MAX}${source === undefined ? "" : ` · ${source}`}`}
                           </small>
                         </span>
                         <span className="fy-abshow__mono">{blocks(voice.blocks)}</span>

@@ -2,6 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  PERFORMANCE_NOTE_MAX,
+  EXPRESSIVE_DIRECTION_SCHEMA_VERSION,
   propSlugs,
   sheetDir,
   worldSheets,
@@ -473,8 +475,10 @@ export async function applySheetNarration(
   const doc = MarkdownFile.parse(live);
   const current = typeof doc.data["narration"] === "string" ? (doc.data["narration"] as string).trim() : "";
   const next = input.narration?.trim() ?? "";
+  if (next.length > PERFORMANCE_NOTE_MAX) throw new Error(`A character brief takes at most ${PERFORMANCE_NOTE_MAX} characters.`);
   if (input.ifEmpty === true && current !== "") return null;
   if (next === current) return null;
+  if (next.length > 60) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "character-expressive-direction");
   if (next === "") {
     const data = { ...doc.data };
     delete data["narration"];

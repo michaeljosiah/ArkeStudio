@@ -517,7 +517,8 @@ export async function followChapterTakes(store: WorldStore, productionId: string
   for (const planned of plan.blocks) {
     if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
     const textHash = audiobookTextHash(planned.block.text);
-    const want = audiobookTakeDirectionHash(audiobookBlockPlan(record, planned.block), planned.note, planned.reading);
+    const turns = plan.reading === "performed" && planned.assigned.provider === "elevenlabs" && planned.assigned.model === "eleven_v4" ? planned.block : undefined;
+    const want = audiobookTakeDirectionHash(audiobookBlockPlan(record, planned.block), planned.note, planned.reading, turns);
     const candidates = store
       .getBundle()
       .artifacts.filter((artifact) => {

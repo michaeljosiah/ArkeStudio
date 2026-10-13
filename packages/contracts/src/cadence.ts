@@ -4,11 +4,11 @@ import { DeliverySchema } from "./voice.js";
 import type { ManifestModel } from "./manifest.js";
 
 /**
- * A marker's phrase and a performed speaker's note (SPEC-047 R-6, R-44): a direction in the
- * author's own words, short enough to be one. It is also the longest note a tag reader takes as
- * a tag (design turn 181): Eleven v3 reads a bracket of sixty characters as it reads `[whispers]`.
+ * A marker's audible phrase (SPEC-047 R-6, issue 1753). The schema permits 160 characters;
+ * a reader's capability can retain a smaller limit. Character briefs have a separate bound.
  */
-export const CADENCE_PHRASE_MAX = 60;
+export const CADENCE_PHRASE_MAX = 160;
+export const PERFORMANCE_NOTE_MAX = 300;
 /**
  * The block's note (design turn 181, SPEC-049 R-21): the audiobook block's phrase and the Bench
  * line's direction in the author's words — `angry and hurt — quieter, not louder` — long enough
@@ -23,7 +23,7 @@ export const CADENCE_NOTE_MAX = 300;
  * `[sighs]` to Eleven v3, `(sigh)` to Breeze in English, `[sighing]` to Fish. What a reader
  * cannot make is held, never spoken.
  */
-export const SOUNDS = ["laughs", "chuckles", "sighs", "gasps", "sobs", "clears throat", "coughs", "groans", "yawns"] as const;
+export const SOUNDS = ["laughs", "chuckles", "sighs", "gasps", "sobs", "clears throat", "coughs", "groans", "yawns", "snorts", "wheezing", "laughs harder", "starts laughing"] as const;
 export const SoundSchema = z.enum(SOUNDS);
 export type Sound = z.infer<typeof SoundSchema>;
 
@@ -40,6 +40,11 @@ export interface SoundCue { kind: "sound"; at: number; sound: Sound }
  * engine's declaration build refuses a type that long (TS7056).
  */
 export type CadenceCue = PauseCue | BreathCue | EmphasisCue | DeliveryMarker | SoundCue;
+export const EXPRESSIVE_DIRECTION_SCHEMA_VERSION = 78;
+export const EXTENDED_SOUNDS: readonly Sound[] = ["snorts", "wheezing", "laughs harder", "starts laughing"];
+export function needsExpressiveDirection(plan: { cues: readonly CadenceCue[] }): boolean {
+  return plan.cues.some(cue => cue.kind === "delivery" && (cue.phrase?.length ?? 0) > 60 || cue.kind === "sound" && EXTENDED_SOUNDS.includes(cue.sound));
+}
 export const CadenceCueSchema: z.ZodType<CadenceCue, z.ZodTypeDef, unknown> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("pause"), at: z.number().int().nonnegative(), length: z.enum(["short", "long"]) }).strict(),
   z.object({ kind: z.literal("breath"), at: z.number().int().nonnegative(), action: z.enum(["inhale", "exhale"]) }).strict(),
@@ -122,11 +127,13 @@ export const CadenceCapabilitiesSchema = z.object({
   /**
    * The most words one tag may carry on this row — a note, or a marker's phrase — where fewer
    * than `CADENCE_PHRASE_MAX` characters are what the reader reliably follows. Absent is the
-   * character cap alone. Eleven v4 (2026-10-07, one scene, six lines a run): a tag of five words
-   * or more ahead of a short line had the line said twice or the tag said aloud in four to six
-   * of six; four and three words still failed one or two; one or two failed none.
+   * character cap alone. A small 2026-10-07 v4 audition repeated short lines under longer tags;
+   * subsequent continuous auditions followed descriptive tags. That evidence is a listening
+   * regression to preserve, not a universal two-word vendor restriction.
    */
   tagWords: z.number().int().positive().optional(),
+  /** An Arke audition limit, not a vendor syntax restriction. Legacy tag readers retain sixty. */
+  tagChars: z.number().int().positive().max(CADENCE_PHRASE_MAX).optional(),
   /**
    * How a tag is written into the text (SPEC-046 R-21). Absent is `bracket`, the ElevenLabs
    * rendering every row declared before there was a second vendor — `[short pause]`,
@@ -202,7 +209,14 @@ export function cueTagWord(model: CadenceRow, cue: PauseCue | BreathCue): string
 }
 
 /** Why a tag reader holds a note: one tag takes no more than a marker's phrase. */
-export const NOTE_TAG_HOLD = `a tag takes ${CADENCE_PHRASE_MAX} characters`;
+export const NOTE_TAG_HOLD = "a tag takes 60 characters";
+export function tagCharacterLimit(model: CadenceRow): number { return model.cadence?.tagChars ?? 60; }
+/** Storage can hold 300 characters; a generated brief must also fit the selected reader. */
+export function performanceNoteLimit(model: Pick<ManifestModel, "cadence">): number {
+  const cap = model.cadence;
+  return cap?.phrase === "best-effort-instruction" || cap?.tagChars !== undefined && cap.tagWords === undefined
+    ? PERFORMANCE_NOTE_MAX : tagCharacterLimit(model);
+}
 
 /** The words in a tag as a reader hears them: runs of letters or digits. */
 export function tagWordCount(text: string): number {
@@ -212,13 +226,13 @@ export function tagWordCount(text: string): number {
 /** Whether words fit one tag on this row: the shared character cap, and the row's word cap where it declares one. */
 export function tagFits(text: string, model: CadenceRow): boolean {
   const words = model.cadence?.tagWords;
-  return text.length <= CADENCE_PHRASE_MAX && (words === undefined || tagWordCount(text) <= words);
+  return text.length <= tagCharacterLimit(model) && (words === undefined || tagWordCount(text) <= words);
 }
 
 /** Why a row holds words too long for its tag. */
-function tagHold(model: CadenceRow): string {
+export function tagHold(model: CadenceRow): string {
   const words = model.cadence?.tagWords;
-  return words === undefined ? NOTE_TAG_HOLD : `a tag takes ${words} word${words === 1 ? "" : "s"} on this reader`;
+  return words === undefined ? `a tag takes ${tagCharacterLimit(model)} characters` : `a tag takes ${words} word${words === 1 ? "" : "s"} on this reader`;
 }
 
 /**
@@ -553,9 +567,24 @@ export function markerSegments(text: string, plan: CadencePlan, model: Pick<Mani
 export function performanceNote(note: string, model: Pick<ManifestModel, "cadence">, language?: string): { mode: "tag"; tag: string } | { mode: "instruction" } | { mode: "unsupported"; reason: string } {
   const cap = model.cadence;
   const tagged = tagsGo(cap, language);
-  // Held past the row's word cap, as a block's note is: on Eleven v4 a long lead tag had short
-  // lines said twice, and a speaker's note leads every one of their lines.
-  if (cap?.phrase === "best-effort-tag" && tagged) return tagFits(note, model) ? { mode: "tag", tag: tagFor(model, note) } : { mode: "unsupported", reason: tagHold(model) };
+  // Legacy readers retain their own word/character ceilings.
+  if (cap?.phrase === "best-effort-tag" && tagged) {
+    if (tagFits(note, model)) return { mode: "tag", tag: tagFor(model, note) };
+    // A character brief can carry several audible clauses. Preserve every word, and keep each
+    // bracket bounded; never silently truncate a voice instruction into a different meaning.
+    if (cap.tagChars !== undefined && cap.tagWords === undefined && note.length <= PERFORMANCE_NOTE_MAX) {
+      const tags: string[] = [];
+      let pending = "";
+      for (const clause of note.split(/(?<=[,;.])\s+/u)) {
+        if (clause.length > cap.tagChars) return { mode: "unsupported", reason: tagHold(model) };
+        if (pending && `${pending} ${clause}`.length > cap.tagChars) { tags.push(tagFor(model, pending)); pending = ""; }
+        pending = pending ? `${pending} ${clause}` : clause;
+      }
+      if (pending) tags.push(tagFor(model, pending));
+      return { mode: "tag", tag: tags.join(" ") };
+    }
+    return { mode: "unsupported", reason: tagHold(model) };
+  }
   if (cap?.phrase === "best-effort-instruction") return { mode: "instruction" };
   return { mode: "unsupported", reason: cap?.phrase === "best-effort-tag" ? UNTAGGED : "no phrase" };
 }
@@ -662,7 +691,7 @@ export function sentAs(text: string, plan: CadencePlan, model: Pick<ManifestMode
 
 export interface CadenceControlSupport { status: "mapped" | "best-effort" | "unsupported"; method?: string; reason?: string;
   /** A tag's word cap on this row (`tagWords`), for the note and a marker's phrase. */
-  words?: number }
+  words?: number; characters?: number }
 
 /**
  * What a reader does with each control before any plan is written (SPEC-047 R-9): the block
@@ -708,8 +737,8 @@ export function cadenceSupport(model: Pick<ManifestModel, "cadence">, language?:
     pause: cue(cap?.pause, "pause"), breath: cue(cap?.breath, "breath"), emphasis: cue(cap?.emphasis, "emphasis"),
     phrase: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: "tag", ...(cap.tagWords !== undefined ? { words: cap.tagWords } : {}) } : { status: "unsupported", reason: UNTAGGED })
       : cap?.phrase === "best-effort-instruction" ? { status: "best-effort", method: "instruction" } : { status: "unsupported", reason: "no phrase" },
-    note: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: cap.tagWords !== undefined ? `tag · ${cap.tagWords} words` : `tag · ${CADENCE_PHRASE_MAX}`,
-      ...(cap.tagWords !== undefined ? { words: cap.tagWords } : {}) } : { status: "unsupported", reason: UNTAGGED })
+    note: cap?.phrase === "best-effort-tag" ? (tagged ? { status: "best-effort", method: cap.tagWords !== undefined ? `tag · ${cap.tagWords} words` : `tag · ${tagCharacterLimit(model)}`,
+      characters: tagCharacterLimit(model), ...(cap.tagWords !== undefined ? { words: cap.tagWords } : {}) } : { status: "unsupported", reason: UNTAGGED })
       : cap?.phrase === "best-effort-instruction" ? { status: "best-effort", method: "instruction" } : { status: "unsupported", reason: "no note" },
     sounds,
   };

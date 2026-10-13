@@ -371,7 +371,7 @@ interface StoreState {
       flagged: number;
       /** The last block that landed or was flagged, and why, for the foot. */
       last?: { block: string; outcome: "made" | "adopted" | "flagged"; reason?: string };
-      price?: { characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort; requests?: number; perParagraph?: number; toCast?: number };
+      price?: { previews?: Extract<DomainEvent, { type: "audiobook.priced" }>["previews"]; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: { label: string; provider: string; characters: number; estimatedMicroUsd: number }[]; notices: string[]; freePlan?: import("@arke-studio/contracts").FreePlanShort; requests?: number; perParagraph?: number; toCast?: number };
       /** A grouped run (design turn 185b): its requests, each grouped request's blocks, and the one being read. */
       requests?: number;
       groups?: string[][];
@@ -2139,7 +2139,7 @@ function handleFrame(json: string): void {
       const held = audiobook[key] ?? { toMake: 0, blocks: 0, made: 0, flagged: 0 };
       audiobook = {
         ...audiobook,
-        [key]: { ...held, state: "priced", price: { characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) } },
+        [key]: { ...held, state: "priced", price: { ...(event.previews !== undefined ? { previews: event.previews } : {}), characters: event.characters, estimatedMicroUsd: event.estimatedMicroUsd, confirmationToken: event.confirmationToken, voices: event.voices, notices: event.notices ?? [], ...(event.freePlan !== undefined ? { freePlan: event.freePlan } : {}), ...(event.requests !== undefined ? { requests: event.requests } : {}), ...(event.perParagraph !== undefined ? { perParagraph: event.perParagraph } : {}), ...(event.toCast !== undefined ? { toCast: event.toCast } : {}) } },
       };
     } else if (event.type === "audiobook.request") {
       // A grouped request begins (design turn 185b): the margin darkens its bracket.
@@ -3715,7 +3715,7 @@ export function renameSheet(worldId: string, path: string, name: string, shortNa
  */
 export function setSheetNarration(worldId: string, path: string, narration: string | null): boolean {
   const trimmed = narration?.trim() ?? "";
-  return send({ kind: "set-sheet-narration", worldId, path, narration: trimmed === "" ? null : trimmed.slice(0, 60) });
+  return send({ kind: "set-sheet-narration", worldId, path, narration: trimmed === "" ? null : trimmed });
 }
 
 export function assignVoice(

@@ -1,3 +1,4 @@
+import { needsExpressiveDirection, EXTENDED_SOUNDS, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -18,7 +19,6 @@ import {
   audiobookRecordingKey,
   audiobookHeading,
   audiobookTextHash,
-  CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   normalizeSpeechText,
   voiceDisplayLabel,
@@ -180,6 +180,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (Object.values(pictures ?? {}).some((picture) => picture.focus !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, "audiobook-picture-focus");
   const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
+  if (Object.values(direction).some(entry => needsExpressiveDirection(entry.plan)) || Object.values(reactions ?? {}).some(reaction => reaction.sound !== undefined && EXTENDED_SOUNDS.includes(reaction.sound))) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "audiobook-expressive-direction");
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
   // A marker, or the words a direction was written for, is a field the build before it reads
   // as unreadable (R-49): raised before the first record that carries one.
@@ -197,7 +198,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   let renamed = false;
   for (const [key, entry] of Object.entries(direction)) {
     const { note, ...plan } = entry.plan;
-    const fits = note === undefined || note.length <= CADENCE_PHRASE_MAX;
+    const fits = note === undefined || note.length <= 60;
     if (!fits || plan.delivery === undefined || plan.cues.some((cue) => cue.kind === "sound")) renamed = true;
     onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
   }
@@ -327,6 +328,7 @@ export async function writeAudiobookBookRaised(store: WorldStore, productionId: 
     ...(chapterNotes !== undefined && Object.keys(chapterNotes).length > 0 ? { chapterNotes } : {}),
     ...(Object.keys(sources).length > 0 ? { noteSources: sources } : {}),
   };
+  if (Object.values(kept.notes ?? {}).some((note) => note.length > 60)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "audiobook-expressive-direction");
   if (kept.reading === "performed" || kept.notes !== undefined || kept.narrator !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
   // The book note, the chapter notes and a note's source (design turn 184) are fields the builds
   // before them read as unreadable: raised before the first record that carries one.
@@ -497,7 +499,7 @@ export function assignReaders(
       ...planned,
       ...(byPerson ? { recorded: true as const } : {}),
       ...(reading_ !== undefined ? { reading: reading_ } : {}),
-      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_),
+      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_, reading === "performed"),
     };
   });
 }

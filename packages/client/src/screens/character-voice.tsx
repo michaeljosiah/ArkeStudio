@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import {
-  CADENCE_PHRASE_MAX,
+  PERFORMANCE_NOTE_MAX,
+  tagCharacterLimit,
+  performanceNoteLimit,
   DEFAULT_NARRATOR,
   HOSTED_READER_LABELS,
   designatedVoiceSample,
@@ -324,10 +326,10 @@ interface NarrationReader {
 }
 
 /** A narrator's limit as data (R-168): words on a row with a tag word cap, else characters, or none. */
-function narrationLimit(row: ManifestModel | undefined): string {
+export function narrationLimit(row: ManifestModel | undefined): string {
   const cap = row?.cadence;
   if (cap?.phrase === undefined || cap.phrase === "unsupported") return "no note";
-  return cap.tagWords !== undefined ? `${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${CADENCE_PHRASE_MAX}`;
+  return cap.tagWords !== undefined ? `${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${performanceNoteLimit(row ?? {})} characters`;
 }
 
 /** Why the narrator holds this note, as one clause (R-168), or null when it plays it. */
@@ -336,7 +338,7 @@ function narrationHeld(note: string, row: ManifestModel | undefined): string | n
   const name = row.displayName;
   const cap = row.cadence;
   if (cap?.phrase === undefined || cap.phrase === "unsupported") return `${name} takes no note`;
-  return cap.tagWords !== undefined ? `${name} takes ${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${name} takes ${CADENCE_PHRASE_MAX}`;
+  return cap.tagWords !== undefined ? `${name} takes ${cap.tagWords} word${cap.tagWords === 1 ? "" : "s"}` : `${name} takes ${tagCharacterLimit(row ?? {})}`;
 }
 
 /**
@@ -382,7 +384,7 @@ function NarrationRow({ note, reader, help, hear, onWrite }: {
         <input
           className="fy-voiceuse__field"
           value={shown}
-          maxLength={CADENCE_PHRASE_MAX}
+          maxLength={PERFORMANCE_NOTE_MAX}
           aria-label="Narration"
           placeholder="low, clipped"
           autoFocus
@@ -542,7 +544,7 @@ export function CharacterVoiceScreen() {
   const narrationHelp: UseHelp = {
     line: "How the narrator plays them when one voice reads the book.",
     example: "low, clipped",
-    ...(narratorRows.length > 0 ? { extra: narratorRows.map((row) => `${row.displayName} · ${narrationLimit(row) === `${CADENCE_PHRASE_MAX}` ? `${CADENCE_PHRASE_MAX} characters` : narrationLimit(row)}`).join("   ") } : {}),
+    ...(narratorRows.length > 0 ? { extra: narratorRows.map((row) => `${row.displayName} · ${narrationLimit(row) === `${tagCharacterLimit(row ?? {})}` ? `${tagCharacterLimit(row ?? {})} characters` : narrationLimit(row)}`).join("   ") } : {}),
   };
   const narration = sheet.narration?.trim() === "" ? undefined : sheet.narration?.trim();
   const heard = hearId === null ? undefined : voiceAudio[hearId.id];
