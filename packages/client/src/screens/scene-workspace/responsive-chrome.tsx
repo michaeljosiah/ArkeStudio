@@ -4,6 +4,7 @@ import { useMediaQuery } from "../../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../../lib/arke-half.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
+import { useGlobalChat } from "../../components/global-chat-context.js";
 
 /**
  * Turn 168: a deep page owns the phone's head and the assistant overlays its work. Two lines, the
@@ -34,11 +35,13 @@ export function useSceneDock() {
 }
 
 export function SceneDock({ open, onOpen, onClose, stage = false, children }: { open: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
+  const global = useGlobalChat();
   const compact = useMediaQuery("(max-width: 1099px)");
   const phone = useMediaQuery("(max-width: 599px)");
   // On a Fold7 the open dock is the hinge half beside the live page, not a drawer over it (202).
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  useHoldArkeHalf(half && open);
+  useHoldArkeHalf(half && open && !global);
+  useEffect(() => { if (global && compact && open) { global.open(); onClose(); } }, [global, compact, open]);
   const trigger = useRef<HTMLButtonElement>(null);
   const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
   const [conversationHost, setConversationHost] = useState<HTMLDivElement | null>(null);
@@ -71,7 +74,7 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     place(); window.addEventListener("scroll", place, true); window.addEventListener("resize", place);
     return () => { cancelAnimationFrame(frame); if (trigger.current) trigger.current.style.translate = "none"; window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [phone, stage]);
-  const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={onOpen}>
+  const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={() => global ? global.open() : onOpen()}>
     {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
   </button>;
   // A phone's rail floats over the page, and nothing floats over Stage's picture (issue 1355). Its way
@@ -79,7 +82,7 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   return <>
     {compact ? phone && stage || half && open ? null : rail : open ? null : rail}
     <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
-    <PageSheet open={compact && open} keepMounted modeless={half} onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
+    <PageSheet open={compact && open && !global} keepMounted modeless={half} onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}
   </>;
 }

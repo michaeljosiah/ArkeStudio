@@ -1796,6 +1796,16 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   z
     .object({
       ...base,
+      type: z.literal("world-chat.create-result"),
+      worldId: z.string().min(1),
+      requestId: z.string().min(1),
+      conversationId: ConversationIdSchema.optional(),
+      detail: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
       type: z.literal("world-chat.send-result"),
       conversationId: z.string().min(1),
       requestId: z.string().min(1),

@@ -232,7 +232,7 @@
   .fy-thread-composer .fy-cx { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 3px; }
   .fy-thread-composer .fy-cx__editorwrap { flex: 1; min-width: 60px; }
   .fy-thread-composer .fy-cx__editor { padding: 12px 10px; }
-  .fy-thread-composer .fy-cx__placeholder { padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+  .fy-thread-composer .fy-cx__placeholder { position: absolute; padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
   .fy-thread-composer .fy-cx__bar, .fy-thread-composer .fy-cx__left { display: contents; }
   .fy-thread-composer .fy-cx__agent { display: none; }
   .fy-thread-composer :is(.fy-cx__strip, .fy-cx__busy, .fy-cx__reason, .fy-cx__drop) { flex-basis: 100%; }

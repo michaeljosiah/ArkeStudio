@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from "react";
+import { useConversationPresentation, useConversationState } from "./global-chat-context.js";
+import { useEffect, useId, useRef, useState } from "react";
 import type { VoiceRuntimeStatus } from "@arke-studio/contracts";
 import { BodyTip, focusIsVisible } from "./body-tip.js";
 import { Mic } from "./icons.js";
@@ -74,78 +75,83 @@ interface PushToTalk {
  * when dictation is asked for keeps that true.
  */
 function usePushToTalk(onText: (text: string) => void): PushToTalk {
+  const presentation = useConversationPresentation();
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
-  const [trouble, setTrouble] = useState<string | null>(null);
-  const sidecar = useVoiceSidecar();
-  const { state } = useStore();
-  const dictation = useDictation();
+  const [trouble, setTrouble] = useConversationState<string | null>("dictationTrouble", null);
+  const capture = useRef<{ recorder: MediaRecorder; stop(): void } | null>(null);
+  const epoch = useRef(0), mounted = useRef(true), deliver = useRef(onText);
+  deliver.current = onText;
+  const sidecar = useVoiceSidecar(), { state, connection } = useStore(), dictation = useDictation();
   const result = requestId ? dictation[requestId] : undefined;
-
   useEffect(() => {
     if (!result) return;
-    if (result.text) onText(result.text);
-    setTrouble(result.error);
-    // Cleared either way: an error that never clears leaves the surface saying a failure from
-    // ten minutes ago is happening now.
-    setRequestId(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (result.text && !presentation) onText(result.text);
+    setTrouble(result.error); setRequestId(null);
   }, [result]);
-
+  useEffect(() => {
+    if (connection === "open" || !requestId) return;
+    setRequestId(null);
+    setTrouble("The connection ended before dictation returned. Your typed draft is retained; dictate again.");
+  }, [connection, requestId]);
+  useEffect(() => {
+    presentation?.owner.phase(recorder ? "listening" : requestId ? "transcribing" : "idle");
+  }, [recorder, requestId, presentation?.owner]);
+  const stop = () => { epoch.current += 1; capture.current?.stop(); };
+  const stopping = useRef(stop); stopping.current = stop;
+  const lastStop = useRef(presentation?.stopCapture);
+  useEffect(() => {
+    if (lastStop.current !== presentation?.stopCapture) stopping.current();
+    lastStop.current = presentation?.stopCapture;
+  }, [presentation?.stopCapture]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; stopping.current(); };
+  }, []);
   const off = whyDictationIsOff(sidecar, state?.app.voiceRuntime ?? null);
-
-  const start = async (): Promise<void> => {
+  const start = async () => {
+    const mine = ++epoch.current;
+    let acquired: MediaStream | null = null;
+    // Capture its destination now; later page navigation cannot move the transcript.
+    const destination = presentation, onCapturedText = deliver.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      const chunks: Blob[] = [];
-      rec.ondataavailable = (e) => chunks.push(e.data);
+      acquired = stream;
+      if (!mounted.current || mine !== epoch.current) { stream.getTracks().forEach(t => t.stop()); return; }
+      const rec = new MediaRecorder(stream), chunks: Blob[] = [];
+      let id: string | null = null;
+      const release = () => stream.getTracks().forEach(t => t.stop());
+      rec.ondataavailable = event => chunks.push(event.data);
       rec.onstop = () => {
-        // Released the moment capture ends: nothing in this app should hold a microphone open
-        // one frame longer than it is being spoken into.
-        stream.getTracks().forEach((t) => t.stop());
-        const id = `dict-${Date.now()}`;
-        setRequestId(id);
-        void new Blob(chunks, { type: rec.mimeType }).arrayBuffer().then((buf) => {
-          let binary = "";
-          const bytes = new Uint8Array(buf);
-          for (const b of bytes) binary += String.fromCharCode(b);
-          transcribeDictation(id, btoa(binary), rec.mimeType || "audio/webm");
+        release(); capture.current = null;
+        if (!id) return;
+        void new Blob(chunks, { type: rec.mimeType }).arrayBuffer().then(buffer => {
+          let binary = ""; for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+          if (!transcribeDictation(id!, btoa(binary), rec.mimeType || "audio/webm")) throw Error("Reconnect before transcribing. Typing still works.");
+        }).catch(error => {
+          const reason = error instanceof Error ? error.message : "The recording could not be transcribed. Typing still works.";
+          destination?.owner.deliverDictation(id!, { error: reason });
+          if (mounted.current) { setTrouble(reason); setRequestId(null); }
         });
       };
-      rec.start();
-      setTrouble(null);
-      setRecorder(rec);
-    } catch (err) {
-      /*
-       * A denied microphone used to do nothing at all — the button was pressed and the app sat
-       * there. Which of these it is decides what the person does next, so each is named (R-14).
-       */
-      const name = err instanceof Error ? err.name : "";
-      setTrouble(
-        name === "NotAllowedError"
-          ? "Arke was not allowed to use the microphone. Grant access, then try again."
-          : name === "NotFoundError"
-            ? "No microphone was found on this machine."
-            : "The microphone could not be opened.",
-      );
+      capture.current = { recorder: rec, stop: () => {
+        if (rec.state === "inactive") { release(); return; }
+        id = crypto.randomUUID();
+        if (destination) destination.owner.queueDictation(destination.key, id, onCapturedText);
+        if (mounted.current) { setRequestId(id); setRecorder(null); }
+        rec.stop(); release();
+      } };
+      rec.start(); setTrouble(null); setRecorder(rec);
+    } catch (error) {
+      acquired?.getTracks().forEach(track => track.stop());
+      if (!mounted.current || mine !== epoch.current) return;
+      const name = error instanceof Error ? error.name : "";
+      setTrouble(name === "NotAllowedError" ? "Arke was not allowed to use the microphone. Grant access, then try again."
+        : name === "NotFoundError" ? "No microphone was found on this machine." : "The microphone could not be opened.");
     }
   };
-
-  return {
-    phase: recorder ? "listening" : requestId ? "transcribing" : "idle",
-    off,
-    trouble,
-    toggle: () => {
-      if (off) return;
-      if (recorder) {
-        recorder.stop();
-        setRecorder(null);
-      } else {
-        void start();
-      }
-    },
-  };
+  return { phase: recorder ? "listening" : requestId ? "transcribing" : "idle", off, trouble,
+    toggle: () => { if (off || requestId) return; if (recorder) stop(); else void start(); } };
 }
 
 /**

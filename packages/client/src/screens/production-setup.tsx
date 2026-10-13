@@ -1,10 +1,13 @@
+import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { useClientRender } from "../components/production-studio-context.js";
+import { ConversationPanelContent, useConversationPresentation, useConversationState, useGlobalChat } from "../components/global-chat-context.js";
 import { HeldBar } from "../components/held-bar.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { ChevronUp } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
-import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   ADAPTATION_KINDS, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
@@ -23,24 +26,37 @@ import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../c
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
+  const { worldId, setupId } = useParams(), global = useGlobalChat(), client = useClientRender();
+  if (worldId && setupId && ConversationIdSchema.safeParse(setupId).success && global && client) return <GlobalWorldChatEntry worldId={worldId} conversationId={setupId} />;
+  return <ProductionSetupView />;
+}
+
+export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
   const phone = useMediaQuery("(max-width: 599px)");
   const [outlineOpen,setOutlineOpen] = useState(false);
-  const { worldId, setupId: routeId } = useParams();
+  const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;
+  const presentation = useConversationPresentation();
   const world = useOpenWorldGuard(worldId);
   const idResult = ConversationIdSchema.safeParse(routeId);
   const setupId = idResult.success ? idResult.data : null;
   const { state, connection } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const onSetupPage = !embedded || location.pathname === `/w/${worldId}/productions/setup/${setupId}` || location.pathname === `/w/${worldId}/chat/${setupId}`;
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
   const readReplies = useReadReplies(workspace);
-  const [message, setMessage] = useState("");
-  const [failure, setFailure] = useState<string | null>(null);
-  const [pending, setPending] = useState<string | null>(null);
+  const [message, setMessage] = useConversationState("draft", "");
+  const [failure, setFailure] = useConversationState<string | null>("setupFailure", null);
+  const [pendingRequest, setPendingRequest] = useConversationState<{ requestId: string; operation: string } | null>("setupPendingRequest", null);
+  const pending = pendingRequest?.operation ?? null;
   const [tab, setTab] = useState<"conversation" | "outline">("conversation");
-  const [modelId, setModelId] = useState("");
-  const pendingRef = useRef<{ requestId: string; operation: string } | null>(null);
+  const [modelId, setModelId] = useConversationState("languageModel", "");
+  const pendingRef = useRef(pendingRequest); pendingRef.current = pendingRequest;
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, pendingRequest !== null); }, [presentation?.owner, presentation?.key, pendingRequest]);
   const opened = useRef<string | null>(null);
+  useEffect(() => { if (setupId) presentation?.owner.reportConversation(presentation.key, setupId); }, [presentation?.owner, presentation?.key, setupId]);
+  useEffect(() => { if (presentation?.inPanel) setTab("outline"); }, [presentation?.inPanel]);
   const inheritedModel = state?.app.agents.find(agent => agent.name === "world-builder")?.model;
   const unavailable = languageChoiceReason(state, modelId || inheritedModel);
   const progress = useWorldChatProgress(setupId ?? undefined, workspace?.runStartedAt ?? null);
@@ -55,25 +71,28 @@ export function ProductionSetupScreen() {
     if (!worldId || !setupId) return;
     const requestId = ulid();
     pendingRef.current = { requestId, operation: action.operation };
-    setPending(action.operation);
+    setPendingRequest(pendingRef.current);
+    presentation?.owner.trackSetupRequest(presentation.key, requestId, action.operation, action.operation === "send" ? action.text : undefined);
     setFailure(null);
     if (!send({ kind: "production-setup", worldId, setupId, requestId, action })) {
-      setPending(null);
+      presentation?.owner.deliverSetupResult({ requestId, detail: "The studio is disconnected. Reconnect to continue this setup." });
+      setPendingRequest(null);
       pendingRef.current = null;
       setFailure("The studio is disconnected. Reconnect to continue this setup.");
     }
   }
   useEffect(() => subscribeProductionSetupResults(result => {
     if (result.worldId !== worldId || result.setupId !== setupId) return;
-    if (result.requestId === pendingRef.current?.requestId) {
+    if (presentation) presentation.owner.deliverSetupResult(result);
+    else if (result.requestId === pendingRef.current?.requestId) {
       if (!result.detail && pendingRef.current.operation === "send") setMessage("");
       pendingRef.current = null;
-      setPending(null);
+      setPendingRequest(null);
     }
     setFailure(result.detail ?? null);
-    if (result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
-    if (result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
-  }), [worldId, setupId, navigate]);
+    if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
+    if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
+  }), [worldId, setupId, navigate, onSetupPage, presentation?.owner]);
   useEffect(() => {
     if (!world || !worldId || !setupId || connection !== "open") return;
     const key = `${worldId}/${setupId}`;
@@ -85,12 +104,12 @@ export function ProductionSetupScreen() {
     if (connection !== "open") {
       opened.current = null;
       pendingRef.current = null;
-      setPending(null);
+      setPendingRequest(null); presentation?.owner.holdOpening(presentation.key, false);
     }
   }, [connection]);
   useEffect(() => {
-    if (setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
-  }, [setup?.status, setup?.productionId, worldId, navigate]);
+    if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
+  }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   if (!setupId) return <p role="alert">This production setup address is invalid.</p>;
   const draft = setup?.draft;
@@ -120,7 +139,7 @@ export function ProductionSetupScreen() {
       </div>
       {failure && <p className="fy-production-setup__notice" role="alert">{failure}</p>}
       <div className="fy-production-setup__panels" data-active={tab}>
-        <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke">
+        <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke"><ConversationPanelContent>
           <div className="fy-production-setup__log">
             <ConversationTranscript workspace={workspace} autoRead={readReplies.autoRead} running={running} progress={progress}
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
@@ -144,7 +163,7 @@ export function ProductionSetupScreen() {
               onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} readReplies={readReplies.composer} />
             <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>
           </HeldBar>
-        </section>
+        </ConversationPanelContent></section>
         <ResponsiveSheet sheet={phone} open={outlineOpen} onClose={() => setOutlineOpen(false)} title="Production so far" className="fy-setup-outline-sheet">
         <aside id="setup-outline" className="fy-production-setup__outline" aria-label="Production so far">
           <h2>Production so far</h2>

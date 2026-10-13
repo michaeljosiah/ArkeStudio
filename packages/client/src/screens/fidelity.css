@@ -2358,7 +2358,7 @@ select.fy-sheetselect { padding-right: 24px; }
 
 /*
  * The composer (design-system/composer.html). A contenteditable surface that grows to a cap and
- * then scrolls, over a control bar of fixed height — so the send button never scrolls away, and
+ * then scrolls, over a control bar that can wrap — so the send button never scrolls away, and
  * there is a home for attachments above the text when they arrive.
  */
 .fy-cx {
@@ -2372,8 +2372,9 @@ select.fy-sheetselect { padding-right: 24px; }
   transition: var(--transition-control);
 }
 .fy-cx:focus-within { border-color: var(--neutral-400); }
-.fy-cx__editorwrap { position: relative; min-height: 44px; }
+.fy-cx__editorwrap { position: relative; min-height: 44px; display: grid; }
 .fy-cx__editor {
+  grid-area: 1 / 1;
   position: relative;
   z-index: 1;
   display: block;
@@ -2382,7 +2383,7 @@ select.fy-sheetselect { padding-right: 24px; }
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  padding: 13px 15px 5px;
+  padding: 13px 15px 8px;
   font: 400 13.5px/20px var(--font-sans);
   color: var(--foreground);
   outline: none;
@@ -2397,11 +2398,13 @@ select.fy-sheetselect { padding-right: 24px; }
   border-radius: 0;
 }
 .fy-cx__placeholder {
-  position: absolute;
+  /* Share the editor's grid cell: a wrapped hint reserves space above the toolbar. */
+  position: relative;
+  grid-area: 1 / 1;
   inset-inline: 0;
   top: 0;
   pointer-events: none;
-  padding: 13px 15px 0;
+  padding: 13px 15px 8px;
   font: 400 13.5px/20px var(--font-sans);
   color: var(--muted-foreground);
 }
@@ -2470,6 +2473,8 @@ select.fy-sheetselect { padding-right: 24px; }
 }
 .fy-cx__attach:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 .fy-cx__attach:disabled { opacity: 0.4; cursor: default; }
+/* Turn 224: centre icons independently of the browser's button padding. */
+.fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send) { padding: 0; }
 /*
  * The microphone, beside attach: the design master's note for World Chat binds this composer to
  * Genesis's, "carrying attach and voice", so the two controls are one pair and wear one shape.
@@ -2499,7 +2504,7 @@ select.fy-sheetselect { padding-right: 24px; }
  */
 .fy-cx__mic[data-listening] { background: var(--primary); color: var(--primary-foreground); }
 .fy-cx__mic[data-listening]:hover { background: var(--primary); color: var(--primary-foreground); }
-.fy-cx__bar { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 15px; }
+.fy-cx__bar { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 8px 8px 15px; }
 .fy-cx__left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .fy-cx__agent { font: 400 11px var(--font-mono); color: var(--muted-foreground); }
 .fy-cx__busy { font: 400 11px var(--font-mono); color: var(--muted-foreground); }

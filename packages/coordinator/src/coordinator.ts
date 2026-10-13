@@ -8052,13 +8052,17 @@ export class Coordinator {
       }
       case "world-chat-create": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        if (msg.entryContext !== undefined && !(msg.entryContext.kind === "bench" ? readBenchSession(store.dir, msg.entryContext.sessionId) !== null : worldChatContextExists(store.getBundle(), msg.entryContext))) return;
+        const answer = (conversationId?: ConversationId) => this.emit({ at: new Date().toISOString(), type: "world-chat.create-result",
+          worldId: msg.worldId, requestId: msg.requestId, ...(conversationId ? { conversationId } : { detail: "The conversation could not be created. Your draft is retained." }) });
+        if (!store || store.worldId !== msg.worldId) { answer(); return; }
+        if (msg.entryContext !== undefined && !(msg.entryContext.kind === "bench" ? readBenchSession(store.dir, msg.entryContext.sessionId) !== null : worldChatContextExists(store.getBundle(), msg.entryContext))) { answer(); return; }
         // The same request again is the same conversation: wait for it and show it.
         const earlier = this.worldChatCreates.get(msg.requestId);
         if (earlier !== undefined) {
           const made = await earlier;
-          if (made === null) return;
+          if (made === null) { answer(); return; }
+          answer(made.id);
+          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
           await this.refreshConversations(store);
           await this.openWorldChat(store, made.id);
           return;
@@ -8098,6 +8102,8 @@ export class Coordinator {
             : await create();
           made = true;
           settle(row);
+          answer(row.id);
+          if (this.opts.provider.openStore?.()?.worldId !== store.worldId) return;
           await this.refreshConversations(store);
           await this.openWorldChat(store, row.id);
           return;
@@ -8106,6 +8112,7 @@ export class Coordinator {
           if (!made) {
             this.worldChatCreates.delete(msg.requestId);
             settle(null);
+            answer();
           }
           throw error;
         }

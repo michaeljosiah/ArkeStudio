@@ -1,3 +1,4 @@
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
@@ -314,6 +315,7 @@ function BenchWorkspace({
   const productionAudio = session.subject?.kind === "production" ? session.subject : undefined;
   const unscopedSession = session.subject === undefined;
   const subject = session.subject?.kind === "production" ? undefined : session.subject;
+  const globalChat = useGlobalChat();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatOpened, setChatOpened] = useState(false);
 
@@ -1404,7 +1406,7 @@ function BenchWorkspace({
         back={back}
         aside={
           <>
-            <button type="button" className="fy-bench__chip" onClick={() => { setChatOpened(true); setChatOpen(true); }}>Ask Arke</button>
+            <button type="button" className="fy-bench__chip" onClick={() => globalChat ? globalChat.open() : (() => { setChatOpened(true); setChatOpen(true); })()}>Ask Arke</button>
             {/* The subject on a pill at the right (design 142a): the crumb on the left says
                 "Bench" and stops, so it can never run under the wordmark the way a chain of
                 five parts did. */}
@@ -3081,7 +3083,10 @@ function BenchWorkspace({
             </div>
           </BodyLayer>
         )}
-        {chatOpened && <PageSheet open={chatOpen} onClose={() => setChatOpen(false)} title="Bench conversation" keepMounted>
+        {globalChat ? <div hidden><ProductionConversation worldId={worldId} productionId={subject?.productionId}
+          entry={{ kind: "bench", sessionId: session.id }} subject={session.selectedTakeId ? { kind: "take", takeId: session.selectedTakeId } : undefined}
+          placeholder="Ask about this take or make something new…" emptyLine="Talk about this Bench session."
+          dock={{ title: "Bench Chat", subject: "Bench", conversationFirst: true }} /></div> : chatOpened && <PageSheet open={chatOpen} onClose={() => setChatOpen(false)} title="Bench conversation" keepMounted>
           <ProductionConversation worldId={worldId} productionId={subject?.productionId}
             entry={{ kind: "bench", sessionId: session.id }}
             subject={session.selectedTakeId ? { kind: "take", takeId: session.selectedTakeId } : undefined}

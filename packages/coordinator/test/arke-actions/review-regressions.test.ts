@@ -574,6 +574,12 @@ it("a conversation made again under the same request is the same conversation (c
   await Promise.all([create(), create()]);
   await create();
   assert.equal((await discoverConversations(store.dir)).summaries.length, before + 1, "one conversation, however many times it was asked for");
+  const answers = w.events.filter((event): event is Extract<DomainEvent, { type: "world-chat.create-result" }> => event.type === "world-chat.create-result" && event.requestId === "req-create-once");
+  assert.equal(answers.length, 3); assert.equal(new Set(answers.map(event => event.conversationId)).size, 1);
+  assert.ok(answers.every(event => event.worldId === WORLD_ID && event.conversationId));
+  await w.internal.handleClientMessage({ kind: "world-chat-create", worldId: "01J8F3K2QW9VZX4N7M0RTYB6R1", title: "Wrong world", requestId: "wrong-world" });
+  const refused = w.events.find(event => event.type === "world-chat.create-result" && event.requestId === "wrong-world");
+  assert.ok(refused?.type === "world-chat.create-result" && refused.detail && !refused.conversationId);
 });
 
 it("an accept that throws is answered by what became of the proposal (codex on PR 1232)", async (t) => {

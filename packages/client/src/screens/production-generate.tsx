@@ -2,6 +2,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { ModelsCard } from "../components/models-card.js";
 import { downloadMedia } from "../lib/download.js";
 import {
@@ -38,6 +39,7 @@ import { carriedSubjects } from "./production-cast.js";
 import { TakesView } from "./production-takes.js";
 
 export function GenerateScreen() {
+  const global = useGlobalChat();
   const { worldId, prodId } = useParams();
   const phone = useMediaQuery("(max-width: 599px)");
   const compact = useMediaQuery("(max-width: 1099px)");
@@ -497,8 +499,8 @@ export function GenerateScreen() {
         <Button variant="outline" disabled={!take || !shotId || take.id === accepted} onClick={() => worldId && prodId && take && shotId && acceptTake(worldId, prodId, take.id, shotId)}>Accept{take ? ' take '+(takes.indexOf(take)+1) : ' take'}</Button>
         <Button variant="primary" disabled={generatorPending || !shotId} onClick={() => shotId && openGenerator(shotId)}>{generatorPending ? "Opening…" : "Generate"}</Button>
       </footer>}
-      {phone && <button type="button" className="fy-gen__arke" aria-haspopup="dialog" onClick={() => { setBenchArkeSeen(true); setBenchArke(true); }}><Sparkle size={16} />Arke</button>}
-      {benchArkeSeen && <PageSheet open={phone && benchArke} keepMounted onClose={() => setBenchArke(false)} title="Arke" className="fy-scene-dock">
+      {phone && <button type="button" className="fy-gen__arke" aria-haspopup="dialog" onClick={() => { if (global) global.open(); else { setBenchArkeSeen(true); setBenchArke(true); } }}><Sparkle size={16} />Arke</button>}
+      {(benchArkeSeen || global) && <PageSheet open={phone && benchArke && !global} keepMounted onClose={() => setBenchArke(false)} title="Arke" className="fy-scene-dock">
         <ProductionConversation worldId={worldId} productionId={prodId} entry={{kind:"generate",productionId:prodId ?? "",...(scene ? {sceneId:scene.id,...(shot ? {shotId:shot.id} : {})} : {})}} subject={shot && scene ? {kind:"shot",sceneId:scene.id,shotId:shot.id} : scene ? {kind:"scene",sceneId:scene.id} : undefined} dock={{onPutAway:()=>setBenchArke(false),title:"Arke · Generate",subject:shot?.title ?? "This production"}} emptyLine="Say what to change in this shot." placeholder="Say what to change" pointsEmpty="Nothing understood yet." />
       </PageSheet>}
       {reject && world && prodId && <RejectTakeChoice key={reject.id} world={world} productionId={prodId} take={reject} number={takes.indexOf(reject)+1} shotId={shotId ?? undefined} onClose={() => setReject(null)} />}
