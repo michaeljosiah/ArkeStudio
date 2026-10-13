@@ -29,7 +29,7 @@ const publication: PublicationPlayback = { sessionId: "session", mediaType: 'vid
 it("renders the world-independent screen and explains when its desktop host is absent", () => {
   const html = renderToString(<MemoryRouter><PublicationsScreen /></MemoryRouter>);
   assert.match(html, /data-screen="publications"/); assert.match(html, /No world needs to be open/);
-  assert.match(html, /Open publications in the desktop app/);
+  assert.match(html, /Open video publication packages in the desktop app/);
 });
 it("preflights codecs, restores position, switches both caption kinds off/on and persists outside the package", async t => {
   const key = `arke-publication:${publication.manifest.id}:${publication.manifestSha256}`;

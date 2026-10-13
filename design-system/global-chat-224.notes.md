@@ -1,4 +1,4 @@
-# Global Chat · turn 224 revision 6
+# Global Chat · turn 225 revision 6
 
 Approved by the author on 13 October 2026, with the model-choice bullet removed. The provider
 mark, model name, separate effort, picker actions and context-specific model rules remain.

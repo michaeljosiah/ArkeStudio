@@ -1,3 +1,4 @@
+import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
@@ -792,6 +793,17 @@ export function subscribeWebPackages(listener: (answer: WebPackagesListed) => vo
 }
 
 /** The book as a listener hears it (design turn 186): answered to the ask that named it. */
+export type StoryPublishAnswer = Extract<DomainEvent, { type: "story.published" | "story.editions" }>;
+const storyPublishListeners = new Set<(answer: StoryPublishAnswer) => void>();
+export function subscribeStoryPublications(listener: (answer: StoryPublishAnswer) => void): () => void {
+  storyPublishListeners.add(listener); return () => { storyPublishListeners.delete(listener); };
+}
+export function publishStory(worldId: string, productionId: string, input: StoryPublishAction): string | null {
+  const requestId = ulid(); return send({ kind: "publish-story", worldId, productionId, requestId, input }) ? requestId : null;
+}
+export function listStoryPublications(): string | null {
+  const requestId = ulid(); return send({ kind: "list-story-publications", requestId }) ? requestId : null;
+}
 export type AudiobookListeningAnswer = Extract<DomainEvent, { type: "audiobook.listening" }>;
 const audiobookListeningListeners = new Set<(answer: AudiobookListeningAnswer) => void>();
 export function subscribeAudiobookListening(listener: (answer: AudiobookListeningAnswer) => void): () => void {
@@ -1775,6 +1787,7 @@ function handleFrame(json: string): void {
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
     }
+    if (event.type === "story.published" || event.type === "story.editions") { for (const listener of storyPublishListeners) listener(event); }
     if (event.type === "audiobook.listening") {
       for (const listener of audiobookListeningListeners) listener(event);
     }

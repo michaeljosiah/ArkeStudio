@@ -124,3 +124,16 @@ test("ready reaction freezes its manifest and fences muted descriptor sources om
   assert.equal(stale.status, "failed"); if (stale.status === "failed") assert.match(stale.error, /source changed before export/);
   assert.deepEqual(await readdir(join(store.dir, ".cache/exports")), []);
 });
+
+// SPEC-053 export cleanup keeps ownership checks when the world was opened through an alias.
+test("effect export cleans its owned intermediates through a world directory alias", async () => {
+  const target = await makeTempWorld(), aliases = await tempDir("arke-effect-alias-");
+  const alias = join(aliases, "world");
+  await symlink(target, alias, process.platform === "win32" ? "junction" : "dir");
+  const store = await WorldStore.open(alias); closeOnCleanup(() => store.close());
+  await writeFile(join(store.dir, "artifacts/effect-picture.png"), "source-v1");
+  const result = await runEffectExport(store, plan(), "alias.mp4", runner, host, () => {}).done;
+  assert.equal(result.status, "done", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(await readdir(join(target, ".cache/exports")), []);
+  assert.equal(await readFile(join(target, "exports/alias.mp4"), "utf8"), "video");
+});

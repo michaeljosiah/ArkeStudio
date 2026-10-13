@@ -624,3 +624,10 @@ estimate. Client `src/components/audiobook-player.tsx` and coordinator
 `scripts/interactive-player-source.mjs` keeps the offline player identical. Regressions are in
 client `test/audiobook-player.test.ts`; public design drawings and approval are in
 [turn 212's notes](../../design-system/listen-captions-212.notes.md).
+
+Private story Publish (approved turn 224): contracts src/story-publication.ts owns settings,
+review and edition messages; coordinator src/publications/story-review.ts owns fresh-source
+readiness/approved prose changes and story.ts owns capture, EPUB/M4B build, retry and delivery.
+Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
+arke:save-story-publication resolves an inventoried edition through the coordinator before a
+native Save dialog. See [publications](publications.md) for file ownership and format boundaries.

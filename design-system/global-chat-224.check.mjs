@@ -90,6 +90,6 @@ try{
  await demo('theme');await check('Dark theme switches','document.documentElement.classList.contains("dark")');await capture('#chat-prototype','prototype-dark-phone');
  if(report.errors.length)throw Error(report.errors.join('\n'));
  await send('Emulation.setDeviceMetricsOverride',{width:1500,height:1100,deviceScaleFactor:1,mobile:false});await delay(100);await evaluate('document.documentElement.classList.remove("dark");sizeFrames();');
- await capture('#frame-224j .gc224-compose','composer-uploads');await capture('#frame-224k .gc224-compose','composer-dictation');await demo('attachments');await click('dictate');await capture('#chat-prototype .gc224-compose','composer-review');
+ await capture('#frame-225j .gc224-compose','composer-uploads');await capture('#frame-225k .gc224-compose','composer-dictation');await demo('attachments');await click('dictate');await capture('#chat-prototype .gc224-compose','composer-review');
  console.log(`${report.checks.length} design interaction/layout checks and fourteen drawings passed`);
 }finally{fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

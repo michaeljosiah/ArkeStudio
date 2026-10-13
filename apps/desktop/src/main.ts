@@ -416,6 +416,34 @@ function registerHostIpc(): void {
    * The destination is the platform's to ask for, and so is what to do about a name already in
    * use — the dialog confirms an overwrite rather than this deciding one silently.
    */
+  ipcMain.handle("arke:save-story-publication", async (event, input: unknown) => {
+    const parent = window;
+    if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !coordinator ||
+        !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
+        typeof input.editionId !== "string" || typeof input.file !== "string") return { ok: false };
+    const hit = await coordinator.storyPublicationFile(input.editionId, input.file);
+    if (!hit || parent !== window || shuttingDown) return { ok: false };
+    const chosen = await dialog.showSaveDialog(parent, { title: "Save edition", defaultPath: join(app.getPath("downloads"), hit.downloadName),
+      filters: [{ name: input.file.endsWith(".epub") ? "EPUB book" : "M4B audiobook", extensions: [input.file.endsWith(".epub") ? "epub" : "m4b"] }],
+      properties: ["createDirectory", "showOverwriteConfirmation"] });
+    if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true };
+    const current = await coordinator?.storyPublicationFile(input.editionId, input.file);
+    if (!current || parent !== window || shuttingDown) return { ok: false };
+    try { await copyFile(current.path, chosen.filePath); return { ok: true }; } catch { return { ok: false }; }
+  });
+  ipcMain.handle("arke:locate-story-publication", async (event, input: unknown) => {
+    const parent = window, host = coordinator;
+    if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !host ||
+        !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
+        typeof input.editionId !== "string" || !/^[a-f0-9-]{36}$/.test(input.editionId) ||
+        (input.file !== "story.epub" && input.file !== "story.m4b")) return { ok: false };
+    const chosen = await dialog.showOpenDialog(parent, { title: "Locate the same edition file", properties: ["openFile"],
+      filters: [{ name: "Edition file", extensions: [input.file === "story.epub" ? "epub" : "m4b"] }] });
+    if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true };
+    if (parent !== window || host !== coordinator || shuttingDown) return { ok: false };
+    try { await host.restoreStoryPublicationFile(input.editionId, input.file, chosen.filePaths[0]); return { ok: true }; }
+    catch { return { ok: false }; }
+  });
   const saveMediaFromHost = saveMediaHandler({
     allowedSender: () => window?.webContents ?? null,
     // The world provider's own confined lookup — the one the media server serves through, so a

@@ -1,6 +1,6 @@
 # Global contextual Chat
 
-The author approved design turn 224 on 13 October 2026, with its model-choice bullet removed.
+The author approved design turn 225 on 13 October 2026, with its model-choice bullet removed.
 Revision 6 amends the recovered turn 195 reference and implements the global entry point in
 ArkeStudio PR #1737. The OpenCode image-handoff increment remains the separate PR #1736.
 
@@ -28,3 +28,5 @@ and verification commands. The native review now imports the implemented App wit
 bridge. Lifecycle tests use fake media; installed microphone/codec/Voxa and physical keyboard
 acceptance remain separate. Additional video/audio review tools and master-agent delegation remain
 separate toolkit increments.
+
+Integration note: this unchanged revision 6 was originally reviewed as turn 224. Main registered private publishing as 224 first, so Chat is retained as master turn 225. Fixture filenames keep their original 224 name. Turn 195 remains restored.
