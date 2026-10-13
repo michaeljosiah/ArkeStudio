@@ -4,6 +4,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   audiobookDirectionFor,
+  compileAudiobookPerformance,
   audiobookTakeDirectionHash,
   performanceNote,
   readingNotesLead,
@@ -405,7 +406,7 @@ export async function prepareChapter(
     // take, so changing it makes every line of the speaker's stale.
     const note = planned.note;
     const playing = note === undefined ? null : performanceNote(note, model, language);
-    const noteHeld = playing?.mode === "unsupported";
+    let noteHeld = playing?.mode === "unsupported";
     // The book note and the chapter note (design turn 184, R-53) lead every block before its
     // own direction and the speaker's note, so a chapter of separate requests sounds like one
     // reader: sentences in the style on an instruction row, a tag each on a tag row while
@@ -470,6 +471,13 @@ export async function prepareChapter(
         parts = rendered.map((part) => part.text);
         own = words.map(() => playedNote);
       } else parts = piecesFor(text, model, voiceFormatForModel(model));
+      const performance = compileAudiobookPerformance(planned.block, plan.book, held?.plan ?? null, model, reading);
+      if (performance !== null) {
+        parts = [performance.text];
+        noteHeld = performance.noteHeld;
+        direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text, voiceSettings: {}, perPart: [{ voiceSettings: {} }] };
+        own = [];
+      }
       if (parts.some((part, index) => !speechInputFits(part, model.limits, direction?.perPart[index]?.instructions))) {
         throw new Error("The words and direction exceed this reader's request limit.");
       }
@@ -642,7 +650,8 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     if (near.length === 0) return [];
     const order = plan.blocks.map((planned) => planned.block.key);
     const members = [...near, block].sort((a, b) => order.indexOf(a.block.key) - order.indexOf(b.block.key));
-    return [make(members, [block])];
+    const packed = make(members, [block]);
+    return speechInputFits(groupedText(packed.turns), block.model.limits) ? [packed] : [];
   }
   const byKey = new Map(speaking.map((block) => [block.block.key, block]));
   const breaks = readBreaks(plan);
@@ -650,7 +659,7 @@ function readGroupsFor(plan: AudiobookPlan, speaking: readonly Speaking[], misse
     const block = byKey.get(planned.block.key);
     if (block === undefined || !misses.includes(block) || !groupable(block, room, plan.book)) return null;
     const breakAfter = breaks.get(planned.block.key);
-    return { key: planned.block.key, reader: readerKey(block), ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
+    return { key: planned.block.key, reader: readerKey(block), maxCharacters: block.model.limits.maxPromptChars, ...block.turns, ...(breakAfter !== undefined ? { breakAfter } : {}) };
   });
   return groupReads(candidates, packing)
     .filter((group) => group.keys.length >= 2)

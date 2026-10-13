@@ -24,7 +24,7 @@ import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./au
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -3176,7 +3176,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * carries; null takes it away. Changing it makes that speaker's lines stale (R-45).
    */
   z
-    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(CADENCE_PHRASE_MAX).nullable() })
+    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(PERFORMANCE_NOTE_MAX).nullable() })
     .strict(),
   /**
    * The book's own narrator (design turn 155h, SPEC-047 R-46), or null for the app's. Written

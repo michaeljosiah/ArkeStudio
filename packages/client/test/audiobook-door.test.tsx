@@ -587,7 +587,7 @@ describe("the Audiobook door (turn 146)", () => {
     const reactValue = (bookNote as unknown as Record<string, { value?: string }>)[Object.keys(bookNote).find((k) => k.startsWith("__reactProps$"))!]?.value;
     assert.equal(reactValue, "Harbour English, unhurried and close.");
     const speakers = [...panel.querySelectorAll('[data-testid="audiobook-voice"]')].map((row) => `${row.querySelector("b")!.textContent}|${(row.querySelector("input") as HTMLInputElement | null)?.getAttribute("aria-label")}|${row.querySelector("small")!.textContent}`);
-    assert.deepEqual(speakers, ["Maren Kest|Note · Maren Kest|10 / 60 · sheet", "Odile Sarn|Note · Odile Sarn|14 / 60 · you", "Perrin Tallow|Note · Perrin Tallow|0 / 60"]);
+    assert.deepEqual(speakers, ["Maren Kest|Note · Maren Kest|10 / 300 · sheet", "Odile Sarn|Note · Odile Sarn|14 / 300 · you", "Perrin Tallow|Note · Perrin Tallow|0 / 300"]);
     await act(async () => (panel.querySelector('[data-testid="draft-from-sheets"]') as HTMLButtonElement).click());
     const drafted = m.sent.findLast((message) => message.kind === "draft-audiobook-speaker-notes") as Extract<ClientMessage, { kind: "draft-audiobook-speaker-notes" }>;
     assert.ok(drafted, "the speakers with no note are drafted from their sheets");

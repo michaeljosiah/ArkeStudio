@@ -1,5 +1,9 @@
 # Code map
 
+ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and
+coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
+
 Use this map to locate a change, then follow imports and exact message/event names. Paths in tables are relative to the repository root; workflow paths use the package prefixes stated in the text. This is an ownership map, not a full file inventory.
 
 ## Package relationships

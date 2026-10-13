@@ -1267,12 +1267,15 @@ describe("direct voice models declare the exact provider wire spelling", () => {
     assert.equal(estimateMicroUsd(model("eleven_v4"), { characters: 1000 }), 80000);
   });
 
-  it("reads Eleven v4 by tags and stability alone: no speed, ten thousand characters", () => {
+  it("reads Eleven v4 by bounded tags without overriding voice defaults: no speed, ten thousand characters", () => {
     const v4 = model("eleven_v4");
     assert.equal(v4.limits.maxPromptChars, 10000);
     assert.equal(v4.cadence?.speed, null, "v4 has no speed; a direction's speed is held, not sent");
     assert.equal(v4.cadence?.phrase, "best-effort-tag");
-    assert.equal(v4.cadence?.tagWords, 2, "a longer tag had short lines said twice");
+    assert.equal(v4.cadence?.tagWords, undefined);
+    assert.equal(v4.cadence?.tagChars, 160);
+    assert.equal(v4.cadence?.groupable, true);
+    assert.equal(v4.limits.audioFormat, "wav");
     assert.equal(v4.cadence?.deliveryMappings["whispered"]?.tag, "whispers");
     assert.deepEqual(Object.keys(v4.cadence?.deliveryMappings ?? {}).sort(), [...v4.cadence!.deliveries].sort());
   });

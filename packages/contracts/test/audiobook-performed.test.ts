@@ -33,8 +33,8 @@ it("a note is played through the row's phrase path, or cannot be (R-45)", () => 
   assert.deepEqual(performanceNote("low", cadence()), { mode: "unsupported", reason: "no phrase" });
 });
 
-it("the book record carries performed, notes of at most 60 characters, and its own narrator (R-44, R-46)", () => {
+it("the book record carries performed, notes of at most 300 characters, and its own narrator (R-44, R-46)", () => {
   const ok = AudiobookBookSchema.safeParse({ schemaVersion: 1, reading: "performed", notes: { "maren-kest": "low, clipped" }, narrator: { provider: "kokoro", model: "kokoro-82m", voiceId: "af_heart", label: "Heart" } });
   assert.ok(ok.success);
-  assert.ok(!AudiobookBookSchema.safeParse({ schemaVersion: 1, reading: "performed", notes: { "maren-kest": "x".repeat(61) } }).success);
+  assert.ok(!AudiobookBookSchema.safeParse({ schemaVersion: 1, reading: "performed", notes: { "maren-kest": "x".repeat(301) } }).success);
 });

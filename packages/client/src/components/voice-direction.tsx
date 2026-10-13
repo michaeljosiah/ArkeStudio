@@ -3,6 +3,7 @@ import {
   AUDIOBOOK_DELIVERIES,
   CADENCE_NOTE_MAX,
   CADENCE_PHRASE_MAX,
+  EXPRESSIVE_PHRASES,
   ONE_REQUEST_HOLD,
   SOUNDS,
   cadenceSupport,
@@ -353,6 +354,12 @@ export function MarkerMenu({ text, base, language, at, model, oneRequest = false
             place({ kind: "delivery", span: words, phrase: trimmed.slice(0, CADENCE_PHRASE_MAX), ...(editing?.kind === "delivery" && editing.delivery !== undefined ? { delivery: editing.delivery } : {}) });
           }}
         />
+      )}
+      {only !== "sound" && support?.phrase.status !== "unsupported" && (
+        <>
+          <div className="fy-ab__menu-eb">Emotion and delivery</div>
+          <div className="fy-ab__menu-chips">{EXPRESSIVE_PHRASES.map((phrase) => chip(phrase, phrase, caret ? "select words" : null, editing?.kind === "delivery" && editing.phrase === phrase, () => place({ kind: "delivery", span: words, phrase })))}</div>
+        </>
       )}
       {onNote !== undefined && only !== "sound" && (
         <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={onNote}>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
@@ -785,11 +785,11 @@ export const AudiobookBookSchema = z
      */
     recorded: z.array(z.string().min(1).max(120)).max(200).optional(),
     /**
-     * How the narrator plays each character under `performed` (R-44): a phrase of at most 60
+     * How the narrator plays each character under `performed` (R-44): a brief of at most 300
      * characters, keyed by sheet id or by a name no sheet carries. The book's, not the sheet's,
      * since another narrator plays a character another way.
      */
-    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
+    notes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
     /**
      * The voice that reads this book (R-46); absent is the app's narrator, followed as it changes.
      * Settings keeps the app's default, which every read outside the audiobook still uses.

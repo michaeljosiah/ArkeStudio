@@ -4,6 +4,8 @@ import {
   AUDIOBOOK_TITLE_KEY,
   CADENCE_NOTE_MAX,
   CADENCE_PHRASE_MAX,
+  PERFORMANCE_NOTE_MAX,
+  tagCharacterLimit,
   DeliverySchema,
   SOUNDS,
   SoundSchema,
@@ -113,6 +115,7 @@ export interface DirectionBlockInput {
   note: "instruction" | "tag" | "none";
   /** A tag reader's word cap for the note and a marker's phrase, where its row declares one. */
   noteWords?: number;
+  noteChars?: number;
   pause: boolean;
   breath: boolean;
   emphasis: boolean;
@@ -228,7 +231,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
       const can = [
         `reads ${block.deliveries.join(", ")}`,
         block.note === "instruction" ? `takes a note to ${CADENCE_NOTE_MAX}`
-          : block.note === "tag" ? (block.noteWords !== undefined ? `takes a note or phrase of ${block.noteWords} words at most` : `takes a note to ${CADENCE_PHRASE_MAX}`) : "no note",
+          : block.note === "tag" ? (block.noteWords !== undefined ? `takes a note or phrase of ${block.noteWords} words at most` : `takes a note to ${block.noteChars ?? 60} characters`) : "no note",
         block.speed !== null ? `speed ${block.speed.min}–${block.speed.max}` : "no speed",
         block.pause ? "pause" : "no pause",
         block.breath ? "breath" : "no breath",
@@ -242,7 +245,7 @@ function buildDirectionPrompt(input: DirectionDeriverInput, retryNote?: string):
   const chapterNote = input.asks?.chapterNote === true;
   const speakerNotes = input.asks?.speakerNotes ?? [];
   const speakerWords = speakerNoteWords(input.blocks);
-  const speakerCap = speakerWords === undefined ? `at most ${CADENCE_PHRASE_MAX} characters` : `${speakerWords} words at most`;
+  const speakerCap = speakerWords === undefined ? `at most ${PERFORMANCE_NOTE_MAX} characters` : `${speakerWords} words at most`;
   const extra = [
     ...(chapterNote ? [`"chapterNote": "<place, time and mood for the whole chapter, at most ${CADENCE_NOTE_MAX} characters>"`] : []),
     ...(speakerNotes.length > 0 ? [`"speakerNotes": {"<speaker key>": "<how the narrator plays them, ${speakerCap}>"}`] : []),
@@ -256,6 +259,9 @@ Rules — every one is enforced mechanically after you answer:
 - Each block says who reads it and what that reader can do. Use only the deliveries listed for that block; give a note only where the reader takes one and within its length; place only the kinds of cue and the sounds the reader takes; set a speed only where it has one. Anything else is dropped.
 - "measured" is the ordinary reading. Keep one delivery across a run of blocks and change it only where the scene turns: at most about one block in four may change delivery from the block before it, and a change closer to the last one than that is held to the delivery before. Never direct every block the same way for effect.
 - The chapter note carries the chapter's mood. Give a block a note only where it reads differently from that; no note is better than one that restates the chapter note or the delivery.
+- Inspect natural pauses at revelations, hesitation, interruptions and scene transitions. Add short or long pauses sparingly, only where punctuation and paragraph breaks do not already carry the beat. Leave fluent passages alone; never add a pause at every comma or sentence. Explain the important added beats in the summary.
+- Preserve the selected narrator's identity, timbre and default accent in narration. Character notes describe how that same narrator performs a character, including register and accent, not a replacement actor. Keep character traits consistent and temporary emotion local to the line.
+- Use audible custom phrases for emotions and delivery beyond the six presets, when supported. Never add environmental sound effects.
 - A sound goes only inside or right after a spoken line — a block marked as a line, or words inside its quotation marks — never in narration.
 - A "delivery" cue turns part of a block: the block's own delivery reads the rest. Only where the reader takes turns.
 - The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
@@ -340,7 +346,7 @@ export function conformInput(input: AudiobookDirectionInput, support: ReturnType
     const tagOnly = support.note.method?.startsWith("tag") === true;
     // A row may cap a tag in words too (Eleven v4): a longer one had short lines said twice.
     const overWords = tagOnly && support.note.words !== undefined && tagWordCount(input.note) > support.note.words;
-    if (input.note.length > (tagOnly ? CADENCE_PHRASE_MAX : CADENCE_NOTE_MAX) || overWords || support.note.status === "unsupported") dropped += 1;
+    if (input.note.length > (tagOnly ? support.note.characters ?? 60 : CADENCE_NOTE_MAX) || overWords || support.note.status === "unsupported") dropped += 1;
     else note = input.note;
   }
   let speed = 1;
@@ -760,6 +766,7 @@ export async function directChapter(
             ...(mixedKeys.has(block.key) ? { mixed: true } : {}),
             deliveries: AUDIOBOOK_DELIVERIES.filter((delivery) => support.deliveries[delivery]?.status !== "unsupported"),
             note: support.note.status === "unsupported" ? "none" : support.note.method?.startsWith("tag") === true ? "tag" : "instruction",
+            noteChars: tagCharacterLimit(block.model),
             ...(support.note.words !== undefined ? { noteWords: support.note.words } : {}),
             pause: support.pause.status !== "unsupported",
             breath: support.breath.status !== "unsupported",
@@ -792,8 +799,8 @@ export async function directChapter(
           continue;
         }
         const note = normalizeSpeechText(value);
-        const words = speakerNoteWords(pass.map((block) => ({ ...(block.model.cadence?.tagWords !== undefined ? { noteWords: block.model.cadence.tagWords } : {}) })));
-        if (note.length > CADENCE_PHRASE_MAX || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
+        const words = speakerNoteWords(pass.map((block) => block.model.cadence?.tagWords !== undefined ? { noteWords: block.model.cadence.tagWords } : {}));
+        if (note.length > PERFORMANCE_NOTE_MAX || (words !== undefined && tagWordCount(note) > words)) dropped += 1;
         else if (note !== "") speakerNotes[key] = note;
       }
     }
@@ -913,10 +920,11 @@ function buildSpeakerNotesPrompt(input: SpeakerNotesInput, retryNote?: string): 
     .map((speaker) => [`[${speaker.key}] ${speaker.name}`, ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []), ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : [])].join("\n"))
     .join("\n\n");
   return `One narrator reads an audiobook and plays every character. From each character's sheet below, write how the narrator plays them: a direction in a few words — register, pace, accent, manner — never words they say. Respond with ONLY a JSON object:
-{"notes": {"<the character's key>": "<at most ${CADENCE_PHRASE_MAX} characters>"}}
+{"notes": {"<the character's key>": "<at most ${PERFORMANCE_NOTE_MAX} characters>"}}
 
 Rules — enforced mechanically after you answer:
-- Use only the keys listed. At most ${CADENCE_PHRASE_MAX} characters a note; a longer one is dropped.
+- Describe how the selected narrator performs each character, preserving the narrator's identity and timbre. Use concise audible clauses separated by commas or semicolons; each clause at most 160 characters. Narration keeps the narrator's original accent.
+- Use only the keys listed. At most ${PERFORMANCE_NOTE_MAX} characters a note; a longer one is dropped.
 - Leave a character out when the sheet says nothing of how they sound or carry themselves.
 ${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
 ## Characters
@@ -963,7 +971,7 @@ export async function draftSpeakerNotes(store: WorldStore, productionId: string,
   for (const [key, value] of Object.entries(raw.notes)) {
     if (!wanted.has(key)) continue;
     const note = normalizeSpeechText(value);
-    if (note !== "" && note.length <= CADENCE_PHRASE_MAX) drafted[key] = note;
+    if (note !== "" && note.length <= PERFORMANCE_NOTE_MAX) drafted[key] = note;
   }
   if (Object.keys(drafted).length === 0) return { drafted: 0 };
   // A read begun while the model worked was prepared under the notes as they were (codex on PR

@@ -876,7 +876,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.ok(row, "the speaker the narrator performs");
     const input = row.querySelector("input") as HTMLInputElement;
     assert.equal(input.value, "low, clipped");
-    assert.match(row.textContent ?? "", /12\/60/, "the note's count");
+    assert.match(row.textContent ?? "", /12\/300/, "the note's count");
     assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
     // One reader, one block (design turn 190): Maren's line is read inside its paragraph.
     const line = all(m, ".fy-ab__block").find((block) => (block.textContent ?? "").includes("You hear it too"))!;
@@ -892,10 +892,12 @@ describe("the Audiobook view (turn 146)", () => {
 
     const key = Object.keys(input).find((k) => k.startsWith("__reactProps$"))!;
     const props = (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[key]!;
-    await act(async () => props.onChange({ target: { value: "flat, far off" } }));
+    const characterNote = "same narrator, slightly higher register with clipped British articulation, preserve the narrator's familiar timbre";
+    assert.equal((input as unknown as Record<string, { maxLength: number }>)[key]!.maxLength, 300);
+    await act(async () => props.onChange({ target: { value: characterNote } }));
     await act(async () => (input as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
     const note = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
-    assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: "flat, far off" });
+    assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: characterNote });
   });
 
   it("shows a prepared multipart token price and sends consent only on the second press", async () => {
@@ -949,7 +951,7 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(add.textContent, "Add");
     await act(async () => add.click());
     const menu = q(m, '[role="menu"][aria-label="Marker"]')!;
-    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Delivery", "Cue", "Sound"], "every group, each struck where the reader cannot");
+    assert.deepEqual([...menu.querySelectorAll(".fy-ab__menu-eb")].map((eyebrow) => eyebrow.textContent), ["Delivery", "Cue", "Sound", "Emotion and delivery"], "every group, each struck where the reader cannot");
     const chips = [...menu.querySelectorAll(".fy-ab__mchip")] as HTMLButtonElement[];
     assert.ok(chips.find((chip) => chip.textContent === "coughs")!.disabled, "a sound the reader does not make is struck");
     await act(async () => chips.find((chip) => chip.textContent === "laughs")!.click());
@@ -1902,6 +1904,27 @@ describe("grouped reads (design turn 185)", () => {
     await act(async () => confirm.click());
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>;
     assert.equal(answered.confirmationToken, "tok");
+  });
+
+  it("shows the compiled v4 request before purchasing a continuous read", async () => {
+    const state = grouped();
+    const v4: ManifestModel = { ...GEMINI, provider: "elevenlabs", id: "eleven_v4", displayName: "Eleven v4", pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
+      limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
+    const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
+    state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", narrator: reader, notes: { "maren-kest": "same narrator, slight pitch lift, retain narrator timbre" } } } : p) };
+    const m = await mount(state);
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.match(sheet.textContent!, /Request 1 · preview/);
+    const body = JSON.parse(sheet.querySelector("pre")!.textContent!);
+    assert.equal(body.model_id, "eleven_v4");
+    assert.match(body.text, /original voice and accent/);
+    assert.match(body.text, /\n\n/);
+    assert.equal(body.voice_settings, undefined, "the selected voice keeps its settings");
   });
 
   it("progress counts requests and blocks, and the request being read is dark (185b)", async () => {

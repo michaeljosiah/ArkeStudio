@@ -13,7 +13,7 @@ import { AudiobookListeningSchema } from "./audiobook-listening.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX } from "./cadence.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
@@ -1628,7 +1628,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       /** The chapter note the director drafted when asked (R-53); written on acceptance. */
       chapterNote: z.string().min(1).max(CADENCE_NOTE_MAX).optional(),
       /** Speaker notes drafted from the sheets for speakers with none (R-54); written on acceptance, never over an author's. */
-      speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(CADENCE_PHRASE_MAX)).optional(),
+      speakerNotes: z.record(z.string().min(1).max(120), z.string().min(1).max(PERFORMANCE_NOTE_MAX)).optional(),
       reason: z.string().optional(),
     })
     .strict(),

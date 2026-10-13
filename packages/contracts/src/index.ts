@@ -156,3 +156,6 @@ export * from "./turn-action-sequencing.js";
 export * from "./human-decision.js";
 export * from "./production-readiness.js";
 export * from "./production-card-preview.js";
+export { compileAudiobookPerformance } from "./audiobook-performance.js";
+
+export { EXPRESSIVE_PHRASES } from "./direction-tags.js";

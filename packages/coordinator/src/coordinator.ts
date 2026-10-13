@@ -1,3 +1,4 @@
+import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
 import { BenchChatControls } from "./bench/chat-controls.js";
 import { benchChatSessionId, prepareBenchChatSession, materializeBenchChatSession, BenchChatMaterializationSchema } from "./bench/chat-session.js";
@@ -12665,7 +12666,7 @@ export class Coordinator {
         // before it cannot parse, and that build drops the line and would number its next event
         // over it: the world is raised first, as the audiobook's direction raises it.
         if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
+          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? EXPRESSIVE_DIRECTION_SCHEMA_VERSION : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
         }
         await bench.store.append(
           {
@@ -15009,7 +15010,7 @@ export class Coordinator {
           const held = await readAudiobookBook(store, msg.productionId);
           const base = held === null || held === "unreadable" ? DEFAULT_AUDIOBOOK_BOOK : held;
           const { [msg.speaker]: _was, ...others } = base.notes ?? {};
-          const notes = msg.note === null ? others : { ...others, [msg.speaker]: msg.note.trim().slice(0, 60) };
+          const notes = msg.note === null ? others : { ...others, [msg.speaker]: msg.note.trim() };
           // A note the author writes is theirs (design turn 184c, R-54): it no longer reads as the sheet's.
           const { [msg.speaker]: _source, ...sources } = base.noteSources ?? {};
           const { notes: _notes, noteSources: _sources, ...rest } = base;

@@ -59,6 +59,8 @@ export interface BlockTurns {
   parts: ReadonlyArray<{ text: string; style?: string }>;
   /** Where a request may close after this block; absent is inside a paragraph or an exchange. */
   breakAfter?: ReadBreak;
+  /** The compiled provider-text cap, including tags and separators. */
+  maxCharacters?: number;
 }
 
 /**
@@ -137,7 +139,7 @@ export function turnInputTokens(turn: SpeechTurn): number {
 
 /** What a grouped request's job says it reads: its turns' words, a space between. Activity shows it and the quote prices it. */
 export function groupedText(turns: readonly SpeechTurn[]): string {
-  return turns.map((turn) => turn.text).join(" ");
+  return turns.map((turn) => turn.text).join("\n\n");
 }
 
 /**
@@ -179,6 +181,11 @@ function measure(blocks: readonly BlockTurns[], packing: GroupPacking): { turns:
  */
 export function groupReads(blocks: readonly (BlockTurns | null)[], packing: GroupPacking = DEFAULT_GROUP_PACKING, caps: GroupedReadCaps = GROUPED_READ_CAPS): ReadGroup[] {
   const groups: ReadGroup[] = [];
+  const fits = (members: BlockTurns[]) => {
+    const size = measure(members, packing);
+    const limit = Math.min(...members.map((member) => member.maxCharacters ?? Infinity));
+    return size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds && groupedText(size.turns).length <= limit;
+  };
   let open: BlockTurns[] = [];
   const close = (members: BlockTurns[]) => {
     if (members.length > 0) groups.push({ keys: members.map((block) => block.key), ...measure(members, packing) });
@@ -194,8 +201,7 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
       open = [];
     }
     const next = [...open, block];
-    const size = measure(next, packing);
-    if (open.length === 0 || (size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds)) {
+    if (open.length === 0 || fits(next)) {
       open = next;
       continue;
     }
@@ -207,8 +213,7 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
     open = [...open.slice(cut), block];
     // What carried over may itself be past the caps with the new block: it is closed as it stands.
     if (open.length > 1) {
-      const carried = measure(open, packing);
-      if (carried.inputTokens > caps.inputTokens || carried.seconds > caps.speechSeconds) {
+      if (!fits(open)) {
         close(open.slice(0, -1));
         open = [block];
       }
@@ -242,7 +247,7 @@ export function shareByCharacters(total: number | null, characters: readonly num
 
 /** Whether a reader's row may group (design turn 185): its cadence says so, and its price is the token's, which one request a group pays. */
 export function readerGroups(model: Pick<ManifestModel, "cadence" | "pricing"> | null | undefined): boolean {
-  return model?.cadence?.groupable === true && model.pricing.kind === "perToken";
+  return model?.cadence?.groupable === true && (model.pricing.kind === "perToken" || model.pricing.kind === "perCharacter");
 }
 
 /**

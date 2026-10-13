@@ -1887,6 +1887,15 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
     { id: "af_heart", label: "Heart", attributes: [] },
   ];
 
+  it("saves a complete character brief through the command without the old sixty-character truncation", () =>
+    withHarness({}, async ({ worldDir, send }) => {
+      const note = "same narrator, slightly higher register with clipped British articulation, preserve the narrator's familiar timbre";
+      await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note });
+      const book = JSON.parse(await readFile(join(worldDir, "productions", LEDGER, ".audiobook", "book.json"), "utf8"));
+      assert.equal(book.notes["maren-kest"], note);
+      assert.equal(JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")).schemaVersion, 68);
+    }));
+
   it("under performed the narrator reads every line, a narrator that takes no phrase holds the note, and the take and the door say so (R-44, R-45)", () =>
     withHarness({}, async ({ worldDir, store, events, requests, send }) => {
       await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "performed" });

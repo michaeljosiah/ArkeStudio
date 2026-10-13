@@ -354,22 +354,24 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.equal(verified.dropped, 2, "the long note and the sound the row does not make");
   });
 
-  it("Eleven v4 takes a note of two words, and is told so: a longer one is dropped before the card", () => {
+  it("Eleven v4 takes descriptive notes and asks for sparse natural pauses", () => {
     // Measured 2026-10-07: v4 said "No." as "No. No." under a five-word tag, and read "let the
     // silence sit" aloud; one or two words read clean.
     const V4 = SHIPPED_MANIFEST.models.find((model) => model.id === "eleven_v4")!;
     const v4Line: DirectableBlock = { ...line, reader: { provider: "elevenlabs", model: V4.id, voiceId: "Ife" }, model: V4 };
     const long = verifyDirections({ blocks: [{ block: "p1.0", delivery: "warm", note: "low and soft, almost a breath" }] }, [v4Line]);
-    assert.equal(long.proposed["p1.0"]?.note, undefined);
-    assert.equal(long.dropped, 1);
+    assert.equal(long.proposed["p1.0"]?.note, "low and soft, almost a breath");
+    assert.equal(long.dropped, 0);
     const short = verifyDirections({ blocks: [{ block: "p1.0", delivery: "warm", note: "softly, smiling" }] }, [v4Line]);
     assert.equal(short.proposed["p1.0"]?.note, "softly, smiling");
     const prompt = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4", deliveries: ["warm"],
-      note: "tag", noteWords: 2, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
-    assert.match(prompt, /takes a note or phrase of 2 words at most/);
+      note: "tag", noteChars: 160, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(prompt, /takes a note to 160 characters/);
     const asking = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, asks: { speakerNotes: [{ key: "ade", name: "Ade" }] }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4",
-      deliveries: ["warm"], note: "tag", noteWords: 2, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
-    assert.match(asking, /how the narrator plays them, 2 words at most/, "a speaker's note leads every line as a tag, so it meets the same cap");
+      deliveries: ["warm"], note: "tag", noteChars: 160, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(asking, /Inspect natural pauses/);
+    assert.match(asking, /preserving|Preserve the selected narrator/);
+    assert.match(asking, /how the narrator plays them, at most 300 characters/, "a speaker's note leads every line as a tag, so it meets the same cap");
   });
 
   // Design turn 185: read per paragraph, chapter 01 changed delivery on most blocks.
