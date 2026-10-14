@@ -112,6 +112,7 @@ export function foldConversation(
   const productionPlans: NonNullable<WorldChatLoaded["productionPlans"]> = {};
   const imageDisclosures = new Map<string, NonNullable<WorldChatLoaded["imageDisclosures"]>[number]>();
   const imageReceipts = new Map<string, NonNullable<WorldChatLoaded["imageReceipts"]>[number]>();
+  const mediaReceipts = new Map<string, NonNullable<WorldChatLoaded["mediaReceipts"]>[number]>();
   /** Landed Bible edits, by the studio message that reported them (master §4.5). */
   const bibleEdits = new Map<string, BibleEditRecord>();
   /** Tools each turn was refused, by the studio message written despite them (#506). */
@@ -229,6 +230,10 @@ export function foldConversation(
           imageReceipts.set(key, e.receipt);
           if (imageReceipts.size > MAX_IMAGE_RECEIPTS) imageReceipts.delete(imageReceipts.keys().next().value!);
         }
+        break;
+      case "media.receipt":
+        mediaReceipts.set(e.receipt.id, e.receipt);
+        if (mediaReceipts.size > 256) mediaReceipts.delete(mediaReceipts.keys().next().value!);
         break;
       case "input.promoted":
         // Only a promotion replay accepted becomes a turn; a rejected one is a named problem.
@@ -675,6 +680,7 @@ export function foldConversation(
     attachments: [...attachments.values()],
     ...(imageDisclosures.size ? { imageDisclosures: [...imageDisclosures.values()] } : {}),
     ...(imageReceipts.size ? { imageReceipts: [...imageReceipts.values()] } : {}),
+    ...(mediaReceipts.size ? { mediaReceipts: [...mediaReceipts.values()] } : {}),
     // Only a start without a terminal event is active. Cleanup owed by a finished interruption
     // must not keep setup Review locked or hide a newer live turn (#1030).
     activeRun,

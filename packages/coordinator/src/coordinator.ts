@@ -905,6 +905,7 @@ export interface CoordinatorOptions {
    */
   boundaryFrameMaker?: BoundaryFrameMaker;
   imageRenditionMaker?: import("./world-chat/image-rendition.js").ImageRenditionMaker;
+  agentMediaTools?: import("./media/agent-media-tools.js").AgentMediaTools;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -21024,6 +21025,7 @@ export class Coordinator {
         return settings?.research.web === true;
       },
       ...(this.opts.imageRenditionMaker ? { imageRenditionMaker: this.opts.imageRenditionMaker } : {}),
+      ...(this.opts.agentMediaTools ? { agentMediaTools: this.opts.agentMediaTools } : {}),
       imageInspectionAllowed: async provider => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;

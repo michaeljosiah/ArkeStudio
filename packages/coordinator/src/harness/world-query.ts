@@ -7,6 +7,7 @@ import { productionRecord } from "../world-chat/production-record.js";
 import type { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import type { WorldStore } from "../world/store.js";
 import { TARGET_READ_TOOLS } from "../world-chat/target-tool-catalog.js";
+import { AGENT_MEDIA_TOOL_CATALOG } from "../world-chat/media-tool-catalog.js";
 
 /**
  * The read-only world-query tool, served over MCP streamable HTTP (SPEC-005 §2.5.1, D2, D3).
@@ -181,6 +182,7 @@ const WORLD_CHAT_TOOLS = [
       productionId: { type: "string" }, frame: { type: "string", enum: ["poster", "start-frame"] },
     }, required: ["kind"], additionalProperties: false },
   },
+  ...AGENT_MEDIA_TOOL_CATALOG,
   {
     name: "describe_action",
     description:

@@ -1,5 +1,12 @@
 # Running and validating changes
 
+Shared media evidence: from `packages/coordinator`, run
+`node --import tsx --test test/media/agent-media-tools.test.ts test/world-chat/media-inspection.test.ts`.
+The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`
+to fail when FFmpeg is unavailable, and optionally set `ARKE_FFMPEG`/`ARKE_FFPROBE` to host binaries.
+Contract coverage and original-channel arithmetic live in `packages/contracts/test/agent-media.test.ts`.
+Existing image, leased MCP, replay and take-review suites remain required regressions.
+
 Global Chat (master turn 225, approved as turn 224 revision 6; restored/amended model turn 195)
 uses client test/global-chat.test.ts for scope/draft/transcription/recovery and the existing conversation suites.
 Build global-chat-224.native-build.mjs, then run global-chat-224.application-check.mjs with

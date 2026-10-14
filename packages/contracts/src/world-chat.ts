@@ -1,6 +1,7 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
 import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
+import { AgentMediaObservationSchema } from "./agent-media.js";
 import { HumanDecisionCardSchema } from "./human-decision.js";
 
 /** A browser upload stays below the authenticated websocket frame budget, including base64. */
@@ -384,6 +385,7 @@ export const CheckToolSchema = z.enum([
   "related",
   "get-attachment-text",
   "view-image",
+  "inspect-media", "sample-video", "analyze-audio-signal",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -421,6 +423,7 @@ export const WorldChatCheckReceiptSchema = z
     ),
     searchedCount: z.number().int().min(0).optional(),
     image: ImageObservationSchema.optional(),
+    media: AgentMediaObservationSchema.optional(),
     /** Present together on target reads; optional so every stored search receipt remains readable. */
     target: ArkeReadTargetSchema.optional(),
     observedRevisionOrDigest: z.string().min(1).max(200).optional(),
@@ -430,6 +433,11 @@ export const WorldChatCheckReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
+    const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples" } as const;
+    const expected = coverage[receipt.tool as keyof typeof coverage];
+    if (receipt.media && (!expected || receipt.media.coverage !== expected || receipt.status !== "complete") || expected && receipt.status === "complete" && !receipt.media) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Media receipt evidence must match the completed tool's coverage" });
+    }
     if ((receipt.tool !== "view-image" && receipt.image !== undefined) ||
       (receipt.tool === "view-image" && receipt.status === "complete" && receipt.image === undefined)) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "complete image receipts require an image observation; other tools cannot carry one" });
@@ -1132,6 +1140,7 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
   z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
   z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
+  z.object({ type: z.literal("media.receipt"), receipt: WorldChatCheckReceiptSchema.refine(receipt => !!receipt.media && receipt.status === "complete", "A durable media receipt needs completed evidence") }).strict(),
   ...WorldChatInputEventSchemas,
   // A queued input becomes a primary turn in one record: message, constraints and run together,
   // so a crash can never pop an input without keeping the turn it became (SPEC-045 §2.4).
@@ -1505,6 +1514,7 @@ export const WorldChatLoadedSchema = z
     messages: z.array(WorldChatMessageSchema),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
+    mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
@@ -1897,6 +1907,7 @@ export const WorldChatWorkspaceSchema = z
     humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
+    mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
