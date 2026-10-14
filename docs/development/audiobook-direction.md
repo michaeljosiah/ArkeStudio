@@ -54,3 +54,36 @@ Official guidance checked 2026-10-13:
 - [Audio tags](https://elevenlabs.io/docs/help-center/product/core-capabilities/text-to-speech/how-do-audio-tags-work-with-eleven-v3-and-v4)
 - [Prompting and pauses](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
 - [TTS request and PCM output](https://elevenlabs.io/docs/api-reference/text-to-speech/convert)
+
+
+Request cleanup (2026-10-13): performed v4 retains structured speaker runs until grouping
+chooses an actual request boundary. `packTurns` renders shared context once and identity cues
+only when the speaker changes; a solo or scoped reread establishes its own context. Narration
+returns use the authored book narration brief, so an explicit accent is retained. Temporary
+spoken delivery resets before the next run, including across paragraph boundaries. Reaction-only
+requests do not inherit the prose performance. Group caps, quotes, confirmation previews and
+queued text use the same rendered turns. This implements SPEC-049's request-scoped direction
+amendment; direction tags remain best-effort provider input, not guaranteed vocal control.
+
+V4 cadence mapping retains source line breaks while cue coordinates remain whitespace-folded.
+Bench's typed pause conversion therefore preserves paragraph layout rather than flattening the
+request. Exact-string regressions cover text, line breaks, inline cues, scoped requests, character
+transitions and request limits. Do not normalize whitespace when comparing a reviewed prompt
+with the actual provider request: doing so concealed the original paragraph-loss regression.
+
+
+Lean audible cues (2026-10-14, PR #1757): keep full character descriptions as planning context.
+The director requests the fewest audible traits needed, not narrator identity instructions.
+`audiblePerformanceBrief` removes only known legacy scaffolding and carries an imitation's
+accent forward; unrecognised clauses remain intact and over-limit cues are held, never cut.
+Saved briefs and character sheets are not rewritten by compilation. Book-specific author cues
+can be shorter than the retained character description.
+
+The compiler no longer injects a same-narrator instruction. A book note consisting only of
+`natural <accent> narration` describes the baseline and is used on returns, not at the opening;
+other expressive book/chapter instructions still lead independent requests. A short reporting
+clause (at most eight words) between the same character's cast dialogue can continue without
+an accent reset. Action, changed speakers, longer narration and temporary delivery still reset.
+This is a conservative English reporting-clause heuristic, not universal language understanding.
+Manuscript words, quotation marks and paragraph boundaries must survive unchanged. The reviewed
+Threshold opening has 14 tags and 11 paragraph breaks; its lean preview has not been synthesized.

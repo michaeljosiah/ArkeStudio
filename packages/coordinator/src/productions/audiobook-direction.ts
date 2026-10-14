@@ -194,11 +194,11 @@ export function renderDirectionContext(context: DirectionContext): string {
   if (chapter.pov !== undefined) lines.push(`Point of view: ${chapter.pov}`);
   if (context.tone !== undefined) lines.push(`Tone: ${context.tone}`);
   lines.push(`Narrator: ${context.narrator.label}${context.narrator.description !== undefined ? ` — ${context.narrator.description}` : ""}`);
-  if (context.bookNote !== undefined) lines.push(`Book note (sent with every block already): ${context.bookNote}`);
-  if (context.chapterNote !== undefined) lines.push(`Chapter note (sent with every block already): ${context.chapterNote}`);
+  if (context.bookNote !== undefined) lines.push(`Book note (compiled at request boundaries and narration returns): ${context.bookNote}`);
+  if (context.chapterNote !== undefined) lines.push(`Chapter note (shared request context): ${context.chapterNote}`);
   for (const speaker of context.speakers) {
     const facts = [
-      ...(speaker.note !== undefined ? [`speaker note (sent with each of their lines already): ${speaker.note}`] : []),
+      ...(speaker.note !== undefined ? [`speaker note (compiled into audible cues): ${speaker.note}`] : []),
       ...(speaker.essence !== undefined ? [`essence: ${speaker.essence}`] : []),
       ...(speaker.voice !== undefined ? [`voice: ${speaker.voice}`] : []),
     ];
@@ -269,11 +269,12 @@ Rules — every one is enforced mechanically after you answer:
 - What the deliveries mean: "warm" is tenderness, intimacy and desire, fully voiced — a love scene, a confession, a lowered voice in a quiet room are warm, with a short note such as "low, close, unhurried" if it needs one. "whispered" is a literal whisper: only where the story has someone whisper (the prose says so, or a sleeping house, a secret within earshot), never for mood, and rarely more than a few blocks a chapter. "breaking" is a voice failing through tears; "cold" is withheld and flat; "urgent" is haste or danger.
 - The chapter note carries the chapter's mood. Give a block a note only where it reads differently from that; no note is better than one that restates the chapter note or the delivery.
 - Inspect natural pauses at revelations, hesitation, interruptions and scene transitions. Add short or long pauses sparingly, only where punctuation and paragraph breaks do not already carry the beat. Leave fluent passages alone; never add a pause at every comma or sentence. Explain the important added beats in the summary.
+- Keep rich character descriptions as planning context, not text to copy into tags. For character cues, choose the fewest audible traits needed to distinguish the performance (for example "calm clipped British delivery" or "slight pitch lift, British delivery"). Omit identity scaffolding such as "same narrator throughout", "male narrator imitating a woman" and "retain male timbre". Do not request a different gender or vocal identity for a single-narrator performance. Preserve an established accent or pitch distinction when it matters; brevity is not a two-word limit.
 - Preserve the selected narrator's identity, timbre and default accent in narration. Character notes describe how that same narrator performs a character, including register and accent, not a replacement actor. Keep character traits consistent and temporary emotion local to the line.
 - Use audible custom phrases for emotions and delivery beyond the six presets, when supported. Never add environmental sound effects.
 - A sound goes only inside or right after a spoken line — a block marked as a line, or words inside its quotation marks — never in narration.
 - A "delivery" cue turns part of a block: the block's own delivery reads the rest. Only where the reader takes turns.
-- The book note, the chapter note and the speaker notes are sent with every block already: never repeat them in a block's note.
+- The compiler handles shared book/chapter context and character transitions. Never repeat that context or add narrator-reset cues in a block's note. Short reporting clauses between the same character's dialogue can run naturally; substantive narration returns to the narrator.
 - "after", "before" and "words" are copied from the block character for character and must occur exactly once in it. At most 40 cues a block.
 - Never rewrite the words. Nothing you write goes into the prose.
 ${chapterNote ? `- "chapterNote" gives the chapter's mood and pace as a voice carries it, in a short phrase ("close and tender, dread underneath"; ${CADENCE_NOTE_MAX} characters at most): never where or when it is set, never what happens.\n` : ""}${speakerNotes.length > 0 ? `- "speakerNotes" gives each of these speakers, from their sheet, how the narrator plays them, in ${speakerCap}: ${speakerNotes.map((speaker) => `${speaker.name} [${speaker.key}]`).join(", ")}.\n` : ""}${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}

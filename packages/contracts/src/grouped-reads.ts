@@ -1,3 +1,4 @@
+import { renderPerformancePassage, type PerformancePassage, type PerformanceState } from "./audiobook-performance.js";
 import type { ManifestModel } from "./manifest.js";
 import { deriveCapabilityAvailability, type ProviderStatus } from "./provider.js";
 import { AUDIOBOOK_TITLE_KEY } from "./audiobook.js";
@@ -56,7 +57,7 @@ export interface BlockTurns {
   /** The reader's identity — provider, model and voice. Two blocks group only when this is the same. */
   reader: string;
   shared?: string;
-  parts: ReadonlyArray<{ text: string; style?: string }>;
+  parts: ReadonlyArray<{ text: string; style?: string; performance?: PerformancePassage }>;
   /** Where a request may close after this block; absent is inside a paragraph or an exchange. */
   breakAfter?: ReadBreak;
   /** The compiled provider-text cap, including tags and separators. */
@@ -114,8 +115,16 @@ export function soloTurns(block: Pick<BlockTurns, "shared" | "parts">): SpeechTu
 export function packTurns(blocks: readonly BlockTurns[], packing: GroupPacking): PackedTurn[] {
   const turns: Array<PackedTurn & { own?: string; shared?: string }> = [];
   let sharedSent: string | undefined;
+  let performanceState: PerformanceState | undefined;
   for (const block of blocks) {
     for (const part of block.parts) {
+      if (part.performance !== undefined) {
+        const rendered = renderPerformancePassage(part.performance, performanceState);
+        performanceState = rendered.state;
+        turns.push({ text: rendered.text, keys: [block.key] });
+        continue;
+      }
+      performanceState = undefined;
       const last = turns[turns.length - 1];
       if (packing === "merged" && last !== undefined && last.own === part.style && last.shared === block.shared) {
         last.text = `${last.text}\n${part.text}`;
