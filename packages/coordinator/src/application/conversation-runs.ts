@@ -60,6 +60,7 @@ export interface ConversationRunDependencies {
   imageRenditionMaker?: ImageRenditionMaker;
   agentMediaTools?: AgentMediaTools;
   agentSpeechReader?: AgentSpeechReader;
+  agentSpeechReady?: (signal: AbortSignal) => Promise<boolean>;
   imageInspectionAllowed?: (provider: string) => Promise<boolean>;
   publishImageDisclosure?: (conversationId: import("@arke-studio/contracts").ConversationId) => Promise<void>;
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
@@ -83,7 +84,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     allowed: provider => deps.imageInspectionAllowed?.(provider) ?? Promise.resolve(false),
     publish: id => deps.publishImageDisclosure?.(id) ?? Promise.resolve(),
   });
-  const media = new ConversationMediaInspection(store, leases, { tools: deps.agentMediaTools, speech: deps.agentSpeechReader, images,
+  const media = new ConversationMediaInspection(store, leases, { tools: deps.agentMediaTools, speech: deps.agentSpeechReader, speechReady: deps.agentSpeechReady, images,
     publish: id => deps.publishImageDisclosure?.(id) ?? Promise.resolve(), });
   const retrieval = new WorldChatRetrieval({
     readMedia: (lease, name, args) => media.read(lease, name, args),

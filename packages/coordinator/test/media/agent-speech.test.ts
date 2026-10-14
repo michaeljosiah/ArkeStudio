@@ -48,6 +48,7 @@ test("malformed, missing, excessive and out-of-range speech never becomes valid 
     { ...heard, words: [] }, { ...heard, words: Array(1001).fill(heard.words[0]) },
     { ...heard, words: [{ ...heard.words[0]!, startSec: .7, endSec: .3 }] },
     { ...heard, words: [{ ...heard.words[0]!, endSec: 1.1 }] },
+    { ...heard, words: [{ ...heard.words[0]!, endSec: .9 }, { ...heard.words[1]!, startSec: .2 }] },
     { ...heard, words: [heard.words[1]!, heard.words[0]!] }, { ...heard, words: [{ ...heard.words[0]!, probability: 1.1 }] }]) {
     await assert.rejects(recognize(value));
   }
@@ -72,11 +73,12 @@ test("the recognition deadline cancels a stalled local request without waiting f
 test("cancellation during local runtime health never launches word recognition afterwards", async () => {
   let finish!: () => void, calls = 0;
   const ready = new Promise<void>(resolve => { finish = resolve; });
-  const service = new VoiceService({ sidecar: { health: async () => { await ready; return { engineStatus: { kokoro: { ready: false } }, wordTiming: { ready: true } }; },
+  let healthSignal: AbortSignal | undefined;
+  const service = new VoiceService({ sidecar: { health: async options => { healthSignal = options?.signal; await ready; return { engineStatus: { kokoro: { ready: false } }, wordTiming: { ready: true } }; },
     listVoices: async () => [], synthesize: async () => bytes, transcribe: async () => "unused", transcribeWords: async () => { calls++; return heard; } },
     localPresets: [], cloudSources: [], getKey: async () => null, emit: () => {} });
   const stop = new AbortController(), pending = service.transcribeWords(bytes, stop.signal);
-  stop.abort(); finish(); await assert.rejects(pending); assert.equal(calls, 0);
+  stop.abort(); finish(); await assert.rejects(pending); assert.equal(calls, 0); assert.equal(healthSignal, stop.signal);
 });
 
 test("speech receipts cannot masquerade as signal QC or a completed script review", async () => {

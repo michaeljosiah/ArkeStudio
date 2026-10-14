@@ -28,7 +28,7 @@ const inventory: AgentMediaInventory = { durationSec: 10, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 3, height: 2, durationSec: 10, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: 4, channels: 2, durationSec: 10, startTimeSec: 0 },
 ] };
-async function harness(options: { speech?: AgentSpeechReader; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
+async function harness(options: { speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), id = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-10-13T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Media", entryContext: { kind: "world" } });
@@ -46,7 +46,7 @@ async function harness(options: { speech?: AgentSpeechReader; local?: boolean; a
     audio: async (_path: string, stream: AgentMediaInventory["streams"][number], start: number, end: number) => {
       const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); },
     speechAudio: async (_path: string, _stream: unknown, start: number, end: number) => ({ bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(Math.round((end - start) * 16000)) }), durationSec: end - start }), };
-  const media = new ConversationMediaInspection(store, leases, { images, speech: options.speech, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
+  const media = new ConversationMediaInspection(store, leases, { images, speech: options.speech, speechReady: options.speechReady, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, leases, lease, cv, images, media, retrieval, source: { kind: "artifact" as const, id }, stop,
@@ -95,6 +95,18 @@ test("missing speech runtime fails before decoding and does not raise the world 
   const result = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
   assert.equal(result.receipt.status, "unavailable"); assert.equal(h.counts().snapshots, 0);
   assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("a configured reader with an offline runtime refuses before decoding or budgets and recovers in the same conversation", async () => {
+  let ready = false, calls = 0;
+  const h = await harness({ speechReady: async signal => { signal.throwIfAborted(); return ready; }, speech: async () => { calls++; return speechAnswer; } });
+  const args = { source: h.source, range: { startSec: 0, endSec: 1 } }, before = h.store.getBundle().meta.schemaVersion;
+  for (let i = 0; i < 17; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", args)).receipt.status, "unavailable");
+  assert.equal(h.counts().snapshots, 0); assert.equal(calls, 0); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  ready = true;
+  for (let i = 0; i < 4; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", args)).receipt.status, "complete");
+  assert.equal(calls, 4);
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech/);
 });
 
 test("speech stream ambiguity, invalid references and per-run recognition budget are enforced", async () => {

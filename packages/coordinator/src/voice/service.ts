@@ -55,7 +55,7 @@ export interface SidecarLike {
    * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
    * depending on @arke-studio/voice.
    */
-  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
+  health(options?: { signal?: AbortSignal }): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
@@ -901,14 +901,17 @@ export class VoiceService {
     return this.deps.sidecar.transcribe(audio, contentType);
   }
 
-  async wordTimingAvailability(): Promise<{ ready: boolean; reason?: string }> {
+  async wordTimingAvailability(signal?: AbortSignal): Promise<{ ready: boolean; reason?: string }> {
+    signal?.throwIfAborted();
     if (this.deps.sidecar?.transcribeWords === undefined) return { ready: false, reason: "this local voice runtime does not provide measured word timing" };
-    return (await this.deps.sidecar.health())?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
+    const health = await this.deps.sidecar.health(signal ? { signal } : undefined);
+    signal?.throwIfAborted();
+    return health?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
   }
 
   async transcribeWords(audio: Uint8Array, signal: AbortSignal): Promise<AcousticWords> {
     signal.throwIfAborted();
-    const ready = await this.wordTimingAvailability();
+    const ready = await this.wordTimingAvailability(signal);
     signal.throwIfAborted();
     if (!ready.ready || this.deps.sidecar?.transcribeWords === undefined) throw new Error(ready.reason ?? "measured word timing is unavailable");
     return this.deps.sidecar.transcribeWords(audio, { signal });

@@ -30,7 +30,10 @@ Local speech tools make a separate canonical mono 16 kHz PCM16 WAV for the reque
 interval. Its hash, size, duration and profile remain distinct from the original-channel signal
 measurements. The exact derivative reaches supervised Voxa's measured-word endpoint; older or
 unavailable runtimes refuse, with no cloud fallback. Receipts retain engine id/version/model,
-recognized text and interval/source/view word times, including segment offsets. Word probabilities
+recognized text and interval/source/view word times, including segment offsets. Evidence requires
+the existing validated timing-engine identity and rejects overlapping/inconsistent word evidence.
+Live measured-word readiness is checked before source snapshots, decoding or budget consumption;
+a runtime that starts later becomes usable in the same conversation. Word probabilities
 are uncalibrated and the recognition can miss or hallucinate words. Empty recognition is unavailable,
 not proof of silence. Each run allows four recognition attempts within the shared sixteen-call
 media budget, at most 60 seconds/12,000 text characters/1,000 words per call, with a 120-second

@@ -47,7 +47,7 @@ export class ConversationMediaInspection {
   private readonly speechCounts = new Map<string, number>();
   private tail: Promise<void> = Promise.resolve();
   constructor(private readonly store: WorldStore, private readonly leases: QueryLeaseRegistry,
-    private readonly deps: { tools?: AgentMediaTools; speech?: AgentSpeechReader; images: ConversationImages; publish?: (id: QueryLease["conversationId"]) => Promise<void> }) {}
+    private readonly deps: { tools?: AgentMediaTools; speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; images: ConversationImages; publish?: (id: QueryLease["conversationId"]) => Promise<void> }) {}
   start(runId: string, signal: AbortSignal) { this.signals.set(runId, AbortSignal.any([signal, this.store.closingSignal])); }
   release(runId: string) { this.signals.delete(runId); this.counts.delete(runId); this.speechCounts.delete(runId); }
   private access(lease: QueryLease, name: MediaInspectionName) {
@@ -72,12 +72,12 @@ export class ConversationMediaInspection {
     if (!parsed.success) throw new RetrievalError("bad-argument", `${name}: name an immutable source and a bounded, valid interval.`);
     const count = this.counts.get(lease.runId) ?? 0;
     if (count >= AGENT_MEDIA_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its media inspection call budget.");
+    const speechCount = this.speechCounts.get(lease.runId) ?? 0;
+    if (speechRead && speechCount >= AGENT_TRANSCRIPT_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its four speech recognition calls.");
+    if (speechRead && this.deps.speechReady && !await this.deps.speechReady(signal)) throw new RetrievalError("unavailable", "Local Voxa measured speech recognition is not ready; no media was decoded or speech budget consumed.");
+    this.access(lease, name);
     this.counts.set(lease.runId, count + 1);
-    if (speechRead) {
-      const speechCount = this.speechCounts.get(lease.runId) ?? 0;
-      if (speechCount >= AGENT_TRANSCRIPT_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its four speech recognition calls.");
-      this.speechCounts.set(lease.runId, speechCount + 1);
-    }
+    if (speechRead) this.speechCounts.set(lease.runId, speechCount + 1);
     const args = parsed.data as { source: AgentMediaSource; range?: { startSec: number; endSec: number }; streamIndex?: number; count?: number; expectedText?: string };
     const source = await agentMediaSource(this.store, args.source);
     if (name === "sample_video") await this.deps.images.validate(lease);

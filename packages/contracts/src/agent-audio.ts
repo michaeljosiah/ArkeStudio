@@ -32,10 +32,10 @@ export const AgentSpeechTranscriptSchema = z.object({
   }
   let previous = 0;
   for (const word of value.words) {
-    if (word.endSec <= word.startSec || word.startSec < previous || word.endSec > value.derivative.durationSec + .000001) {
+    if (word.endSec <= word.startSec || word.startSec < previous - .005 || word.endSec > value.derivative.durationSec + .000001) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Recognition word bounds must be ordered and inside decoded audio" });
     }
-    previous = word.startSec;
+    previous = word.endSec;
   }
   const comparison = value.contentReview?.comparison;
   if (comparison && (comparison.status !== "compared" || comparison.audioHash !== value.derivative.hash ||
