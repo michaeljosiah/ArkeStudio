@@ -15,7 +15,9 @@ excludes audio binaries; putting a WAV in its prompt would not prove audio reach
 
 The local worker receives only a canonical mono 16 kHz PCM16 WAV and enumerated review focuses,
 over stdin. It receives no world path, source text, conversation history, script or credentials as
-request fields. Source/container hashes, source/view range, selected stream, decoder versions,
+request fields. Its child environment also excludes provider/infrastructure credentials and proxy
+settings, retaining only required operating-system/CUDA runtime variables and offline flags.
+Source/container hashes, source/view range, selected stream, decoder versions,
 derivative hash and a fingerprint of the local model/processor files stay in the durable receipt.
 Audio bytes do not. The review text follows the selected writing harness's ordinary text policy.
 
@@ -33,7 +35,8 @@ The exact selected interval must be cited; unsupplied intervals/focuses remain u
 Use a dedicated Python 3.11 environment with a suitable PyTorch build for the machine. Install the
 optional requirements from `packages/coordinator/src/media/audio-listener-requirements.txt` into
 that environment. They target the documented [Transformers 4.51.3 Qwen2Audio API](https://huggingface.co/docs/transformers/v4.51.3/en/model_doc/qwen2_audio).
-Maintain this environment independently of Voxa and other installed Python tools.
+The worker uses the supported `audio` processor keyword; the deprecated `audios` alias in older
+examples is not used. Maintain this environment independently of Voxa and other installed Python tools.
 
 Prepare a complete local **Qwen2-Audio-7B-Instruct** snapshot, including config, processor,
 tokenizer and safetensors shards. Use a fixed, immutable snapshot directory. Model acquisition is

@@ -1,5 +1,5 @@
 # Optional isolated environment, never installed or upgraded by Studio.
-# Qwen2AudioProcessor's audios= boundary is qualified against the 4.51.3 API.
+# Qwen2AudioProcessor's supported audio= boundary targets the 4.51.3 API.
 transformers==4.51.3
 huggingface-hub>=0.30.0,<1.0
 accelerate>=1.0,<2.0

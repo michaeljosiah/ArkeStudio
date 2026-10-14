@@ -4,6 +4,17 @@ import { isAbsolute } from "node:path";
 import { AGENT_LISTENING_LIMITS, AgentListeningFocusesSchema, AgentListeningResultSchema } from "@arke-studio/contracts";
 import type { AgentAudioListener } from "./agent-listening.js";
 
+/** Offline flags are not a credential boundary: the optional worker gets only runtime variables. */
+export function audioListenerChildEnvironment(host: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const names = ["SystemRoot", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP", "TMPDIR",
+    "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "HOME", "CUDA_PATH", "CUDA_VISIBLE_DEVICES",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "OMP_NUM_THREADS", "MKL_NUM_THREADS"] as const;
+  const env: Record<string, string> = {};
+  for (const name of names) { const value = host[name]; if (value) env[name] = value; }
+  return { ...env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1",
+    PYTHONNOUSERSITE: "1", TOKENIZERS_PARALLELISM: "false" };
+}
+
 /** Opt-in host setup; absent/incomplete paths fail closed without affecting app startup. */
 export function localAudioListenerOptions(worker: string, env: NodeJS.ProcessEnv = process.env): { agentAudioListener?: AgentAudioListener } {
   const python = env["ARKE_AUDIO_LISTENER_PYTHON"], modelDirectory = env["ARKE_AUDIO_LISTENER_MODEL"];
@@ -21,7 +32,7 @@ export function createLocalAudioListener(options: { python: string; worker: stri
     if (signal.aborted) { reject(new Error("Audio listening stopped")); return; }
     const child = spawnProcess(options.python, ["-I", options.worker, "--model", options.modelDirectory, ...(probe ? ["--probe"] : [])], {
       windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", HF_HUB_DISABLE_TELEMETRY: "1", TOKENIZERS_PARALLELISM: "false" },
+      env: audioListenerChildEnvironment(),
     });
     let output = Buffer.alloc(0), stderrBytes = 0, failed = false;
     const stop = () => { failed = true; child.kill("SIGKILL"); };

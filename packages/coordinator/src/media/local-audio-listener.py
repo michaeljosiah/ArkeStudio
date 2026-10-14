@@ -80,7 +80,7 @@ def review(directory, files, pcm, focuses):
     conversation = [{"role": "user", "content": [{"type": "audio", "audio_url": "local-clip"}, {"type": "text", "text": prompt}]}]
     text = processor.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
     audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-    inputs = processor(text=text, audios=[audio], sampling_rate=16000, return_tensors="pt", padding=True).to(model.device)
+    inputs = processor(text=text, audio=[audio], sampling_rate=16000, return_tensors="pt", padding=True).to(model.device)
     with torch.inference_mode():
         generated = model.generate(**inputs, max_new_tokens=768, do_sample=False)
     result = processor.batch_decode(generated[:, inputs.input_ids.size(1):], skip_special_tokens=True,

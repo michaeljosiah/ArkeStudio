@@ -4,10 +4,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { createLocalAudioListener, localAudioListenerOptions } from "../../src/media/local-audio-listener.js";
+import { audioListenerChildEnvironment, createLocalAudioListener, localAudioListenerOptions } from "../../src/media/local-audio-listener.js";
 import { writeSpeechWav } from "../../src/audio/speech-wav.js";
 const answer = { engine: { id: "local-qwen2-audio-v1", model: "Qwen2-Audio-7B-Instruct", modelHash: "sha256:" + "a".repeat(64), runtime: "test" }, review: "Soft music." };
 const bytes = writeSpeechWav({ rate: 16000, samples: new Float32Array(16000) });
+
+test("local listening child preserves required runtime paths without inheriting credentials or proxies", () => {
+  const env = audioListenerChildEnvironment({ SystemRoot: "system", PATH: "runtime", TEMP: "scratch", CUDA_PATH: "cuda",
+    OPENAI_API_KEY: "secret", ANTHROPIC_API_KEY: "secret", HF_TOKEN: "secret", AWS_ACCESS_KEY_ID: "secret",
+    AWS_SECRET_ACCESS_KEY: "secret", HTTP_PROXY: "secret", CUSTOM_SERVICE_SECRET: "secret" });
+  assert.equal(env["SystemRoot"], "system"); assert.equal(env["PATH"], "runtime");
+  assert.equal(env["TEMP"], "scratch"); assert.equal(env["CUDA_PATH"], "cuda");
+  for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "HF_TOKEN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "HTTP_PROXY", "CUSTOM_SERVICE_SECRET"])
+    assert.equal(env[key], undefined);
+  assert.equal(env["HF_HUB_OFFLINE"], "1"); assert.equal(env["PYTHONNOUSERSITE"], "1");
+});
 
 test("native listening protocol sends only WAV/focus, uses offline unshelled execution and refuses invalid/oversized responses", async t => {
   const directory = await mkdtemp(join(tmpdir(), "arke-listening-process-")); t.after(() => rm(directory, { recursive: true, force: true }));

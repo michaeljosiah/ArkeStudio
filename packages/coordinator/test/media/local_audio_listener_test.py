@@ -78,9 +78,11 @@ class ListeningWorkerTests(unittest.TestCase):
                 seen["conversation"] = conversation
                 return "<|AUDIO|>review"
 
-            def __call__(self, **kwargs):
-                seen["inputs"] = kwargs
-                return Inputs(input_features=kwargs["audios"])
+            # Match the supported processor signature; arbitrary kwargs hid deprecated alias bugs.
+            def __call__(self, *, text, audio, sampling_rate, return_tensors, padding):
+                seen["inputs"] = {"text": text, "audio": audio, "sampling_rate": sampling_rate,
+                                  "return_tensors": return_tensors, "padding": padding}
+                return Inputs(input_features=audio)
 
             def batch_decode(self, generated, **kwargs):
                 return ["The music has a slow pulse; the voice sounds restrained."]
