@@ -23,7 +23,9 @@ export const CADENCE_NOTE_MAX = 300;
  * `[sighs]` to Eleven v3, `(sigh)` to Breeze in English, `[sighing]` to Fish. What a reader
  * cannot make is held, never spoken.
  */
-export const SOUNDS = ["laughs", "chuckles", "sighs", "gasps", "sobs", "clears throat", "coughs", "groans", "yawns", "snorts", "wheezing", "laughs harder", "starts laughing"] as const;
+export const NEW_VOCAL_SOUNDS = ["argh", "heavy breath", "cackles", "cheers", "cries", "giggles", "growls", "grunts", "grr", "hisses", "moans", "pants", "pff", "phew", "screams", "shouts", "shrieks", "sneezes", "snickers", "tsk", "whimpers"] as const;
+export const VOCAL_EVENTS_SCHEMA_VERSION = 82;
+export const SOUNDS = ["laughs", "chuckles", "sighs", "gasps", "sobs", "clears throat", "coughs", "groans", "yawns", "snorts", "wheezing", "laughs harder", "starts laughing", ...NEW_VOCAL_SOUNDS] as const;
 export const SoundSchema = z.enum(SOUNDS);
 export type Sound = z.infer<typeof SoundSchema>;
 
@@ -41,7 +43,10 @@ export interface SoundCue { kind: "sound"; at: number; sound: Sound }
  */
 export type CadenceCue = PauseCue | BreathCue | EmphasisCue | DeliveryMarker | SoundCue;
 export const EXPRESSIVE_DIRECTION_SCHEMA_VERSION = 78;
-export const EXTENDED_SOUNDS: readonly Sound[] = ["snorts", "wheezing", "laughs harder", "starts laughing"];
+export const EXTENDED_SOUNDS: readonly Sound[] = [...NEW_VOCAL_SOUNDS, "snorts", "wheezing", "laughs harder", "starts laughing"];
+export function directionSchemaVersion(plan: { cues: readonly CadenceCue[] }): number {
+  return plan.cues.some(cue => cue.kind === "sound" && (NEW_VOCAL_SOUNDS as readonly string[]).includes(cue.sound)) ? VOCAL_EVENTS_SCHEMA_VERSION : EXPRESSIVE_DIRECTION_SCHEMA_VERSION;
+}
 export function needsExpressiveDirection(plan: { cues: readonly CadenceCue[] }): boolean {
   return plan.cues.some(cue => cue.kind === "delivery" && (cue.phrase?.length ?? 0) > 60 || cue.kind === "sound" && EXTENDED_SOUNDS.includes(cue.sound));
 }

@@ -1,4 +1,4 @@
-import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
@@ -12654,7 +12654,7 @@ export class Coordinator {
         // before it cannot parse, and that build drops the line and would number its next event
         // over it: the world is raised first, as the audiobook's direction raises it.
         if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? EXPRESSIVE_DIRECTION_SCHEMA_VERSION : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
+          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? directionSchemaVersion(msg.params.direction) : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
         }
         await bench.store.append(
           {

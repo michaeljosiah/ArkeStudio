@@ -1,6 +1,8 @@
 import type { AudiobookBlock, AudiobookBook } from "./audiobook.js";
 import { audiobookNoteKey } from "./audiobook.js";
 import { isPointCue, markerSegments, normalizeSpeechText, performanceNote, readingNotesLead, sentAs, type CadenceCue, type CadencePlan, type HeldControl } from "./cadence.js";
+import { compileStyledPerformance } from "./audiobook-styled-performance.js";
+import type { SpeechTurn } from "./grouped-reads.js";
 import type { ManifestModel } from "./manifest.js";
 import { speechInputFits, splitSpeechInput } from "./speech-input.js";
 
@@ -20,7 +22,7 @@ export function audiblePerformanceBrief(brief: string): string {
  * scaffolding cleanup must not make an editor promise words the request will discard. */
 export function characterPerformanceDirection(note: string | undefined, model: ManifestModel) {
   if (note === undefined) return null;
-  const audible = model.provider === "elevenlabs" && model.id === "eleven_v4" ? audiblePerformanceBrief(note) : note;
+  const audible = (model.provider === "elevenlabs" && model.id === "eleven_v4" || model.provider === "google") ? audiblePerformanceBrief(note) : note;
   return audible.trim() === "" ? null : { audible, ...performanceNote(audible, model) };
 }
 
@@ -58,13 +60,28 @@ export function renderPerformancePassage(passage: PerformancePassage, previous?:
   return { text: words.filter(Boolean).join(" "), state: { narration: passage.narration, lead: passage.lead, identity, directed } };
 }
 
+/** Quote punctuation is part of the spoken turn, never a separate style-only fragment. */
+function quotedPerformancePlan(text: string, plan: CadencePlan | null): CadencePlan | null {
+  if (plan === null) return null;
+  const whole = normalizeSpeechText(text);
+  return { ...plan, cues: plan.cues.map(cue => {
+    if (cue.kind !== "delivery") return cue;
+    let { from, to } = cue.span;
+    if (from > 0 && /["“]/.test(whole[from - 1]!)) from--;
+    to += /^[.,!?;:…]*["”]?/.exec(whole.slice(to))![0].length;
+    return { ...cue, span: { from, to, text: whole.slice(from, to) } };
+  }) };
+}
+
 /** Single-performer v4 direction. Speaker boundaries are resolved in clean source coordinates,
  * before tags are inserted, so repeated dialogue and inline delivery do not move attribution.
  * The same function drives Sent as and the queued request (issue 1753).
  */
 export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<AudiobookBook, "reading" | "notes"> | null,
   plan: CadencePlan | null, model: ManifestModel, reading?: { book?: string; chapter?: string }):
-  { text: string; parts: string[]; passages: PerformancePassage[]; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
+  { text: string; parts: string[]; passages: PerformancePassage[]; styledParts?: SpeechTurn[][]; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
+  plan = quotedPerformancePlan(block.text, plan);
+  if (model.provider === "google" && model.cadence?.phrase === "best-effort-instruction" && book?.reading === "performed") return compileStyledPerformance(block, book, plan, model, reading);
   if (model.provider !== "elevenlabs" || model.id !== "eleven_v4" || book?.reading !== "performed") return null;
   const whole = normalizeSpeechText(block.text);
   const rows = block.rows ?? [block];

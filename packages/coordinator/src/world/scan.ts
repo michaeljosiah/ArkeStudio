@@ -172,7 +172,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 78: expressive audiobook direction: longer character briefs, phrases and vocalizations.
 // 79: immutable, leased agent media evidence and durable coverage receipts.
 // 80: local measured speech evidence and transcript-grounded content review receipts.
-export const SUPPORTED_SCHEMA_VERSION = 81;
+// 82: expanded provider vocal events in persisted cadence plans and reactions.
+export const SUPPORTED_SCHEMA_VERSION = 82;
 
 export class WorldOpenError extends Error {
   constructor(

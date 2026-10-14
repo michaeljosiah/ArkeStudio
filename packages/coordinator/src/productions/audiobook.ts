@@ -1,4 +1,4 @@
-import { needsExpressiveDirection, EXTENDED_SOUNDS, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { needsExpressiveDirection, directionSchemaVersion, EXTENDED_SOUNDS, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -180,7 +180,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   if (Object.values(pictures ?? {}).some((picture) => picture.focus !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, "audiobook-picture-focus");
   const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
-  if (Object.values(direction).some(entry => needsExpressiveDirection(entry.plan)) || Object.values(reactions ?? {}).some(reaction => reaction.sound !== undefined && EXTENDED_SOUNDS.includes(reaction.sound))) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "audiobook-expressive-direction");
+  if (Object.values(direction).some(entry => needsExpressiveDirection(entry.plan)) || Object.values(reactions ?? {}).some(reaction => reaction.sound !== undefined && EXTENDED_SOUNDS.includes(reaction.sound))) await store.ensureSchemaVersion(Math.max(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, ...Object.values(direction).map(entry => directionSchemaVersion(entry.plan)), ...Object.values(reactions ?? {}).map(reaction => directionSchemaVersion({ cues: reaction.sound === undefined ? [] : [{ kind: "sound", at: 0, sound: reaction.sound }] }))), "audiobook-expressive-direction");
   if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
   // A marker, or the words a direction was written for, is a field the build before it reads
   // as unreadable (R-49): raised before the first record that carries one.

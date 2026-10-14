@@ -103,3 +103,37 @@ sent. This is the standing character cue; the complete confirmation request stil
 line delivery, pauses, narration returns and grouping. Editing never generates audio.
 Existing notes are not silently migrated between books. Moving an existing book note to a
 character is a deliberate content change, checked against the current effective direction.
+
+
+## Gemini performed direction and vocal events — 2026-10-14
+
+Under Performed, Gemini compiles cast dialogue, narration and temporary delivery into separate
+styled turns in one selected voice. Character Narration and explicit book overrides remain the
+inputs. Substantive narration receives its own baseline instead of inheriting a character's
+paragraph-wide style. The shared compiler drives Sent as, grouping, quotation, recovery and
+dispatch; per-paragraph reads retain the same turn metadata rather than creating a request for
+each change of character. Input budgets count style bytes and turn overhead. Grouped requests
+respect the 400-turn bound. Quotation punctuation stays attached to delivery spans.
+
+Gemini's documented human vocal events now include snort and the new portable event vocabulary
+in cadence.ts. Typed aliases, the marker menu and director capabilities share that vocabulary.
+V4 maps the added human events through its free-form tag path; v3 and other readers retain
+their qualified sets. Environmental sound effects are not inserted into audiobook prose.
+New vocal events raise the world reader boundary to 82 before persistence; existing long
+briefs and the previous expressive events retain boundary 78. Opening a world never raises it.
+
+Official guidance checked 2026-10-14:
+- https://ai.google.dev/gemini-api/docs/speech-generation
+- https://elevenlabs.io/blog/elevenlabs-audio-tags-list
+
+This implements a bounded SPEC-049 amendment, not the whole proposed roadmap. Gemini styles
+and character accent portrayals remain best effort; the single selected voice is unchanged.
+Flash-Lite grouping remains disabled pending the listening qualification required by R-48.
+No listening qualification is implied by compiler tests or a JSON preview.
+
+Validation: contracts audiobook-styled-performance, audiobook-performance, grouped-reads,
+cadence and direction-tags; providers google-tts and voice-direction; coordinator
+audiobook-grouped, audiobook-director and voice/direction; client chapter-audiobook,
+character-narration-source. Offline Chapter 1 previews are review artifacts,
+not persisted author changes or audio evidence. The corresponding SPEC-049 amendment is kept
+in the private specification repository.
