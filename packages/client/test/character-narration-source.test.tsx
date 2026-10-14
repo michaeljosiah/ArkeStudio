@@ -10,7 +10,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
-const model: ManifestModel = { id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4", accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { maxPromptChars: 10000, audioFormat: "wav" }, pricing: { kind: "perCharacter", microUsdPerCharacter: 80 }, cadence: { deliveries: ["measured"], speed: null, pause: "best-effort-audio-tag", breath: "best-effort-audio-tag", emphasis: "best-effort-capitalization", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160 } };
+const model: ManifestModel = { id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4", accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { maxPromptChars: 10000, audioFormat: "wav" }, pricing: { kind: "perCharacter", microUsdPerCharacter: 80 }, cadence: { deliveries: ["measured"], speed: null, pause: "best-effort-audio-tag", breath: "best-effort-audio-tag", emphasis: "best-effort-capitalization", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160, deliveryMappings: {} } };
 const props = (element: Element) => (element as unknown as Record<string, { onChange(e: { target: { value: string } }): void; onBlur(): void }>)[Object.keys(element).find(k => k.startsWith("__reactProps$"))!]!;
 
 it("book edits default to the character; overrides are deliberate, visible, and removable without generating audio", async t => {
@@ -41,6 +41,11 @@ it("book edits default to the character; overrides are deliberate, visible, and 
   await act(async () => toggle().click());
   assert.ok(field("Book override"));
   assert.equal(sent.length, beforeOpening, "opening an override neither saves nor generates");
+  await act(async () => props(field("Book override")).onChange({ target: { value: "unsaved override" } }));
+  await act(async () => toggle().click());
+  assert.equal(sent.length, beforeOpening, "cancelling an uncommitted override does not write it");
+  await act(async () => toggle().click());
+  assert.equal((field("Book override") as HTMLTextAreaElement).value, "");
   await act(async () => props(field("Book override")).onChange({ target: { value: "calm clipped British delivery" } }));
   await act(async () => props(field("Book override")).onBlur());
   assert.equal(sent.at(-1)?.kind, "set-audiobook-note");

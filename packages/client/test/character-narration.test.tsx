@@ -106,4 +106,7 @@ it("Narration is the Voice tab's third use: help asked for, written in place, tr
   const preview = sent.findLast((message) => message.kind === "voice-preview");
   assert.ok(preview && preview.kind === "voice-preview", "Hear asks for a preview");
   assert.deepEqual([preview.provider, preview.model, preview.voiceId, preview.note], ["elevenlabs", "eleven_v4", "rachel", "low, clipped"]);
+  await act(async () => props(container.querySelector('[aria-label="Narration book"]')!).onChange({ target: { value: "" } }));
+  assert.ok(container.querySelector('[data-testid="narration-default-effective"]'));
+  assert.equal(container.querySelector('[data-testid="narration-effective"] code')!.textContent, "[British delivery]", "a legacy override remains visible outside book context");
 });

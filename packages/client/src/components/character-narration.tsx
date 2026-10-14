@@ -41,6 +41,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
     if (!setAudiobookNote(worldId, productionId, speakerKey, next || null)) setRefusal("The studio is disconnected — the override was not saved.");
   };
   const performed = book?.audiobook?.reading === "performed";
+  const source = override !== undefined ? "book override" : inherited !== undefined ? "character" : "narrator baseline";
   const effective = !performed ? "Not sent in this reading mode" : note === undefined || (model && direction === null) ? "No character cue — narrator's baseline" : !model ? "Reader unavailable — cannot preview" : direction?.mode === "unsupported" ? `Not sent — ${direction.reason}` : direction?.mode === "tag" ? direction.tag : direction?.audible;
   return <div className="fy-character-narration" data-testid="character-narration" data-source={override !== undefined ? "book" : inherited !== undefined ? "character" : "none"}>
     {sheet && showCharacter && <label>
@@ -64,7 +65,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
         {override !== undefined ? "Use character narration" : overrideOpen ? "Cancel override" : "Override for this book"}
       </button>}
     </div>
-    <div className="fy-character-narration__effective" data-testid="narration-effective"><span>Effective character direction · {override !== undefined ? "book override" : "character"}</span><code>{effective}</code><small>{narrator.label ?? narrator.voiceId} · {model?.displayName ?? modelId} · saved direction</small></div>
+    <div className="fy-character-narration__effective" data-testid="narration-effective"><span>Effective character direction · {source}</span><code>{effective}</code><small>{narrator.label ?? narrator.voiceId} · {model?.displayName ?? modelId} · saved direction</small></div>
     {refusal && <p role="alert">{refusal}</p>}
   </div>;
 }
