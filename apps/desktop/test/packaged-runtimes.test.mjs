@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNothingForbidden } from "../scripts/verify-packaged-runtimes.mjs";
+import { assertNothingForbidden, assertAudioListenerWorker } from "../scripts/verify-packaged-runtimes.mjs";
 
 /**
  * The "must never ship" half of the afterPack guard.
@@ -19,6 +19,19 @@ function resources() {
   mkdirSync(join(dir, "resources"), { recursive: true });
   return join(dir, "resources");
 }
+
+it("requires the exact audio worker as a loose resource Python can read", () => {
+  const dir = resources();
+  try {
+    assert.throws(() => assertAudioListenerWorker(dir), /audio listener worker is missing/);
+    mkdirSync(join(dir, "audio-listener"));
+    const path = join(dir, "audio-listener", "local-audio-listener.py");
+    writeFileSync(path, "stale or invalid script");
+    assert.throws(() => assertAudioListenerWorker(dir), /differs from source/);
+    writeFileSync(path, readFileSync(new URL("../../../packages/coordinator/src/media/local-audio-listener.py", import.meta.url)));
+    assert.doesNotThrow(() => assertAudioListenerWorker(dir));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 describe("what must never enter the installer", () => {
   it("refuses a build carrying the Claude Code runtime, and names the exclusion that slipped", () => {

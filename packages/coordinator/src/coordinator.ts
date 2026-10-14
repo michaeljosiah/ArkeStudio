@@ -906,6 +906,7 @@ export interface CoordinatorOptions {
   boundaryFrameMaker?: BoundaryFrameMaker;
   imageRenditionMaker?: import("./world-chat/image-rendition.js").ImageRenditionMaker;
   agentMediaTools?: import("./media/agent-media-tools.js").AgentMediaTools;
+  agentAudioListener?: import("./media/agent-listening.js").AgentAudioListener;
   /**
    * The credential file's name inside the app root. Only dev overrides it, and only because its
    * cipher is not safeStorage: `ARKE_STUDIO_ROOT` can point the dev coordinator at a real app
@@ -21026,6 +21027,7 @@ export class Coordinator {
       },
       ...(this.opts.imageRenditionMaker ? { imageRenditionMaker: this.opts.imageRenditionMaker } : {}),
       ...(this.opts.agentMediaTools ? { agentMediaTools: this.opts.agentMediaTools } : {}),
+      ...(this.opts.agentAudioListener ? { agentAudioListener: this.opts.agentAudioListener } : {}),
       agentSpeechReader: (bytes, signal) => {
         if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
         return this.voiceService.transcribeWords(bytes, signal);

@@ -35,11 +35,13 @@ export async function takeReviewInspectionReason(store: WorldStore, intent: Conv
     } catch { return false; }
   };
   const poster = await supplied("poster"), start = await supplied("start-frame");
-  if (verifiedMedia.some(media => media.frames || media.audio || media.transcript)) {
+  if (verifiedMedia.some(media => media.frames || media.audio || media.transcript || media.listening)) {
     const frames = new Map(verifiedMedia.flatMap(media => (media.frames ?? []).map(frame => [
       `${media.sourceHash}:${frame.streamIndex}:${frame.sourceTimeSec}:${frame.image.renditionHash}`, frame] as const))), audio = verifiedMedia.filter(media => media.audio);
     const speech = verifiedMedia.some(media => media.transcript);
-    return `${frames.size ? `${frames.size} unique timestamped still frames supplied; gaps between frames remain unreviewed. ` : "No take frames were supplied. "}${audio.length ? "Original-channel audio sample measurements supplied; no listening or performance judgment. " : speech ? "Original-channel audio signal was not measured. " : "Audio was not inspected. "}${speech ? "Local automatic speech transcript supplied; content interpretation is transcript-grounded. Music, voice quality, emotion and delivery were not reviewed. " : ""}Continuous motion and audiovisual sync were not reviewed.${start ? " Frozen start frame supplied." : " Frozen start frame was not inspected."}`;
+    const listening = verifiedMedia.filter(media => media.listening);
+    const listened = listening.map(media => `source ${media.sourceStartSec + media.range!.startSec}–${media.sourceStartSec + media.range!.endSec}s (${media.listening!.focuses.join(", ")})`).join("; ");
+    return `${frames.size ? `${frames.size} unique timestamped still frames supplied; gaps between frames remain unreviewed. ` : "No take frames were supplied. "}${audio.length ? `Original-channel audio sample measurements supplied${listening.length ? ". " : "; no listening or performance judgment. "}` : speech || listening.length ? "Original-channel audio signal was not measured. " : "Audio was not inspected. "}${speech ? `Local automatic speech transcript supplied; content interpretation is transcript-grounded.${listening.length ? " " : " Music, voice quality, emotion and delivery were not reviewed. "}` : ""}${listening.length ? `Local audio-model impressions supplied for ${listened}; subjective, not measured timing or actual emotional state. Other intervals and focuses remain unreviewed. ` : ""}Continuous motion and audiovisual sync were not reviewed.${start ? " Frozen start frame supplied." : " Frozen start frame was not inspected."}`;
   }
   if (!poster && !start) return "Metadata-only review; no current take image or poster was supplied to this turn. Audio was not inspected.";
   const source = poster ? `${take.kind === "clip" ? "Poster frame" : "Take image"}${start ? " and frozen start frame" : ""}` : "Frozen start frame only";

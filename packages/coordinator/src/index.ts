@@ -382,6 +382,8 @@ export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
 
 export * from "./audio/media-tools.js";
 export * from "./media/agent-media-tools.js";
+export * from "./media/agent-listening.js";
+export * from "./media/local-audio-listener.js";
 export * from "./audio/qc.js";
 export * from "./audio/storage.js";
 export * from "./audio/rights.js";

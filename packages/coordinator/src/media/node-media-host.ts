@@ -6,6 +6,8 @@ export { hashMediaFile } from "./media-file-hash.js";
 import { createNodeEffectAudioAnalysisHost } from "./node-effect-audio.js";
 import { createAudioMediaTools } from "../audio/media-tools.js";
 import { createAgentMediaTools } from "./agent-media-tools.js";
+import { localAudioListenerOptions } from "./local-audio-listener.js";
+import { fileURLToPath } from "node:url";
 import { ffprobeArgs, parseFfprobeJson, type MediaProbe } from "./probe.js";
 import { createNodeEffectRasterHost } from "./node-effect-renderer.js";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -55,5 +57,6 @@ export function createNodeMediaHost(options: { ffmpeg: string; ffprobe: string; 
     durationSec: async (path, opts) => (await probe(path, opts?.signal ?? new AbortController().signal))?.durationSec ?? null,
   };
   return { ffmpeg: createNodeFfmpegRunner(options.ffmpeg, options.slateFont), mediaProbe,
+    ...localAudioListenerOptions(fileURLToPath(new URL("./local-audio-listener.py", import.meta.url))),
     audioMediaTools: createAudioMediaTools(process), agentMediaTools: createAgentMediaTools(process), effectAudioAnalysisHost: createNodeEffectAudioAnalysisHost({ ffmpeg: options.ffmpeg }), effectRasterHost: createNodeEffectRasterHost({ ...options, mediaProcess: process }) };
 }
