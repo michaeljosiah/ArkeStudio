@@ -636,7 +636,7 @@ native Save dialog. See [publications](publications.md) for file ownership and f
 
 
 Audiobook v4 request direction: contracts `audiobook-performance.ts` retains structured
-`PerformancePassage` runs; `grouped-reads.ts` renders them once request membership is known.
+`PerformancePassage` runs and `audiblePerformanceBrief` removes legacy identity scaffolding without rewriting stored briefs; `grouped-reads.ts` renders them once request membership is known.
 Coordinator `productions/audiobook-run.ts` passes those runs to the same packer used for caps,
 quotes, previews and dispatch. Contracts `cadence.ts` preserves v4 source line breaks through
 Bench's typed-tag compilation. Coverage: contracts `audiobook-performance.test.ts` and

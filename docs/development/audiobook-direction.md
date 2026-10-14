@@ -70,3 +70,20 @@ Bench's typed pause conversion therefore preserves paragraph layout rather than 
 request. Exact-string regressions cover text, line breaks, inline cues, scoped requests, character
 transitions and request limits. Do not normalize whitespace when comparing a reviewed prompt
 with the actual provider request: doing so concealed the original paragraph-loss regression.
+
+
+Lean audible cues (2026-10-14, PR #1757): keep full character descriptions as planning context.
+The director requests the fewest audible traits needed, not narrator identity instructions.
+`audiblePerformanceBrief` removes only known legacy scaffolding and carries an imitation's
+accent forward; unrecognised clauses remain intact and over-limit cues are held, never cut.
+Saved briefs and character sheets are not rewritten by compilation. Book-specific author cues
+can be shorter than the retained character description.
+
+The compiler no longer injects a same-narrator instruction. A book note consisting only of
+`natural <accent> narration` describes the baseline and is used on returns, not at the opening;
+other expressive book/chapter instructions still lead independent requests. A short reporting
+clause (at most eight words) between the same character's cast dialogue can continue without
+an accent reset. Action, changed speakers, longer narration and temporary delivery still reset.
+This is a conservative English reporting-clause heuristic, not universal language understanding.
+Manuscript words, quotation marks and paragraph boundaries must survive unchanged. The reviewed
+Threshold opening has 14 tags and 11 paragraph breaks; its lean preview has not been synthesized.

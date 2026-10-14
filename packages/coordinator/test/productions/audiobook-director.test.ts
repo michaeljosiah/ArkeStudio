@@ -376,6 +376,9 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.match(asking, /Inspect natural pauses/);
     assert.match(asking, /preserving|Preserve the selected narrator/);
     assert.match(asking, /how the narrator plays them, at most 300 characters/, "a speaker's note leads every line as a tag, so it meets the same cap");
+    assert.match(asking, /fewest audible traits/);
+    assert.match(asking, /Short reporting clauses/);
+    assert.match(asking, /Never rewrite the words/);
   });
 
   // Design turn 185: read per paragraph, chapter 01 changed delivery on most blocks.
@@ -753,4 +756,3 @@ describe("a card's extras go only with that card (codex on PR 1476)", () => {
       assert.equal((await readBook(worldDir)).notes, undefined);
     }));
 });
-
