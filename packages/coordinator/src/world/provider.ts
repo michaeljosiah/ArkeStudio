@@ -898,7 +898,7 @@ export class FsWorldProvider implements WorldProvider {
     this.closeEpoch++;
     this.closeAttempt = (async () => {
       await this.worldAccessTail;
-      const retained = [...this.backgroundStores.values()].map(held => held.store);
+      const retained = [...this.backgroundStores.values()].map(held => held.store).filter(store => store !== this.store);
       this.backgroundStores.clear();
       const closed = await Promise.allSettled([this.closeStore(), ...retained.map(store => store.close())]);
       try {
@@ -909,7 +909,8 @@ export class FsWorldProvider implements WorldProvider {
       this.appIndex = null;
       this.appIndexReady = false;
       const failed = closed.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      if (failed.length) throw new AggregateError(failed.map(result => result.reason), "World stores could not all close cleanly.");
+      if (failed.length === 1) throw failed[0]!.reason;
+      if (failed.length > 1) throw new AggregateError(failed.map(result => result.reason), `World stores could not all close cleanly: ${failed.map(result => String(result.reason)).join("; ")}`);
     })().finally(() => {
       // A later explicit load may reuse the provider, but overlapping closes share this drain.
       this.closing = false;
