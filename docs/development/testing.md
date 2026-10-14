@@ -1,10 +1,14 @@
 # Running and validating changes
 
 Shared media evidence: from `packages/coordinator`, run
-`node --import tsx --test test/media/agent-media-tools.test.ts test/world-chat/media-inspection.test.ts`.
+`node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/world-chat/media-inspection.test.ts`.
 The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`
 to fail when FFmpeg is unavailable, and optionally set `ARKE_FFMPEG`/`ARKE_FFPROBE` to host binaries.
 Contract coverage and original-channel arithmetic live in `packages/contracts/test/agent-media.test.ts`.
+`test/agent-audio.test.ts` covers script bounds. Speech tests exercise canonical multi-track
+extraction, exact bytes through the Voxa protocol, word/source/view times, script wording diffs,
+bad recognition, abort/late results, leases, budgets and schema-80 replay. The recognizer is a
+deterministic fixture: these tests do not establish live model accuracy or perceptual listening.
 Existing image, leased MCP, replay and take-review suites remain required regressions.
 
 Global Chat (master turn 225, approved as turn 224 revision 6; restored/amended model turn 195)

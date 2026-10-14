@@ -7,6 +7,8 @@ import { createAgentMediaTools, parseAgentMediaProbe } from "../../src/media/age
 import { createNodeMediaProcessRunner } from "../../src/media/node-media-process.js";
 import { decodePng } from "../../src/references/png.js";
 import { tempDir } from "../tmp.js";
+import { readSpeechWav } from "../../src/audio/speech-wav.js";
+import { decodeWav } from "@arke-studio/voice";
 const signal = () => new AbortController().signal;
 const runner = createNodeMediaProcessRunner({ ffmpeg: process.env["ARKE_FFMPEG"] ?? "ffmpeg", ffprobe: process.env["ARKE_FFPROBE"] ?? "ffprobe" });
 const version = await runner.run("ffmpeg", ["-version"], { signal: signal(), timeoutMs: 10000, maxStdoutBytes: 65536, maxStderrBytes: 16384 });
@@ -22,6 +24,21 @@ test("probe output is a whitelist with no tags, path or title and refuses excess
   const result = parseAgentMediaProbe(Buffer.from(JSON.stringify(probe)));
   assert.equal(result.streams[0]!.sampleRate, 32000); assert.equal(result.durationSec, 2.5); assert.equal(JSON.stringify(result).includes("PRIVATE"), false);
   assert.throws(() => parseAgentMediaProbe(Buffer.from(JSON.stringify({ streams: Array(17).fill(probe.streams[0]) }))));
+});
+
+test("native speech extraction selects the named stream and exact window into a separate canonical derivative", { skip: !available }, async () => {
+  const folder = await tempDir("arke-speech-native-"), wav = join(folder, "two-tracks.mkv");
+  await generate(["-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,1)\\,0.1\\,0.5)|0:s=48000:d=2",
+    "-f", "lavfi", "-i", "aevalsrc=0:s=32000:d=2", "-map", "0:a", "-map", "1:a", "-c:a", "pcm_f32le", wav]);
+  const inventory = await tools.probe(wav, signal()), first = inventory.streams[0]!, second = inventory.streams[1]!;
+  const speech = await tools.speechAudio!(wav, first, 1, 2, signal()), decoded = decodeWav(speech.bytes)!;
+  assert.equal(decoded.rate, 16000); assert.equal(decoded.channels, 1); assert.equal(decoded.encoding, "pcm16");
+  assert.equal(speech.durationSec, 1); assert.equal(decoded.mono.length, 16000);
+  assert.ok(readSpeechWav(speech.bytes).samples[8000]! > .1, "the requested second, rather than the first, was decoded");
+  const silent = await tools.speechAudio!(wav, second, 1, 2, signal());
+  assert.ok(readSpeechWav(silent.bytes).samples.every(value => value === 0), "the explicitly selected silent track stays silent");
+  assert.equal(first.sampleRate, 48000); assert.equal(first.channels, 2);
+  await assert.rejects(tools.speechAudio!(wav, first, 0, 61, signal()));
 });
 test("decoder bounds, aborts and raw diagnostics fail without leaking their contents", async () => {
   const fail = createAgentMediaTools({ run: async () => ({ code: 1, stdout: Buffer.from("PRIVATE"), stderr: "PRIVATE_PATH", timedOut: false, cancelled: false, outputLimitExceeded: false }) });
