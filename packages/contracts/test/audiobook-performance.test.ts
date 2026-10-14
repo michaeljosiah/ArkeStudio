@@ -81,8 +81,9 @@ test("grouping accounts for every compiled tag and paragraph separator", () => {
     { reading: "performed", notes: { Jace: "low, controlled" } }, { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1, delivery: "measured",
       cues: [{ kind: "delivery", span: { from: 6, to: 17, text: "Stay quiet." }, delivery: "whispered" }, { kind: "pause", at: 17, length: "short" }] }, whispered)!;
   assert.match(result.text, /\[whispers\] Stay quiet\./);
-  assert.match(result.text, /\[normal speaking voice\] Move\./);
-  assert.equal(result.text.split("[low, controlled]").length - 1, 3);
+  assert.match(result.text, /\[normal speaking voice\] \[low, controlled\] Move\./);
+  assert.equal(result.text.split("[low, controlled]").length - 1, 2);
+  assert.equal(result.text.split("[normal speaking voice]").length - 1, 1);
   assert.equal(result.text.split("[short pause]").length - 1, 1);
   assert.equal(result.text.replace(/\[[^\]]*\]\s*/g, ""), text);
   assert.deepEqual(result.held, []);
@@ -148,4 +149,26 @@ test("action, longer attributions and changed speakers keep narration resets", (
     assert.ok(result.text.includes("[natural American narration] " + middle));
     assert.equal(result.text.replace(/\[[^\]]*\]\s*/g, ""), rows.map(r => r.text).join(" "));
   }
+});
+
+
+test("emotion returns to narration once within and across grouped blocks", () => {
+  const book = { reading: "performed" as const, notes: { Jace: "calm American delivery" } };
+  const direction = { schemaVersion: 1 as const, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1,
+    cues: [{ kind: "delivery" as const, span: { from: 0, to: 5, text: "Stop." }, phrase: "restrained urgency" }] };
+  const first = compileAudiobookPerformance({ key: "a", paragraph: 0, text: "Stop.", speaker: "Jace" }, book, direction, model, { book: "natural American narration" })!;
+  const next = compileAudiobookPerformance({ key: "b", paragraph: 1, text: "He waited." }, book, null, model, { book: "natural American narration" })!;
+  const grouped = groupedText(packTurns([first, next].map((p, i) => ({ key: String(i), reader: "calen", parts: p.parts.map((text, j) => ({ text, performance: p.passages[j] })) })), "deltas"));
+  assert.equal(grouped, "[calm American delivery] [restrained urgency] Stop.\n\n[natural American narration] He waited.");
+  const combined = compileAudiobookPerformance({ key: "c", paragraph: 0, text: "Stop. He waited.", rows: [{ text: "Stop.", speaker: "Jace" }, { text: "He waited." }] }, book, direction, model, { book: "natural American narration" })!;
+  assert.equal(combined.text, grouped.replace("\n\n", " "));
+  assert.equal(next.text, "He waited.", "an independent request starts at the selected voice's baseline");
+});
+
+test("a local narration emotion ends with one baseline cue, without redundant segment resets", () => {
+  const text = "He waited. Nothing moved. Then he left.";
+  const result = compileAudiobookPerformance({ key: "a", paragraph: 0, text }, { reading: "performed" },
+    { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1,
+      cues: [{ kind: "delivery", span: { from: 11, to: 25, text: "Nothing moved." }, phrase: "uneasy" }] }, model, { book: "natural American narration" })!;
+  assert.equal(result.text, "He waited. [uneasy] Nothing moved. [natural American narration] Then he left.");
 });

@@ -137,3 +137,14 @@ audiobook-grouped, audiobook-director and voice/direction; client chapter-audiob
 character-narration-source. Offline Chapter 1 previews are review artifacts,
 not persisted author changes or audio evidence. The corresponding SPEC-049 amendment is kept
 in the private specification repository.
+
+
+Narration reset ownership (2026-10-14): the performed ElevenLabs compiler retains local
+segments as structured runs until grouping. Returning from temporary delivery to narration
+emits the book's narrator baseline once; it does not precede it with a generic normal-voice
+reset. Changed character identity also establishes a new baseline. Continuing the same
+character after temporary delivery retains a normal-voice reset and that character's brief.
+An independent request begins fresh. Mid-row segments no longer pre-insert resets that the
+request renderer would duplicate. Source words, pauses, character briefs and single-voice
+selection remain intact. This implements the user-approved lean direction requirement;
+Gemini's separate styled-turn compiler is unchanged.
