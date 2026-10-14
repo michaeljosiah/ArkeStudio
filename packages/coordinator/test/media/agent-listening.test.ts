@@ -57,3 +57,14 @@ test("listening deadline cancels a stalled reader", async t => {
   t.mock.timers.tick(AGENT_LISTENING_LIMITS.timeoutMs);
   await assert.rejects(pending, /deadline/); assert.ok(active.aborted);
 });
+
+test("cancelled native listening drains its own process handles before the inspection settles", async () => {
+  let drained = false, settled = false, close!: () => void, runningSignal!: AbortSignal;
+  const closed = new Promise<void>(resolve => { close = resolve; }), stop = new AbortController();
+  const pending = listenToAgentAudio({ ...input, signal: stop.signal, listener: { ...listener,
+    listen: async (_bytes, _focuses, signal) => { runningSignal = signal; return new Promise(() => {}); },
+    drain: async signal => { assert.equal(signal, runningSignal); await closed; drained = true; },
+  } }).finally(() => { settled = true; });
+  stop.abort(); await new Promise(resolve => setImmediate(resolve)); assert.equal(settled, false);
+  close(); await assert.rejects(pending, /stopped/); assert.ok(drained);
+});

@@ -15,7 +15,9 @@ export function localAudioListenerOptions(worker: string, env: NodeJS.ProcessEnv
  * Native process completion follows close so world-close cannot race live output handles. */
 export function createLocalAudioListener(options: { python: string; worker: string; modelDirectory: string }, spawnProcess = spawn): AgentAudioListener {
   if (![options.python, options.worker, options.modelDirectory].every(isAbsolute)) throw new Error("Audio listener paths must be absolute");
-  const run = (probe: boolean, input: string, signal: AbortSignal): Promise<unknown> => new Promise((resolve, reject) => {
+  const pending = new Map<AbortSignal, Set<Promise<unknown>>>();
+  const run = (probe: boolean, input: string, signal: AbortSignal): Promise<unknown> => {
+    const task = new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new Error("Audio listening stopped")); return; }
     const child = spawnProcess(options.python, ["-I", options.worker, "--model", options.modelDirectory, ...(probe ? ["--probe"] : [])], {
       windowsHide: true, shell: false, stdio: ["pipe", "pipe", "pipe"],
@@ -40,8 +42,14 @@ export function createLocalAudioListener(options: { python: string; worker: stri
     });
     child.stdin.end(input);
     if (signal.aborted) stop();
-  });
+    });
+    const group = pending.get(signal) ?? new Set<Promise<unknown>>(); group.add(task); pending.set(signal, group);
+    const release = () => { group.delete(task); if (!group.size) pending.delete(signal); };
+    void task.then(release, release);
+    return task;
+  };
   return {
+    async drain(signal) { await Promise.allSettled([...(pending.get(signal) ?? [])]); },
     async ready(signal) {
       signal.throwIfAborted();
       try {

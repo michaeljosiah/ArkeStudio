@@ -7,6 +7,8 @@ import { readSpeechWav, writeSpeechWav } from "../audio/speech-wav.js";
 export interface AgentAudioListener {
   ready(signal: AbortSignal): Promise<boolean>;
   listen(bytes: Uint8Array, focuses: AgentListeningFocus[], signal: AbortSignal): Promise<AgentListeningResult>;
+  /** Native hosts wait for only this request's process handles after cancellation. */
+  drain?(signal: AbortSignal): Promise<void>;
 }
 export async function listenToAgentAudio(input: { bytes: Uint8Array; durationSec: number; streamIndex: number;
   focuses: AgentListeningFocus[]; listener: AgentAudioListener; signal: AbortSignal }): Promise<AgentAudioListening> {
@@ -31,5 +33,8 @@ export async function listenToAgentAudio(input: { bytes: Uint8Array; durationSec
     derivative: { profile: "arke-listening-16khz-mono-v1", hash: `sha256:${createHash("sha256").update(input.bytes).digest("hex")}`,
       byteLength: input.bytes.length, durationSec: input.durationSec, sampleRate: 16000, channels: 1, format: "pcm-s16le-wav" },
       basis: "audio-model-interpretation", timing: "no-measured-event-times" });
-  } finally { clearTimeout(timer); signal.removeEventListener("abort", onAbort); }
+  } finally {
+    clearTimeout(timer); signal.removeEventListener("abort", onAbort);
+    if (signal.aborted) await input.listener.drain?.(signal);
+  }
 }
