@@ -172,3 +172,15 @@ test("a local narration emotion ends with one baseline cue, without redundant se
       cues: [{ kind: "delivery", span: { from: 11, to: 25, text: "Nothing moved." }, phrase: "uneasy" }] }, model, { book: "natural American narration" })!;
   assert.equal(result.text, "He waited. [uneasy] Nothing moved. [natural American narration] Then he left.");
 });
+
+
+test("a segmented attribution restores narration before its undirected prefix", () => {
+  const rows = [{ text: "Hold.", speaker: "Jace" }, { text: "she softly said." }, { text: "Stay.", speaker: "Jace" }];
+  const text = rows.map(r => r.text).join(" ");
+  const from = text.indexOf("softly");
+  const result = compileAudiobookPerformance({ key: "a", paragraph: 0, text, rows },
+    { reading: "performed", notes: { Jace: "calm American delivery" } },
+    { schemaVersion: 1, sourceTextHash: `sha256:${"0".repeat(64)}`, speed: 1,
+      cues: [{ kind: "delivery", span: { from, to: from + 6, text: "softly" }, phrase: "uneasy" }] }, model, { book: "natural American narration" })!;
+  assert.equal(result.text, "[calm American delivery] Hold. [natural American narration] she [uneasy] softly [natural American narration] said. [calm American delivery] Stay.");
+});

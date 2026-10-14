@@ -147,7 +147,8 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
         // Keep segment boundaries structured: the renderer owns resets once the actual
         // request is grouped, so a local marker cannot add a second narrator reset.
         const directed = mapped.sent.delivery !== undefined && mapped.sent.delivery !== "measured" || mapped.sent.note !== undefined || mapped.sent.cues.some(cue => cue.kind === "delivery");
-        const run = { identity, directed, attribution, text: mapped.text };
+        // A marked attribution is narration throughout, including any unmarked prefix.
+        const run = { identity, directed, attribution: attribution && segments.length === 1, text: mapped.text };
         if (!speechInputFits(renderPerformancePassage({ lead, narration, runs: [run] }).text, model.limits)) {
           if (segment.text.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
           for (const piece of splitSpeechInput(segment.text, { maxPromptChars: Math.floor(segment.text.length / 2) })) render(from + segment.from + piece.from, from + segment.from + piece.to);
