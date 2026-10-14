@@ -674,3 +674,17 @@ client `character-narration-source`, `character-narration`, `audiobook-door` and
 `chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.
 
 Character and audiobook direction previews share available-narrator resolution in `packages/client/src/lib/audiobook-narrator.ts`; chapter screens re-export it for existing callers.
+
+
+Background audiobook reads: `world/provider.ts` owns reference-counted background stores
+through `WorldProvider.withBackgroundWorldStore`. Acquisition/release serialize with selection,
+but synthesis does not hold the navigation queue. Coordinator chapter/book reads, audiobook
+reads/review and player export acquire the named world without selecting it. Returning to a
+retained world reuses its store and does not run live-session recovery. Explicit Stop resolves
+world/production/chapter IDs independently of selection. Shutdown and ownership loss abort work;
+archiving an active owner is refused. Global audiobook activity and durable job recovery retain
+their existing paths. Regressions: `test/world/provider.test.ts` and
+`test/productions/audiobook.test.ts`. Requirement: user-requested background generation across
+world switches (2026-10-14); navigation is no longer treated as closing the job's world under
+SPEC-047 R-16. The available private spec folder is not a Git checkout, so no private amendment
+commit was possible in this session.

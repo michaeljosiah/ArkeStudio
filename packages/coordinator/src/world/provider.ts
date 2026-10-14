@@ -34,7 +34,7 @@ import { WorldChatStore } from "../world-chat/store.js";
 /**
  * The real filesystem WorldProvider (SPEC-002 T-14), replacing SPEC-001's mock. Owns the app
  * root, world discovery and creation, the app-level index (SPEC-003 R-5, R-6), and the
- * lifecycle of the one open WorldStore.
+ * lifecycle of the selected WorldStore and stores retained by background work.
  */
 
 export interface CreateWorldInput {
@@ -65,6 +65,8 @@ export interface FsWorldProviderOptions {
 
 export class FsWorldProvider implements WorldProvider {
   private store: WorldStore | null = null;
+  private readonly archivingWorlds = new Set<string>();
+  private readonly backgroundStores = new Map<string, { store: WorldStore; users: number }>();
   private closing = false;
   private closeEpoch = 0;
   private closeAttempt: Promise<void> | null = null;
@@ -172,6 +174,14 @@ export class FsWorldProvider implements WorldProvider {
 
   onWorldLockError(cb: (worldId: string, message: string, consecutive: number) => void): void {
     this.onLockErrorCb = cb;
+  }
+
+  private worldAdopted(worldId: string): void {
+    if (this.store?.worldId === worldId) this.onAdoptedCb?.(worldId);
+    else {
+      const store = this.backgroundStores.get(worldId)?.store;
+      if (store) this.refreshRegistry(store.getBundle());
+    }
   }
 
   private lockEvents(worldId: string) {
@@ -430,11 +440,12 @@ export class FsWorldProvider implements WorldProvider {
     return operation;
   }
 
-  /** Open for read-write: recovery, lock, scan, index, watcher. Closes any previous world. */
+  /** Open for read-write: recovery, lock, scan, index, watcher. Releases the previous selection; background work may retain its store. */
   async loadWorld(worldId: string): Promise<WorldBundle> {
     if (this.closing) throw new Error("the world provider is closing");
     return this.accessWorld(() => {
       if (this.closing) throw new Error("the world provider is closing");
+      if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
       return this.loadWorldOnce(worldId);
     });
   }
@@ -453,12 +464,12 @@ export class FsWorldProvider implements WorldProvider {
       }
       await this.closeStore();
     }
-    this.store = await WorldStore.open(dir, {
+    this.store = this.backgroundStores.get(worldId)?.store ?? await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
       events: {
         ...this.lockEvents(worldId),
-        onAdopted: () => this.onAdoptedCb?.(worldId),
+        onAdopted: () => this.worldAdopted(worldId),
       },
     });
     const bundle = this.store.getBundle();
@@ -513,6 +524,7 @@ export class FsWorldProvider implements WorldProvider {
     // The registry is refreshed afterwards: writes admitted before close are allowed to finish,
     // and reading their bundle early can cache a paid take as unreviewed after its accept lands.
     this.store = null;
+    if (this.backgroundStores.get(store.worldId)?.store === store) return;
     try {
       await store.close();
     } finally {
@@ -528,7 +540,11 @@ export class FsWorldProvider implements WorldProvider {
   async withWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
     if (this.closing) throw new Error("the world provider is closing");
     return this.accessWorld(async () => {
+      if (this.closing) throw new Error("the world provider is closing");
       if (this.store?.worldId === worldId) return fn(this.store);
+      if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
+      const retained = this.backgroundStores.get(worldId);
+      if (retained) return fn(retained.store);
       const dir = await this.findWorldDir(worldId);
       const scoped = await WorldStore.open(dir, {
         events: this.lockEvents(worldId),
@@ -542,6 +558,43 @@ export class FsWorldProvider implements WorldProvider {
         await scoped.close();
       }
     });
+  }
+
+  isWorldLoaded(worldId: string): boolean {
+    return this.store?.worldId === worldId || this.backgroundStores.has(worldId);
+  }
+
+  async withBackgroundWorldStore<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T> {
+    if (this.closing) throw new Error("the world provider is closing");
+    const retained = await this.accessWorld(async () => {
+      if (this.closing) throw new Error("the world provider is closing");
+      if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
+      let held = this.backgroundStores.get(worldId);
+      if (!held) {
+        const store = this.store?.worldId === worldId ? this.store : await WorldStore.open(await this.findWorldDir(worldId), {
+          clock: this.clock, ...(this.sqlite ? { sqlite: this.sqlite } : {}),
+          events: { ...this.lockEvents(worldId), onAdopted: () => this.worldAdopted(worldId) },
+        });
+        held = { store, users: 0 };
+        this.backgroundStores.set(worldId, held);
+      }
+      held.users++;
+      return held;
+    });
+    // The operation runs outside the selection queue. Only acquisition and release serialize
+    // with navigation; holding that queue during synthesis would merely turn cancellation into a frozen UI.
+    try {
+      await retained.store.assertOwnership();
+      return await fn(retained.store);
+    } finally {
+      await this.accessWorld(async () => {
+        if (this.backgroundStores.get(worldId) !== retained) return;
+        if (--retained.users > 0) return;
+        this.backgroundStores.delete(worldId);
+        this.refreshRegistry(retained.store.getBundle());
+        if (this.store !== retained.store) await retained.store.close();
+      });
+    }
   }
 
   /**
@@ -567,8 +620,12 @@ export class FsWorldProvider implements WorldProvider {
     const epoch = this.closeEpoch;
     const dir = await this.findWorldDir(worldId);
     const wasOpen = this.store?.worldId === worldId;
-    if (wasOpen) await this.accessWorld(async () => {
+    await this.accessWorld(async () => {
+      if (this.closing) throw new Error("the world provider is closing");
+      if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
+      if (this.backgroundStores.has(worldId)) throw new Error("Stop background work in this world before archiving it.");
       if (this.store?.worldId === worldId) await this.closeStore();
+      this.archivingWorlds.add(worldId);
     });
     try {
       const target = await this.moveToArchive(dir);
@@ -594,6 +651,8 @@ export class FsWorldProvider implements WorldProvider {
         if (epoch === this.closeEpoch && !this.closing && this.store === null) await this.loadWorldOnce(worldId);
       }).catch(() => {});
       throw err;
+    } finally {
+      this.archivingWorlds.delete(worldId);
     }
   }
 
@@ -839,7 +898,9 @@ export class FsWorldProvider implements WorldProvider {
     this.closeEpoch++;
     this.closeAttempt = (async () => {
       await this.worldAccessTail;
-      await this.closeStore();
+      const retained = [...this.backgroundStores.values()].map(held => held.store);
+      this.backgroundStores.clear();
+      const closed = await Promise.allSettled([this.closeStore(), ...retained.map(store => store.close())]);
       try {
         this.appIndex?.close();
       } catch {
@@ -847,6 +908,8 @@ export class FsWorldProvider implements WorldProvider {
       }
       this.appIndex = null;
       this.appIndexReady = false;
+      const failed = closed.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failed.length) throw new AggregateError(failed.map(result => result.reason), "World stores could not all close cleanly.");
     })().finally(() => {
       // A later explicit load may reuse the provider, but overlapping closes share this drain.
       this.closing = false;
