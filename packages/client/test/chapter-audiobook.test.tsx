@@ -879,9 +879,9 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m, { voices: CAST });
     const row = q(m, '[data-testid="performed-speaker"]');
     assert.ok(row, "the speaker the narrator performs");
-    const input = row.querySelector("input") as HTMLInputElement;
+    const input = row.querySelector('textarea[aria-label="Book override · Maren Kest"]') as HTMLTextAreaElement;
     assert.equal(input.value, "low, clipped");
-    assert.match(row.textContent ?? "", /12\/300/, "the note's count");
+    assert.match(row.textContent ?? "", /Book override/, "the legacy note's scope is explicit");
     assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
     // One reader, one block (design turn 190): Maren's line is read inside its paragraph.
     const line = all(m, ".fy-ab__block").find((block) => (block.textContent ?? "").includes("You hear it too"))!;
@@ -900,7 +900,7 @@ describe("the Audiobook view (turn 146)", () => {
     const characterNote = "same narrator, slightly higher register with clipped British articulation, preserve the narrator's familiar timbre";
     assert.equal((input as unknown as Record<string, { maxLength: number }>)[key]!.maxLength, 300);
     await act(async () => props.onChange({ target: { value: characterNote } }));
-    await act(async () => (input as unknown as Record<string, { onBlur: () => void }>)[key]!.onBlur());
+    await act(async () => (input as unknown as Record<string, { onBlur: (event: { relatedTarget: null }) => void }>)[key]!.onBlur({ relatedTarget: null }));
     const note = m.sent.findLast((message) => message.kind === "set-audiobook-note") as Extract<ClientMessage, { kind: "set-audiobook-note" }>;
     assert.deepEqual({ speaker: note.speaker, note: note.note }, { speaker: "maren-kest", note: characterNote });
   });

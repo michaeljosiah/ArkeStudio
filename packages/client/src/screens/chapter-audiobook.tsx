@@ -1,3 +1,5 @@
+import { chapterNarrator } from "../lib/audiobook-narrator.js";
+export { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
@@ -14,7 +16,6 @@ import {
   readingNotesLead,
   type AudiobookReadingNotes,
   type HeldReadingNote,
-  DEFAULT_NARRATOR,
   audiobookBlockState,
   audiobookBlockOptions,
   audiobookBlocks,
@@ -38,11 +39,8 @@ import {
   normalizeSpeechText,
   formatMicroUsd,
   legacyVoiceModel,
-  narratorAppliesTo,
-  narratorFor,
   readerName,
   readerPlace,
-  supportsVoiceUse,
   voiceSourceFor,
   type ArtifactSidecar,
   type AudiobookBlock,
@@ -58,6 +56,7 @@ import {
   type ClonedVoice,
   type ManifestModel,
 } from "@arke-studio/contracts";
+import { CharacterNarration } from "../components/character-narration.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { DirectedText, type TurnBreak, MarkerMenu, VIEW_HASH, cueLabel, heldWords, markerLabel, viewPlan, type MarkerAt } from "../components/voice-direction.js";
 
@@ -88,7 +87,6 @@ import {
   useSpeakerLines,
   useHeardLines,
   hearAudiobookLine,
-  setAudiobookNote,
   dismissDirection,
   keepAudiobookTake,
   stageAudiobookTake,
@@ -114,7 +112,6 @@ import {
   setAudiobookRequests,
   groupChapterBeats,
   useBeatRuns,
-  type ReadingVoice,
 } from "../lib/store.js";
 
 /**
@@ -351,37 +348,6 @@ function readerOf(voice: { provider: string; model?: string; voiceId: string; la
   const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, clonedVoices ?? []);
   if (model === null) return null;
   return { provider: voice.provider, model, voiceId: voice.voiceId, ...(voice.label !== undefined ? { label: voice.label } : {}) };
-}
-
-/**
- * Who narrates the chapter, by the coordinator's rule (`audiobookNarrator`) so the chapter and the
- * door name the same voice: the book's own reader when it can speak now, else the app's narrator
- * where it applies to this world, else the shipped voice. A book's reader resolves against the
- * world's voices only, never the app narrator's copy of another world's (SPEC-049 R-12).
- *
- * Until the catalogue answers, the choice is taken as stored. Judging it against no catalogue
- * named George over Ife's designed voice on every chapter surface — the Voices rail, the Timing
- * lanes, the block panel and the price — while the door, answered by the coordinator, said Ife.
- */
-export function chapterNarrator(input: {
-  bookNarrator?: AudiobookReader;
-  stored: { provider: string; model?: string; voiceId: string; label?: string; worldId?: string } | null;
-  worldId: string;
-  catalogue: readonly ReadingVoice[] | null;
-  names?: Parameters<typeof voiceDisplayLabel>[1];
-}): AudiobookReader {
-  const { bookNarrator, stored, worldId, catalogue, names } = input;
-  const applies = stored !== null && narratorAppliesTo(stored, worldId) && supportsVoiceUse(stored, "narration") ? stored : null;
-  const reader = (voice: { provider: string; model: string; voiceId: string; label?: string | undefined }): AudiobookReader =>
-    ({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voiceDisplayLabel(voice, names) });
-  if (catalogue === null) {
-    if (bookNarrator !== undefined) return reader(bookNarrator);
-    const model = applies === null ? null : (applies.model ?? legacyVoiceModel(applies.provider, applies.voiceId));
-    return applies !== null && model !== null ? reader({ ...applies, model }) : reader(DEFAULT_NARRATOR);
-  }
-  const speakable = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
-  const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable.filter((voice) => voice.narratorCopy !== true));
-  return reader(own !== null && !own.fallback ? own : narratorFor(applies, speakable));
 }
 
 /** The blocks, their states and the counts, from the one rule both ends use. */
@@ -2524,7 +2490,7 @@ export function markerAtSelection(rows: readonly BlockRow[]): MarkerAt | null {
  * `Hear <name>` — the selected line if it is theirs, else their first in the chapter, as it
  * would be read, priced on the button for a cloud narrator — and what that line is sent as.
  */
-export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, source, noteHeld, line, model, slug, focused, onFocus }: {
+export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKey, name, lines, tone, note, noteHeld, line, model, slug, focused, onFocus }: {
   worldId: string;
   productionId: string;
   chapterFile: string;
@@ -2533,7 +2499,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   lines: number;
   tone: string;
   note?: string;
-  /** Where the note comes from (design turn 200, R-167): writing here always sets the book's own. */
+  /** Where the effective note comes from. Edits default to the character. */
   source?: "this book" | "character";
   noteHeld: boolean;
   /** The line Hear plays and Sent as shows. */
@@ -2543,19 +2509,8 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
   focused: boolean;
   onFocus: () => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  // The note field waits behind its press until there is a note (design turn 192): three empty
-  // inputs under three speakers read as three things owed.
   const [noteOpen, setNoteOpen] = useState(false);
-  const showNote = noteOpen || note !== undefined || draft !== null;
-  const value = draft ?? note ?? "";
-  const commit = () => {
-    if (draft === null) return;
-    const trimmed = draft.trim();
-    setDraft(null);
-    if (trimmed === (note ?? "")) return;
-    setAudiobookNote(worldId, productionId, speakerKey, trimmed === "" ? null : trimmed.slice(0, PERFORMANCE_NOTE_MAX));
-  };
+  const showNote = noteOpen || note !== undefined;
   const [hearId, setHearId] = useState<string | null>(null);
   const heard = useHeardLines()[hearId ?? ""];
   useEffect(() => {
@@ -2583,27 +2538,7 @@ export function PerformedSpeaker({ worldId, productionId, chapterFile, speakerKe
         </span>
       </div>
       {showNote && (
-        <div className="fy-ab__note">
-          <input
-            className="fy-ab__note-input"
-            value={value}
-            maxLength={PERFORMANCE_NOTE_MAX}
-            placeholder="note"
-            aria-label={`Note · ${name}`}
-            autoFocus={noteOpen && note === undefined}
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={() => {
-              // Left empty, it folds back to its press; written, it stays open until the note
-              // the store sends back takes over.
-              if (value.trim() === "") setNoteOpen(false);
-              commit();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-            }}
-          />
-          <span className="fy-ab__note-count fy-mono">{`${value.length}/${PERFORMANCE_NOTE_MAX}${source !== undefined ? ` · ${source}` : ""}`}</span>
-        </div>
+        <CharacterNarration worldId={worldId} productionId={productionId} speakerKey={speakerKey} name={name} />
       )}
       {focused && line !== null && (
         <div className="fy-ab__note-more">
@@ -3590,27 +3525,7 @@ export function BookReadingPanel({ worldId, productionId, title, bookNote, speak
 }
 
 export function SpeakerNoteInput({ worldId, productionId, speaker, disabled }: { worldId: string; productionId: string; speaker: { key: string; name: string; note?: string }; disabled: boolean }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? speaker.note ?? "";
-  const commit = () => {
-    if (draft === null) return;
-    const trimmed = draft.trim().slice(0, PERFORMANCE_NOTE_MAX);
-    setDraft(null);
-    if (trimmed === (speaker.note ?? "")) return;
-    setAudiobookNote(worldId, productionId, speaker.key, trimmed === "" ? null : trimmed);
-  };
-  return (
-    <input
-      className="fy-ab__note-input"
-      value={value}
-      maxLength={PERFORMANCE_NOTE_MAX}
-      disabled={disabled}
-      aria-label={`Note · ${speaker.name}`}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
-    />
-  );
+  return <CharacterNarration worldId={worldId} productionId={productionId} speakerKey={speaker.key} name={speaker.name} disabled={disabled} />;
 }
 
 /** A figure the checks measured, or a dash. */

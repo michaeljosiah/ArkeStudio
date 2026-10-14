@@ -16,6 +16,14 @@ export function audiblePerformanceBrief(brief: string): string {
   return [...new Set([...clauses, ...accents])].join(", ");
 }
 
+/** The character cue shown by the editor and used by the request compiler. V4's legacy
+ * scaffolding cleanup must not make an editor promise words the request will discard. */
+export function characterPerformanceDirection(note: string | undefined, model: ManifestModel) {
+  if (note === undefined) return null;
+  const audible = model.provider === "elevenlabs" && model.id === "eleven_v4" ? audiblePerformanceBrief(note) : note;
+  return audible.trim() === "" ? null : { audible, ...performanceNote(audible, model) };
+}
+
 /** Only a short reporting clause between the same character's lines is transparent.
  * Action, ambiguous narration and explicit delivery still restore the narrator. */
 function shortAttribution(text: string): boolean {
@@ -86,8 +94,7 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
     const to = from + words.length;
     const key = audiobookNoteKey(row);
     const note = key === null ? undefined : book.notes?.[key];
-    const audible = note === undefined ? undefined : audiblePerformanceBrief(note);
-    const play = !audible ? null : performanceNote(audible, model);
+    const play = characterPerformanceDirection(note, model);
     const previousKey = rowIndex > 0 ? audiobookNoteKey(rows[rowIndex - 1]!) : null;
     const nextKey = rowIndex + 1 < rows.length ? audiobookNoteKey(rows[rowIndex + 1]!) : null;
     const attribution = key === null && previousKey !== null && previousKey === nextKey && shortAttribution(words);
