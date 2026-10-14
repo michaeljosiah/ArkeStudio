@@ -24,7 +24,9 @@ export const AgentSpeechTranscriptSchema = z.object({
     expectedTextHash: FullSha256Schema, comparison: AudioTranscriptComparisonSchema }).strict().optional(),
 }).strict().superRefine((value, context) => {
   // A timed quotation must come from the same recognized content the model receives.
-  if (timingWord(value.text) !== timingWord(value.words.map(word => word.text).join(" "))) {
+  const recognized = value.text.trim().split(/\s+/u).map(timingWord).filter(Boolean);
+  const timed = value.words.map(word => timingWord(word.text)).filter(Boolean);
+  if (!recognized.length || recognized.length !== timed.length || recognized.some((word, index) => word !== timed[index])) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Recognized text and timed words disagree" });
   }
   if (value.words.reduce((count, word) => count + word.text.length, 0) > AGENT_TRANSCRIPT_LIMITS.characters) {
