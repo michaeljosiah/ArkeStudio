@@ -23,16 +23,6 @@ import {
 const SPEECH_MODELS = SHIPPED_MANIFEST.models.filter((model) => model.provider === "elevenlabs" && model.capability === "voice-tts").map((model) => model.id);
 
 /**
- * A professional clone is trained per model, and v4 needs its own pass ("open My Voices, hover
- * the voice, click + next to Eleven v4"), which the voice reports as one of its
- * `high_quality_base_model_ids`. Offering it to v4 before then would only fail at the read.
- */
-function readsWith(voice: { category?: string; high_quality_base_model_ids?: unknown }, model: string): boolean {
-  if (model !== "eleven_v4" || voice.category !== "professional" || !Array.isArray(voice.high_quality_base_model_ids)) return true;
-  return voice.high_quality_base_model_ids.includes("eleven_v4");
-}
-
-/**
  * ElevenLabs names a refusal in `detail.status`, and two of them are not what their status
  * says: a spent character quota arrives as a 401, which read as a rejected key sends the person
  * to replace a key that works, and a full house — `too_many_concurrent_requests`,
@@ -215,7 +205,10 @@ export class ElevenLabsClient implements ProviderClient {
       tokens.add(token);
     } while (true);
     const unique = new Map(voices.filter(v => typeof v.voice_id === "string" && typeof v.name === "string").map(v => [v.voice_id!, v]));
-    return [...unique.values()].flatMap((v) => SPEECH_MODELS.filter((model) => readsWith(v, model)).map((model) => ({
+    // high_quality_base_model_ids is quality metadata, not an exhaustive compatibility list.
+    // Calen's professional voice omitted v4 while authenticated v4 synthesis succeeded (#1752).
+    // Keep listed voices selectable for an explicit audition; a provider refusal remains a refusal.
+    return [...unique.values()].flatMap((v) => SPEECH_MODELS.map((model) => ({
         provider: "elevenlabs",
         model,
         voiceId: v.voice_id!,

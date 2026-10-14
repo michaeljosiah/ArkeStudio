@@ -2132,3 +2132,42 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
       assert.equal(queued.length, initial.quote.parts);
     }));
 });
+
+
+describe("an explicit book narrator never falls back (#1752)", () => {
+  it("preserves the saved voice and refuses chapter, book and audition before a quote", () =>
+    withHarness({ cloud: [] }, async ({ send, events, spoken, bundle }) => {
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+
+      await read(send);
+      await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      await send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", requestId: "01J8F3K2QW9VZX4N7M0RTYB6E3" });
+      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide.*unavailable.*Refresh/);
+      assert.match(events.find(e => e.type === "audiobook.book-finished")?.reason ?? "", /Low tide.*unavailable/);
+      assert.match(events.find(e => e.type === "audiobook.heard")?.refused ?? "", /Low tide.*unavailable/);
+      assert.equal(events.some(e => e.type === "audiobook.priced" || e.type === "audiobook.book-priced"), false);
+      assert.deepEqual(spoken, []);
+      assert.equal(bundle().productions.find(p => p.meta.id === LEDGER)?.audiobook?.narrator?.voiceId, LOW_TIDE.voiceId);
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: null });
+      await read(send);
+      assert.ok(spoken.length > 0, "explicit reset permits the inherited reader");
+    }));
+  it("prices the exact v4 voice and refuses an old confirmation if the voice disappears", async () => {
+    const calen = { ...LOW_TIDE, model: "eleven_v4", voiceId: "S44KQ3oLFckbxgyKfold", label: "Calen Voss" };
+    const cloud = [calen];
+    await withHarness({ cloud, models: [KOKORO, { ...ELEVEN, id: "eleven_v4" }] }, async ({ send, events, spoken }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: calen.provider, model: calen.model, voiceId: calen.voiceId, label: calen.label } });
+      await read(send);
+      const price = events.find((e): e is Priced => e.type === "audiobook.priced");
+      assert.ok(price, JSON.stringify(events.filter(e => e.type.startsWith("audiobook."))));
+      assert.deepEqual(price.voices.map(v => [v.provider, v.label]), [["elevenlabs", "Calen Voss"]]);
+      cloud.length = 0;
+      await send({ kind: "voice-catalogue", worldId: WORLD_ID, refresh: true });
+      await read(send, { confirmationToken: price.confirmationToken });
+      assert.match(events.findLast(e => e.type === "audiobook.finished")?.reason ?? "", /Calen Voss.*unavailable/);
+      assert.equal(events.filter(e => e.type === "audiobook.priced").length, 1);
+      assert.deepEqual(spoken, []);
+    });
+  });
+});

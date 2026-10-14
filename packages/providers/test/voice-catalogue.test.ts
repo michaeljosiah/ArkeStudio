@@ -30,7 +30,7 @@ it("lists every voice under each ElevenLabs reader, so a v3 or v4 narrator can b
   const voices = await client.listVoicesCatalog("key");
   const under = (id: string) => voices.filter((voice) => voice.voiceId === id).map((voice) => voice.model).sort();
   assert.deepEqual(under("ife"), ["eleven-v3", "eleven_multilingual_v2", "eleven_v4"]);
-  assert.deepEqual(under("pvc-old"), ["eleven-v3", "eleven_multilingual_v2"], "a professional clone waits for its v4 training");
+  assert.deepEqual(under("pvc-old"), ["eleven-v3", "eleven_multilingual_v2", "eleven_v4"], "missing quality metadata is not a v4 incompatibility verdict");
   assert.deepEqual(under("pvc-new"), ["eleven-v3", "eleven_multilingual_v2", "eleven_v4"]);
 });
 it("rejects an incomplete catalogue instead of presenting a successful empty or partial result", async () => {

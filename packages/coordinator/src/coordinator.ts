@@ -1610,14 +1610,18 @@ export class Coordinator {
     return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
   }
 
-  /** The book's available reader, or the app's; reading still checks the host's local capability. */
-  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
+  /** A book keeps its chosen narrator even when unavailable; only an explicit reset inherits the app's. */
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
     const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
     // A book's own narrator is written into the world, so it resolves against the world's
     // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
-    const narrator = own !== null && !own.fallback ? own : chosen;
+    const saved = book === null || book === "unreadable" ? undefined : book.narrator;
+    if (requireAvailable && saved !== undefined && (own === null || own.fallback)) {
+      throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable. Refresh the voice catalogue or choose a replacement narrator before generating audio.`);
+    }
+    const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
     return {
       narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
       catalogue,
@@ -13504,7 +13508,7 @@ export class Coordinator {
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return answer({ outcome: "refused", reason: "no such chapter" });
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [] };
           const reader = room.narrator;
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator: reader });
           const keys = probeWindow(plan.blocks.map((planned) => ({ key: planned.block.key, ...(planned.block.speaker !== undefined ? { speaker: planned.block.speaker } : {}) })), msg.count ?? 4, msg.from);
@@ -15249,7 +15253,7 @@ export class Coordinator {
         const refuse = (refused: string) => this.emit({ at: new Date().toISOString(), type: "audiobook.heard", ...ids, refused });
         if (voice === null) return refuse("no voice service");
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [] };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, msg.voice === undefined)), models: this.opts.manifest?.models ?? [] };
           if ((msg.voice ?? room.narrator).provider === "kokoro" && !voice.localSpeechConfigured) return refuse("Local narration is unavailable on this host. Choose a configured cloud narrator.");
           // Heard as the chapter's held proposal would send it (design turn 184b, R-55): its
           // directions whole, and the cast and notes it carries — the coordinator's copy, never
@@ -15328,7 +15332,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = await this.audiobookNarrator(store, voice, msg.productionId);
+          const room = await this.audiobookNarrator(store, voice, msg.productionId, true);
           await this.readAudiobookChapter(store, voice, room, ids, requestId, msg.kind, control.signal, {
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
             ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
@@ -15968,7 +15972,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), transcriber: this.wordTimer(voice) !== undefined };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), transcriber: this.wordTimer(voice) !== undefined };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
               reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });
@@ -16119,6 +16123,7 @@ export class Coordinator {
           this.emit({ at: new Date().toISOString(), type: "voice.catalogue", voices: [], errors: ["Voice services are unavailable."] });
           return;
         }
+        if (msg.refresh === true) this.voiceService.invalidateCloudCatalogue();
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
         // The narrator's designed voice where this world lacks it (SPEC-049 R-12): listed so the

@@ -469,13 +469,21 @@ export class VoiceService {
     designedVoices: readonly Pick<import("@arke-studio/contracts").WorldDesignedVoice, "id" | "revision" | "name" | "description" | "expiresAt">[] = [],
     errors?: string[],
   ): Promise<VoiceCandidate[]> {
-    const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
-    return [...await this.rawCatalogue(clonedVoices, errors),
-      ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
-        ...this.deps.readerAvailability?.("google"),
-        ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
-      }))]
-      .filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+    // Refresh covers the whole answer, including local health and clone availability.
+    // A slow cloud response must not bring back local rows captured before the refresh.
+    while (true) {
+      const revision = this.catalogueRevision;
+      const currentErrors: string[] = [];
+      const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
+      const rows = [...await this.rawCatalogue(clonedVoices, currentErrors),
+        ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
+          ...this.deps.readerAvailability?.("google"),
+          ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
+        }))].filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+      if (revision !== this.catalogueRevision) continue;
+      errors?.push(...currentErrors);
+      return rows;
+    }
   }
 
   private async rawCatalogue(
@@ -588,6 +596,20 @@ export class VoiceService {
    */
   private readonly cloudLists = new Map<string, { key: string; at: number; voices: Promise<VoiceCandidate[]> }>();
 
+  /** An explicit refresh bypasses the TTL; ordinary readers still share one in-flight list. */
+  private catalogueRevision = 0;
+
+  invalidateCloudCatalogue(): void {
+    this.catalogueRevision++;
+    this.cloudLists.clear();
+  }
+
+  private async currentCloudList(source: CloudVoiceSource): Promise<VoiceCandidate[]> {
+    // Never let an overtaken invocation reinstall its obsolete credential in the cache.
+    const key = await this.deps.getKey(source.provider);
+    return key === null ? [] : this.cloudList(source, key);
+  }
+
   private async cloudList(source: CloudVoiceSource, key: string): Promise<VoiceCandidate[]> {
     const fingerprint = createHash("sha256").update(key).digest("hex");
     let entry = this.cloudLists.get(source.provider);
@@ -599,8 +621,16 @@ export class VoiceService {
       });
       entry = fresh;
     }
+    let voices: VoiceCandidate[];
+    try { voices = await entry.voices; }
+    catch (error) {
+      // An explicit refresh may have replaced an older request while it was in flight.
+      if (this.cloudLists.has(source.provider) && this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
+      throw error;
+    }
+    if (this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
     // Copies, so no reader's change to a row reaches the next reader's list.
-    return (await entry.voices).map((voice) => ({ ...voice }));
+    return voices.map((voice) => ({ ...voice }));
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */

@@ -3,7 +3,7 @@ import type { ReadingVoice } from "./store.js";
 
 /**
  * Who narrates the chapter, by the coordinator's rule (`audiobookNarrator`) so the chapter and the
- * door name the same voice: the book's own reader when it can speak now, else the app's narrator
+ * door name the same voice: an explicit book reader is retained even while unavailable; otherwise the app's narrator
  * where it applies to this world, else the shipped voice. A book's reader resolves against the
  * world's voices only, never the app narrator's copy of another world's (SPEC-049 R-12).
  *
@@ -29,6 +29,6 @@ export function chapterNarrator(input: {
   }
   const speakable = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
   const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable.filter((voice) => voice.narratorCopy !== true));
-  return reader(own !== null && !own.fallback ? own : narratorFor(applies, speakable));
+  return reader(own !== null && !own.fallback ? own : bookNarrator ?? narratorFor(applies, speakable));
 }
 

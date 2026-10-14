@@ -87,7 +87,8 @@ it("effective preview matches v4 compilation for legacy briefs, held notes, read
   await act(async () => __setStateForTest(structuredClone(state)));
   assert.match(cue(), /^Not sent/);
   await act(async () => __setStateForTest(structuredClone(state), { voiceCatalogueHeld: [] }));
-  assert.match(host.textContent!, /kokoro-82m/, "unavailable saved voice resolves to shipped narrator");
+  assert.match(host.textContent!, /eleven_v4|Eleven v4/, "unavailable saved voice retains its identity");
+  assert.match(cue(), /Reader unavailable/);
   assert.doesNotMatch(cue(), /slight pitch lift/, "does not claim the unavailable v4 cue will be sent");
   book.audiobook.reading = "narrator";
   await act(async () => __setStateForTest(structuredClone(state)));

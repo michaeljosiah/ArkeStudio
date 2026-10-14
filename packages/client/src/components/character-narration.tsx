@@ -23,6 +23,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
   const narrator = chapterNarrator({ bookNarrator: book?.audiobook?.narrator, stored: store.state?.app.narrator ?? null, worldId, catalogue: store.voiceCatalogueHeld });
   const modelId = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId, world?.clonedVoices ?? []);
   const model = store.state?.app.manifest?.models.find(m => m.provider === narrator.provider && m.id === modelId && m.capability === "voice-tts");
+  const unavailable = store.voiceCatalogueHeld !== null && !store.voiceCatalogueHeld.some(v => v.provider === narrator.provider && v.model === modelId && v.voiceId === narrator.voiceId && v.unavailableReason === undefined);
   const direction = model ? characterPerformanceDirection(note, model) : null;
   const active = Object.entries(store.audiobook).some(([key, run]) => key.startsWith(`${worldId}/`) && run.state === "reading") || Object.values(store.audiobookBook).some(run => run.state === "reading");
   const held = disabled || store.connection !== "open" || active || !book;
@@ -43,7 +44,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
   };
   const performed = book?.audiobook?.reading === "performed";
   const source = override !== undefined ? "book override" : inherited !== undefined ? "character" : "narrator baseline";
-  const effective = !performed ? "Not sent in this reading mode" : note === undefined || (model && direction === null) ? "No character cue — narrator's baseline" : !model ? "Reader unavailable — cannot preview" : direction?.mode === "unsupported" ? `Not sent — ${direction.reason}` : direction?.mode === "tag" ? direction.tag : direction?.audible;
+  const effective = unavailable ? "Reader unavailable — direction is not sent until the reader is available" : !performed ? "Not sent in this reading mode" : note === undefined || (model && direction === null) ? "No character cue — narrator's baseline" : !model ? "Reader unavailable — cannot preview" : direction?.mode === "unsupported" ? `Not sent — ${direction.reason}` : direction?.mode === "tag" ? direction.tag : direction?.audible;
   return <div className="fy-character-narration" data-testid="character-narration" data-source={override !== undefined ? "book" : inherited !== undefined ? "character" : "none"}>
     {sheet && showCharacter && <label>
       <span>Character narration</span>
