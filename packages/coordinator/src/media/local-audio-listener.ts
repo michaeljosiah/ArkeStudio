@@ -49,7 +49,7 @@ export function createLocalAudioListener(options: { python: string; worker: stri
     return task;
   };
   return {
-    async drain(signal) { await Promise.allSettled([...(pending.get(signal) ?? [])]); },
+    async drain(signal) { await Promise.allSettled(pending.get(signal) ?? []); },
     async ready(signal) {
       signal.throwIfAborted();
       try {
