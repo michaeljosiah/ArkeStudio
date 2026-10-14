@@ -15,7 +15,7 @@ import {
   mainPhotoFor,
   narratorAppliesTo,
   orderedShots,
-  performanceNote,
+  characterPerformanceDirection,
   readerName,
   readerPriceLabel,
   supportsVoiceUse,
@@ -31,6 +31,7 @@ import {
   voiceDisplayLabel,
 } from "@arke-studio/contracts";
 import { CharacterHeader } from "./character-reference.js";
+import { CharacterNarration } from "../components/character-narration.js";
 import { BodyLayer } from "../components/body-layer.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
@@ -334,7 +335,7 @@ export function narrationLimit(row: ManifestModel | undefined): string {
 
 /** Why the narrator holds this note, as one clause (R-168), or null when it plays it. */
 function narrationHeld(note: string, row: ManifestModel | undefined): string | null {
-  if (row === undefined || performanceNote(note, row).mode !== "unsupported") return null;
+  if (row === undefined || characterPerformanceDirection(note, row)?.mode !== "unsupported") return null;
   const name = row.displayName;
   const cap = row.cadence;
   if (cap?.phrase === undefined || cap.phrase === "unsupported") return `${name} takes no note`;
@@ -349,12 +350,13 @@ function narrationHeld(note: string, row: ManifestModel | undefined): string | n
  * what the field holds while it is being written, so a note is tried before it is kept; its press
  * keeps the focus in the field, or pressing it would write the note on the way.
  */
-function NarrationRow({ note, reader, help, hear, onWrite }: {
+function NarrationRow({ note, reader, help, hear, onWrite, disabled }: {
   note: string | undefined;
   reader: NarrationReader;
   help: UseHelp;
   hear: (note: string) => React.ReactNode;
   onWrite: (note: string | null) => void;
+  disabled: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const editing = draft !== null;
@@ -365,7 +367,7 @@ function NarrationRow({ note, reader, help, hear, onWrite }: {
     ? `${words} word${words === 1 ? "" : "s"}`
     : `${reader.label} · ${reader.row?.displayName ?? reader.model} · ${narrationLimit(reader.row)}`;
   const commit = () => {
-    if (draft === null) return;
+    if (draft === null || disabled) return;
     const next = draft.trim();
     setDraft(null);
     if (next === (note ?? "")) return;
@@ -384,6 +386,7 @@ function NarrationRow({ note, reader, help, hear, onWrite }: {
         <input
           className="fy-voiceuse__field"
           value={shown}
+          disabled={disabled}
           maxLength={PERFORMANCE_NOTE_MAX}
           aria-label="Narration"
           placeholder="low, clipped"
@@ -402,7 +405,7 @@ function NarrationRow({ note, reader, help, hear, onWrite }: {
       {held !== null && <span className="fy-mono fy-voiceuse__meta fy-voiceuse__meta--warn" data-testid="voice-narration-held">{held}</span>}
       <span className={cx("fy-mono fy-voiceuse__meta", editing && held !== null && "fy-voiceuse__meta--warn")}>{meta}</span>
       {!editing && (
-        <Button variant="outline" onClick={() => setDraft(note ?? "")} data-testid="voice-narration-change">
+        <Button variant="outline" disabled={disabled} onClick={() => setDraft(note ?? "")} data-testid="voice-narration-change">
           {note !== undefined ? "Change" : "Set"}
         </Button>
       )}
@@ -448,8 +451,10 @@ export function CharacterVoiceScreen() {
   const sheet = useSheet(worldId, sheetId);
   const candidates = useVoiceCandidates()[sheetId ?? ""];
   const sidecar = useVoiceSidecar();
-  const models = useStore().state?.app.manifest?.models;
-  const appNarrator = useStore().state?.app.narrator ?? null;
+  const studio = useStore();
+  const models = studio.state?.app.manifest?.models;
+  const appNarrator = studio.state?.app.narrator ?? null;
+  const narrationDisabled = studio.connection !== "open" || Object.values(studio.audiobookBook).some(run => run.state === "reading") || Object.entries(studio.audiobook).some(([key, run]) => key.startsWith(`${worldId}/`) && run.state === "reading");
   const voiceAudio = useVoiceAudio();
   const [hearId, setHearId] = useState<{ id: string; note: string } | null>(null);
   const [params, setParams] = useSearchParams();
@@ -547,6 +552,7 @@ export function CharacterVoiceScreen() {
     ...(narratorRows.length > 0 ? { extra: narratorRows.map((row) => `${row.displayName} · ${narrationLimit(row) === `${tagCharacterLimit(row ?? {})}` ? `${tagCharacterLimit(row ?? {})} characters` : narrationLimit(row)}`).join("   ") } : {}),
   };
   const narration = sheet.narration?.trim() === "" ? undefined : sheet.narration?.trim();
+  const defaultDirection = reader.row ? characterPerformanceDirection(narration, reader.row) : null;
   const heard = hearId === null ? undefined : voiceAudio[hearId.id];
   const hearPrice = candidates?.previewMicroUsdByVoice[voiceTargetKey(reader)];
   // Hear the character's own line under a note (R-168): the one written, or the one being tried.
@@ -555,12 +561,13 @@ export function CharacterVoiceScreen() {
     <ClipPlayButton
       small
       busy={hearId !== null && hearId.note === note && heard === undefined}
-      label={`Hear · ${reader.label}${hearPrice !== undefined && hearPrice > 0 ? ` · ~${formatMicroUsd(hearPrice)}` : ""}`}
+      label={`Hear character narration · ${reader.label}${hearPrice !== undefined && hearPrice > 0 ? ` · ~${formatMicroUsd(hearPrice)}` : ""}`}
       clip={hearId !== null && hearId.note === note && heard?.status === "ready" && heard.file ? { id: heard.requestId, url: mediaUrl(world.meta.slug, heard.file), title: `${sheet.name} · narration`, sub: `${note} · ${reader.label}` } : null}
       onStart={() => {
         const provider = providerIdOf(reader.provider);
         if (provider === null || provider === undefined) return;
-        setHearId({ id: requestVoicePreview(world.meta.worldId, sheet.id, provider, reader.model, reader.voiceId, undefined, note), note });
+        const sentNote = reader.row ? characterPerformanceDirection(note, reader.row)?.audible : note;
+        setHearId({ id: requestVoicePreview(world.meta.worldId, sheet.id, provider, reader.model, reader.voiceId, undefined, sentNote), note });
       }}
     />
   );
@@ -652,6 +659,7 @@ export function CharacterVoiceScreen() {
                 onSet={() => open("sample")}
               />
               <NarrationRow
+                disabled={narrationDisabled}
                 note={narration}
                 reader={reader}
                 help={narrationHelp}
@@ -660,6 +668,19 @@ export function CharacterVoiceScreen() {
                   if (!setSheetNarration(world.meta.worldId, sheetPath, next)) setRefusal("The studio is disconnected — the narration was not changed.");
                 }}
               />
+              <div className="fy-voice-narration-books">
+                <label>Book context <select aria-label="Narration book" value={bookId ?? ""} onChange={event => setParams(event.target.value ? { book: event.target.value } : {}, { replace: true })}>
+                  <option value="">Character default</option>
+                  {world.productions.filter(p => p.meta.format === "story").map(p => <option key={p.meta.id} value={p.meta.id}>{p.meta.title}</option>)}
+                </select></label>
+                {bookId === null && <div className="fy-character-narration__effective" data-testid="narration-default-effective">
+                  <span>Default character direction</span>
+                  <code>{!reader.row ? "Reader unavailable — cannot preview" : !defaultDirection ? "No character cue — narrator's baseline" : defaultDirection.mode === "tag" ? defaultDirection.tag : defaultDirection.mode === "unsupported" ? `Not sent — ${defaultDirection.reason}` : defaultDirection.audible}</code>
+                </div>}
+                {world.productions.filter(p => p.meta.id === bookId || p.audiobook?.notes?.[sheet.id] !== undefined).map(p => (
+                  <CharacterNarration key={p.meta.id} worldId={world.meta.worldId} productionId={p.meta.id} speakerKey={sheet.id} name={sheet.name} showCharacter={false} />
+                ))}
+              </div>
             </div>
             {candidates && (
               <p className="fy-mono fy-voicehero__line">

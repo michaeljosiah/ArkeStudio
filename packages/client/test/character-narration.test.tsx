@@ -40,7 +40,7 @@ it("Narration is the Voice tab's third use: help asked for, written in place, tr
   const world = state.world!;
   const sheet = world.sheets.find((candidate) => candidate.type === "character")!;
   const book = world.productions[0]!;
-  book.audiobook = { schemaVersion: 1, reading: "performed", narrator: { provider: "elevenlabs", model: V4.id, voiceId: "rachel", label: "Rachel" } };
+  book.audiobook = { schemaVersion: 1, reading: "performed", notes: { [sheet.id]: "British delivery" }, narrator: { provider: "elevenlabs", model: V4.id, voiceId: "rachel", label: "Rachel" } };
   state.app.manifest = { ...state.app.manifest!, models: [...(state.app.manifest?.models ?? []), V4] };
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } });
@@ -64,6 +64,8 @@ it("Narration is the Voice tab's third use: help asked for, written in place, tr
   assert.ok(row(), "the third use row");
   assert.equal(container.querySelectorAll('[data-testid="help-tip"]').length, 3, "a help glyph on each use");
   assert.match(row().textContent ?? "", /Narration.*not set/s);
+  assert.match(container.querySelector('[data-testid="character-narration"]')!.textContent!, /Book override.*Overrides Character narration.*British delivery/s, "legacy book override is visible despite an empty character default");
+  assert.equal(container.querySelector('[data-testid="narration-effective"] code')!.textContent, "[British delivery]");
   assert.match(row().textContent ?? "", /Rachel · Eleven v4 · 2 words/, "heard on the book's narrator, its limit as data");
 
   // Help, asked for: the line, the example and each narrator's limit, and nothing until asked.

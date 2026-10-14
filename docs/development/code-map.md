@@ -662,3 +662,12 @@ quotes, previews and dispatch. Contracts `cadence.ts` preserves v4 source line b
 Bench's typed-tag compilation. Coverage: contracts `audiobook-performance.test.ts` and
 `grouped-reads.test.ts`, coordinator `voice/direction.test.ts` and
 `productions/audiobook-grouped.test.ts`; see [audiobook direction](audiobook-direction.md).
+
+
+Character narration ownership (#1765): client `components/character-narration.tsx` is the
+shared editor for character defaults, explicit book overrides and effective provider cues.
+`character-voice.tsx` shows book context and otherwise-hidden overrides; audiobook Reading
+and chapter speaker rows use the same editor. Contracts `audiobook-performance.ts` owns
+`characterPerformanceDirection`, shared with actual v4 request compilation. Tests:
+client `character-narration-source`, `character-narration`, `audiobook-door` and
+`chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.

@@ -879,9 +879,9 @@ describe("the Audiobook view (turn 146)", () => {
     await answerOpen(m, { voices: CAST });
     const row = q(m, '[data-testid="performed-speaker"]');
     assert.ok(row, "the speaker the narrator performs");
-    const input = row.querySelector("input") as HTMLInputElement;
+    const input = row.querySelector('textarea[aria-label="Book override · Maren Kest"]') as HTMLTextAreaElement;
     assert.equal(input.value, "low, clipped");
-    assert.match(row.textContent ?? "", /12\/300/, "the note's count");
+    assert.match(row.textContent ?? "", /Book override/, "the legacy note's scope is explicit");
     assert.match(row.textContent ?? "", /note · not on this reader/, "Kokoro takes no phrase");
     // One reader, one block (design turn 190): Maren's line is read inside its paragraph.
     const line = all(m, ".fy-ab__block").find((block) => (block.textContent ?? "").includes("You hear it too"))!;
