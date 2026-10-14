@@ -1,10 +1,10 @@
+import { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import {
   PERFORMANCE_NOTE_MAX,
   tagCharacterLimit,
   performanceNoteLimit,
-  DEFAULT_NARRATOR,
   HOSTED_READER_LABELS,
   designatedVoiceSample,
   formatMicroUsd,
@@ -13,7 +13,6 @@ import {
   isHostedVoiceReader,
   legacyVoiceModel,
   mainPhotoFor,
-  narratorAppliesTo,
   orderedShots,
   characterPerformanceDirection,
   readerName,
@@ -531,8 +530,7 @@ export function CharacterVoiceScreen() {
   // Who the narration is heard on (R-168): the book's own narrator when the tab was opened from a
   // book, else the app's, or the shipped voice where that does not apply to this world.
   const book = bookId === null ? undefined : world.productions.find((production) => production.meta.id === bookId);
-  const app = appNarrator !== null && supportsVoiceUse(appNarrator, "narration") && narratorAppliesTo(appNarrator, world.meta.worldId) ? appNarrator : null;
-  const target = book?.audiobook?.narrator ?? app ?? DEFAULT_NARRATOR;
+  const target = chapterNarrator({ bookNarrator: book?.audiobook?.narrator, stored: appNarrator, worldId: world.meta.worldId, catalogue: studio.voiceCatalogueHeld });
   const targetModel = target.model ?? legacyVoiceModel(target.provider, target.voiceId, world.clonedVoices ?? []) ?? "";
   const reader: NarrationReader = {
     provider: target.provider,

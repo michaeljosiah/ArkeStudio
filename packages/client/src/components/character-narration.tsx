@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { DEFAULT_NARRATOR, PERFORMANCE_NOTE_MAX, characterPerformanceDirection, legacyVoiceModel, narratorAppliesTo, sheetNarrations, speakerNoteFor, supportsVoiceUse } from "@arke-studio/contracts";
+import { chapterNarrator } from "../lib/audiobook-narrator.js";
+import { useRef, useState } from "react";
+import { PERFORMANCE_NOTE_MAX, characterPerformanceDirection, legacyVoiceModel, sheetNarrations, speakerNoteFor } from "@arke-studio/contracts";
 import { setAudiobookNote, setSheetNarration, useStore } from "../lib/store.js";
 
 /** Character defaults and intentional book differences are separate edits. Never turn an
@@ -8,6 +9,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
   worldId: string; productionId: string; speakerKey: string; name: string; disabled?: boolean; showCharacter?: boolean;
 }) {
   const store = useStore();
+  const overrideToggle = useRef<HTMLButtonElement>(null);
   const [characterDraft, setCharacterDraft] = useState<string | null>(null);
   const [overrideDraft, setOverrideDraft] = useState<string | null>(null);
   const [overrideOpen, setOverrideOpen] = useState(false);
@@ -18,8 +20,7 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
   const inherited = sheet?.narration?.trim() || undefined;
   const override = book?.audiobook?.notes?.[speakerKey];
   const note = speakerNoteFor(book?.audiobook?.notes, { speaker: speakerKey, ...(sheet ? { sheet: sheet.id } : {}) }, sheetNarrations(world?.sheets ?? []));
-  const app = store.state?.app.narrator;
-  const narrator = book?.audiobook?.narrator ?? (app && supportsVoiceUse(app, "narration") && narratorAppliesTo(app, worldId) ? app : DEFAULT_NARRATOR);
+  const narrator = chapterNarrator({ bookNarrator: book?.audiobook?.narrator, stored: store.state?.app.narrator ?? null, worldId, catalogue: store.voiceCatalogueHeld });
   const modelId = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId, world?.clonedVoices ?? []);
   const model = store.state?.app.manifest?.models.find(m => m.provider === narrator.provider && m.id === modelId && m.capability === "voice-tts");
   const direction = model ? characterPerformanceDirection(note, model) : null;
@@ -55,11 +56,11 @@ export function CharacterNarration({ worldId, productionId, speakerKey, name, di
       {override !== undefined || overrideOpen || !sheet ? <label>
         <span>Book override{!sheet ? " · speaker has no character sheet" : ""}</span>
         <textarea className="fy-ab__note-input" aria-label={`Book override · ${name}`} maxLength={PERFORMANCE_NOTE_MAX} rows={2} disabled={held}
-          value={overrideDraft ?? override ?? ""} onChange={e => setOverrideDraft(e.target.value)} onBlur={commitOverride}
+          value={overrideDraft ?? override ?? ""} onChange={e => setOverrideDraft(e.target.value)} onBlur={event => { if (!overrideToggle.current || event.relatedTarget !== overrideToggle.current) commitOverride(); }}
           onKeyDown={e => { if (e.key === "Escape") { setOverrideDraft(null); setOverrideOpen(false); } }} />
         {sheet && override !== undefined && <small>Overrides Character narration for this book.</small>}
       </label> : <span className="fy-mono">Uses Character narration</span>}
-      {sheet && <button type="button" className="fy-ch__derive" disabled={held} data-testid="narration-override-toggle"
+      {sheet && <button type="button" className="fy-ch__derive" disabled={held} data-testid="narration-override-toggle" ref={overrideToggle}
         onMouseDown={event => event.preventDefault()}
         onClick={() => { setRefusal(null); setOverrideDraft(null); if (override !== undefined) { setOverrideOpen(false); if (!setAudiobookNote(worldId, productionId, speakerKey, null)) setRefusal("The studio is disconnected — the override was not removed."); } else setOverrideOpen(!overrideOpen); }}>
         {override !== undefined ? "Use character narration" : overrideOpen ? "Cancel override" : "Override for this book"}

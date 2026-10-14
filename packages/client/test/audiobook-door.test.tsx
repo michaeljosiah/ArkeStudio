@@ -480,6 +480,16 @@ describe("the Audiobook door (turn 146)", () => {
   // a long book each answer arrived superseded and was thrown away.
   const asks = (m: Mounted) => m.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook");
 
+  it("refreshes the door when character narration changes", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const before = asks(m).length;
+    const changed = inkbound();
+    changed.world!.sheets[0]!.narration = "quiet American delivery";
+    await act(async () => __setStateForTest(changed, { connection: "open", audiobookDoor: __stateForTest().audiobookDoor }));
+    assert.equal(asks(m).length, before + 1);
+  });
+
   it("the rail and the door share one ask", async () => {
     const m = await mount(inkbound(), ROUTE, true);
     assert.equal(asks(m).length, 1, "one ask between them, not one each");

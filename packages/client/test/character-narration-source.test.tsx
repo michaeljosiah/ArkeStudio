@@ -11,7 +11,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
 const model: ManifestModel = { id: "eleven_v4", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v4", accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { maxPromptChars: 10000, audioFormat: "wav" }, pricing: { kind: "perCharacter", microUsdPerCharacter: 80 }, cadence: { deliveries: ["measured"], speed: null, pause: "best-effort-audio-tag", breath: "best-effort-audio-tag", emphasis: "best-effort-capitalization", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160, deliveryMappings: {} } };
-const props = (element: Element) => (element as unknown as Record<string, { onChange(e: { target: { value: string } }): void; onBlur(): void }>)[Object.keys(element).find(k => k.startsWith("__reactProps$"))!]!;
+const props = (element: Element) => (element as unknown as Record<string, { onChange(e: { target: { value: string } }): void; onBlur(e?: { relatedTarget: EventTarget | null }): void }>)[Object.keys(element).find(k => k.startsWith("__reactProps$"))!]!;
 
 it("book edits default to the character; overrides are deliberate, visible, and removable without generating audio", async t => {
   let state = structuredClone(FIXTURE_STATE);
@@ -42,12 +42,13 @@ it("book edits default to the character; overrides are deliberate, visible, and 
   assert.ok(field("Book override"));
   assert.equal(sent.length, beforeOpening, "opening an override neither saves nor generates");
   await act(async () => props(field("Book override")).onChange({ target: { value: "unsaved override" } }));
+  await act(async () => props(field("Book override")).onBlur({ relatedTarget: toggle() }));
   await act(async () => toggle().click());
   assert.equal(sent.length, beforeOpening, "cancelling an uncommitted override does not write it");
   await act(async () => toggle().click());
   assert.equal((field("Book override") as HTMLTextAreaElement).value, "");
   await act(async () => props(field("Book override")).onChange({ target: { value: "calm clipped British delivery" } }));
-  await act(async () => props(field("Book override")).onBlur());
+  await act(async () => props(field("Book override")).onBlur({ relatedTarget: null }));
   assert.equal(sent.at(-1)?.kind, "set-audiobook-note");
   state = structuredClone(state);
   state.world!.productions[0]!.audiobook!.notes = { [sheet.id]: "calm clipped British delivery" };
@@ -85,6 +86,9 @@ it("effective preview matches v4 compilation for legacy briefs, held notes, read
   book.audiobook.notes = { Doctor: "x".repeat(161) };
   await act(async () => __setStateForTest(structuredClone(state)));
   assert.match(cue(), /^Not sent/);
+  await act(async () => __setStateForTest(structuredClone(state), { voiceCatalogueHeld: [] }));
+  assert.match(host.textContent!, /kokoro-82m/, "unavailable saved voice resolves to shipped narrator");
+  assert.doesNotMatch(cue(), /slight pitch lift/, "does not claim the unavailable v4 cue will be sent");
   book.audiobook.reading = "narrator";
   await act(async () => __setStateForTest(structuredClone(state)));
   assert.equal(cue(), "Not sent in this reading mode");

@@ -671,3 +671,5 @@ and chapter speaker rows use the same editor. Contracts `audiobook-performance.t
 `characterPerformanceDirection`, shared with actual v4 request compilation. Tests:
 client `character-narration-source`, `character-narration`, `audiobook-door` and
 `chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.
+
+Character and audiobook direction previews share available-narrator resolution in `packages/client/src/lib/audiobook-narrator.ts`; chapter screens re-export it for existing callers.
