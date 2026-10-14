@@ -95,6 +95,7 @@ export class WorldStore {
     if (lock) lock.onLost = (error) => {
       this.ownershipFailure = error;
       this.lockHeld = false;
+      this.closingController.abort(error);
       this.watcher?.stop();
       this.events.onOwnershipLost?.(error);
     };

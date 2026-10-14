@@ -52,6 +52,12 @@ export interface WorldProvider {
    * call provider selection/scoped-store methods from inside the callback.
    */
   withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
+  /** Retain one owned store for a background operation without pinning renderer selection.
+   * Navigation and scoped writes reuse this store; release closes it when no reader owns it.
+   * Shutdown still closes retained stores. Archiving a retained world is refused. */
+  withBackgroundWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
+  /** True for selected or retained worlds, so reopening does not recover live work as abandoned. */
+  isWorldLoaded?(worldId: string): boolean;
   /**
    * Resolve a world-relative media file for the renderer (design-fidelity pass): read-only,
    * traversal-guarded, media extensions only. Null when the file is not servable.

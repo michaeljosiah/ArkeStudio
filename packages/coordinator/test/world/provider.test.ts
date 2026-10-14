@@ -576,3 +576,73 @@ describe("archiving a world", () => {
     await provider.close();
   });
 });
+
+
+describe("retained background world ownership", () => {
+  it("navigation stays responsive, revisits reuse the same store, and the last release closes only an unselected owner", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const first = (await provider.listWorlds())[0]!;
+    const second = await provider.createWorld({ name: "Other World" });
+    await provider.loadWorld(first.worldId);
+    const original = provider.openStore()!;
+    let release!: () => void, ready!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const work = provider.withBackgroundWorldStore(first.worldId, async store => {
+      assert.equal(store, original); ready(); await barrier;
+      await store.ownedWrite(() => writeFile(join(store.dir, "background.txt"), "finished"));
+    });
+    try {
+      await started;
+      await provider.loadWorld(second.worldId);
+      assert.equal(original.isClosed(), false);
+      const adopted: string[] = [];
+      provider.onWorldAdopted(worldId => adopted.push(worldId));
+      await writeFile(join(original.dir, "bible.md"), "# Background edit\n");
+      await original.reconcileExternalEdit("bible.md");
+      assert.deepEqual(adopted, [], "a background watcher cannot select its world through the refresh callback");
+      await provider.withWorldStore(first.worldId, async store => { assert.equal(store, original); });
+      await provider.withBackgroundWorldStore(first.worldId, async store => { assert.equal(store, original); });
+      assert.equal(original.isClosed(), false, "a shorter consumer cannot release the ongoing run");
+      await provider.loadWorld(first.worldId);
+      assert.equal(provider.openStore(), original, "reopening never acquires a competing lock");
+      await provider.loadWorld(second.worldId);
+      await assert.rejects(provider.archiveWorld(first.worldId), /Stop background work/);
+      release(); await work;
+      assert.equal(await readFile(join(original.dir, "background.txt"), "utf8"), "finished");
+      assert.equal(original.isClosed(), true);
+      assert.equal(provider.openStore()?.worldId, second.worldId);
+    } finally { release(); await work; await provider.close(); }
+  });
+
+  it("shutdown aborts retained work and rejects new acquisition; a release cannot revive it", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const first = (await provider.listWorlds())[0]!;
+    let ready!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const work = provider.withBackgroundWorldStore(first.worldId, async store => {
+      ready(); await new Promise<void>(resolve => store.closingSignal.addEventListener("abort", () => resolve(), { once: true }));
+      await assert.rejects(store.assertOwnership());
+    });
+    await started;
+    const closing = provider.close();
+    await assert.rejects(provider.withBackgroundWorldStore(first.worldId, async () => {}), /closing/);
+    await closing; await work;
+    assert.equal(provider.isWorldLoaded(first.worldId), false);
+    assert.equal(provider.openStore(), null);
+  });
+
+  it("a failed background callback releases its lock and never changes selection", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root);
+    const first = (await provider.listWorlds())[0]!;
+    try {
+      await assert.rejects(provider.withBackgroundWorldStore(first.worldId, async () => { throw new Error("test failure"); }), /test failure/);
+      assert.equal(provider.openStore(), null);
+      assert.equal(provider.isWorldLoaded(first.worldId), false);
+      await provider.loadWorld(first.worldId);
+    } finally { await provider.close(); }
+  });
+});
