@@ -43,7 +43,9 @@ test("script wording comparison retains an exact target and keeps a negation cha
 
 test("malformed, missing, excessive and out-of-range speech never becomes valid evidence", async () => {
   for (const value of [{ ...heard, text: "" }, { ...heard, text: "a".repeat(12001) }, { ...heard, seconds: 4 },
-    { ...heard, engine: { ...heard.engine, model: "" } }, { ...heard, words: [] }, { ...heard, words: Array(1001).fill(heard.words[0]) },
+    { ...heard, engine: { ...heard.engine, model: "" } }, { ...heard, engine: { ...heard.engine, id: "sentence-duration-estimate" } },
+    { ...heard, text: "Do not stay here" }, { ...heard, words: [{ ...heard.words[0]!, text: " " }] },
+    { ...heard, words: [] }, { ...heard, words: Array(1001).fill(heard.words[0]) },
     { ...heard, words: [{ ...heard.words[0]!, startSec: .7, endSec: .3 }] },
     { ...heard, words: [{ ...heard.words[0]!, endSec: 1.1 }] },
     { ...heard, words: [heard.words[1]!, heard.words[0]!] }, { ...heard, words: [{ ...heard.words[0]!, probability: 1.1 }] }]) {
