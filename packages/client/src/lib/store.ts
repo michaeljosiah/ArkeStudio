@@ -4397,9 +4397,9 @@ export function setProviderPlan(provider: "google" | "mistral", plan: "paid" | "
   send({ kind: "set-provider-plan", provider, plan });
 }
 
-export function requestVoiceCatalogue(worldId?: string): void {
+export function requestVoiceCatalogue(worldId?: string, refresh = false): void {
   emitChange({ ...current, voiceCatalogue: null, voiceCatalogueErrors: [] });
-  send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}) });
+  send({ kind: "voice-catalogue", ...(worldId ? { worldId } : {}), ...(refresh ? { refresh: true } : {}) });
 }
 
 export function requestCataloguePreview(voice: ReadingVoice): string {

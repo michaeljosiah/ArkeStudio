@@ -1324,3 +1324,50 @@ it("refuses oversized normalized Gemini character previews before quoting or con
     assert.throws(() => service.queuedPreviewRequest({ ...request, line: { ...request.line, text: "a".repeat(7000) } }), /price changed/, "a fitting line reaches the consent check");
   }
 });
+
+
+it("explicit refresh bypasses a warm catalogue and shares the new request (#1752)", async () => {
+  let calls = 0;
+  let fail = false;
+  const service = new VoiceService({ sidecar: null, localPresets: [], getKey: async () => "key", emit: () => {},
+    cloudSources: [{ provider: "elevenlabs", list: async () => {
+      calls++;
+      if (fail) throw new Error("offline");
+      return [{ provider: "elevenlabs", model: "eleven_v4", voiceId: `voice-${calls}`, label: "Calen", attributes: [], local: false, canClone: false }];
+    } }],
+  });
+  assert.equal((await service.catalogue())[0]?.voiceId, "voice-1");
+  assert.equal((await service.catalogue())[0]?.voiceId, "voice-1");
+  service.invalidateCloudCatalogue();
+  const results = await Promise.all([service.catalogue(), service.catalogue()]);
+  assert.ok(results.every(rows => rows[0]?.voiceId === "voice-2"));
+  assert.equal(calls, 2);
+  fail = true;
+  service.invalidateCloudCatalogue();
+  const errors: string[] = [];
+  assert.deepEqual(await service.catalogue([], [], errors), []);
+  assert.equal(errors.length, 1);
+  fail = false;
+  assert.equal((await service.catalogue())[0]?.voiceId, "voice-4");
+});
+
+
+it("a catalogue request overtaken by refresh cannot publish its old list (#1752)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  const service = new VoiceService({ sidecar: null, localPresets: [], getKey: async () => "key", emit: () => {},
+    cloudSources: [{ provider: "elevenlabs", list: async () => {
+      const call = ++calls;
+      if (call === 1) await gate;
+      return [{ provider: "elevenlabs", model: "eleven_v4", voiceId: String(call), label: "V", attributes: [], local: false, canClone: false }];
+    } }],
+  });
+  const old = service.catalogue();
+  await new Promise(resolve => setImmediate(resolve));
+  service.invalidateCloudCatalogue();
+  assert.equal((await service.catalogue())[0]?.voiceId, "2");
+  release();
+  assert.equal((await old)[0]?.voiceId, "2");
+  assert.equal(calls, 2);
+});

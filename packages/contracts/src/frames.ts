@@ -1934,7 +1934,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * open. It could not, at first: an empty id failed frame validation and the request was
    * dropped, leaving the picker reading a catalogue that never arrived.
    */
-  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional(), refresh: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("catalogue-voice-preview"), requestId: UlidSchema,
     provider: z.string().min(1), model: z.string().min(1), voiceId: z.string().min(1),
     maxMicroUsd: z.number().int().nonnegative(),

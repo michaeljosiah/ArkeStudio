@@ -381,7 +381,7 @@ export function chapterNarrator(input: {
   }
   const speakable = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
   const own = bookNarrator === undefined ? null : narratorFor(bookNarrator, speakable.filter((voice) => voice.narratorCopy !== true));
-  return reader(own !== null && !own.fallback ? own : narratorFor(applies, speakable));
+  return reader(own !== null && !own.fallback ? own : bookNarrator ?? narratorFor(applies, speakable));
 }
 
 /** The blocks, their states and the counts, from the one rule both ends use. */

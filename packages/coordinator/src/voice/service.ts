@@ -588,6 +588,11 @@ export class VoiceService {
    */
   private readonly cloudLists = new Map<string, { key: string; at: number; voices: Promise<VoiceCandidate[]> }>();
 
+  /** An explicit refresh bypasses the TTL; ordinary readers still share one in-flight list. */
+  invalidateCloudCatalogue(): void {
+    this.cloudLists.clear();
+  }
+
   private async cloudList(source: CloudVoiceSource, key: string): Promise<VoiceCandidate[]> {
     const fingerprint = createHash("sha256").update(key).digest("hex");
     let entry = this.cloudLists.get(source.provider);
@@ -599,8 +604,16 @@ export class VoiceService {
       });
       entry = fresh;
     }
+    let voices: VoiceCandidate[];
+    try { voices = await entry.voices; }
+    catch (error) {
+      // An explicit refresh may have replaced an older request while it was in flight.
+      if (this.cloudLists.has(source.provider) && this.cloudLists.get(source.provider) !== entry) return this.cloudList(source, key);
+      throw error;
+    }
+    if (this.cloudLists.get(source.provider) !== entry) return this.cloudList(source, key);
     // Copies, so no reader's change to a row reaches the next reader's list.
-    return (await entry.voices).map((voice) => ({ ...voice }));
+    return voices.map((voice) => ({ ...voice }));
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
