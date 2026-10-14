@@ -36,6 +36,7 @@ directories:
   output: release
 files:
   - dist/**
+  - "!dist/local-audio-listener.py"
   - assets/**
   # This TTF is a loose resource below, not duplicated inside app.asar.
   - "!assets/Geist-Regular.ttf"
@@ -54,6 +55,11 @@ asarUnpack:
   - "**/*.node"
   - "node_modules/better-sqlite3-electron/**"
 extraResources:
+  # Python cannot read Electron's virtual app.asar filesystem.
+  - from: dist/local-audio-listener.py
+    to: audio-listener/local-audio-listener.py
+  - from: ../../packages/coordinator/src/media/audio-listener-requirements.txt
+    to: audio-listener/requirements.txt
   - from: ../../packages/client/dist
     to: client
   # Runtime preparation is a hard package prerequisite. ${arch} is expanded independently for

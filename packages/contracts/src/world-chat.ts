@@ -385,7 +385,7 @@ export const CheckToolSchema = z.enum([
   "related",
   "get-attachment-text",
   "view-image",
-  "inspect-media", "sample-video", "analyze-audio-signal", "transcribe-audio", "review-audio-content",
+  "inspect-media", "sample-video", "analyze-audio-signal", "transcribe-audio", "review-audio-content", "listen-audio",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -434,7 +434,7 @@ export const WorldChatCheckReceiptSchema = z
   .strict()
   .superRefine((receipt, context) => {
     const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples",
-      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech" } as const;
+      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech", "listen-audio": "model-audio-listening" } as const;
     const expected = coverage[receipt.tool as keyof typeof coverage];
     if (receipt.media && (!expected || receipt.media.coverage !== expected || receipt.status !== "complete") || expected && receipt.status === "complete" && !receipt.media) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Media receipt evidence must match the completed tool's coverage" });

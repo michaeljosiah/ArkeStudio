@@ -1077,3 +1077,12 @@ chapter mixes, verifies AAC, chapter order, author metadata, cover art and packa
 ARKE_STORY_SMOKE_OUTPUT retains the EPUB, M4B and probe report. Test tones replace provider
 speech; no generation is charged. External EPUB validation and physical phone import/playback
 are separate acceptance checks and must be reported separately.
+
+
+## Optional local audio listener
+
+See [audio listening](audio-listening.md) for host setup, focused tests and the live-quality
+boundary. CI shard 1 on Windows/Linux runs the stdlib Python worker protocol test without weights
+or GPU. The ordinary coordinator suite includes listening schemas, canonical waveform handoff,
+native Stop/output bounds, lease/source revocation, MCP and schema-81 replay. Actual music,
+perceived-emotion and voice-delivery accuracy requires an installed-model smoke and human review.

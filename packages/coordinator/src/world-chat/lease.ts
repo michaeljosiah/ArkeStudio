@@ -80,7 +80,7 @@ export const LEASED_OPERATIONS = [
   "related",
   "get_attachment_text",
   "view_image",
-  "inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content",
+  "inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content", "listen_audio",
   // Reading a page the person named, kept as an attachment (2026-08-22).
   "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.

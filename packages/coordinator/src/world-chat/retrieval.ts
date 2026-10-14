@@ -55,7 +55,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   get_attachment_text: "get-attachment-text",
   view_image: "view-image",
   inspect_media: "inspect-media", sample_video: "sample-video", analyze_audio_signal: "analyze-audio-signal",
-  transcribe_audio: "transcribe-audio", review_audio_content: "review-audio-content",
+  transcribe_audio: "transcribe-audio", review_audio_content: "review-audio-content", listen_audio: "listen-audio",
   fetch_url: "fetch-url",
   get_production: "get-production",
   describe_action: "describe-action",
@@ -213,7 +213,7 @@ export class WorldChatRetrieval {
       case "view_image":
         if (!this.deps.readImage) throw new RetrievalError("unavailable", "view_image: image inspection is unavailable for this adapter.");
         return this.deps.readImage(lease, args);
-      case "inspect_media": case "sample_video": case "analyze_audio_signal": case "transcribe_audio": case "review_audio_content":
+      case "inspect_media": case "sample_video": case "analyze_audio_signal": case "transcribe_audio": case "review_audio_content": case "listen_audio":
         if (!this.deps.readMedia) throw new RetrievalError("unavailable", "Local media inspection is unavailable on this host.");
         return this.deps.readMedia(lease, toolName, args);
       case "describe_action": {

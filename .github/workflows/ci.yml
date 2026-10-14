@@ -99,6 +99,10 @@ jobs:
         if: matrix.os == 'windows-latest' && matrix.shard == 3
         run: node --import tsx --test --test-timeout=60000 packages/coordinator/test/harness/owned-child.test.ts
 
+      - name: Offline audio-listener worker protocol (no model or GPU)
+        if: matrix.shard == 1
+        run: python -I -B packages/coordinator/test/media/local_audio_listener_test.py
+
       # Shard 2 also runs every workspace other than the coordinator — 50s of tests all told,
       # smaller than the cost of splitting them further, and put beside a shard that is not
       # already carrying lint, types and build.

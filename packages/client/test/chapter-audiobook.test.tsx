@@ -1953,12 +1953,16 @@ describe("grouped reads (design turn 185)", () => {
       limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
     const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
     state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
-    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, notes: { "maren-kest": "same narrator, slight pitch lift, retain narrator timbre" } } } : p) };
+    // An authored direction must be billed in each compiled request. Baseline narration tags
+    // may be elided, so they cannot establish the cost difference this regression needs.
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader,
+      note: "Read every passage in a measured, warm voice; retain the narrator's original accent and steady timbre, with restrained energy throughout.",
+      notes: { "maren-kest": "same narrator, slight pitch lift, retain narrator timbre" } } } : p) };
     const m = await mount(state);
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
     const displayedPrice = q(m, '[data-testid="read-audiobook"]')!.textContent!.match(/\$([\d.]+)/)![1]!;
-    assert.ok(Number(displayedPrice) > 0.02, "the price includes repeated narrator direction, not just the short source paragraphs");
+    assert.ok(Number(displayedPrice) > 0.02, `the price includes repeated authored narrator direction, not just the short source paragraphs (displayed $${displayedPrice})`);
     if (requests === "per-paragraph") return;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 4600, confirmationToken: "tok", previews: [{ request: 1, endpoint: "/v1/text-to-speech/calen?output_format=pcm_24000", body: { model_id: "eleven_v4", text: "[same narrator, original voice and accent] Authoritative neighbour.\n\nTarget." } }], voices: [{ label: "Calen", provider: "elevenlabs", characters: 120, estimatedMicroUsd: 4600 }], requests: 1, perParagraph: 4 }));

@@ -69,6 +69,12 @@ the Voxa protocol, script negation differences, malformed/unavailable responses,
 probabilities, cancellation/staleness, MCP delivery and durable replay. Recognizer fixtures validate
 protocol and authority, not live speech recognition accuracy or perceptual audio quality.
 
-Next increments remain continuous-motion/flicker/sync coverage, measured true peak/loudness, sound/voice listening
-specialists, versioned reuse and a context-aware director delegating through bounded authorities.
+Optional local `listen_audio` now sends actual bounded WAV excerpts to a configured offline
+Qwen2-Audio worker, with music/emotion/voice-delivery focuses and subjective model interpretation
+receipts under schema 81. Raw audio stays local. Python/weights are not bundled or auto-downloaded;
+live quality and target-machine setup remain unqualified. See [setup and validation](../development/audio-listening.md).
+
+Next increments remain installed-model qualification, continuous-motion/flicker/sync coverage,
+measured true peak/loudness, richer listening specialists, versioned reuse and a context-aware
+director delegating through bounded authorities.
 The global Chat presentation is not itself a master orchestrating agent.

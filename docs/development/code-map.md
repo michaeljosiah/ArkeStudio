@@ -8,6 +8,11 @@ ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.t
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
+`media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`
+owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
+Desktop/Node hosts opt in through local Python/model paths. See [setup and limits](audio-listening.md).
+
 Contracts `src/agent-audio.ts` owns speech derivative, word-time and content-review evidence.
 Coordinator `src/media/agent-speech.ts` bounds local Voxa recognition and reuses
 `audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`

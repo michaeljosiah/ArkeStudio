@@ -29,6 +29,7 @@ import {
   ComfyUiEngineService,
   Coordinator,
   createStudioHost,
+  localAudioListenerOptions,
   createNodeEffectRasterHost,
   createNodeEffectAudioAnalysisHost,
   type StudioServer,
@@ -1337,6 +1338,7 @@ async function initialize(): Promise<{ port: number }> {
         }
       : {}),
     ...audioMediaOptions(ffmpegPath(), ffprobeResolution().path),
+    ...localAudioListenerOptions(app.isPackaged ? join(process.resourcesPath, "audio-listener", "local-audio-listener.py") : join(__dirname, "local-audio-listener.py")),
     performanceSpool,
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is
     // unknown, and the cut cannot check a take against the window it was cut for. Wired
