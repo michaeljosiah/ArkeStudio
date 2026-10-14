@@ -21026,6 +21026,10 @@ export class Coordinator {
       },
       ...(this.opts.imageRenditionMaker ? { imageRenditionMaker: this.opts.imageRenditionMaker } : {}),
       ...(this.opts.agentMediaTools ? { agentMediaTools: this.opts.agentMediaTools } : {}),
+      agentSpeechReader: (bytes, signal) => {
+        if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
+        return this.voiceService.transcribeWords(bytes, signal);
+      },
       imageInspectionAllowed: async provider => {
         const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
         return settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;

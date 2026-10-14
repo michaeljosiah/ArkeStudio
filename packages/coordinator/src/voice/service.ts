@@ -907,7 +907,9 @@ export class VoiceService {
   }
 
   async transcribeWords(audio: Uint8Array, signal: AbortSignal): Promise<AcousticWords> {
+    signal.throwIfAborted();
     const ready = await this.wordTimingAvailability();
+    signal.throwIfAborted();
     if (!ready.ready || this.deps.sidecar?.transcribeWords === undefined) throw new Error(ready.reason ?? "measured word timing is unavailable");
     return this.deps.sidecar.transcribeWords(audio, { signal });
   }

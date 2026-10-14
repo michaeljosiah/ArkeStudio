@@ -3,11 +3,16 @@
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
 immutable source identities, verifies contained snapshots and persists receipts under leases;
-`media-tool-catalog.ts` exposes the three MCP reads. `src/media/agent-media-tools.ts` owns bounded
+`media-tool-catalog.ts` exposes the five MCP reads. `src/media/agent-media-tools.ts` owns bounded
 ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.ts` and coordinator
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Contracts `src/agent-audio.ts` owns speech derivative, word-time and content-review evidence.
+Coordinator `src/media/agent-speech.ts` bounds local Voxa recognition and reuses
+`audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`
+injects the supervised `VoiceService.transcribeWords` seam; recognized speech raises schema 80.
+The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
 Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and

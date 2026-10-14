@@ -194,4 +194,5 @@ export * from "./editor-picture-appearance.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";
+export * from "./agent-audio.js";
 export * from "./story-publication.js";

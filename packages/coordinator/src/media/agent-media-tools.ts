@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, type AgentMediaInventory, type AudioSignal } from "@arke-studio/contracts";
 import type { MediaProcessRunner } from "../audio/media-tools.js";
 import { decodePng } from "../references/png.js";
+import { writeSpeechWav } from "../audio/speech-wav.js";
 
 export interface AgentMediaTools {
   version(signal: AbortSignal): Promise<string>;
@@ -11,6 +12,7 @@ export interface AgentMediaTools {
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
   }>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
+  speechAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{ bytes: Uint8Array; durationSec: number }>;
 }
 const FORMATS = "mov,matroska,webm,wav,mp3,ogg,flac,aac,gif,image2,png_pipe,jpeg_pipe,webp_pipe";
 const finite = (value: unknown): number | null => {
@@ -84,6 +86,26 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const measured = measureAudioSignal(result.stdout, rate, channels, stream.index, pcmHash);
       if (Math.abs(measured.decodedDurationSec - duration) > 0.05) throw new Error("Decoded audio does not cover the requested interval");
       return measured;
+    },
+    async speechAudio(path, stream, startSec, endSec, signal) {
+      const duration = endSec - startSec;
+      if (!stream.sampleRate || !stream.channels || stream.sampleRate > AGENT_MEDIA_LIMITS.sampleRate || stream.channels > AGENT_MEDIA_LIMITS.channels ||
+        !Number.isInteger(stream.index) || stream.index < 0 || stream.index > 255 || !Number.isFinite(startSec) || startSec < 0 ||
+        !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Audio exceeds the speech derivative profile");
+      // This separate derivative must never stand in for original-channel signal QC.
+      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-map_metadata", "-1",
+        "-ac", "1", "-ar", "16000", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"], signal, 60 * 16000 * 4);
+      if (!result.stdout.length || result.stdout.length % 4) throw new Error("Invalid speech PCM");
+      const samples = new Float32Array(result.stdout.length / 4), view = new DataView(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength);
+      for (let i = 0; i < samples.length; i++) {
+        const value = view.getFloat32(i * 4, true);
+        if (!Number.isFinite(value)) throw new Error("Non-finite speech PCM");
+        samples[i] = value;
+      }
+      const durationSec = samples.length / 16000;
+      if (Math.abs(durationSec - duration) > .025) throw new Error("Speech derivative does not cover the requested interval");
+      return { bytes: writeSpeechWav({ rate: 16000, samples }), durationSec };
     },
   };
 }
