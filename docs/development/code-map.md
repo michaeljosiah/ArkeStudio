@@ -20,7 +20,8 @@ injects the supervised `VoiceService.transcribeWords` seam; recognized speech ra
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
-Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and
+Shared character compilation lives in contracts `audiobook-performance.ts` (v4 tags) and
+`audiobook-styled-performance.ts` (Gemini scoped metadata turns); chapter preview and
 coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
 Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
 chapter identity. `AudiobookScope` travels through listening/player commands and video options

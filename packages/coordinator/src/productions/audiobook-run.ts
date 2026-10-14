@@ -198,6 +198,8 @@ export interface Speaking extends PlannedBlock {
   carried?: AudiobookDirection;
   /** What the reader is sent, in parts each within its cap (R-5): the rendered text under a direction, the words otherwise. */
   parts: string[];
+  /** Turn-scoped style, retained even when this block is read alone. */
+  styledParts?: SpeechTurn[][];
   /** One preparation's rates: shared by its total, confirmation identity and dispatch. */
   quotes: SpeechQuote[];
   format: Format;
@@ -407,6 +409,7 @@ export async function prepareChapter(
     let direction: Speaking["direction"] = null;
     let refusal: string | undefined;
     let parts: string[];
+    let styledParts: SpeechTurn[][] | undefined;
     let performancePassages: NonNullable<ReturnType<typeof compileAudiobookPerformance>>["passages"] | undefined;
     // The speaker's note under `performed` (R-45): the line's leading phrase through the row's
     // phrase path, ahead of the line's own direction. A row that takes no phrase cannot play
@@ -438,7 +441,7 @@ export async function prepareChapter(
       text: leadTags.length > 0 ? `${leadTags.join(" ")} ${part.text}` : part.text,
       ...(leadStyle !== "" ? { instructions: part.instructions === undefined ? leadStyle : `${leadStyle} ${part.instructions}` } : {}),
     });
-    const performedTurns = plan.reading === "performed" && model.provider === "elevenlabs" && model.id === "eleven_v4" ? planned.block : undefined;
+    const performedTurns = plan.reading === "performed" && (model.provider === "google" || model.provider === "elevenlabs" && model.id === "eleven_v4") ? planned.block : undefined;
     const takeHash = audiobookTakeDirectionHash(held?.plan ?? null, note, reading, performedTurns);
     // Each part's own style apart from the notes the whole chapter shares (design turn 185): a
     // grouped request sends the notes once and each later turn only this.
@@ -484,6 +487,7 @@ export async function prepareChapter(
         notes: { ...override?.speakerNotes, ...sheetNarrations(store.getBundle().sheets), ...plan.book?.notes } }, held?.plan ?? null, model, reading);
       if (performance !== null) {
         parts = performance.parts;
+        styledParts = performance.styledParts;
         performancePassages = performance.passages;
         noteHeld = performance.noteHeld;
         direction = { hash: takeHash ?? audioHash(Buffer.from(performance.text)), rendered: performance.text,
@@ -497,6 +501,7 @@ export async function prepareChapter(
       refusal = error instanceof Error ? error.message : String(error);
       parts = [text];
       performancePassages = undefined;
+      styledParts = undefined;
     }
     // A reaction that is a sound (R-83) is sent as the reader's own tag for it, alone: the take
     // still names what the reaction says (`[laughs]`), and a reader that makes no such sound is
@@ -508,6 +513,7 @@ export async function prepareChapter(
       else {
         parts = [how.tag];
         performancePassages = undefined;
+        styledParts = undefined;
         direction = null;
       }
     }
@@ -519,7 +525,7 @@ export async function prepareChapter(
     // take retired, the older take of the same words must not be the answer either.
     const remake = only !== undefined;
     const compiledSpeechHash = byteCap === undefined ? undefined : audioHash(Buffer.from(JSON.stringify({
-      compiler: "speech-input-v1", model: model.providerModelId ?? model.id, format,
+      compiler: "speech-input-v1", styledParts, model: model.providerModelId ?? model.id, format,
       parts: parts.map((part, index) => ({ text: part,
         voiceSettings: direction?.perPart[index]?.voiceSettings ?? direction?.voiceSettings ?? {},
         instructions: direction?.perPart[index]?.instructions ?? direction?.instructions ?? null })),
@@ -542,15 +548,16 @@ export async function prepareChapter(
       text,
       direction,
       parts,
+      ...(styledParts !== undefined ? { styledParts } : {}),
       // Each part with the style it goes with, as the dispatcher quotes it.
       quotes: parts.map((part, index) => {
-        const instructions = direction?.perPart[index]?.instructions ?? direction?.instructions;
+        const instructions = styledParts?.[index]?.map(turn => turn.instructions ?? "").join(" ") || direction?.perPart[index]?.instructions || direction?.instructions;
         return quoteSpeech(model, part, { at: quotedAt, ...(instructions !== undefined ? { instructions } : {}) });
       }),
       format,
       remake,
       ...(compiledSpeechHash !== undefined ? { compiledSpeechHash } : {}),
-      turns: { ...(context.instructions !== undefined ? { shared: context.instructions } : {}), parts: parts.map((part, index) => ({ text: part, ...(performancePassages?.[index] !== undefined ? { performance: performancePassages[index] } : {}), ...(own[index] !== undefined ? { style: own[index] } : {}) })) },
+      turns: styledParts !== undefined ? { parts: styledParts.flat().map(turn => ({ text: turn.text, ...(turn.instructions !== undefined ? { style: turn.instructions } : {}) })) } : { ...(context.instructions !== undefined ? { shared: context.instructions } : {}), parts: parts.map((part, index) => ({ text: part, ...(performancePassages?.[index] !== undefined ? { performance: performancePassages[index] } : {}), ...(own[index] !== undefined ? { style: own[index] } : {}) })) },
       // A whole block already in the cache is adopted without a call (R-19); parts are never
       // cached as a block, so a block over the cap is always made, the cache holds no
       // direction, so a directed block never comes from it, and a block made again unchanged
@@ -1272,6 +1279,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
               params: {
                 voiceId: block.reader.voiceId,
                 text: part,
+                ...(block.styledParts?.[index] !== undefined ? { turns: block.styledParts[index] } : {}),
                 audioFormat: block.format,
                 purpose: "audiobook",
                 productionId,

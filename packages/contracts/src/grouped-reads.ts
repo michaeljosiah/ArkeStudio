@@ -193,7 +193,7 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
   const fits = (members: BlockTurns[]) => {
     const size = measure(members, packing);
     const limit = Math.min(...members.map((member) => member.maxCharacters ?? Infinity));
-    return size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds && groupedText(size.turns).length <= limit;
+    return size.turns.length <= 400 && size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds && groupedText(size.turns).length <= limit;
   };
   let open: BlockTurns[] = [];
   const close = (members: BlockTurns[]) => {

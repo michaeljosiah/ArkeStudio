@@ -44,6 +44,28 @@ export const FISH_DELIVERY: Record<Delivery, { settings: Record<string, number>;
  * spoken.
  */
 export const GEMINI_SOUNDS: Partial<Record<Sound, string>> = {
+  snorts: "snort",
+  "argh": "argh",
+  "heavy breath": "heavy breath",
+  "cackles": "cackle",
+  "cheers": "cheer",
+  "cries": "cry",
+  "giggles": "giggle",
+  "growls": "growl",
+  "grunts": "grunt",
+  "grr": "grr",
+  "hisses": "hiss",
+  "moans": "moan",
+  "pants": "pant",
+  "pff": "pff",
+  "phew": "phew",
+  "screams": "scream",
+  "shouts": "shout",
+  "shrieks": "shriek",
+  "sneezes": "sneeze",
+  "snickers": "snicker",
+  "tsk": "tsk",
+  "whimpers": "whimper",
   laughs: "laugh", chuckles: "chuckle", sighs: "sigh", gasps: "gasp", sobs: "sob",
   "clears throat": "throat-clearing", coughs: "cough", groans: "groan", yawns: "yawn",
 };
@@ -53,6 +75,31 @@ export const ELEVEN_V3_SOUNDS: Partial<Record<Sound, string>> = {
   snorts: "snorts", wheezing: "wheezing", "laughs harder": "laughs harder", "starts laughing": "starts laughing",
   laughs: "laughs", chuckles: "chuckles", sighs: "sighs", gasps: "gasps", sobs: "sobs",
   "clears throat": "clears throat", coughs: "coughs", groans: "groans", yawns: "yawns",
+};
+
+/** V4 accepts natural-language vocal events; retained as best-effort, never acoustic guarantees. */
+export const ELEVEN_V4_SOUNDS: Partial<Record<Sound, string>> = { ...ELEVEN_V3_SOUNDS,
+  "argh": "argh",
+  "heavy breath": "heavy breath",
+  "cackles": "cackles",
+  "cheers": "cheers",
+  "cries": "crying",
+  "giggles": "giggles",
+  "growls": "growls",
+  "grunts": "grunts",
+  "grr": "grr",
+  "hisses": "hisses",
+  "moans": "moans",
+  "pants": "pants",
+  "pff": "pff",
+  "phew": "phew",
+  "screams": "screams",
+  "shouts": "shouts",
+  "shrieks": "shrieks",
+  "sneezes": "sneezes",
+  "snickers": "snickers",
+  "tsk": "tsk",
+  "whimpers": "whimpers",
 };
 
 /** Breeze TTS 2's English audio tags, in parentheses. */

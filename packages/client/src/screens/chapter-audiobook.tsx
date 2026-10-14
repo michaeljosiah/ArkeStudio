@@ -1,6 +1,6 @@
 import { chapterNarrator } from "../lib/audiobook-narrator.js";
 export { chapterNarrator } from "../lib/audiobook-narrator.js";
-import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type BlockTurns } from "@arke-studio/contracts";
+import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type SpeechTurn, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
@@ -242,6 +242,8 @@ export interface BlockRow {
   /** What that reader is sent (R-42): each part's text, tags in; null without a direction. */
   /** What the reader is sent, part by part: the words with its syntax in, and the style beside them (design turn 181e). */
   sentAs: SentPart[] | null;
+  /** Actual solo requests; several styled turns can belong to one request. */
+  requestParts?: SpeechTurn[][];
   /** The speaker's note the line is played with under `performed` (R-44). */
   note?: string;
   /** The narrator reads it (turn 165's `read by … · narrator`): narration, a line under `narrator` or `performed`, or a stand-in. */
@@ -253,7 +255,7 @@ export interface BlockRow {
    * accepted, with what it would be sent as; null when no proposal is held, or it leaves the
    * block undirected.
    */
-  proposed: { input: AudiobookDirectionInput; held: HeldControl[]; sentAs: SentPart[] | null; readingHeld: HeldReadingNote[] } | null;
+  proposed: { input: AudiobookDirectionInput; requestParts?: SpeechTurn[][]; held: HeldControl[]; sentAs: SentPart[] | null; readingHeld: HeldReadingNote[] } | null;
   /**
    * The block as a grouped request takes it (design turn 185): the notes the chapter shares apart
    * from each part's own style — the coordinator's packing, so the requests counted here are its.
@@ -286,7 +288,7 @@ export function directionView(
   language?: string,
   note?: string,
   reading?: AudiobookReadingNotes,
-): { held: HeldControl[]; sentAs: SentPart[]; readingHeld: HeldReadingNote[]; turns: Pick<BlockTurns, "shared" | "parts"> } | null {
+): { held: HeldControl[]; sentAs: SentPart[]; requestParts?: SpeechTurn[][]; readingHeld: HeldReadingNote[]; turns: Pick<BlockTurns, "shared" | "parts"> } | null {
   try {
     // The book note and the chapter note lead every part, before the speaker's note and the
     // block's own direction (design turn 184, R-53): sentences in the style on an instruction
@@ -323,6 +325,23 @@ export function directionView(
   } catch {
     return null;
   }
+}
+
+
+/** Price one synthesis request per compiled part, not one per style change. */
+export function soloRowEstimate(row: Pick<BlockRow, "turns" | "requestParts">, model: ManifestModel): number {
+  return row.requestParts
+    ? row.requestParts.reduce((sum, turns) => sum + quoteGroupedSpeech(model, turns).expectedMicroUsd, 0)
+    : soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0);
+}
+
+/** Text/style rows are display turns; requestParts retains the actual synthesis boundaries. */
+export function performedDirectionView(performed: NonNullable<ReturnType<typeof compileAudiobookPerformance>>): NonNullable<ReturnType<typeof directionView>> {
+  const styled = performed.styledParts?.flat().map(turn => ({ text: turn.text, ...(turn.instructions ? { style: turn.instructions } : {}) }));
+  return { held: performed.held, readingHeld: performed.readingHeld,
+    sentAs: styled ?? performed.parts.map(text => ({ text })),
+    ...(performed.styledParts ? { requestParts: performed.styledParts } : {}),
+    turns: { parts: styled ?? performed.parts.map((text, i) => ({ text, performance: performed.passages[i] })) } };
 }
 
 /** A held book or chapter note in Sent as's words (design turn 184d): `book note · 94 characters · Eleven v3 takes 60 as a tag`. */
@@ -510,7 +529,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (speakerModel !== null) {
         try {
           const performed = compileAudiobookPerformance(block, { reading, notes: { ...narrations, ...notes } }, direction === null ? null : viewPlan(direction.input), speakerModel, led);
-          if (performed !== null) view = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
+          if (performed !== null) view = performedDirectionView(performed);
         } catch { view = null; }
       }
       // Under the proposal: its direction, the speaker notes and the chapter note it drafted
@@ -522,7 +541,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (proposedInput !== undefined && speakerModel !== null) {
         try {
           const performed = compileAudiobookPerformance(block, { reading, notes: { ...proposal?.speakerNotes, ...narrations, ...notes } }, viewPlan(proposedInput), speakerModel, proposedReading);
-          if (performed !== null) proposedView = { held: performed.held, readingHeld: performed.readingHeld, sentAs: performed.parts.map(text => ({ text })), turns: { parts: performed.parts.map(text => ({ text })) } };
+          if (performed !== null) proposedView = performedDirectionView(performed);
         } catch { proposedView = null; }
       }
       return {
@@ -531,7 +550,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         split: recordOrNull?.flags[block.key]?.split ?? null,
         state: audiobookBlockState(block, recordOrNull, assigned, hasArtifact, byPerson, note, led, reading === "performed"),
         readingHeld: view?.readingHeld ?? [],
-        proposed: proposedInput === undefined ? null : { input: proposedInput, held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
+        proposed: proposedInput === undefined ? null : { input: proposedInput, ...(proposedView?.requestParts ? { requestParts: proposedView.requestParts } : {}), held: proposedView?.held ?? [], sentAs: proposedView?.sentAs ?? null, readingHeld: proposedView?.readingHeld ?? [] },
         ...(note !== undefined ? { note } : {}),
         mark,
         full,
@@ -555,6 +574,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         direction,
         held: view?.held ?? [],
         sentAs: view?.sentAs ?? null,
+        ...(view?.requestParts ? { requestParts: view.requestParts } : {}),
         byNarrator: speaker === narrator,
       };
     });
@@ -621,7 +641,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
         if (model === null) return sum;
         const label = speechPlanLabel(model);
         return label !== null ? { ...sum, plan: sum.plan ?? label }
-          : { ...sum, estimate: sum.estimate + soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
+          : { ...sum, estimate: sum.estimate + soloRowEstimate(row, model), tokenPriced: sum.tokenPriced || model.pricing.kind === "perToken" };
       }, { estimate: 0, plan: null, tokenPriced: false }),
     [rows, modelOf],
   );
@@ -659,7 +679,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       perParagraph += 1;
       const group = groupOf.get(row.block.key);
       if (group === undefined) {
-        requests += 1;
+        requests += row.requestParts?.length ?? 1;
         continue;
       }
       if (group.keys[0] !== row.block.key) continue;
@@ -677,7 +697,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       if (group === undefined || row.state === "made" || row.state === "awaiting") continue;
       const model = modelOf(row.speaker);
       if (model === null || speechPlanLabel(model) !== null) continue;
-      estimate_ -= soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0);
+      estimate_ -= soloRowEstimate(row, model);
     }
     return estimate_ + grouping.groups.reduce((sum, group) => sum + group.estimatedMicroUsd, 0);
   }, [rows, modelOf, grouping]);
@@ -2708,7 +2728,7 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
     ...(row.sentAs.some((part) => part.style !== undefined) ? ["style"] : []),
     `${row.sentAs.length} ${row.sentAs.length === 1 ? "part" : "parts"}`,
   ];
-  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, soloTurns(row.turns).reduce((sum, turn) => sum + estimateSpeechMicroUsd(model, turn.text, undefined, undefined, turn.instructions), 0), creditLeft) : null;
+  const price = model !== null && row.speaker.provider !== "kokoro" ? speechPriceCopy(model, soloRowEstimate(row, model), creditLeft) : null;
   // The Voice tab (design turn 194, rule 12; 194g): Delivery, Note, Speed and Markers as rows, the
   // takes each with its play, Sent as folded with its parts named, and Upload and Make again at
   // the foot. A held proposal is drawn in the direction's place until it is accepted (184b).
@@ -3162,7 +3182,7 @@ export function ProposedBlock({ row, proposed, model, hear }: {
   }, [heard?.state]);
   const sent = proposed.sentAs?.map((part) => part.text).join(" ") ?? normalizeSpeechText(row.block.text);
   // The requests a read makes: the coordinator's count once it has quoted, the parts the markers make before (codex on PR 1479).
-  const reads = heard?.state === "priced" ? heard.parts : (proposed.sentAs?.length ?? 1);
+  const reads = heard?.state === "priced" ? heard.parts : (proposed.requestParts?.length ?? proposed.sentAs?.length ?? 1);
   const tokenPriced = model?.pricing.kind === "perToken" && model.speechPlan !== "free-plan";
   const plan = speechPlanLabel(model);
   const price = model === null || tokenPriced || plan !== null || row.speaker.provider === "kokoro" ? 0 : estimateSpeechMicroUsd(model, sent);

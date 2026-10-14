@@ -1947,13 +1947,27 @@ describe("grouped reads (design turn 185)", () => {
     assert.equal(answered.confirmationToken, "tok");
   });
 
+  it("Gemini display turns retain one solo request and its estimate", async () => {
+    const { compileAudiobookPerformance, quoteGroupedSpeech } = await import("@arke-studio/contracts");
+    const { performedDirectionView, soloRowEstimate } = await import("../src/screens/chapter-audiobook.js");
+    const block = { key: "p0.0", paragraph: 0, text: '"Hold." He checked the ridge. "Move."', rows: [
+      { text: '"Hold."', speaker: "Zeb" }, { text: "He checked the ridge." }, { text: '"Move."', speaker: "Jace" },
+    ] };
+    const compiled = compileAudiobookPerformance(block, { reading: "performed", notes: { Zeb: "dry British delivery", Jace: "calm stoic American delivery" } }, null, GEMINI, { book: "natural American narration" })!;
+    const view = performedDirectionView(compiled);
+    assert.equal(view.sentAs.length, 3, "each character and narrator style is visible");
+    assert.equal(view.requestParts!.length, 1, "three styles do not mean three synthesis requests");
+    assert.equal(soloRowEstimate(view, GEMINI), quoteGroupedSpeech(GEMINI, compiled.styledParts![0]!).expectedMicroUsd);
+    assert.deepEqual(view.sentAs.map(part => part.style), ["dry British delivery", "Natural American narration.", "calm stoic American delivery"]);
+  });
+
   for (const requests of [undefined, "per-paragraph"] as const) it(`prices the compiled v4 request (${requests ?? "grouped"}) before purchasing`, async () => {
     const state = grouped(requests);
     const v4: ManifestModel = { ...GEMINI, provider: "elevenlabs", id: "eleven_v4", displayName: "Eleven v4", pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       limits: { audioFormat: "wav", maxPromptChars: 10000 }, cadence: { ...GEMINI.cadence!, phrase: "best-effort-tag", tagSyntax: "bracket", tagChars: 160 } };
     const reader = { provider: "elevenlabs" as const, model: v4.id, voiceId: "calen", label: "Calen" };
     state.app.manifest = { ...state.app.manifest!, models: [...state.app.manifest!.models, v4] };
-    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, note: "measured American narration", notes: { "maren-kest": "slight pitch lift" } } } : p) };
+    state.world = { ...state.world!, productions: state.world!.productions.map(p => p.meta.id === "inkbound" ? { ...p, audiobook: { schemaVersion: 1, reading: "performed", ...(requests ? { requests } : {}), narrator: reader, note: "measured American narration, deliberate pacing, restrained tension, with clear articulation and unhurried transitions", notes: { "maren-kest": "slight pitch lift" } } } : p) };
     const m = await mount(state);
     await answerOpen(m);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
@@ -1964,7 +1978,8 @@ describe("grouped reads (design turn 185)", () => {
     await answerOpen(plain);
     await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...reader, attributes: [], local: false, canClone: false, usedBy: [] }] }));
     const plainPrice = q(plain, '[data-testid="read-audiobook"]')!.textContent!.match(/\$([\d.]+)/)![1]!;
-    assert.ok(Number(displayedPrice) > Number(plainPrice), "the audible narration direction is priced, without assuming redundant identity tags");
+    // A substantial note keeps the difference visible after currency rounding and request-level deduplication.
+    assert.ok(Number(displayedPrice) > Number(plainPrice), `the audible narration direction is priced: ${displayedPrice} versus ${plainPrice}`);
     await act(async () => plain.root.unmount());
     open.splice(open.indexOf(plain), 1); plain.container.remove();
     if (requests === "per-paragraph") return;
