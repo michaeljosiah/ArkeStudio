@@ -36,7 +36,7 @@ function shortAttribution(text: string): boolean {
 export interface PerformancePassage {
   lead: string;
   narration: string;
-  runs: Array<{ identity: string; text: string; restore?: boolean; directed?: boolean; attribution?: boolean }>;
+  runs: Array<{ identity: string; text: string; directed?: boolean; attribution?: boolean }>;
 }
 export interface PerformanceState { narration: string; lead: string; identity: string; directed: boolean }
 
@@ -47,12 +47,14 @@ export function renderPerformancePassage(passage: PerformancePassage, previous?:
   let directed = !fresh && previous.directed;
   const words: string[] = fresh && passage.lead ? [passage.lead] : [];
   for (const run of passage.runs) {
-    if (run.attribution && !directed && !run.directed && !run.restore && identity !== passage.narration) {
+    if (run.attribution && !directed && !run.directed && identity !== passage.narration) {
       words.push(run.text);
       continue;
     }
-    if (directed) words.push("[normal speaking voice]");
-    if (run.identity !== identity || run.restore || directed) words.push(run.identity);
+    // A changed identity already restores its baseline, including the narrator's accent.
+    // Only the same character needs an explicit end to temporary delivery.
+    if (directed && run.identity === identity && identity !== passage.narration) words.push("[normal speaking voice]");
+    if (run.identity !== identity || directed) words.push(run.identity);
     words.push(run.text);
     identity = run.identity;
     directed = run.directed === true;
@@ -142,10 +144,11 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
       const segments = markerSegments(words, local, model);
       for (const segment of segments) {
         const mapped = sentAs(segment.text, segment.plan, model);
-        // A parts-only marker has no inline reset. Restate normal delivery and character
-        // identity before each segment so a whisper cannot spill into the following words.
+        // Keep segment boundaries structured: the renderer owns resets once the actual
+        // request is grouped, so a local marker cannot add a second narrator reset.
         const directed = mapped.sent.delivery !== undefined && mapped.sent.delivery !== "measured" || mapped.sent.note !== undefined || mapped.sent.cues.some(cue => cue.kind === "delivery");
-        const run = { identity, directed, attribution, text: `${segments.length > 1 ? "[normal speaking voice] " : ""}${mapped.text}`, ...(segments.length > 1 ? { restore: true } : {}) };
+        // A marked attribution is narration throughout, including any unmarked prefix.
+        const run = { identity, directed, attribution: attribution && segments.length === 1, text: mapped.text };
         if (!speechInputFits(renderPerformancePassage({ lead, narration, runs: [run] }).text, model.limits)) {
           if (segment.text.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
           for (const piece of splitSpeechInput(segment.text, { maxPromptChars: Math.floor(segment.text.length / 2) })) render(from + segment.from + piece.from, from + segment.from + piece.to);
