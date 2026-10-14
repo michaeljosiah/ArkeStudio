@@ -87,3 +87,19 @@ an accent reset. Action, changed speakers, longer narration and temporary delive
 This is a conservative English reporting-clause heuristic, not universal language understanding.
 Manuscript words, quotation marks and paragraph boundaries must survive unchanged. The reviewed
 Threshold opening has 14 tags and 11 paragraph breaks; its lean preview has not been synthesized.
+
+
+Character narration ownership (2026-10-14, issue #1765): the character Voice tab, the
+Reading sheet and chapter speaker editors now edit the character's `narration` by default.
+A book difference requires the explicit **Override for this book** control. Existing overrides
+remain intact and visible; **Use character narration** removes only that book's override.
+Speakers without an active character sheet retain book-scoped directions.
+
+The Voice tab shows overrides even when entered without book context, and offers a book
+selector. Each book panel shows the saved effective character cue and source. V4 previews
+and the request compiler share `characterPerformanceDirection`, including legacy scaffold
+cleanup and provider limits. Held cues and non-performed reading modes are labelled as not
+sent. This is the standing character cue; the complete confirmation request still shows
+line delivery, pauses, narration returns and grouping. Editing never generates audio.
+Existing notes are not silently migrated between books. Moving an existing book note to a
+character is a deliberate content change, checked against the current effective direction.

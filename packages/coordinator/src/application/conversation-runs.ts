@@ -26,6 +26,8 @@ import { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import { ConversationImages } from "../world-chat/images.js";
 import { ConversationMediaInspection } from "../world-chat/media-inspection.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
+import type { AgentSpeechReader } from "../media/agent-speech.js";
+import type { AgentAudioListener } from "../media/agent-listening.js";
 import type { ImageRenditionMaker } from "../world-chat/image-rendition.js";
 import { LeaseDeniedError } from "../world-chat/lease.js";
 import { WorldChatAttachmentStore, MAX_TEXT_PER_RUN_CHARS } from "../world-chat/attachments.js";
@@ -58,6 +60,9 @@ export interface ConversationRunDependencies {
   researchAllowed: NonNullable<RetrievalDeps["researchAllowed"]>;
   imageRenditionMaker?: ImageRenditionMaker;
   agentMediaTools?: AgentMediaTools;
+  agentSpeechReader?: AgentSpeechReader;
+  agentAudioListener?: AgentAudioListener;
+  agentSpeechReady?: (signal: AbortSignal) => Promise<boolean>;
   imageInspectionAllowed?: (provider: string) => Promise<boolean>;
   publishImageDisclosure?: (conversationId: import("@arke-studio/contracts").ConversationId) => Promise<void>;
   resolveLanguageModel: NonNullable<RunDeps["resolveLanguageModel"]>;
@@ -81,7 +86,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     allowed: provider => deps.imageInspectionAllowed?.(provider) ?? Promise.resolve(false),
     publish: id => deps.publishImageDisclosure?.(id) ?? Promise.resolve(),
   });
-  const media = new ConversationMediaInspection(store, leases, { tools: deps.agentMediaTools, images,
+  const media = new ConversationMediaInspection(store, leases, { tools: deps.agentMediaTools, listener: deps.agentAudioListener, speech: deps.agentSpeechReader, speechReady: deps.agentSpeechReady, images,
     publish: id => deps.publishImageDisclosure?.(id) ?? Promise.resolve(), });
   const retrieval = new WorldChatRetrieval({
     readMedia: (lease, name, args) => media.read(lease, name, args),

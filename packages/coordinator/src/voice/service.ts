@@ -55,7 +55,7 @@ export interface SidecarLike {
    * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
    * depending on @arke-studio/voice.
    */
-  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
+  health(options?: { signal?: AbortSignal }): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
@@ -469,13 +469,21 @@ export class VoiceService {
     designedVoices: readonly Pick<import("@arke-studio/contracts").WorldDesignedVoice, "id" | "revision" | "name" | "description" | "expiresAt">[] = [],
     errors?: string[],
   ): Promise<VoiceCandidate[]> {
-    const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
-    return [...await this.rawCatalogue(clonedVoices, errors),
-      ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
-        ...this.deps.readerAvailability?.("google"),
-        ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
-      }))]
-      .filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+    // Refresh covers the whole answer, including local health and clone availability.
+    // A slow cloud response must not bring back local rows captured before the refresh.
+    while (true) {
+      const revision = this.catalogueRevision;
+      const currentErrors: string[] = [];
+      const keyed = designedVoices.length === 0 || await this.deps.getKey("google") !== null;
+      const rows = [...await this.rawCatalogue(clonedVoices, currentErrors),
+        ...designedVoiceCandidates(designedVoices).map(voice => ({ ...voice,
+          ...this.deps.readerAvailability?.("google"),
+          ...(!keyed ? { unavailableReason: "Connect the Google project that owns this voice. Saved audio still plays." } : {}),
+        }))].filter(voice => supportsVoiceUse(voice, "preview") && this.deps.modelEnabled?.(voice.model) !== false);
+      if (revision !== this.catalogueRevision) continue;
+      errors?.push(...currentErrors);
+      return rows;
+    }
   }
 
   private async rawCatalogue(
@@ -589,8 +597,17 @@ export class VoiceService {
   private readonly cloudLists = new Map<string, { key: string; at: number; voices: Promise<VoiceCandidate[]> }>();
 
   /** An explicit refresh bypasses the TTL; ordinary readers still share one in-flight list. */
+  private catalogueRevision = 0;
+
   invalidateCloudCatalogue(): void {
+    this.catalogueRevision++;
     this.cloudLists.clear();
+  }
+
+  private async currentCloudList(source: CloudVoiceSource): Promise<VoiceCandidate[]> {
+    // Never let an overtaken invocation reinstall its obsolete credential in the cache.
+    const key = await this.deps.getKey(source.provider);
+    return key === null ? [] : this.cloudList(source, key);
   }
 
   private async cloudList(source: CloudVoiceSource, key: string): Promise<VoiceCandidate[]> {
@@ -608,10 +625,10 @@ export class VoiceService {
     try { voices = await entry.voices; }
     catch (error) {
       // An explicit refresh may have replaced an older request while it was in flight.
-      if (this.cloudLists.has(source.provider) && this.cloudLists.get(source.provider) !== entry) return this.cloudList(source, key);
+      if (this.cloudLists.has(source.provider) && this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
       throw error;
     }
-    if (this.cloudLists.get(source.provider) !== entry) return this.cloudList(source, key);
+    if (this.cloudLists.get(source.provider) !== entry) return this.currentCloudList(source);
     // Copies, so no reader's change to a row reaches the next reader's list.
     return voices.map((voice) => ({ ...voice }));
   }
@@ -914,13 +931,18 @@ export class VoiceService {
     return this.deps.sidecar.transcribe(audio, contentType);
   }
 
-  async wordTimingAvailability(): Promise<{ ready: boolean; reason?: string }> {
+  async wordTimingAvailability(signal?: AbortSignal): Promise<{ ready: boolean; reason?: string }> {
+    signal?.throwIfAborted();
     if (this.deps.sidecar?.transcribeWords === undefined) return { ready: false, reason: "this local voice runtime does not provide measured word timing" };
-    return (await this.deps.sidecar.health())?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
+    const health = await this.deps.sidecar.health(signal ? { signal } : undefined);
+    signal?.throwIfAborted();
+    return health?.wordTiming ?? { ready: false, reason: "measured word timing is unavailable · update the local voice runtime" };
   }
 
   async transcribeWords(audio: Uint8Array, signal: AbortSignal): Promise<AcousticWords> {
-    const ready = await this.wordTimingAvailability();
+    signal.throwIfAborted();
+    const ready = await this.wordTimingAvailability(signal);
+    signal.throwIfAborted();
     if (!ready.ready || this.deps.sidecar?.transcribeWords === undefined) throw new Error(ready.reason ?? "measured word timing is unavailable");
     return this.deps.sidecar.transcribeWords(audio, { signal });
   }

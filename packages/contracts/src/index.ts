@@ -184,7 +184,7 @@ export * from "./turn-action-sequencing.js";
 export * from "./human-decision.js";
 export * from "./production-readiness.js";
 export * from "./production-card-preview.js";
-export { audiblePerformanceBrief, compileAudiobookPerformance, renderPerformancePassage, type PerformancePassage, type PerformanceState } from "./audiobook-performance.js";
+export { audiblePerformanceBrief, characterPerformanceDirection, compileAudiobookPerformance, renderPerformancePassage, type PerformancePassage, type PerformanceState } from "./audiobook-performance.js";
 
 export { EXPRESSIVE_PHRASES } from "./direction-tags.js";
 export * from "./browser-media-import.js";
@@ -194,4 +194,6 @@ export * from "./editor-picture-appearance.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";
+export * from "./agent-audio.js";
+export * from "./agent-listening.js";
 export * from "./story-publication.js";

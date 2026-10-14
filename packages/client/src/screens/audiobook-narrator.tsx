@@ -7,7 +7,7 @@ import { DesignVoiceDialog } from "../components/design-voice-dialog.js";
 import { Button } from "../components/ui.js";
 import { playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
-import { hearAudiobookLine, quoteAudiobookNarrator, setAudiobookNarrator, useHeardLines, useNarratorQuotes, useStore, type ReadingVoice } from "../lib/store.js";
+import { requestVoiceCatalogue, hearAudiobookLine, quoteAudiobookNarrator, setAudiobookNarrator, useHeardLines, useNarratorQuotes, useStore, type ReadingVoice } from "../lib/store.js";
 
 const same = (a: AudiobookReader | null | undefined, b: AudiobookReader | null | undefined) =>
   a != null && b != null && a.provider === b.provider && a.model === b.model && a.voiceId === b.voiceId;
@@ -61,7 +61,7 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   data: string;
   onClose: () => void;
 }) {
-  const { state, voiceCatalogue } = useStore();
+  const { state, voiceCatalogue, voiceCatalogueErrors } = useStore();
   const models = state?.app.manifest?.models ?? [];
   const disabledModels = state?.app.models.disabled;
   const rowOf = (voice: { provider: string; model: string }) => models.find((m) => m.provider === voice.provider && m.id === voice.model && m.capability === "voice-tts");
@@ -191,6 +191,8 @@ export function NarratorDialog({ worldId, productionId, narratorLabel, bookNarra
   let first = true;
   const list_ = (
     <div className="fy-abnarr__pick">
+      <button type="button" disabled={voiceCatalogue === null} onClick={() => requestVoiceCatalogue(worldId, true)}>{voiceCatalogue === null ? "Refreshing catalogue…" : "Refresh catalogue"}</button>
+      {voiceCatalogueErrors.length > 0 && <p role="alert">{voiceCatalogueErrors.join(" ")}</p>}
       <input
         ref={searchBox}
         className="fy-abnarr__search"

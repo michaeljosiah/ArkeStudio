@@ -318,9 +318,12 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       break;
   }
   switch (receipt.tool) {
+    case "listen-audio": return "local audio model reviewed the supplied interval; subjective interpretation";
     case "inspect-media": return "read verified media metadata only";
     case "sample-video": return `inspected ${receipt.media?.frames?.length ?? 0} timestamped still frames; gaps unreviewed`;
     case "analyze-audio-signal": return "measured original audio channels; no listening judgment";
+    case "transcribe-audio": return "recognized speech locally; automatic words may be wrong";
+    case "review-audio-content": return "compared recognized speech with the supplied script; delivery unreviewed";
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":

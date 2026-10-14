@@ -29,6 +29,7 @@ import {
   ComfyUiEngineService,
   Coordinator,
   createStudioHost,
+  localAudioListenerOptions,
   createNodeEffectRasterHost,
   createNodeEffectAudioAnalysisHost,
   type StudioServer,
@@ -1065,8 +1066,8 @@ async function initialize(): Promise<{ port: number }> {
      * Null when no runtime was found at all, which the catalogue reads as "unknown, leave the
      * configured presets alone" rather than "failed, offer nothing".
      */
-    health: () =>
-      voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
+    health: (options?: { signal?: AbortSignal }) =>
+      voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(options),
     listVoices: () => voxaClient.listVoices(),
     // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
     // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
@@ -1337,6 +1338,7 @@ async function initialize(): Promise<{ port: number }> {
         }
       : {}),
     ...audioMediaOptions(ffmpegPath(), ffprobeResolution().path),
+    ...localAudioListenerOptions(app.isPackaged ? join(process.resourcesPath, "audio-listener", "local-audio-listener.py") : join(__dirname, "local-audio-listener.py")),
     performanceSpool,
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is
     // unknown, and the cut cannot check a take against the window it was cut for. Wired

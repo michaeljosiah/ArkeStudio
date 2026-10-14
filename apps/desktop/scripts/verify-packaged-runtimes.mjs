@@ -1,12 +1,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 
 export default async function verifyPackagedRuntimes(context) {
   const arch = context.arch === 1 ? "x64" : context.arch === 3 ? "arm64" : null;
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
+  assertAudioListenerWorker(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);
@@ -107,6 +109,14 @@ export default async function verifyPackagedRuntimes(context) {
   }
   const nativeIndex = join(resources, "app.asar.unpacked", "node_modules", "better-sqlite3-electron", "build", "Release", "better_sqlite3.node");
   if (existsSync(nativeIndex)) assertPeArchitecture(nativeIndex, arch);
+}
+
+/** A worker hidden inside app.asar would pass Electron reads but fail Python startup. */
+export function assertAudioListenerWorker(resources) {
+  const source = fileURLToPath(new URL("../../../packages/coordinator/src/media/local-audio-listener.py", import.meta.url));
+  const installed = join(resources, "audio-listener", "local-audio-listener.py");
+  const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
+  if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
 }
 
 /**

@@ -171,7 +171,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 77: SPEC-055 Air Particles, Pattern, physics, picture appearance and protected review.
 // 78: expressive audiobook direction: longer character briefs, phrases and vocalizations.
 // 79: immutable, leased agent media evidence and durable coverage receipts.
-export const SUPPORTED_SCHEMA_VERSION = 79;
+// 80: local measured speech evidence and transcript-grounded content review receipts.
+export const SUPPORTED_SCHEMA_VERSION = 81;
 
 export class WorldOpenError extends Error {
   constructor(

@@ -2,6 +2,9 @@ import { z } from "zod";
 import { FullSha256Schema } from "./audio.js";
 import { SessionIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { ImageObservationSchema } from "./world-chat-images.js";
+import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeechTranscript } from "./agent-audio.js";
+
+import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudioListening } from "./agent-listening.js";
 
 export const AGENT_MEDIA_SCHEMA_VERSION = 79;
 export const AGENT_MEDIA_PROFILE = "arke-media-evidence-v1";
@@ -25,6 +28,10 @@ export const SampleVideoArgsSchema = z.object({ source: AgentMediaSourceSchema, 
   streamIndex: z.number().int().min(0).max(255).optional() }).strict();
 export const AnalyzeAudioArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema,
   streamIndex: z.number().int().min(0).max(255).optional() }).strict();
+export const ListenAudioArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema.refine(range => range.endSec - range.startSec <= 30, "Listening clips are at most 30 seconds"),
+  streamIndex: z.number().int().min(0).max(255).optional(), focuses: AgentListeningFocusesSchema }).strict();
+export const ReviewAudioContentArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema,
+  streamIndex: z.number().int().min(0).max(255).optional(), expectedText: AgentTranscriptTextSchema }).strict();
 export const AgentMediaStreamSchema = z.object({ index: z.number().int().min(0).max(255),
   kind: z.enum(["video", "audio", "other"]), codec: z.string().max(80),
   width: z.number().int().positive().optional(), height: z.number().int().positive().optional(),
@@ -49,20 +56,40 @@ export const AgentMediaFrameSchema = z.object({ requestedSourceTimeSec: time, so
 export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; source: AgentMediaSource; decoderVersion: string; probeVersion: string;
   sourceHash: string; byteLength: number; sourceStartSec: number; sourceEndSec: number | null; inventory: AgentMediaInventory;
   range?: { startSec: number; endSec: number }; frames?: Array<z.infer<typeof AgentMediaFrameSchema>>; audio?: AudioSignal;
-  coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples"; limitations: string[] };
+  transcript?: AgentSpeechTranscript; listening?: AgentAudioListening;
+  coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples" | "recognized-speech" | "model-audio-listening"; limitations: string[] };
 export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.object({ profile: z.literal(AGENT_MEDIA_PROFILE), source: AgentMediaSourceSchema,
   decoderVersion: z.string().min(1).max(200),
   probeVersion: z.string().min(1).max(200),
   sourceHash: FullSha256Schema, byteLength: z.number().int().positive(),
   sourceStartSec: time, sourceEndSec: time.nullable(), inventory: AgentMediaInventorySchema,
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),
-  audio: AudioSignalSchema.optional(), coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples"]),
+  listening: AgentAudioListeningSchema.optional(), audio: AudioSignalSchema.optional(), transcript: AgentSpeechTranscriptSchema.optional(), coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples", "recognized-speech", "model-audio-listening"]),
   limitations: z.array(z.string().min(1).max(500)).min(1).max(8) }).strict().superRefine((value, context) => {
     if (value.sourceEndSec !== null && value.sourceEndSec < value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
     if (value.coverage === "sampled-frames-only" && (!value.range || !value.frames || value.audio) ||
       value.coverage === "decoded-audio-samples" && (!value.range || !value.audio || value.frames) ||
-      value.coverage === "metadata-only" && (value.frames || value.audio || value.range)) {
+      value.coverage === "metadata-only" && (value.frames || value.audio || value.range) ||
+      value.coverage === "recognized-speech" && (!value.range || !value.transcript || value.frames || value.audio) ||
+      value.coverage !== "recognized-speech" && value.transcript ||
+      value.coverage === "model-audio-listening" && (!value.range || !value.listening || value.frames || value.audio || value.transcript) ||
+      value.coverage !== "model-audio-listening" && value.listening) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence must match its declared coverage" });
+    }
+    if (value.listening && (!value.range || Math.abs(value.listening.derivative.durationSec - (value.range.endSec - value.range.startSec)) > .025 ||
+      !value.inventory.streams.some(stream => stream.kind === "audio" && stream.index === value.listening!.streamIndex))) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Listening must retain its selected audio stream and interval" });
+    }
+    if (value.transcript) {
+      const transcript = value.transcript;
+      if (!value.range || !value.inventory.streams.some(stream => stream.kind === "audio" && stream.index === transcript.streamIndex) ||
+        Math.abs(transcript.derivative.durationSec - (value.range.endSec - value.range.startSec)) > .025 ||
+        transcript.words.some(word => Math.abs(word.viewStartSec - (value.range!.startSec + word.startSec)) > .000001 ||
+          Math.abs(word.viewEndSec - (value.range!.startSec + word.endSec)) > .000001 ||
+          Math.abs(word.sourceStartSec - (value.sourceStartSec + word.viewStartSec)) > .000001 ||
+          Math.abs(word.sourceEndSec - (value.sourceStartSec + word.viewEndSec)) > .000001)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Speech word times must retain the selected stream and source/view interval" });
+      }
     }
     if (value.range && (value.sourceEndSec === null || value.sourceStartSec + value.range.endSec > value.sourceEndSec + .000001)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence interval exceeds its source" });
     for (const frame of value.frames ?? []) {

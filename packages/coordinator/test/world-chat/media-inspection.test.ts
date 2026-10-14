@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, measureAudioSignal, LOCAL_ACTOR_ID, type ConversationActionPrepareIntent, type HarnessAdapter, type AgentMediaInventory, type Take } from "@arke-studio/contracts";
+import { writeSpeechWav } from "../../src/audio/speech-wav.js";
+import type { AgentSpeechReader } from "../../src/media/agent-speech.js";
+import type { AgentAudioListener } from "../../src/media/agent-listening.js";
 import { WorldStore } from "../../src/world/store.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
@@ -26,7 +29,7 @@ const inventory: AgentMediaInventory = { durationSec: 10, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 3, height: 2, durationSec: 10, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: 4, channels: 2, durationSec: 10, startTimeSec: 0 },
 ] };
-async function harness(options: { local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
+async function harness(options: { listener?: AgentAudioListener; speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), id = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-10-13T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Media", entryContext: { kind: "world" } });
@@ -42,8 +45,9 @@ async function harness(options: { local?: boolean; allowed?: boolean; supported?
   const tools = { version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture", probe: async (path: string) => { snapshots++; assert.deepEqual(await readFile(path), Buffer.from(png)); await options.duringProbe?.(); return options.inventory ?? inventory; },
     frame: async (_path: string, _stream: number, at: number) => { frames++; await options.duringFrame?.(); return { bytes: png, width: 3, height: 2, sourceTimeSec: at }; },
     audio: async (_path: string, stream: AgentMediaInventory["streams"][number], start: number, end: number) => {
-      const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); }, };
-  const media = new ConversationMediaInspection(store, leases, { images, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
+      const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); },
+    speechAudio: async (_path: string, _stream: unknown, start: number, end: number) => ({ bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(Math.round((end - start) * 16000)) }), durationSec: end - start }), };
+  const media = new ConversationMediaInspection(store, leases, { images, listener: options.listener, speech: options.speech, speechReady: options.speechReady, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, leases, lease, cv, images, media, retrieval, source: { kind: "artifact" as const, id }, stop,
@@ -55,6 +59,142 @@ test("metadata receipts replay and raise the reader boundary without claiming pi
   assert.equal(outcome.receipt.media!.coverage, "metadata-only"); assert.equal(outcome.imageContent, undefined);
   assert.equal((await h.loaded())!.mediaReceipts!.length, 1); assert.equal(h.store.getBundle().meta.schemaVersion, 79);
   await assert.rejects(readWorldMeta(h.store.dir, { supports: 78 }), /newer|version|schema/i);
+});
+
+const speechAnswer = { text: "Stay here", seconds: 1, engine: { id: "whisper.cpp/dtw-word-boundaries-v1", version: "fixture-1", model: "fixture" },
+  words: [{ text: "Stay", startSec: .1, endSec: .3, probability: .9 }, { text: "here", startSec: .4, endSec: .8, probability: .2 }] };
+
+const listeningAnswer = { engine: { id: "local-qwen2-audio-v1" as const, model: "Qwen2-Audio-7B-Instruct" as const,
+  modelHash: hash(Buffer.from("model fixture")), runtime: "fixture-1" }, review: "The voice sounds restrained; soft strings support the slow pulse." };
+const listener: AgentAudioListener = { ready: async () => true, listen: async () => listeningAnswer };
+
+test("local listening serves subjective music/emotion/delivery text through leased MCP and replays schema 81 without audio bytes", async () => {
+  let calls = 0;
+  const h = await harness({ allowed: false, supported: false, listener: { ...listener, listen: async (bytes, focuses) => {
+    calls++; assert.ok(bytes.length > 32000); assert.deepEqual(focuses, ["music", "emotion", "voice-delivery"]); return listeningAnswer;
+  } } });
+  const server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
+  server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: () => {} });
+  const response = await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "listen_audio", arguments: { source: h.source,
+      range: { startSec: 3, endSec: 4 }, focuses: ["music", "emotion", "voice-delivery"] } } }) });
+  const body = await response.json() as { result: { content: Array<{ type: string; text?: string }> } };
+  assert.equal(calls, 1); assert.ok(body.result.content.every(content => content.type === "text"));
+  const result = JSON.parse(body.result.content[0]!.text!);
+  assert.equal(result.coverage, "model-audio-listening"); assert.equal(result.listening.review, listeningAnswer.review);
+  assert.deepEqual(result.range, { startSec: 3, endSec: 4 }); assert.equal(result.listening.streamIndex, 1);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 81); await assert.rejects(readWorldMeta(h.store.dir, { supports: 80 }), /newer Arke/);
+  const loaded = (await h.loaded())!;
+  assert.deepEqual(loaded.mediaReceipts![0]!.media, result); assert.equal(loaded.imageDisclosures, undefined);
+  assert.ok(!JSON.stringify(loaded.mediaReceipts).includes("base64"));
+});
+
+test("unavailable listening refuses before decoding/budgets, recovers, and retains its separate two-call limit", async () => {
+  const absent = await harness();
+  assert.equal((await absent.retrieval.call(absent.lease.token, "listen_audio", { source: absent.source, range: { startSec: 0, endSec: 1 }, focuses: ["music"] })).receipt.status, "unavailable");
+  assert.equal(absent.counts().snapshots, 0);
+  let ready = false;
+  const h = await harness({ listener: { ...listener, ready: async () => ready } }), before = h.store.getBundle().meta.schemaVersion;
+  const args = { source: h.source, range: { startSec: 0, endSec: 1 }, focuses: ["music"] };
+  for (let i = 0; i < 17; i++) assert.equal((await h.retrieval.call(h.lease.token, "listen_audio", args)).receipt.status, "unavailable");
+  assert.equal(h.counts().snapshots, 0); assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+  ready = true;
+  for (let i = 0; i < 2; i++) assert.equal((await h.retrieval.call(h.lease.token, "listen_audio", args)).receipt.status, "complete");
+  await assert.rejects(h.retrieval.call(h.lease.token, "listen_audio", args), /two audio listening/);
+});
+
+for (const revoke of ["abort", "world", "lease", "close", "bytes", "publish"] as const) test(`listening cannot deliver evidence after ${revoke} changes`, async () => {
+  let h: Awaited<ReturnType<typeof harness>>;
+  const revokeAccess = async () => {
+    if (revoke === "abort" || revoke === "publish") h.stop.abort();
+    else if (revoke === "world") h.setActive(null);
+    else if (revoke === "lease") h.leases.revokeRun(h.lease.runId);
+    else if (revoke === "close") await h.store.close();
+    else await writeFile(join(h.store.dir, "artifacts", "inspect.mp4"), "changed");
+  };
+  h = await harness({ listener: { ...listener, listen: async () => { if (revoke !== "publish") await revokeAccess(); return listeningAnswer; } },
+    ...(revoke === "publish" ? { duringPublish: revokeAccess } : {}) });
+  try { assert.equal((await h.retrieval.call(h.lease.token, "listen_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, focuses: ["emotion"] })).receipt.status, "unavailable"); }
+  catch (error) { assert.ok(error instanceof LeaseDeniedError); }
+  if (revoke !== "publish") assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("listening requires explicit ambiguous streams and validates interval/focus before invoking the worker", async () => {
+  let calls = 0;
+  const h = await harness({ listener: { ...listener, listen: async () => { calls++; return listeningAnswer; } },
+    inventory: { ...inventory, streams: [...inventory.streams, { ...inventory.streams[1]!, index: 2 }] } });
+  await assert.rejects(h.retrieval.call(h.lease.token, "listen_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, focuses: ["music"] }), /explicit audio/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "listen_audio", { source: h.source, range: { startSec: 0, endSec: 31 }, focuses: ["music"] }), /valid interval/);
+  assert.equal(calls, 0);
+});
+
+test("local speech receipts replay with schema 80 and source/view times without image permission or raw audio", async () => {
+  const h = await harness({ allowed: false, supported: false, speech: async () => speechAnswer });
+  const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 3, endSec: 4 } });
+  assert.equal(outcome.receipt.status, "complete"); assert.equal(outcome.receipt.media!.coverage, "recognized-speech");
+  assert.equal(outcome.receipt.media!.transcript!.words[0]!.sourceStartSec, 3.1);
+  assert.equal(outcome.imageContent, undefined); assert.equal((await h.loaded())!.imageDisclosures, undefined);
+  const persisted = (await h.loaded())!.mediaReceipts![0]!;
+  assert.deepEqual(persisted, outcome.receipt); assert.equal(h.store.getBundle().meta.schemaVersion, 80);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 79 }), /newer Arke/);
+  assert.equal(JSON.stringify(outcome.result).includes("base64"), false);
+});
+
+test("speech-content review returns a script-bound wording diff as evidence for the agent's semantic interpretation", async () => {
+  const h = await harness({ speech: async () => speechAnswer });
+  const server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
+  server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: () => {} });
+  const response = await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "review_audio_content",
+      arguments: { source: h.source, range: { startSec: 0, endSec: 1 }, expectedText: "Do not stay here" } } }) });
+  const result = await response.json() as { result: { content: Array<{ type: string; text?: string }> } };
+  assert.ok(result.result.content.every(block => block.type === "text"));
+  const receipt = (await h.loaded())!.mediaReceipts![0]!, review = receipt.media!.transcript!.contentReview!;
+  assert.equal(receipt.tool, "review-audio-content"); assert.equal(review.expectedText, "Do not stay here");
+  assert.equal(review.comparison.status === "compared" && review.comparison.result, "mismatch");
+  assert.ok(receipt.media!.limitations.some(text => text.includes("untrusted")));
+});
+
+test("missing speech runtime fails before decoding and does not raise the world schema", async () => {
+  const h = await harness(), before = h.store.getBundle().meta.schemaVersion;
+  const result = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.equal(result.receipt.status, "unavailable"); assert.equal(h.counts().snapshots, 0);
+  assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("a configured reader with an offline runtime refuses before decoding or budgets and recovers in the same conversation", async () => {
+  let ready = false, calls = 0;
+  const h = await harness({ speechReady: async signal => { signal.throwIfAborted(); return ready; }, speech: async () => { calls++; return speechAnswer; } });
+  const args = { source: h.source, range: { startSec: 0, endSec: 1 } }, before = h.store.getBundle().meta.schemaVersion;
+  for (let i = 0; i < 17; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", args)).receipt.status, "unavailable");
+  assert.equal(h.counts().snapshots, 0); assert.equal(calls, 0); assert.equal(h.store.getBundle().meta.schemaVersion, before);
+  ready = true;
+  for (let i = 0; i < 4; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", args)).receipt.status, "complete");
+  assert.equal(calls, 4);
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech/);
+});
+
+test("speech stream ambiguity, invalid references and per-run recognition budget are enforced", async () => {
+  const h = await harness({ speech: async () => speechAnswer, inventory: { ...inventory, streams: [...inventory.streams, { ...inventory.streams[1]!, index: 2 }] } });
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } }), /explicit audio/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "review_audio_content", { source: h.source, range: { startSec: 0, endSec: 1 }, expectedText: "" }), /valid interval/);
+  for (let i = 0; i < 3; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, streamIndex: 2 })).receipt.status, "complete");
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, streamIndex: 2 }), /four speech/);
+});
+
+for (const revoke of ["abort", "world", "lease", "close", "bytes"] as const) test(`speech evidence cannot finish after ${revoke} changes during recognition`, async () => {
+  let h: Awaited<ReturnType<typeof harness>>;
+  h = await harness({ speech: async () => {
+    if (revoke === "abort") h.stop.abort();
+    else if (revoke === "world") h.setActive(null);
+    else if (revoke === "lease") h.leases.revokeRun(h.lease.runId);
+    else if (revoke === "close") await h.store.close();
+    else await writeFile(join(h.store.dir, "artifacts", "inspect.mp4"), "changed");
+    return speechAnswer;
+  } });
+  try { assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } })).receipt.status, "unavailable"); }
+  catch (error) { assert.ok(error instanceof LeaseDeniedError); }
+  assert.equal((await h.loaded())!.mediaReceipts, undefined);
 });
 test("sampled frames deliver actual pixels, source times, source/rendition hashes and cloud disclosures", async () => {
   const h = await harness(), outcome = await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 1, endSec: 3 }, count: 2 });
@@ -84,7 +224,7 @@ test("the shared leased MCP catalog serves frame images as image blocks and reco
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
   const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
-  for (const name of ["inspect_media", "sample_video", "analyze_audio_signal"]) assert.ok(listed.result.tools.some((tool: { name: string }) => tool.name === name));
+  for (const name of ["inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content"]) assert.ok(listed.result.tools.some((tool: { name: string }) => tool.name === name));
   const reply = await rpc("tools/call", { name: "sample_video", arguments: { source: h.source, range: { startSec: 0, endSec: 1 }, count: 2 } }) as { result: { content: Array<{ type: string }> } };
   assert.equal(reply.result.content.filter((block: { type: string }) => block.type === "image").length, 2); assert.equal(served, "sample-video");
   assert.equal((await h.loaded())!.mediaReceipts!.length, 1);
@@ -143,7 +283,7 @@ test("inspection range, immutable identity and host call budgets are enforced", 
   await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: h.source }), /call budget/);
 });
 test("a trimmed segment reports both take-relative and actual source times", async () => {
-  const h = await harness(), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
+  const h = await harness({ listener, speech: async () => speechAnswer }), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
   const parentId = newId("tk"), segmentId = newId("tk"), parent: Take = { ...base, id: parentId, media: "source.mp4", mediaHash: hash(png) };
   const segment: Take = { ...base, id: segmentId, segment: { passTakeId: parentId, inSec: 2, outSec: 5 } }; delete segment.media; delete segment.mediaHash;
   await h.store.commit({ kind: "segment-fixture", source: "test", files: [
@@ -152,9 +292,15 @@ test("a trimmed segment reports both take-relative and actual source times", asy
   ] });
   const outcome = await h.retrieval.call(h.lease.token, "sample_video", { source: { kind: "production-take", productionId: "saltlight", takeId: segmentId }, range: { startSec: .5, endSec: 1.5 }, count: 1 });
   assert.equal(outcome.receipt.media!.frames![0]!.sourceTimeSec, 2.5); assert.equal(outcome.receipt.media!.frames![0]!.viewTimeSec, .5);
+  const speech = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: { kind: "production-take", productionId: "saltlight", takeId: segmentId }, range: { startSec: .5, endSec: 1.5 } });
+  assert.equal(speech.receipt.media!.transcript!.words[0]!.sourceStartSec, 2.6);
+  assert.equal(speech.receipt.media!.transcript!.words[0]!.viewStartSec, .6);
+  const listening = await h.retrieval.call(h.lease.token, "listen_audio", { source: { kind: "production-take", productionId: "saltlight", takeId: segmentId }, range: { startSec: .5, endSec: 1.5 }, focuses: ["voice-delivery"] });
+  assert.equal(listening.receipt.media!.sourceStartSec, 2); assert.deepEqual(listening.receipt.media!.range, { startSec: .5, endSec: 1.5 });
+  assert.equal(listening.receipt.media!.listening!.derivative.durationSec, 1);
 });
 test("take-review coverage requires served evidence in its completed run and still-current source bytes", async () => {
-  const h = await harness(), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
+  const h = await harness({ listener, speech: async () => speechAnswer }), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
   const take: Take = { ...base, id: newId("tk"), media: "review.mp4", mediaHash: hash(png) }, path = `productions/saltlight/takes/${take.id}/review.mp4`;
   await h.store.commit({ kind: "review-media-fixture", source: "test", files: [
     { path, action: "create", baseHash: null, encoding: "base64", content: Buffer.from(png).toString("base64") },
@@ -162,6 +308,7 @@ test("take-review coverage requires served evidence in its completed run and sti
   ] });
   const source = { kind: "production-take", productionId: "saltlight", takeId: take.id }, range = { startSec: 0, endSec: 1 };
   const frames = await h.retrieval.call(h.lease.token, "sample_video", { source, range, count: 1 }), audio = await h.retrieval.call(h.lease.token, "analyze_audio_signal", { source, range });
+  const speech = await h.retrieval.call(h.lease.token, "review_audio_content", { source, range, expectedText: "Stay here" });
   const at = "2026-10-13T00:00:00Z", turnId = newId("turn"), intent: ConversationActionPrepareIntent = {
     actionId: newId("act"), conversationId: h.cv, turnId, worldId: h.store.worldId, productionId: "saltlight", actorId: LOCAL_ACTOR_ID,
     scope: "production", actionKind: "production-take-review", authorityKind: "take-review", cardFamily: "take-review", targets: [{ kind: "take", id: take.id }],
@@ -171,9 +318,18 @@ test("take-review coverage requires served evidence in its completed run and sti
   const chat = new WorldChatStore(conversationDir(h.store.dir, h.cv));
   await chat.append({ type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "Review", attachmentIds: [], createdAt: at },
     run: { id: h.lease.runId, turnId, basedOnConversationSeq: 1, status: "completed", adapter: "fixture", harnessCleanup: "not-required", contextDigest: hash(png), startedAt: at, endedAt: at },
-    receipts: [frames.receipt, frames.receipt, audio.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
+    receipts: [frames.receipt, frames.receipt, audio.receipt, speech.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
   const reason = await takeReviewInspectionReason(h.store, intent, production, take);
   assert.match(reason, /1 unique timestamped still frames/); assert.match(reason, /Original-channel audio sample measurements/); assert.match(reason, /no listening or performance judgment/);
+  assert.match(reason, /Local automatic speech transcript supplied/); assert.match(reason, /emotion and delivery were not reviewed/);
+  const listening = await h.retrieval.call(h.lease.token, "listen_audio", { source, range, focuses: ["voice-delivery"] });
+  assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /emotion and delivery were not reviewed/, "evidence not served in the completed turn cannot establish listening coverage");
+  await chat.append({ type: "turn.completed", message: { id: newId("msg"), turnId, role: "studio", text: "Updated review", attachmentIds: [], createdAt: at },
+    run: { id: h.lease.runId, turnId, basedOnConversationSeq: 1, status: "completed", adapter: "fixture", harnessCleanup: "not-required", contextDigest: hash(png), startedAt: at, endedAt: at },
+    receipts: [listening.receipt], candidates: [], groups: [], tombstones: [], actionPrepareIntents: [intent] });
+  const listened = await takeReviewInspectionReason(h.store, intent, production, take);
+  assert.match(listened, /Local audio-model impressions supplied for source 0–1s \(voice-delivery\)/);
+  assert.match(listened, /Other intervals and focuses remain unreviewed/); assert.doesNotMatch(listened, /Audio was not inspected|emotion and delivery were not reviewed/);
   await writeFile(join(h.store.dir, path), "changed");
   assert.match(await takeReviewInspectionReason(h.store, intent, production, take), /Metadata-only/);
 });

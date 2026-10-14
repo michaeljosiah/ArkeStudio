@@ -1371,3 +1371,48 @@ it("a catalogue request overtaken by refresh cannot publish its old list (#1752)
   assert.equal((await old)[0]?.voiceId, "2");
   assert.equal(calls, 2);
 });
+
+
+it("credential rotation cannot make superseded catalogue calls reinstall the old key", async () => {
+  let key = "old";
+  const calls: string[] = [];
+  const releases = new Map<string, () => void>();
+  const service = new VoiceService({ sidecar: null, localPresets: [], getKey: async () => key, emit: () => {},
+    cloudSources: [{ provider: "elevenlabs", list: async active => {
+      calls.push(active);
+      await new Promise<void>(resolve => releases.set(active, resolve));
+      return [{ provider: "elevenlabs", model: "eleven_v4", voiceId: active, label: active, attributes: [], local: false, canClone: false }];
+    } }],
+  });
+  const old = service.catalogue();
+  await until(() => releases.has("old"), "old credential request");
+  key = "new";
+  const fresh = service.catalogue();
+  await until(() => releases.has("new"), "new credential request");
+  releases.get("old")!();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ["old", "new"]);
+  releases.get("new")!();
+  assert.deepEqual((await Promise.all([old, fresh])).map(rows => rows[0]?.voiceId), ["new", "new"]);
+  assert.deepEqual(calls, ["old", "new"]);
+});
+
+it("a refreshed catalogue cannot be overwritten by local rows captured before its cloud wait", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  const local = [{ provider: "kokoro", model: "kokoro-82m", voiceId: "old-local", label: "Local", attributes: [], local: true, canClone: false }];
+  const service = new VoiceService({ sidecar: null, get localPresets() { return local.map(v => ({ ...v })); }, getKey: async () => "key", emit: () => {},
+    cloudSources: [{ provider: "elevenlabs", list: async () => {
+      if (++calls === 1) await gate;
+      return [];
+    } }],
+  });
+  const old = service.catalogue();
+  await until(() => calls === 1, "first cloud request");
+  local[0]!.voiceId = "new-local";
+  service.invalidateCloudCatalogue();
+  assert.equal((await service.catalogue())[0]?.voiceId, "new-local");
+  release();
+  assert.equal((await old)[0]?.voiceId, "new-local");
+});

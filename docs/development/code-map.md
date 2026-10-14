@@ -3,11 +3,21 @@
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
 immutable source identities, verifies contained snapshots and persists receipts under leases;
-`media-tool-catalog.ts` exposes the three MCP reads. `src/media/agent-media-tools.ts` owns bounded
+`media-tool-catalog.ts` exposes the five MCP reads. `src/media/agent-media-tools.ts` owns bounded
 ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.ts` and coordinator
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
+`media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`
+owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
+Desktop/Node hosts opt in through local Python/model paths. See [setup and limits](audio-listening.md).
+
+Contracts `src/agent-audio.ts` owns speech derivative, word-time and content-review evidence.
+Coordinator `src/media/agent-speech.ts` bounds local Voxa recognition and reuses
+`audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`
+injects the supervised `VoiceService.transcribeWords` seam; recognized speech raises schema 80.
+The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
 Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and
@@ -652,3 +662,14 @@ quotes, previews and dispatch. Contracts `cadence.ts` preserves v4 source line b
 Bench's typed-tag compilation. Coverage: contracts `audiobook-performance.test.ts` and
 `grouped-reads.test.ts`, coordinator `voice/direction.test.ts` and
 `productions/audiobook-grouped.test.ts`; see [audiobook direction](audiobook-direction.md).
+
+
+Character narration ownership (#1765): client `components/character-narration.tsx` is the
+shared editor for character defaults, explicit book overrides and effective provider cues.
+`character-voice.tsx` shows book context and otherwise-hidden overrides; audiobook Reading
+and chapter speaker rows use the same editor. Contracts `audiobook-performance.ts` owns
+`characterPerformanceDirection`, shared with actual v4 request compilation. Tests:
+client `character-narration-source`, `character-narration`, `audiobook-door` and
+`chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.
+
+Character and audiobook direction previews share available-narrator resolution in `packages/client/src/lib/audiobook-narrator.ts`; chapter screens re-export it for existing callers.

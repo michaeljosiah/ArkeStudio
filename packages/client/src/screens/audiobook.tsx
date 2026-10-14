@@ -69,7 +69,7 @@ import {
  */
 
 type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
-type DoorWorld = { sheets: readonly { id: string; voice?: { provider: string; voiceId: string } }[] };
+type DoorWorld = { sheets: readonly { id: string; narration?: string; retired?: boolean; voice?: { provider: string; voiceId: string } }[] };
 
 /**
  * What the door's answer depends on, as one string: asked again when it moves. The chapters'
@@ -102,7 +102,7 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
     production.audiobook ?? null,
     production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
     narrator,
-    sheets.map((sheet) => [sheet.id, sheet.voice ?? null]),
+    sheets.map((sheet) => [sheet.id, sheet.voice ?? null, sheet.narration ?? null, sheet.retired === true]),
     catalogue === null
       ? null
       : catalogue

@@ -385,7 +385,7 @@ export const CheckToolSchema = z.enum([
   "related",
   "get-attachment-text",
   "view-image",
-  "inspect-media", "sample-video", "analyze-audio-signal",
+  "inspect-media", "sample-video", "analyze-audio-signal", "transcribe-audio", "review-audio-content", "listen-audio",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -433,10 +433,14 @@ export const WorldChatCheckReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
-    const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples" } as const;
+    const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples",
+      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech", "listen-audio": "model-audio-listening" } as const;
     const expected = coverage[receipt.tool as keyof typeof coverage];
     if (receipt.media && (!expected || receipt.media.coverage !== expected || receipt.status !== "complete") || expected && receipt.status === "complete" && !receipt.media) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Media receipt evidence must match the completed tool's coverage" });
+    }
+    if (receipt.media?.transcript && (receipt.tool === "review-audio-content") !== !!receipt.media.transcript.contentReview) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Speech-content review needs its exact script comparison; transcription alone cannot claim review" });
     }
     if ((receipt.tool !== "view-image" && receipt.image !== undefined) ||
       (receipt.tool === "view-image" && receipt.status === "complete" && receipt.image === undefined)) {
