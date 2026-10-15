@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AudioArrangementSchema, AudioStudioProposalSchema } from "./audio-arrangement-schema.js";
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema, isPointCue, normalizeSpeechText, VoiceDirectionInputSchema, type CadenceCue, type CadencePlan } from "./cadence.js";
 import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
@@ -764,6 +765,9 @@ export const ChapterAudiobookSchema = z
     reactions: z.record(z.string(), AudiobookReactionSchema).optional(),
     beds: z.record(z.string(), AudiobookBedSchema).optional(),
     sounds: z.record(z.string(), AudiobookBlockSoundSchema).optional(),
+    /** The sole timing authority after the first accepted Audio Studio edit (SPEC-047 R-191). */
+    arrangement: AudioArrangementSchema.optional(),
+    audioStudioProposals: z.array(AudioStudioProposalSchema).max(100).optional(),
     /**
      * The seams set by hand (design turn 198, SPEC-047 R-147): joins and splits between the
      * chapter's turns, kept for the chapter and not for one reading. Absent on a record with none;
@@ -790,6 +794,7 @@ export const ChapterAudiobookSummarySchema = z
     updatedAt: IsoDateTimeSchema,
     takes: z.number().int().min(0),
     flagged: z.number().int().min(0),
+    arranged: z.boolean().optional(),
   })
   .strict();
 export type ChapterAudiobookSummary = z.infer<typeof ChapterAudiobookSummarySchema>;
@@ -803,6 +808,7 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
     updatedAt: record.updatedAt,
     takes: Object.keys(record.takes).length,
     flagged: Object.keys(record.flags).length,
+    ...(record.arrangement ? { arranged: true } : {}),
   };
 }
 

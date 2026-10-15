@@ -356,6 +356,9 @@ import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRid
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
+import { audioWaveform } from "./audio/waveform.js";
+import { audioStudioMedia, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
+import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -377,6 +380,7 @@ import { applySceneCommand, sceneCommandFrom } from "./productions/scene-command
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { assembleTimelineScene, applyHumanTimelineCommand, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
+import { importAudioStudioMedia } from "./productions/audio-studio-import.js";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
 import {
   acceptStill,
@@ -1340,6 +1344,7 @@ export class Coordinator {
   private readonly audiobookJobs = new JobWaiters();
   private readonly makingMotion = new Map<string, AbortController>();
   private readonly preparingWordTiming = new Map<string, AbortController>();
+  private readonly audioStudioPreviews = new AudioStudioPreviews();
   private readonly wordTimingRequests = new Map<string, string>();
   private readonly wordTimingProgress = new Map<string, { done: number; total: number; chapters: string[] }>();
   private waitForAudiobookJob(jobId: string): Promise<Job> {
@@ -15901,6 +15906,44 @@ export class Coordinator {
         }
         return;
       }
+      case "stop-audio-studio-preview": this.audioStudioPreviews.cancel(msg.worldId, msg.requestId); return;
+      case "preview-audio-studio": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.worldId === msg.worldId ? store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile) : undefined;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable" };
+        if (!store || !chapter) { this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: "This chapter is no longer open" }); return; }
+        try {
+          const rendered = await this.audioStudioPreviews.render(store, msg, this.opts.ffmpeg);
+          this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
+        } catch (error) { this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(error) }); }
+        return;
+      }
+      case "read-audio-studio":
+      case "decide-audio-studio-proposal":
+      case "edit-audio-studio":
+      case "read-audio-studio-source": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.worldId === msg.worldId ? store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile) : undefined;
+        const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable" };
+        if (!store || !chapter) { this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: null, refused: "This chapter is no longer open" }); return; }
+        try {
+          const options = this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {};
+          if (msg.kind === "read-audio-studio-source") {
+            const media = await audioStudioMedia(store, msg.productionId, msg.file, { ...options, ...(msg.expectedHash ? { expectedHash: msg.expectedHash } : {}) });
+            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: media.source, ...(msg.waveform ? { waveform: audioWaveform(media.source.hash, media.pcm) } : {}) });
+          } else {
+            if (msg.kind === "edit-audio-studio" || msg.kind === "decide-audio-studio-proposal") {
+              const record = msg.kind === "edit-audio-studio" ? await editAudioStudio(store, msg.productionId, chapter.id, msg.base, msg.edit, options)
+                : await decideAudioStudioProposal(store, msg.productionId, chapter.id, msg.id, msg.version, msg.decision, options);
+              this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+              this.refreshIfStillOpen(store);
+            }
+            const studio = await audioStudioSnapshot(store, msg.productionId, chapter.id, options);
+            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio, source: null });
+          }
+        } catch (error) { this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: null, refused: describeCoordinatorError(error) }); }
+        return;
+      }
       case "set-audiobook-timing": {
         // One block's timing (turn 187, SPEC-047 R-81): held to the binding — under Performed a
         // grouped request's inside is the reader's (R-85) — written through the record's lane and
@@ -15996,6 +16039,13 @@ export class Coordinator {
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator });
+          if (plan.record !== "unreadable" && plan.record?.arrangement) {
+            const opened = await openAudioStudio(store, msg.productionId, chapter.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
+            const rendered = await this.audioStudioPreviews.render(store, { productionId: msg.productionId, chapterFile: chapter.file, requestId: msg.requestId, base: opened.base,
+              ...(msg.window ? { window: { from: Math.round(msg.window.from * 48000), to: Math.min(opened.resolved.samples, Math.round(msg.window.to * 48000)) } } : {}) }, this.opts.ffmpeg);
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
+            return;
+          }
           const mix = chapterMix(chapterTiming(store, plan, "skip"));
           if (mix.voices.length === 0) throw new MixRefusal("nothing made to play");
           const rendered = await renderChapterMix(store.dir, msg.productionId, chapter.file, mix, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.window !== undefined ? { window: msg.window } : {}) });
@@ -17217,6 +17267,7 @@ export class Coordinator {
        * and only the lane knows one.
        */
       case "upload-artifacts": {
+        if (msg.editor && msg.audioStudio) { this.rejectEnqueue(msg.requestId, msg.kind, "Choose one editor for this import."); return; }
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
         if (browserImportStore && store !== browserImportStore) {
@@ -17256,6 +17307,22 @@ export class Coordinator {
         // A closed dialog is not a failure. Nothing was filed and nothing is said.
         if (chosen.length === 0) {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (msg.audioStudio) {
+          try {
+            const failures = await importAudioStudioMedia(store, chosen, msg.audioStudio, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            await this.refreshWorldSnapshot(msg.worldId);
+            this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
+          } catch (error) {
+            this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+            if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
+          }
           return;
         }
         if (msg.editor) {
@@ -20823,6 +20890,14 @@ export class Coordinator {
       },
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,
+      audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
+      audioStudioChanged: async (productionId, chapterId) => {
+        const chapter = store.getBundle().productions.find(entry => entry.meta.id === productionId)?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
+        if (!chapter) return;
+        const record = await readAudiobook(store, productionId, chapter.file);
+        if (this.opts.provider.openStore?.() !== store || !record || record === "unreadable") return;
+        this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: store.worldId, productionId, chapterId: chapter.id, record });
+      },
       benchGenerationQuotes: benchQuotes,
       benchControls: new BenchChatControls(store, {
         bench: sessionId => this.benchFor(store.worldId, sessionId),
@@ -21080,6 +21155,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
       adapter: this.opts.adapter ?? null,
@@ -21500,6 +21576,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
     // reload timer that would have settled it is cleared below, and nothing else fires.
@@ -21513,6 +21590,7 @@ export class Coordinator {
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
       await this.chapterReviewService?.stop();
+      await audioStudioStopped;
       await this.effectAnalysis.stop();
       const setupStopped = this.setup?.dispose();
       await this.adapterLibrary?.dispose();

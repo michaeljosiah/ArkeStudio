@@ -70,6 +70,7 @@ export function mountAudiobookPlayer(root, options) {
         audio,
         blocks: c.blocks || [],
         gaps: c.gaps || [],
+        audioNotes: c.audioNotes || [],
         pictures: pictures.map((picture, index) => ({
           ...picture,
           seconds: Number.isFinite(picture.seconds) && picture.seconds > 0
@@ -864,7 +865,7 @@ export function mountAudiobookPlayer(root, options) {
       const tail = c.audio.length === 0
         ? '<span class="abp-mono">not read</span>'
         : '<span class="prog"><i style="width:' + progress + '%"></i></span>' + (c.state === "part" ? '<span class="abp-mono">' + unread + " not read</span>" : "") + '<span class="abp-mono">' + time(c.seconds) + "</span>";
-      return '<button type="button" class="abp-ch' + (i === ci ? " cur" : "") + '" data-act="chapter" data-index="' + i + '"' + (c.audio.length === 0 ? " disabled" : "") + (i === ci ? ' aria-current="true"' : "") + '><span class="n abp-mono">' + pad(c.order) + '</span><span class="t">' + esc(c.title) + "</span>" + tail + "</button>";
+      return '<button type="button" class="abp-ch' + (i === ci ? " cur" : "") + '" data-act="chapter" data-index="' + i + '"' + (c.audio.length === 0 ? " disabled" : "") + (i === ci ? ' aria-current="true"' : "") + '><span class="n abp-mono">' + pad(c.order) + '</span><span class="t">' + esc(c.title) + "</span>" + tail + "</button>" + c.audioNotes.map(note => '<p class="abp-gapnote">' + esc(note) + "</p>").join("");
     });
     el.sheet.innerHTML = "<h4>Chapters · " + chapters.length + " · " + read + ' read</h4><div class="abp-list">' + rows.join("") + "</div>";
   }
@@ -881,7 +882,7 @@ export function mountAudiobookPlayer(root, options) {
         ? '<button type="button" class="abp-btn primary" data-act="continue">' + icon(I.play, 16, true) + "Continue · chapter " + c.order + " · " + time(t) + '<i><b style="width:' + pct + '%"></b></i></button>' +
           '<button type="button" class="abp-btn" data-act="restart">Start over</button>'
         : '<button type="button" class="abp-btn primary" data-act="continue"' + (nextPlayable(0, 1) < 0 ? " disabled" : "") + ">" + icon(I.play, 16, true) + "Play</button>") +
-      "</div>";
+      "</div>" + (c ? c.audioNotes.map(note => '<p class="abp-gapnote">' + esc(note) + "</p>").join("") : "");
   }
   function render() {
     const c = chapter();

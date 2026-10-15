@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
@@ -1071,6 +1072,8 @@ export const ProductionPerformanceModelActionSchema = z.object({ kind: z.literal
 export const ProductionAudioEditModelActionSchema = z.object({ kind: z.literal("production-audio-edit"),
   productionId: SlugSchema, request: ModelEditorRequestSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 /** Chat may propose a bounded scope; reviewed human authority still comes only from the host. */
+export const ProductionAudioStudioProposeModelActionSchema = z.object({ kind: z.literal("production-audio-studio-propose"),
+  productionId: SlugSchema, chapterId: z.string().min(1).max(160), proposal: AudioStudioProposalInputSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 export const ProductionEffectsProposeModelActionSchema = z.object({ kind: z.literal("production-effects-propose"),
   productionId: SlugSchema, scope: EffectArrangementScopeSchema.optional(), proposal: ModelEffectProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 export const ProductionTransitionsProposeModelActionSchema = z.object({ kind: z.literal("production-transitions-propose"),
@@ -1079,7 +1082,7 @@ export const ProductionPicturesProposeModelActionSchema = z.object({ kind: z.lit
   productionId: SlugSchema, proposal: ModelPictureProposalSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 /** Count every model entry point that prepares an editor request, not just one result array. */
 export function editorProposalActionCount(actions: readonly { kind: string; request?: unknown }[]): number {
-  return actions.filter(action => ["production-pictures-propose", "production-transitions-propose", "production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||
+  return actions.filter(action => ["production-audio-studio-propose", "production-pictures-propose", "production-transitions-propose", "production-effects-propose", "production-audio-edit", "production-audio-cue"].includes(action.kind) ||
     (action.kind === "production-timeline-operation" && !["transcribe", "undo", "redo"].includes((action.request as { operation?: string } | undefined)?.operation ?? ""))).length;
 }
 export const ProductionAudioCueModelActionSchema = z.object({ kind: z.literal("production-audio-cue"), productionId: SlugSchema,
@@ -1397,6 +1400,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionAudioGenerationModelActionSchema.extend(ActionSequencingShape),
   ProductionPerformanceModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioEditModelActionSchema.extend(ActionSequencingShape),
+  ProductionAudioStudioProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionEffectsProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionTransitionsProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionPicturesProposeModelActionSchema.extend(ActionSequencingShape),
@@ -1658,6 +1662,8 @@ export const WorldChatEditorRequestActionSchema = z
   })
   .strict();
 export type WorldChatEditorRequestAction = z.infer<typeof WorldChatEditorRequestActionSchema>;
+export const WorldChatAudioStudioProposalActionSchema = z.object({ kind: z.literal("world-chat-audio-studio-proposal"),
+  worldId: UlidSchema, productionId: SlugSchema, chapterId: z.string().min(1).max(160), proposal: AudioStudioProposalInputSchema }).strict();
 export const WorldChatEffectProposalActionSchema = z.object({ kind: z.literal("world-chat-effect-proposal"),
   worldId: UlidSchema, productionId: SlugSchema, proposal: ModelEffectProposalSchema, scope: EffectArrangementScopeSchema,
   reviewed: EffectVersionRefSchema.optional() }).strict();
@@ -1673,6 +1679,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatBibleActionSchema,
   WorldChatSceneActionSchema,
   WorldChatEditorRequestActionSchema,
+  WorldChatAudioStudioProposalActionSchema,
   WorldChatEffectProposalActionSchema,
   WorldChatTransitionProposalActionSchema,
   WorldChatPictureProposalActionSchema,

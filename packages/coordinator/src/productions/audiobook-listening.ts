@@ -29,6 +29,7 @@ import { chapterTiming } from "./audiobook-timing.js";
 import { applyAudiobookWordTiming } from "./audiobook-word-timing.js";
 import { checkAudiobookMotion } from "./audiobook-motion.js";
 import type { FfmpegRunner } from "../takes/export.js";
+import { audioStudioListening } from "./audio-studio-listening.js";
 
 /**
  * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): every chapter of the
@@ -140,7 +141,7 @@ async function timedListening(store: WorldStore, productionId: string, plan: Aud
  * takes its sound from the renderer the chapter's Play uses and nothing else, so a chapter with
  * no timing is rendered as one too: its takes back to back, at the book's one loudness.
  */
-export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean; scope?: AudiobookScope } = {}): Promise<AudiobookListening> {
+export async function audiobookListening(store: WorldStore, productionId: string, options: { ffmpeg?: FfmpegRunner; mixAll?: boolean; scope?: AudiobookScope; finalAudio?: boolean; signal?: AbortSignal } = {}): Promise<AudiobookListening> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const scope = options.scope ?? { kind: "book" };
@@ -161,6 +162,18 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const record = plan.record === "unreadable" ? null : plan.record;
     const pictures = record?.pictures ?? {};
     const usable = await usablePictures(store, pictures);
+    if (record?.arrangement) {
+      try {
+        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: summary.title, cover, pictures, usable: file => usable.has(file),
+          ...(options.ffmpeg ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), final: options.finalAudio === true });
+        await checkAudiobookMotion(store, chapter); chapters.push(chapter);
+      } catch (error) {
+        if ((options.finalAudio && scope.kind === "chapter") || options.signal?.aborted || store.closingSignal.aborted) throw error;
+        chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
+          audioStudio: { revision: record.arrangement.revision, issues: [error instanceof Error ? error.message : "The arrangement could not be played"], omissions: [] } });
+      }
+      continue;
+    }
     const timed = await timedListening(store, productionId, plan, options.ffmpeg, options.mixAll === true);
     const chapter = listeningChapter({ chapterId: summary.id, order: summary.order, title: summary.title, blocks: listeningBlocks(store, plan), pictures, cover, usable: (file) => usable.has(file), ...(timed !== null ? { timed } : {}) });
     await applyAudiobookWordTiming(store, plan, chapter);

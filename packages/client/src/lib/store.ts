@@ -826,6 +826,12 @@ export function subscribeAudiobookListening(listener: (answer: AudiobookListenin
 
 /** A chapter's mix rendered (design turn 187): answered to the ask that named it. */
 export type AudiobookMixAnswer = Extract<DomainEvent, { type: "audiobook.mix" }>;
+export type AudioStudioAnswer = Extract<DomainEvent, { type: "audio-studio.state" }>;
+const audioStudioListeners = new Set<(answer: AudioStudioAnswer) => void>();
+export function subscribeAudioStudio(listener: (answer: AudioStudioAnswer) => void): () => void {
+  audioStudioListeners.add(listener);
+  return () => audioStudioListeners.delete(listener);
+}
 const audiobookMixListeners = new Set<(answer: AudiobookMixAnswer) => void>();
 export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void {
   audiobookMixListeners.add(listener);
@@ -1824,6 +1830,7 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.mix") {
       for (const listener of audiobookMixListeners) listener(event);
     }
+    if (event.type === "audio-studio.state") for (const listener of audioStudioListeners) listener(event);
     if (event.type === "audiobook.timing-proposal") {
       for (const listener of audiobookTimingProposalListeners) listener(event);
     }
@@ -5338,6 +5345,7 @@ export function retireArtifact(worldId: string, artifactId: string): void {
 export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[], production?: string,
+  audioStudio?: Extract<ClientMessage, { kind: "upload-artifacts" }>["audioStudio"],
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
@@ -5348,7 +5356,7 @@ export function importEditorMedia(
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
-  const scope = production !== undefined ? { production } : {};
+  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}) };
   if (browserImport) {
     const currentBridge = bridge;
     let worldChanged = false;
@@ -5781,6 +5789,27 @@ export function setAudiobookTiming(worldId: string, productionId: string, chapte
   const requestId = ulid();
   return send({ kind: "set-audiobook-timing", worldId, productionId, chapterFile, block, timing, requestId }) ? requestId : null;
 }
+export function readAudioStudio(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-studio", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+export function editAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, edit: import("@arke-studio/contracts").AudioArrangementEdit): string | null {
+  const requestId = ulid();
+  return send({ kind: "edit-audio-studio", worldId, productionId, chapterFile, base, edit, requestId }) ? requestId : null;
+}
+export function decideAudioStudioProposal(worldId: string, productionId: string, chapterFile: string, id: string, version: number, decision: "keep" | "apply"): string | null {
+  const requestId = ulid();
+  return send({ kind: "decide-audio-studio-proposal", worldId, productionId, chapterFile, id, version, decision, requestId }) ? requestId : null;
+}
+export function readAudioStudioSource(worldId: string, productionId: string, chapterFile: string, file: string, waveform?: boolean, expectedHash?: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-studio-source", worldId, productionId, chapterFile, file, requestId, ...(waveform !== undefined ? { waveform } : {}), ...(expectedHash ? { expectedHash } : {}) }) ? requestId : null;
+}
+export function previewAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, options: { edit?: import("@arke-studio/contracts").AudioArrangementEdit; solo?: string[]; window?: { from: number; to: number } } = {}): string | null {
+  const requestId = ulid();
+  return send({ kind: "preview-audio-studio", worldId, productionId, chapterFile, base, ...options, requestId }) ? requestId : null;
+}
+export function stopAudioStudioPreview(worldId: string, requestId: string): void { send({ kind: "stop-audio-studio-preview", worldId, requestId }); }
 
 /** A reaction under a block set, changed by its key, or taken away with null (design turn 187, R-83). */
 export function setAudiobookReaction(worldId: string, productionId: string, chapterFile: string, key: string | null, reaction: import("@arke-studio/contracts").ReactionInput | null): string | null {

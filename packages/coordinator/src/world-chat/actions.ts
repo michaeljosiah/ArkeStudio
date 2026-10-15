@@ -55,6 +55,7 @@ import {
   WorldChatCanonRestoreActionSchema,
   WorldChatCanonRetireActionSchema,
   WorldChatEditorRequestActionSchema,
+  WorldChatAudioStudioProposalActionSchema,
   WorldChatEffectProposalActionSchema,
   editorProposalActionCount,
   WorldChatProposalActionSchema,
@@ -312,6 +313,7 @@ import { transitionProposalConversationAdapter } from "./transition-proposals.js
 import { pictureProposalConversationAdapter } from "./picture-proposals.js";
 import { WorldChatTransitionProposalActionSchema } from "@arke-studio/contracts";
 import { WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
+import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals.js";
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
@@ -356,6 +358,8 @@ export interface WorldChatActionTurn {
 export interface WorldChatActionAdapterDeps {
   readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
   readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
+  readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
+  readonly audioStudioChanged?: (productionId: string, chapterId: string) => Promise<void>;
   readonly effectDependencies?: EditorEffectDependencies;
   readonly getGenerationRouteRows?: () => readonly import("./production-reads.js").ProductionReadRow[];
   readonly activePlans?: import("../productions/scene-commands.js").SceneCommandDeps["activePlans"];
@@ -553,6 +557,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-audio-edit": ["timeline"],
   "production-transitions-propose": ["timeline", "editor-requests"],
   "production-pictures-propose": ["timeline", "editor-requests"],
+  "production-audio-studio-propose": ["chapters"],
   "production-effects-propose": ["timeline", "editor-requests"],
   "production-timeline-operation": ["timeline", "scenes", "takes", "artifacts"],
   "production-audio-cue": ["timeline"],
@@ -606,7 +611,7 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
       }
       return { target: targetId, fence: chaptersFence(production) };
     }
@@ -784,6 +789,7 @@ function productionActionTargets(
     ];
     case "audio-spine-command": return [{ requirement: "spine", target: action.productionId }];
     case "production-timeline-operation": return [{ requirement: "timeline", target: action.productionId }, { requirement: "scenes", target: action.productionId }, { requirement: "takes", target: action.productionId }, { requirement: "artifacts", target: worldId }];
+    case "production-audio-studio-propose": return [{ requirement: "chapters", target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.chapterId)}:audio-studio` }];
     case "production-audio-edit": return [{ requirement: "timeline", target: action.productionId }];
     case "production-transitions-propose":
     case "production-pictures-propose":
@@ -990,6 +996,7 @@ function preparedWorldPayload(
     case "production-audio-edit": return WorldChatEditorRequestActionSchema.parse({ kind: "world-chat-editor-request", worldId, productionId: action.productionId, request: action.request });
     case "production-transitions-propose": return WorldChatTransitionProposalActionSchema.parse({ kind: "world-chat-transition-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
     case "production-pictures-propose": return WorldChatPictureProposalActionSchema.parse({ kind: "world-chat-picture-proposal", worldId, productionId: action.productionId, proposal: action.proposal });
+    case "production-audio-studio-propose": return WorldChatAudioStudioProposalActionSchema.parse({ kind: "world-chat-audio-studio-proposal", worldId, productionId: action.productionId, chapterId: action.chapterId, proposal: action.proposal });
     case "production-effects-propose": {
       return WorldChatEffectProposalActionSchema.parse({ kind: "world-chat-effect-proposal", worldId, productionId: action.productionId,
         proposal: action.proposal, ...effectProposalRequestContext(store.getBundle(), action.productionId, action.scope, subject) });
@@ -1376,6 +1383,7 @@ function worldActionTargets(
     case "production-transitions-propose":
     case "production-pictures-propose":
     case "production-effects-propose":
+    case "production-audio-studio-propose":
     case "production-audio-cue": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-audio-generation": return [{ kind: "production", id: action.productionId, label: action.productionId },
       ...("sheetId" in action.request ? [{ kind: "sheet", id: action.request.sheetId, label: action.request.sheetId }] : [])];
@@ -5335,6 +5343,7 @@ export function worldChatActionAdapters(
     bible,
     scene,
     editor,
+    audioStudioProposalConversationAdapter(store, deps.audioStudioOptions, deps.audioStudioChanged),
     effectProposalConversationAdapter(store, deps.effectDependencies, now),
     transitionProposalConversationAdapter(store, deps.effectDependencies),
     pictureProposalConversationAdapter(store, deps.effectDependencies),

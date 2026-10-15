@@ -28,6 +28,19 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN AUDIO STUDIO 226
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Existing video editor · layout reference", frame: "226a", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["The source-backed Cut drawing from turns 220–223 supplies the existing wordmark, navigation, Library, preview, timeline and Inspector structure. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Chapter studio · script and performance", frame: "226b", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Script selection locates Mara’s performance. Narrator and cast tracks sit beside Effects, Music and Ambience. The Inspector names the chosen source. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Sound cue · follow the passage", frame: "226c", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Cabin door follows the end of Mara’s line. The Inspector shows the resulting time and the attachment rule. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Sound cue · explicit fixed time", frame: "226d", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Fix at this time detaches the cue from narration. It stays at twelve seconds when the performance changes. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Longer take · review dependent changes", frame: "226e", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Suggested is two seconds longer. The attached cue and following dialogue move; beds grow to the chapter end. Current remains unchanged until Apply. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Applied replacement · one Undo", frame: "226f", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["The chosen replacement and dependent placements become Current in one transaction. Undo restores the prior arrangement. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Phone · existing Details sheet", frame: "226g", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["The same compact editor opens its scrolling Details sheet with a fixed Done footer. Attachment sits in Placement beneath the numerical times. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Fold · existing compact workspace", frame: "226h", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Keep the compact Cut layout, Library drawer and Arke rail. The script replaces the preview; selection and arrangement stay on the same timeline. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Phone · script above the timeline", frame: "226i", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Use the existing chapter header, preview slot, transport, timeline and Library / Inspect / Arke toolbar. Approved design; implementation tracked separately." ] },
+  { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Arke · proposal in the existing panel", frame: "226j", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Review dependent cue changes in the existing Arke panel. Current / Suggested and Apply remain in the shared review bar. Approved design; implementation tracked separately." ] },
+  // END AUDIO STUDIO 226
+
   // BEGIN GLOBAL CHAT 225
   { group: "Global Chat · approved 2026-10-13", screen: "One place to reach Arke", frame: "225a", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Chat is the first icon on the right, before Proposals, Activity, Settings and Account. The existing Activity/Settings pair stays together. Approved with model-choice marker removal on 2026-10-13. The native comparison now exercises the implemented application." ] },
   { group: "Global Chat · approved 2026-10-13", screen: "World Chat beside the world", frame: "225b", route: "App chrome", status: "drawn", checked: "2026-10-13", controls: [], notes: ["Opening Chat uses this world’s conversation. Its context is visible above the messages and beside the composer. Approved with model-choice marker removal on 2026-10-13. The native comparison now exercises the implemented application." ] },
@@ -727,6 +740,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "audio-studio.review.html", what: "Turn 226 revision 2: existing video editor comparison, script preview, chapter arrangement, replacement review and compact layouts.", state: "approved; implementation starting" },
   { file: "global-chat-224.native-review.html", what: "Turn 225 revision 3: actual Develop page and native composer/model controls compared with the proposed global Chat host. Build using global-chat-224.native-build.mjs.", state: "approved · implementation under validation" },
   { file: "global-chat-224.review.html", what: "Design turn 225: persistent contextual Chat, navigation, drafts, phone and world boundary. Interactive isolated fixture.", state: "approved · implementation under validation" },
   { file: "publish-private-review.html", what: "Approved private EPUB/M4B publishing and explicit style review, turn 224.", state: "approved · implementation PR #1751" },
@@ -881,6 +895,7 @@ const page = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Arke Studio · design review</title>
 <link rel="stylesheet" href="global-chat-224.css">
+<link rel="stylesheet" href="audio-studio-226.frames.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

@@ -462,6 +462,7 @@ export function AudiobookScreen() {
     );
   })();
   const menuItems = [
+    ...(chapters.length > 0 ? [{ label: "Audio Studio", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(placeRow?.chapterId ?? chapters[0]!.id)}?view=audio-studio`), testId: "menu-audio-studio" }] : []),
     { label: "Reading", data: [READINGS.find(([value]) => value === reading)![1]], warn: warning, onPress: () => setSheet(true), testId: "menu-reading" },
     ...(narratorName !== null ? [{ label: "Narrator", data: [narratorName], warn: null, onPress: () => setNarrating(true), testId: "menu-narrator" }] : []),
     // A world with no art: its cover is made where the world's look is (190).

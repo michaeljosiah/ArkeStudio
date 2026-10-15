@@ -259,7 +259,8 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
-  const cutRoute = /\/cut\/?$/.test(location.pathname);
+  const audioStudioRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname) && ["timing", "audio-studio"].includes(new URLSearchParams(location.search).get("view") ?? "");
+  const cutRoute = /\/cut\/?$/.test(location.pathname) || audioStudioRoute;
   const cutPhone = useMediaQuery(CUT_PHONE_QUERY) && cutRoute;
   const phone = useMediaQuery("(max-width: 599px)");
   const compact = useMediaQuery("(max-width: 1099px)");
@@ -366,14 +367,14 @@ export function ProductionLayout() {
   const chapterRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => chapter.id === chapterId || chapter.file === chapterId);
   const chapterView = new URLSearchParams(location.search).get("view");
-  const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing")
+  const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing" || chapterView === "audio-studio")
     ? production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)
     : undefined;
   // The audiobook's show page (design turn 199f) is its own phone page: the backdrop is the top
   // of the screen under a back press, and the page's own bar takes over once it scrolls away.
   const audiobookDeep = phone && /\/story\/audiobook\/?$/.test(location.pathname) && production !== undefined && production !== null;
   const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
-  const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
+  const wantsFold = compact && chapterRoute && !audioStudioRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design
   // turn 196o): a drawer would put the production's pages a press away while the canvas is the
   // page, and the full rail left the canvas a third of the screen. The person's own choice
@@ -707,10 +708,10 @@ export function ProductionLayout() {
                 <>
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
                   {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {item("story/audiobook", "Audiobook", audiobookCount)}
+                  {item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
                 </>

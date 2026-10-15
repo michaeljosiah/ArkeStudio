@@ -152,6 +152,13 @@ async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
 }
 
 describe("the Audiobook door (turn 146)", () => {
+  it("opens Audio Studio from the book menu without starting generation or a mix", async () => {
+    const m = await mount(inkbound());
+    await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+    await act(async () => q(m, '[data-testid="menu-audio-studio"]')!.click());
+    assert.match(m.where(), /story\/chapters\/slack-water\?view=audio-studio$/);
+    assert.equal(m.sent.some(message => ["read-audiobook-chapter", "read-audiobook-book", "render-audiobook-mix"].includes(message.kind)), false);
+  });
   it("shows a row a chapter with its state, the count and running time over them, the read bar, and opens a chapter's Audiobook view", async () => {
     const m = await mount(inkbound());
     // The page is the book's cover (design turn 190a): its title, not the word Audiobook, which the rail says.

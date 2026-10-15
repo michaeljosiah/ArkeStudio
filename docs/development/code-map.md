@@ -1,5 +1,27 @@
 # Code map
 
+Audio Studio (approved turn 226): client
+`screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
+`EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
+connects acknowledged state, source replacement review, import, audition and chapter export;
+`audio-studio-timeline.tsx` shares the video pointer engine through `lib/audio-studio-gesture.ts`.
+`audio-studio-library.tsx`, `audio-studio-inspector.tsx` and `audio-studio-repairs.tsx` own their panels.
+`audio-studio-passage-panel.tsx` routes the existing Audiobook Timing tab to this authority.
+`audio-studio-waveform.tsx` and `lib/audio-studio-waveform.ts` load bounded exact-source stereo peaks.
+`production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
+Remembered Timing views canonicalise to Audio Studio without changing world data.
+`audiobook.tsx` adds the book menu entry. Contracts `audio-arrangement*.ts` own sample-domain
+placement, migration and durable history. Coordinator `productions/audio-studio.ts` owns read,
+source, proposal decisions and revision-checked edit commands through the audiobook record lane;
+`world-chat/audio-studio-proposals.ts` stages reviewed command families through the native
+conversation lifecycle, using the `get_chapter` audio-studio read section. `audio-studio-mix.ts`
+streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`; `audio-studio-cache.ts`
+reserves bounded disk space and protects playback files through audition/world lifetimes. `audio-studio-listening.ts`
+maps the same plan to Listen, captions and web/video exports. `audio-studio-preview.ts` drains
+cancelled auditions; `audio-studio-import.ts` files before revision-checked placement. Private
+publication `story-review.ts` captures exact arrangements and sources, and `story.ts` renders
+them through the same mixer. See [implementation scope](audio-studio.md), SPEC-047 R-185–R-194.
+
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
 immutable source identities, verifies contained snapshots and persists receipts under leases;
