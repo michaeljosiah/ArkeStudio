@@ -80,7 +80,7 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
         {held && <p>Save the chapter before starting a review.</p>}
         {error && <p role="alert">{error}</p>}
       </div>
-      {review && <ChapterReviewReport review={review} slug={slug} disabled={held || busy || connection !== "open"}
+      {review && <ChapterReviewReport key={review.id} review={review} slug={slug} disabled={held || busy || connection !== "open"}
         onDecision={(id, decision, note) => decideChapterReview(worldId, productionId, chapterId, review.id, id, decision, note)} />}
     </EditorDialog>
   </>;

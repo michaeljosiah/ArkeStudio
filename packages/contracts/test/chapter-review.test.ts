@@ -4,12 +4,12 @@ import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema } f
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
-  const answer = ReviewAnswerSchema.parse({ facts: [{ quote: finding.quote, claim: "Tablet is shared", kind: "explicit" }, { quote: "Invented", claim: "No", kind: "explicit" }], findings: [finding, { ...finding, quote: "Paraphrase" }, { ...finding, imageBlocks: ["p9.0"] }, { ...finding, imageBlocks: [] }] });
+  const answer = ReviewAnswerSchema.parse({ facts: [{ quote: finding.quote, claim: "Tablet is shared", kind: "explicit" }, { quote: "Invented", claim: "No", kind: "explicit" }], findings: [finding, { ...finding, quote: "Paraphrase" }, { ...finding, imageBlocks: ["p9.0"] }, { ...finding, imageBlocks: [] }, { ...finding, category: "continuity", imageBlocks: [] }, { ...finding, category: "narration" }] });
   const result = verifiedReviewAnswer(finding.quote, answer, ["p0.0"]);
   assert.equal(result.findings.length, 1);
   assert.equal(result.findings[0]!.certainty, "possible-confusion");
   assert.equal(result.facts.length, 1);
-  assert.equal(result.rejected, 4);
+  assert.equal(result.rejected, 6);
 });
 it("refuses oversized answers and unsafe target paths", () => {
   assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], extra: "ignored?" }).success, false);

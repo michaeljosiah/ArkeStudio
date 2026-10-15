@@ -47,8 +47,11 @@ export type ReviewTask = z.infer<typeof ReviewTaskSchema>;
 
 /** A model cannot manufacture source citations or claim to have seen an unsupplied image. */
 export function verifiedReviewAnswer(body: string, answer: ReviewAnswer, suppliedImages: readonly string[]) {
-  const findings = answer.findings.filter(f => body.includes(f.quote) &&
-    f.imageBlocks.every(id => suppliedImages.includes(id)) && (f.category !== "image" || f.imageBlocks.length > 0));
+  // These model tasks receive neither audio nor compiled voice requests. Narration stays in
+  // the deterministic record audit; a different category cannot evade visual citations.
+  const findings = answer.findings.filter(f => body.includes(f.quote) && f.category !== "narration" &&
+    f.imageBlocks.every(id => suppliedImages.includes(id)) &&
+    ((suppliedImages.length === 0 && f.category !== "image") || f.imageBlocks.length > 0));
   const facts = answer.facts.filter(f => body.includes(f.quote));
   return { findings, facts, rejected: answer.findings.length - findings.length + answer.facts.length - facts.length };
 }
