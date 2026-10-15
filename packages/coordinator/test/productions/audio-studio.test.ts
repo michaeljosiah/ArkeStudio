@@ -117,6 +117,11 @@ describe("Audio Studio durable authority", () => {
   }));
   it("files imports before placement and keeps stale and partly failed imports recoverable", () => fixture(async (store, dir) => {
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    const beforeArtifacts = store.getBundle().artifacts;
+    const image = join(dir, "not-a-sound.png"); await writeFile(image, "image bytes");
+    const rejected = await importAudioStudioMedia(store, [image], { productionId: PRODUCTION, chapterFile: CHAPTER, base: opened.base, destination: "library" }, { abandoned: () => false });
+    assert.match(rejected[0]!.reason, /supported audio/);
+    assert.deepEqual(store.getBundle().artifacts, beforeArtifacts, "a rejected non-audio import never reaches Library");
     const file = join(dir, "import-studio.wav"), pcm = new Float32Array(4800).fill(.1);
     await writeFile(file, writeStereoWav({ rate: 48000, channels: 2, left: pcm, right: pcm }));
     await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
@@ -204,6 +209,29 @@ describe("Audio Studio durable authority", () => {
     assert.equal(chapter.state, "read"); assert.equal(chapter.blocks.length, state.passages.length);
     assert.equal(chapter.mix?.seconds, state.passages.length / 10);
     assert.deepEqual(chapter.audioStudio?.issues, []);
+    const firstText = plan.blocks[0]!.block.text, tokens = firstText.trim().split(/\s+/);
+    const timing = { artifactId: filed.artifact.id, audioHash: source.hash, textHash: audiobookTextHash(firstText), engine: { id: "whisper.cpp/dtw-word-boundaries-v1", version: "1", model: "fixture" }, seconds: .1, at: store.now(),
+      words: tokens.map((text, i) => ({ text, startSec: i * 40 / 48000, endSec: (i * 40 + 20) / 48000, probability: 1 })) };
+    await updateAudiobook(store, PRODUCTION, plan.chapter, current => ({ ...current, wordTiming: { first: timing } }));
+    const trim = async (sourceIn: number, sourceOut = 4800) => {
+      const current = await openAudioStudio(store, PRODUCTION, CHAPTER);
+      await editAudioStudio(store, PRODUCTION, CHAPTER, current.base, { kind: "commands", label: "Trim voice", commands: [{ kind: "set-clip", id: "voice-0", changes: { sourceIn, sourceOut } }] });
+      return (await audiobookListening(store, PRODUCTION, { scope })).chapters[0]!.blocks[0]!;
+    };
+    assert.ok((await trim(0)).words?.length);
+    const cutHead = await trim(1); assert.equal(cutHead.words, undefined); assert.match(cutHead.wordTimingReason!, /cuts through a word/);
+    const cutTail = await trim(0, 10); assert.equal(cutTail.words, undefined); assert.match(cutTail.wordTimingReason!, /cuts through a word/);
+    assert.ok((await trim(20)).words?.length, "a trim on a word boundary keeps exact remaining timings");
+    await trim(0);
+    const incomplete = await openAudioStudio(store, PRODUCTION, "02-the-same-ink");
+    await editAudioStudio(store, PRODUCTION, "02-the-same-ink", incomplete.base, addTrack);
+    const wholeBook = await audiobookListening(store, PRODUCTION, { finalAudio: true });
+    assert.equal(wholeBook.chapters.find(entry => entry.chapterId === plan.chapter.id)?.state, "read");
+    const incompleteId = store.getBundle().productions.find(production => production.meta.id === PRODUCTION)!.chapters.find(entry => entry.file === "02-the-same-ink")!.id;
+    assert.equal(wholeBook.chapters.find(entry => entry.chapterId === incompleteId)?.state, "not read");
+    await assert.rejects(audiobookListening(store, PRODUCTION, { finalAudio: true, scope: { kind: "chapter", chapterId: incompleteId } }), /needs attention|no arranged audio/);
+    const bookExport = await exportAudiobookPlayer(store, PRODUCTION, { clock: () => "2026-10-15T12:00:00.000Z" });
+    assert.ok(bookExport.ok); assert.deepEqual(bookExport.chapterIds, [plan.chapter.id]);
     const exported = await exportAudiobookPlayer(store, PRODUCTION, { scope, clock: () => "2026-10-15T12:00:00.000Z" });
     assert.equal(exported.ok, true);
     if (exported.ok) assert.deepEqual(await readFile(join(dir, exported.dir, "media", `chapter-${String(chapter.order).padStart(2, "0")}.wav`)), await readFile(join(dir, chapter.mix!.file)));

@@ -31,13 +31,14 @@ export async function touchAudioStudioCache(dir: string, file: string): Promise<
   const now = new Date(); await utimes(path, now, now);
 }
 
-/** Reserve completed output before rendering. Concurrent jobs cannot each claim the same free space.
+/** Reserve output and temporary scratch space before rendering. Concurrent jobs cannot each claim the same free space.
  * Recent exports get a copy grace period; active auditions/Listen are explicitly pinned. If those
  * fill the budget, refuse more work instead of breaking a player's next HTTP range request. */
 export async function reserveAudioStudioCache(dir: string, bytes: number, files: number, signal: AbortSignal, budget = limits): Promise<() => void> {
   const folder = await audioStudioCache(dir, "mix"), key = resolve(folder);
   const work = (queues.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {
     signal.throwIfAborted();
+    if (bytes > budget.bytes || files > budget.files) throw new AudioArrangementRefusal("This audio render exceeds the cache and scratch space budget; shorten the arrangement before rendering");
     const entries = [];
     for (const entry of await readdir(folder, { withFileTypes: true })) {
       if (!/^[a-f0-9]{64}\.(wav|json)$/.test(entry.name)) continue;

@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AudioArrangementCommand, AudioStudioImport } from "@arke-studio/contracts";
-import { fileArtifact } from "../artifacts/filing.js";
+import { fileArtifact, kindForFile } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { WorldStore } from "../world/store.js";
@@ -25,6 +25,7 @@ export async function importAudioStudioMedia(store: WorldStore, paths: readonly 
     if (options.abandoned()) throw new Error("The world closed during import");
     if (sourcePath === null) { failures.push({ index, reason: "This drop has no local file; save it to disk and import again" }); continue; }
     try {
+      if (kindForFile(sourcePath) !== "audio") throw new Error("Choose a supported audio file for Audio Studio");
       let result = await fileArtifact(store, { sourcePath, production: target.productionId, ...options });
       if (result.outcome === "needs-consent" && options.confirmLarge && await options.confirmLarge({ name: basename(sourcePath), sizeBytes: result.sizeBytes })) {
         if (options.abandoned()) throw new Error("The world closed during import");

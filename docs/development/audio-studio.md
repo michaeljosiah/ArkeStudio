@@ -86,7 +86,10 @@ replacement ripple, fixed cues, protection, durable history and explicit omissio
 Coordinator: `test/productions/audio-studio.test.ts`, `audio-studio-mix.test.ts` and
 `test/publications/story.test.ts` cover persistence, stale imports, source changes, stereo,
 sample-aligned windows, phase-preserving loop splits, frozen retry and parity between Listen
-and publication PCM. `test/world-chat/audio-studio-proposals.test.ts` verifies section-scoped
+and publication PCM. The cache tests cover concurrent reservations, playback pins and eviction;
+render tests count float scratch against the same budget. Publication tests verify that disposable
+mix caches are removed on success and failure. Delivery tests cover word-boundary trims and
+whole-book export with incomplete arranged chapters. `test/world-chat/audio-studio-proposals.test.ts` verifies section-scoped
 read receipts and the human-only apply boundary; `test/audio/waveform.test.ts` verifies stereo
 peaks and transient retention.
 Set `ARKE_STORY_CODEC_SMOKE=1` for real FFmpeg AAC publication with mixed arranged/legacy chapters.
@@ -94,7 +97,7 @@ Set `ARKE_STORY_CODEC_SMOKE=1` for real FFmpeg AAC publication with mixed arrang
 From `packages/client`, run the edit preparation, player ownership and entry tests:
 
 ```text
-node --import tsx --test test/audio-studio-edit.test.ts test/audio.test.ts test/chapter-timing.test.tsx
+node --import tsx --test test/audio-studio-edit.test.ts test/audio-studio-player.test.tsx test/audio.test.ts test/chapter-timing.test.tsx
 ```
 
 Run the broader chapter, Audiobook and Cut suites, then the repository lint, typecheck, build

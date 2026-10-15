@@ -65,8 +65,9 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
       if (!timing || !validateAcousticWords(text, { text, seconds: timing.seconds, engine: timing.engine, words: timing.words }).ok) { reason = "word timing not prepared for this exact arranged take"; break; }
       if (entry.clip.loop || performances.some(other => other.clip.id !== entry.clip.id && other.at < entry.at + entry.samples && other.at + other.samples > entry.at)) { reason = "overlapping or looped voices need a caption lane"; break; }
       const from = audioSeconds(entry.clip.sourceIn), to = Math.min(audioSeconds(entry.clip.sourceOut), from + audioSeconds(entry.samples)), at = audioSeconds(entry.at);
-      for (const word of timing.words) if (word.endSec > from && word.startSec < to) words.push({ ...word,
-        startSec: at + Math.max(from, word.startSec) - from, endSec: at + Math.min(to, word.endSec) - from });
+      const included = timing.words.filter(word => word.endSec > from && word.startSec < to);
+      if (included.some(word => word.startSec < from || word.endSec > to)) { reason = "the arranged trim cuts through a word; move the trim to a word boundary"; break; }
+      for (const word of included) words.push({ ...word, startSec: at + word.startSec - from, endSec: at + word.endSec - from });
     }
     if (reason || !words.length) block.wordTimingReason = reason ?? "word timing not prepared";
     else block.words = words.sort((a, b) => a.startSec - b.startSec);

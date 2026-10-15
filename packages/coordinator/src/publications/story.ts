@@ -290,8 +290,8 @@ export class StoryPublicationService {
             const file = "chapter-" + index + ".wav";
             let duration: number;
             if (chapter.studio) {
-              const rendered = await renderAudioStudioMix(inputRoot, chapter.studio.state, chapter.studio.script, { ffmpeg: this.options.ffmpeg, signal, final: true });
-              await copyFile(await checkedPublicationPath(inputRoot, rendered.file), join(work, file));
+              const rendered = await renderAudioStudioMix(inputRoot, chapter.studio.state, chapter.studio.script, { cacheRoot: work, ffmpeg: this.options.ffmpeg, signal, final: true });
+              await copyFile(await checkedPublicationPath(work, rendered.file), join(work, file));
               duration = rendered.seconds;
             } else {
               if (!chapter.mix) throw new Error("The captured chapter has no audio plan.");

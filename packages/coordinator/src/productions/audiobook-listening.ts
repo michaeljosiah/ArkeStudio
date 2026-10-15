@@ -168,7 +168,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
           ...(options.ffmpeg ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), final: options.finalAudio === true });
         await checkAudiobookMotion(store, chapter); chapters.push(chapter);
       } catch (error) {
-        if (options.finalAudio || options.signal?.aborted) throw error;
+        if ((options.finalAudio && scope.kind === "chapter") || options.signal?.aborted || store.closingSignal.aborted) throw error;
         chapters.push({ chapterId: summary.id, order: summary.order, title: summary.title, state: "not read", seconds: 0, blocks: [], gaps: [], pictures: [], opening: cover,
           audioStudio: { revision: record.arrangement.revision, issues: [error instanceof Error ? error.message : "The arrangement could not be played"], omissions: [] } });
       }

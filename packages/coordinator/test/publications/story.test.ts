@@ -181,6 +181,8 @@ describe("publication narration identity", () => {
     assert.deepEqual(review.blockers, []); assert.deepEqual(review.chapters[0]!.audioProblems, []);
     const failed = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
     assert.match(failed.error!, /Encoder interrupted/);
+    await assert.rejects(stat(join(h.root, failed.id, "inputs/.cache/audio-studio/mix")), { code: "ENOENT" });
+    await assert.rejects(stat(join(h.root, failed.id, "render")), { code: "ENOENT" });
     const frozen = JSON.parse(await readFile(join(h.root, failed.id, "inputs.json"), "utf8"));
     assert.equal(frozen.mixes[0].studio.revision, arranged.saved!.revision);
     assert.equal(frozen.mixes[0].mix, undefined);
@@ -188,6 +190,8 @@ describe("publication narration identity", () => {
     fail = false;
     const preview = await service.retry(failed.id, () => {});
     assert.equal(preview.status, "preview", preview.error);
+    await assert.rejects(stat(join(h.root, preview.id, "inputs/.cache/audio-studio/mix")), { code: "ENOENT" });
+    await assert.rejects(stat(join(h.root, preview.id, "render")), { code: "ENOENT" });
     await assert.rejects(service.create(h.store, h.productionId, preview.id), /source changed/);
   });
   it("flags only the recording whose spoken text changed, and undo restores its exact dependency", async () => {

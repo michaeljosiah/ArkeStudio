@@ -84,6 +84,7 @@ export function useAudioStudioPlayer(input: { worldId: string; productionId: str
     request.current = { id, loop: loop === true }; setPending(true); setProblem(null); setIssues([]);
   }, [worldId, productionId, chapterFile, key, stop]);
   const mine = playback.clip?.id === key;
+  useEffect(() => { if (mine && playback.status === "ended") stop(); }, [mine, playback.status, stop]);
   const playing = mine && ["playing", "loading", "paused", "blocked"].includes(playback.status);
-  return { play, stop, pending, playing, issues, problem: problem ?? (mine ? playback.error : null), at: mine ? Math.round((offset + playback.currentTime) * 48000) : null };
+  return { play, stop, pending, playing, issues, problem: problem ?? (mine ? playback.error : null), at: mine && playback.status !== "ended" ? Math.round((offset + playback.currentTime) * 48000) : null };
 }

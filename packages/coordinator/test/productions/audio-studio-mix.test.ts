@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { initialAudioArrangement, editAudioArrangement, newAudioClip, resolveAudioArrangement, type AudioArrangementState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -23,6 +23,17 @@ async function fixture() {
   return { dir, arranged, pcm, source };
 }
 describe("Audio Studio canonical stereo rendering", () => {
+  it("reserves float scratch space before creating a long render", async () => {
+    const { dir, arranged } = await fixture();
+    const clip = arranged.clips[0]!; clip.loop = true; clip.loopDuration = 800_000_000;
+    // The 3.2 GB output fits, but output plus 6.4 GB scratch exceeds the 8 GiB budget.
+    await assert.rejects(renderAudioStudioMix(dir, arranged, script), /scratch space budget/);
+    assert.deepEqual(await readdir(join(dir, ".cache/audio-studio/mix")), []);
+    clip.loop = false; delete clip.loopDuration;
+    const mix = await renderAudioStudioMix(dir, arranged, script);
+    assert.equal(mix.seconds, 1, "a rejected render releases its reservation");
+    assert.ok((await readdir(join(dir, ".cache/audio-studio/mix"))).every(file => /^[a-f0-9]{64}\.(wav|json)$/.test(file)), "scratch files are removed after rendering");
+  });
   it("decodes each layered source once across output chunks and repeated placements", async () => {
     const dir = await tempDir("arke-layered-decodes-"); await mkdir(join(dir, "artifacts"));
     const arranged = state(), samples = 48000 * (process.env.ARKE_AUDIO_MEMORY_SMOKE === "1" ? 360 : 2);
