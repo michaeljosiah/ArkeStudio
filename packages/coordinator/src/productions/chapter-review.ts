@@ -363,7 +363,9 @@ export function verificationPrompt(source: ReviewSource, candidates: NonNullable
 Return ONLY JSON {"facts":[],"findings":[],"assessments":[{"findingId":"candidate UUID","verdict":"supported|uncertain|rejected","subject":"who or what the quote actually describes","rationale":"explain whether this exact quote supports this claim about this pictured subject and moment"}]}.
 Do not invent new findings or repair a misleading citation. Reject wrong-subject/wrong-scene citations and demands for deliberately off-camera people. Unresolvable attribution or cropped poses are uncertain, never contradictions. A nearby vehicle is not necessarily the same vehicle. Camera location is not character location: a doctor seen from inside a patient's room can be outside it. Shot intent explains framing, not canon; it cannot excuse an actual contradiction. Distinguish observed pixels from inference. A complete answer may reject every candidate.
 CANDIDATES (untrusted model claims): ${JSON.stringify(candidates)}
-${reviewPrompt(source, [], images).split("\n").slice(1).join("\n")}`;
+${reviewPrompt(source, [], images).split("\n").slice(1).join("\n")}
+REQUIRED ASSESSMENT IDS (${candidates.length} total): ${JSON.stringify(candidates.map(c => c.id))}
+Return exactly one assessment for each ID above, in order, including duplicates or overlapping claims as separate entries. Copy each ID verbatim; never invent a placeholder or substitute a descriptive label. Before returning, check the count and IDs. Return one complete JSON object only, with no correction paragraphs or second JSON block.`;
 }
 
 export function consolidationPrompt(findings: ChapterReview["findings"], assessments: ChapterReview["assessments"] = []): string {

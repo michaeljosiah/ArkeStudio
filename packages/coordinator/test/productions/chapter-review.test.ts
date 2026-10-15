@@ -178,6 +178,8 @@ it("pins shot intent and documents negative framing cases without elevating inte
   const prompt = verificationPrompt(source, [], [f.block.key]);
   assert.match(prompt, /"notInFrame":\["patient","teammate"\]/);
   assert.match(prompt, /patient's room/); assert.match(prompt, /cropped poses/);
+  assert.match(prompt, /REQUIRED ASSESSMENT IDS \(0 total\): \[\]/);
+  assert.match(prompt, /never invent a placeholder/);
   assert.match(prompt, /not necessarily the same vehicle/); assert.match(prompt, /cannot excuse an actual contradiction/);
   assert.match(consolidationPrompt([]), /symbol shape and a pointed spike tip are separate/);
 });
