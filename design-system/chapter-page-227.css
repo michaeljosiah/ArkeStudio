@@ -1,0 +1,225 @@
+/* Turn 227 · the chapter page, full width. Scoped to .ch227 so nothing reaches another turn.
+   Type is set through the tokens only (check-master's rule from turn 139). */
+.ch227{--hero-h:320px;--measure:660px;--gut:48px;position:relative;overflow:hidden;color:var(--foreground);background:var(--background);font:var(--type-body);display:grid;grid-template-rows:44px minmax(0,1fr);text-align:left}
+.ch227 *{box-sizing:border-box}
+.ch227 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.ch227 svg{width:16px;height:16px;flex:none}
+.ch227 .v1{--v:var(--voice-1)}.ch227 .v2{--v:var(--voice-2)}.ch227 .v3{--v:var(--voice-3)}.ch227 .v4{--v:var(--voice-4)}.ch227 .v6{--v:var(--voice-6)}
+
+/* Titlebar and rails: the shipped chrome (turn 220–226 drawing), unchanged. */
+.ch227 .tb{height:44px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;font:var(--type-label);color:var(--muted-foreground);position:relative}
+.ch227 .tb>b{position:absolute;left:50%;transform:translateX(-50%);font:var(--type-ui);color:var(--foreground)}
+.ch227 .tb>b small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .tb .crumb{display:flex;gap:14px}.ch227 .tb .crumb span{color:var(--foreground)}
+.ch227 .tb .util{display:flex;gap:16px;align-items:center}
+.ch227 .body{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;min-height:0}
+.ch227.arke-open .body{grid-template-columns:42px minmax(0,1fr) 331px}
+.ch227 .rail{border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:12px;color:var(--muted-foreground)}
+.ch227 .rail button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
+.ch227 .rail button.on{background:var(--muted);color:var(--foreground)}
+.ch227 .fold{border-left:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding-top:12px;color:var(--muted-foreground)}
+.ch227 .fold button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
+
+/* The page. One scroll; the hero is the top of it, not a panel. */
+.ch227 .main{position:relative;min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.ch227 .scroll{flex:1;min-height:0;overflow:hidden;position:relative}
+
+/* Hero: the chapter's picture fades into the page; the words sit on the faded side. */
+.ch227 .hero{position:relative;min-height:var(--hero-h);padding:24px var(--gut) 28px;display:flex;flex-direction:column;justify-content:flex-end}
+.ch227 .hero__art{position:absolute;top:0;right:0;bottom:0;width:64%;background-size:cover;background-position:65% 30%;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 46%),linear-gradient(180deg,#000 55%,transparent 100%);-webkit-mask-composite:source-in;
+  mask-image:linear-gradient(90deg,transparent 0,#000 46%),linear-gradient(180deg,#000 55%,transparent 100%);mask-composite:intersect}
+.ch227 .hero__in{position:relative;max-width:600px;display:flex;flex-direction:column;gap:14px}
+.ch227 .hero.bare{min-height:0;padding-top:32px}
+
+/* The book strip: one segment a chapter, its length the chapter's words. */
+.ch227 .book{display:flex;align-items:center;gap:10px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .book .nav{width:22px;height:22px;display:grid;place-items:center;border-radius:6px;border:1px solid var(--border);color:var(--foreground)}
+.ch227 .book .nav svg{width:12px;height:12px}
+.ch227 .book .nav[disabled]{opacity:.35}
+.ch227 .strip{display:flex;gap:2px;height:6px;width:300px;align-items:stretch}
+.ch227 .strip i{display:block;border-radius:2px;background:color-mix(in srgb,var(--foreground) 22%,transparent)}
+.ch227 .strip i.here{background:var(--foreground)}
+.ch227 .strip i.plan{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 22%,transparent)}
+.ch227 .book b{color:var(--foreground);font-weight:var(--weight-medium)}
+
+.ch227 h1{margin:0;font-weight:var(--weight-semibold);font-size:var(--text-5xl);line-height:1.04;letter-spacing:var(--tracking-tighter)}
+.ch227 .syn{margin:0;font:var(--type-lead);font-size:var(--text-md);color:var(--muted-foreground);max-width:540px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ch227 .meta{display:flex;align-items:center;gap:16px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .pov{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 10px 0 3px;border-radius:var(--radius-pill);border:1px solid var(--border);color:var(--foreground);font:var(--type-ui);background:color-mix(in srgb,var(--background) 70%,transparent)}
+.ch227 .pov img{width:24px;height:24px;border-radius:50%;object-fit:cover;object-view-box:inset(6% 24% 58% 24%)}
+.ch227 .pov svg{width:12px;height:12px;color:var(--muted-foreground)}
+.ch227 .acts{display:flex;align-items:center;gap:8px;margin-top:6px}
+.ch227 .btn{height:36px;display:inline-flex;align-items:center;gap:8px;padding:0 14px;border-radius:var(--radius-pill);border:1px solid var(--border);font:var(--type-ui);background:color-mix(in srgb,var(--background) 70%,transparent)}
+.ch227 .btn.pri{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary);padding:0 18px 0 14px}
+.ch227 .btn.pri small{font:var(--type-ui);font-weight:var(--weight-regular);opacity:.62}
+.ch227 .btn.icon{width:36px;padding:0;justify-content:center}
+.ch227 .btn svg{width:14px;height:14px}
+
+/* The cast: faces in their voice colours, the one place voices are managed. */
+.ch227 .cast{display:flex;align-items:center;gap:6px;padding:4px var(--gut) 18px}
+.ch227 .who{display:grid;grid-template-columns:44px auto;align-items:center;gap:10px;padding:6px 14px 6px 6px;border-radius:14px;text-align:left}
+.ch227 .who.sel{background:var(--muted)}
+.ch227 .face{width:44px;height:54px;border-radius:10px;object-fit:cover;object-view-box:inset(2% 12% 40% 12%);box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--v)}
+.ch227 .face.nar{display:grid;place-items:center;background:color-mix(in srgb,var(--v) 26%,var(--background));color:var(--foreground)}
+.ch227 .face.nar svg{width:20px;height:20px}
+.ch227 .who b{display:block;font:var(--type-ui)}
+.ch227 .who small{display:block;font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .cast .gap{flex:1}
+.ch227 .owe{display:flex;align-items:center;gap:10px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .dot{width:7px;height:7px;border-radius:50%;background:var(--warning);display:inline-block;flex:none}
+
+/* The view row: the three views, then what the margins show. Sticky under the hero. */
+.ch227 .views{display:flex;align-items:center;gap:12px;padding:0 var(--gut);height:52px;border-bottom:1px solid var(--border);background:var(--background)}
+.ch227 .seg{display:inline-flex;padding:3px;border-radius:10px;background:var(--muted);gap:2px}
+.ch227 .seg button{height:30px;padding:0 14px;border-radius:7px;font:var(--type-ui);color:var(--muted-foreground)}
+.ch227 .seg button.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.ch227 .views .gap{flex:1}
+.ch227 .tog{width:34px;height:34px;display:grid;place-items:center;border-radius:8px;color:var(--muted-foreground)}
+.ch227 .tog.on{color:var(--foreground);background:var(--muted)}
+.ch227 .sep{width:1px;height:20px;background:var(--border)}
+.ch227 .notes-btn{height:34px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:8px;font:var(--type-ui)}
+.ch227 .notes-btn.on{background:var(--muted)}
+
+/* Compact bar: the hero once the reader has scrolled into the prose. */
+.ch227 .bar{display:flex;align-items:center;gap:14px;height:60px;padding:0 var(--gut) 0 20px;border-bottom:1px solid var(--border);background:var(--background)}
+.ch227 .bar .thumb{width:44px;height:30px;border-radius:6px;background-size:cover;background-position:65% 30%}
+.ch227 .bar .t{display:flex;flex-direction:column;min-width:0}
+.ch227 .bar .t small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .bar .t b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ch227 .bar .seg{margin-left:18px}
+
+/* The manuscript: people in the left margin, pictures in the right, prose at a fixed measure. */
+.ch227 .ms{display:grid;grid-template-columns:minmax(0,1fr) min(var(--measure),100%) minmax(0,1fr);column-gap:36px;row-gap:16px;padding:30px var(--gut) 80px}
+.ch227 .ms p{grid-column:2;margin:0;font-size:var(--text-lg);line-height:1.72;font-weight:var(--weight-regular)}
+.ch227 .ms .mk{grid-column:1;justify-self:end;display:flex;align-items:center;gap:10px;height:31px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .ms .mk img{width:26px;height:26px;border-radius:50%;object-fit:cover;object-view-box:inset(6% 24% 58% 24%);box-shadow:0 0 0 2px var(--background),0 0 0 3.5px var(--v)}
+.ch227 .ms .mk.quiet img{box-shadow:0 0 0 1.5px var(--v);width:22px;height:22px;opacity:.85}
+.ch227 .ms figure{grid-column:3;margin:4px 0 0;align-self:start;width:min(100%,240px)}
+.ch227 .ms figure div{aspect-ratio:3/2;border-radius:10px;background-size:cover;background-position:center}
+.ch227 .ms p.said{color:var(--foreground)}
+.ch227 .ms p.sel{background:color-mix(in srgb,var(--v) 16%,transparent);border-radius:6px;box-shadow:-10px 0 0 color-mix(in srgb,var(--v) 16%,transparent),10px 0 0 color-mix(in srgb,var(--v) 16%,transparent)}
+
+.ch227 .foot{display:flex;align-items:center;height:36px;padding:0 var(--gut);border-top:1px solid var(--border);font:var(--type-meta);color:var(--muted-foreground);background:var(--background)}
+.ch227 .foot .gap{flex:1}
+.ch227 .foot button{font:var(--type-label);color:var(--foreground)}
+
+/* Voice card: opened from a face in the cast. Replaces the Voices column. */
+.ch227 .vcard{position:absolute;z-index:5;width:480px;padding:16px;border-radius:var(--radius-xl);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);display:grid;grid-template-columns:116px minmax(0,1fr);gap:16px}
+.ch227 .vcard .big{width:116px;height:146px;border-radius:12px;object-fit:cover;object-position:50% 14%;box-shadow:0 0 0 2px var(--popover),0 0 0 4px var(--v)}
+.ch227 .vcard h3{margin:0;font:var(--type-h3)}
+.ch227 .vcard .sub{font:var(--type-meta);color:var(--muted-foreground);margin-top:2px}
+.ch227 .voice{display:flex;align-items:center;gap:10px;margin-top:12px;padding:8px 10px 8px 8px;border-radius:10px;background:var(--muted)}
+.ch227 .voice .play{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--foreground);color:var(--background)}
+.ch227 .voice .play svg{width:12px;height:12px}
+.ch227 .voice span{flex:1;font:var(--type-ui);white-space:nowrap}
+.ch227 .voice span small{font:var(--type-meta);color:var(--muted-foreground);margin-left:6px}
+.ch227 .voice button.ch{font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .wave{display:flex;align-items:center;gap:2px;height:16px}
+.ch227 .wave i{display:block;width:2px;border-radius:1px;background:var(--v)}
+.ch227 .fld{grid-column:1/-1;display:flex;flex-direction:column;gap:6px}
+.ch227 .fld label{font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .fld .ta{min-height:64px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);font:var(--type-body);color:var(--foreground);background:var(--background)}
+.ch227 .row{grid-column:1/-1;display:flex;align-items:center;gap:10px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .row .gap{flex:1}
+.ch227 .sw{width:34px;height:20px;border-radius:10px;background:var(--muted);position:relative;border:1px solid var(--border)}
+.ch227 .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted-foreground)}
+.ch227 .sw.on{background:var(--foreground)}.ch227 .sw.on::after{left:16px;background:var(--background)}
+.ch227 .link{font:var(--type-ui);color:var(--foreground);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--border)}
+
+/* Notes: everything that was the side column, in one drawer (docked on ultrawide). */
+.ch227 .notes{position:absolute;z-index:4;top:0;right:0;bottom:0;width:360px;background:var(--card);border-left:1px solid var(--border);padding:18px 20px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.ch227 .notes.docked{position:static;background:none;height:auto}
+.ch227 .scroll.with-notes{display:grid;grid-template-columns:minmax(0,1fr) 360px}
+.ch227 .scroll.with-notes>.notes{position:static}
+.ch227 .notes header{display:flex;align-items:center;justify-content:space-between;font:var(--type-h3)}
+.ch227 .notes header button{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--muted-foreground)}
+.ch227 .notes section{display:flex;flex-direction:column;gap:10px}
+.ch227 .notes h4{margin:0;display:flex;align-items:center;gap:8px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ch227 .notes h4 .gap{flex:1}
+.ch227 .notes h4 button{font:var(--type-label);color:var(--muted-foreground);display:inline-flex;gap:6px;align-items:center}
+.ch227 .notes h4 button svg{width:12px;height:12px}
+.ch227 .bars{display:flex;align-items:flex-end;gap:3px;height:52px}
+.ch227 .bars i{flex:1;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--foreground) 22%,transparent)}
+.ch227 .bars i.here{background:var(--foreground)}
+.ch227 .bars i.plan{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 22%,transparent);height:8px!important}
+.ch227 .kv{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .kv b{color:var(--foreground);font-weight:var(--weight-medium)}
+.ch227 .flag{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warning) 12%,transparent);font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .flag .gap{flex:1}
+.ch227 .flag button{font:var(--type-label)}
+.ch227 .cont{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;align-items:start;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .cont img{width:24px;height:24px;border-radius:50%;object-fit:cover;object-view-box:inset(6% 24% 58% 24%)}
+.ch227 .cont b{font-weight:var(--weight-semibold)}
+.ch227 .cont span{color:var(--muted-foreground)}
+.ch227 .chips{display:flex;flex-wrap:wrap;gap:6px}
+.ch227 .chips span{height:26px;display:inline-flex;align-items:center;padding:0 10px;border-radius:var(--radius-pill);border:1px solid var(--border);font:var(--type-label)}
+.ch227 .vers{display:flex;flex-direction:column;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .vers div{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)}
+.ch227 .vers div:last-child{border:0}
+.ch227 .vers small{font:var(--type-meta);color:var(--muted-foreground)}
+
+/* Arke, open (ultrawide frame): the existing dock, drawn plainly. */
+.ch227 .dock{border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+.ch227 .dock header{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border);font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ch227 .dock header .gap{flex:1}
+.ch227 .dock .thread{flex:1;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font:var(--type-body)}
+.ch227 .dock .me{align-self:flex-end;max-width:85%;padding:10px 12px;border-radius:14px 14px 4px 14px;background:var(--muted)}
+.ch227 .dock .ai{max-width:92%}
+.ch227 .dock .comp{margin:12px;min-height:76px;border:1px solid var(--border);border-radius:14px;padding:12px;color:var(--muted-foreground);font:var(--type-body)}
+
+/* Empty states: a chapter with no picture and no cast yet. */
+.ch227 .uncast{display:flex;align-items:center;gap:12px;padding:6px var(--gut) 20px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .ghost{width:44px;height:54px;border-radius:10px;border:1px dashed var(--border)}
+
+/* Ultrawide: a larger hero, the cast in the left margin's names, Notes docked. */
+.ch227.wide{--hero-h:420px;--measure:760px;--gut:64px}
+.ch227.wide .page{display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:100%}
+.ch227.wide .page>.notes{border-left:1px solid var(--border);padding:24px 24px}
+.ch227.wide .ms figure{width:min(100%,360px)}
+.ch227.wide .hero__art{width:min(64%,1180px)}
+.ch227.wide .ms p{font-size:var(--text-xl);line-height:1.7}
+.ch227.wide .strip{width:420px}
+
+/* Fold (984): one rail, prose at 600, pictures inside the column after their passage. */
+.ch227.fold{--hero-h:280px;--measure:600px;--gut:32px}
+.ch227.fold .ms{grid-template-columns:44px min(var(--measure),100%) 44px;justify-content:center}
+.ch227.fold h1{font-size:var(--text-4xl)}
+.ch227 .ms figure.in{grid-column:2;width:100%;margin:2px 0 6px}
+.ch227 .ms figure.in div{aspect-ratio:16/9}
+
+/* Phone (390): no titlebar, no rails; the hero is a full-bleed picture; Listen held at the foot. */
+.ch227.phone{--gut:20px;grid-template-rows:minmax(0,1fr)}
+.ch227.phone .pscroll{overflow:hidden;position:relative}
+.ch227.phone .phero{position:relative;height:300px;background-size:cover;background-position:70% 20%}
+.ch227.phone .phero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.35) 0,transparent 30%,transparent 50%,var(--background) 100%)}
+.ch227.phone .ptop{position:absolute;z-index:2;top:12px;left:12px;right:12px;display:flex;justify-content:space-between}
+.ch227.phone .ptop button{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--media-overlay-bg) 55%,transparent);color:var(--media-overlay-fg)}
+.ch227.phone .pin{position:relative;margin-top:-92px;padding:0 var(--gut);display:flex;flex-direction:column;gap:12px;z-index:1}
+.ch227.phone h1{font-size:var(--text-3xl)}
+.ch227.phone .strip{width:100%;flex:1}
+.ch227.phone .book{width:100%}
+.ch227.phone .meta{gap:12px;flex-wrap:wrap}
+.ch227 .pcast{display:flex;gap:14px;padding:18px var(--gut) 16px;overflow:hidden}
+.ch227 .pcast button{display:flex;flex-direction:column;align-items:center;gap:6px;width:60px;font:var(--type-label)}
+.ch227 .pcast img,.ch227 .pcast .nar{width:52px;height:52px;border-radius:50%;object-fit:cover;object-view-box:inset(4% 18% 48% 18%);box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--v)}
+.ch227 .pcast .nar{display:grid;place-items:center;background:color-mix(in srgb,var(--v) 26%,var(--background))}
+.ch227 .pcast small{font:var(--type-meta);color:var(--muted-foreground);margin-top:-4px}
+.ch227.phone .pviews{display:flex;gap:8px;align-items:center;padding:0 var(--gut) 6px}
+.ch227.phone .pviews .seg{flex:1;display:flex}
+.ch227.phone .pviews .seg button{flex:1;padding:0 6px}
+.ch227.phone .ms{display:block;padding:16px var(--gut) 120px}
+.ch227.phone .ms p{font-size:var(--text-md);line-height:1.7;margin:0 0 14px}
+.ch227.phone .ms p.said{border-left:2px solid var(--v);padding-left:12px;margin-left:-14px}
+.ch227.phone .ms figure{width:100%;margin:2px 0 16px}
+.ch227.phone .ms figure div{aspect-ratio:16/9}
+.ch227 .hold{position:absolute;z-index:6;left:0;right:0;bottom:0;padding:12px var(--gut) 22px;background:linear-gradient(180deg,transparent,var(--background) 30%);display:flex;gap:8px}
+.ch227 .hold .btn{height:48px;flex:1;justify-content:center;font:var(--type-ui)}
+.ch227 .hold .btn.icon{flex:none;width:48px}
+.ch227 .sheet{position:absolute;z-index:7;left:0;right:0;bottom:0;border-radius:22px 22px 0 0;background:var(--popover);border-top:1px solid var(--border);padding:10px 20px 24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 -20px 60px rgba(0,0,0,.5)}
+.ch227 .sheet .grab{width:40px;height:4px;border-radius:2px;background:var(--border);align-self:center}
+.ch227 .sheet .hd{display:flex;align-items:center;gap:14px}
+.ch227 .sheet .hd img{width:64px;height:64px;border-radius:50%;object-fit:cover;object-position:50% 16%;box-shadow:0 0 0 2px var(--popover),0 0 0 4px var(--v)}
+.ch227 .sheet .hd h3{margin:0;font:var(--type-h3)}
+.ch227 .sheet .done{height:48px;border-radius:12px;background:var(--primary);color:var(--primary-foreground);font:var(--type-ui)}
+.ch227 .scrim{position:absolute;inset:0;z-index:6;background:rgba(0,0,0,.5)}
