@@ -84,6 +84,8 @@ export const SCREENS: ScreenEntry[] = [
   // The chapter, opened (turn 126); the fixture's story production is chapterless, so the sample
   // path renders the opening state and the chrome around it.
   { id: "chapter", samplePath: `${P}/story/chapters/neap` },
+  // Audio Studio remains a chapter view (?view=audio-studio; legacy ?view=timing is accepted).
+  // Its populated route and read-only opening are covered in chapter-timing.test.tsx.
   // The audiobook's door (turn 146): the fixture's story production has no chapters, so the
   // sample path renders the head, the seg and the empty state under them.
   { id: "audiobook", samplePath: `${P}/story/audiobook` },

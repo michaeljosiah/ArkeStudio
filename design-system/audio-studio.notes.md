@@ -126,7 +126,7 @@ The recommended decisions are: evolve Timing into Audio Studio; keep Audiobook a
 
 SPEC-047 is marked proposed with built slices and later amendments. R-21 and D5 explicitly exclude a free timeline; R-80–R-89 describe the existing block timing/mix direction. This proposal deliberately changes that boundary, including the mono mix choice in R-85. SPEC-043 is accepted and supplies the independent video editing/import and track-role rules; reusing mechanics must preserve those rules. Publication integration must also be reconciled with SPEC-048. No new spec number is reserved here.
 
-Before implementation, amend the live private specifications for arrangement authority, migration, passage identity, clock, replacement review and delivery. The private documents were readable in this session, but `node scripts/private-docs.mjs` reported that their directory was not a Git repository; no private amendment or commit was made. Turn 226 is appended as a proposal; prior turns and their approval states remain unchanged.
+The approved design is committed as `087cfcdf5`. Implementation begins with the existing chapter timing authority inside the shared editor shell; [implementation scope](../docs/development/audio-studio.md) separates this first slice from the advanced arrangement work. The initial sandbox check could not inspect the private repository's Git metadata; a subsequent permitted check confirmed it is a clean Git repository. Live SPEC-047 R-185–R-190 and SPEC-043 are amended alongside implementation for the first slice and the remaining arrangement, migration, clock, review and delivery requirements. Prior design turns and their approval states remain unchanged.
 
 ## Review coverage
 

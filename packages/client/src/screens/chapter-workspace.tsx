@@ -1,3 +1,4 @@
+import { ChapterAudioStudio } from "./chapter-audio-studio.js";
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -1132,12 +1133,17 @@ export function ChapterWorkspace({
   const viewParam = searchParams.get("view");
   const view = chapterView(worldId, prodId, chapter.id, viewParam);
   useEffect(() => { rememberChapterView(worldId, prodId, chapter.id, view); }, [worldId, prodId, chapter.id, view]);
+  // Remembered views and old Timing links need the same editor chrome as direct Studio links.
+  useEffect(() => {
+    if (view !== "timing" || viewParam === "audio-studio") return;
+    setSearchParams(params => { const next = new URLSearchParams(params); next.set("view", "audio-studio"); return next; }, { replace: true });
+  }, [view, viewParam, setSearchParams]);
   const chooseView = (next: "manuscript" | "audiobook" | "timing") => {
     rememberChapterView(worldId, prodId, chapter.id, next);
     setSearchParams(
       (params) => {
         const copy = new URLSearchParams(params);
-        if (next !== "manuscript") copy.set("view", next);
+        if (next !== "manuscript") copy.set("view", next === "timing" ? "audio-studio" : next);
         else copy.delete("view");
         return copy;
       },
@@ -1784,6 +1790,12 @@ export function ChapterWorkspace({
   const timingLocked = locked || record === null || connection !== "open" || audiobook.run?.state === "reading";
   // Propose timing (design turn 187b): drawn dashed on the view until accepted whole.
   const timingProposal = useTimingProposal({ worldId, prodId, chapterId: chapter.id, chapterFile: chapter.file, connection });
+  const cancelStudioMix = audiobook.mixPlayer.cancel;
+  useEffect(() => {
+    if (view !== "timing" || timingProposal.proposal === null) return;
+    cancelStudioMix();
+    if (audiobook.mixPlayer.playing) dismissPlayback();
+  }, [view, timingProposal.proposal, cancelStudioMix, audiobook.mixPlayer.playing]);
   const proposalView = useMemo(
     () => proposedView(audiobookRecord.record === "unreadable" ? null : audiobookRecord.record, timingProposal.proposal, audiobook.rows.map((row) => row.block)),
     [audiobookRecord.record, timingProposal.proposal, audiobook.rows],
@@ -1793,7 +1805,7 @@ export function ChapterWorkspace({
     [timingProposal.proposal, audiobook.timing, audiobook.rows, proposalView.record, world.artifacts, production.audiobook?.reading, audiobookRecord.missing],
   );
   const onTiming = (key: string, input: BlockTimingInput) => {
-    if (timingLocked) return;
+    if (timingLocked || timingProposal.proposal !== null) return;
     setAudiobookTiming(worldId, prodId, chapter.file, key, input);
   };
   const selectedBar = audiobook.timing.bars.find((bar) => bar.key === audiobook.selected) ?? null;
@@ -1818,8 +1830,8 @@ export function ChapterWorkspace({
         timing={audiobook.timing}
         row={selectedTimingRow}
         speakers={reactors}
-        locked={timingLocked}
-        onReaction={(key, reaction) => !timingLocked && setAudiobookReaction(worldId, prodId, chapter.file, key, reaction)}
+        locked={timingLocked || timingProposal.proposal !== null}
+        onReaction={(key, reaction) => !timingLocked && timingProposal.proposal === null && setAudiobookReaction(worldId, prodId, chapter.file, key, reaction)}
       />
       <BedPanel
         worldId={worldId}
@@ -1828,9 +1840,9 @@ export function ChapterWorkspace({
         timing={audiobook.timing}
         rows={audiobook.rows}
         row={selectedTimingRow}
-        locked={timingLocked}
-        onBed={(key, bed) => !timingLocked && setAudiobookBed(worldId, prodId, chapter.file, key, bed)}
-        onSound={(key, sound) => !timingLocked && setAudiobookSound(worldId, prodId, chapter.file, key, sound)}
+        locked={timingLocked || timingProposal.proposal !== null}
+        onBed={(key, bed) => !timingLocked && timingProposal.proposal === null && setAudiobookBed(worldId, prodId, chapter.file, key, bed)}
+        onSound={(key, sound) => !timingLocked && timingProposal.proposal === null && setAudiobookSound(worldId, prodId, chapter.file, key, sound)}
       />
     </>
   );
@@ -1926,8 +1938,40 @@ export function ChapterWorkspace({
   ) : null;
   const barArke = phone && foldedAudiobook ? arkePress : null;
   return (
-    <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
-      <main className="fy-sw__centre" ref={chapterCentre}>
+    <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
+      {view === "timing" && <ChapterAudioStudio key={chapter.id} book={production.meta.title} title={chapter.title}
+        rows={audiobook.rows} timing={shownTiming} selected={audiobook.selected} onSelect={audiobook.setSelected}
+        playhead={shownPlayhead} onPlayhead={setPlayhead}
+        reviewing={timingProposal.proposal !== null} playing={audiobook.mixPlayer.playing} pending={audiobook.mixPlayer.pending}
+        canPlay={connection === "open" && audiobook.mixed.bars.length > 0}
+        onPlay={at => audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at))}
+        onStop={() => { audiobook.mixPlayer.cancel(); dismissPlayback(); }}
+        onBack={() => chooseView("audiobook")} onExport={openChapterExport} exportDisabled={connection !== "open" || record === null}
+        problem={openFailure ?? (record === null ? "Opening…" : audiobook.mixPlayer.refused)}
+        timeline={<TimingView
+                    timing={shownTiming}
+                    lanes={timingLanes(audiobook.rows)}
+                    rows={audiobook.rows}
+                    selected={audiobook.selected}
+                    onSelect={audiobook.setSelected}
+                    onTiming={onTiming}
+                    playhead={shownPlayhead}
+                    onPlayhead={setPlayhead}
+                    reactionLabels={Object.fromEntries(Object.entries(proposalView.record?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
+                    proposed={proposalView.proposed}
+                    // A proposal held is looked at, not edited around: accepted or discarded first.
+                    locked={timingLocked || timingProposal.proposal !== null}
+                  />}
+        inspector={<><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows}
+          onTiming={onTiming} playDisabled={connection !== "open" || audiobook.mixed.bars.length === 0 || timingProposal.proposal !== null}
+          onPlayFrom={at => { if (connection !== "open" || audiobook.mixed.bars.length === 0 || timingProposal.proposal !== null) return; setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }}
+          refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked || timingProposal.proposal !== null} revision={audiobook.lastRecord?.seq} />{soundsPanel}</>}
+        proposal={timingProposal.proposal !== null && <TimingProposalCard proposal={timingProposal.proposal} onAccept={timingProposal.accept} onDiscard={timingProposal.discard} refused={timingProposal.refused} locked={timingLocked} />}
+        propose={<div className="fy-audio-studio__propose"><Button disabled={timingLocked || timingProposal.pending || timingProposal.proposal !== null} onClick={timingProposal.propose} data-testid="timing-propose">{timingProposal.pending ? "Proposing…" : "Propose timing"}</Button>{timingProposal.refused && <p role="status">{timingProposal.refused}</p>}</div>}
+        conversation={<ProductionConversation worldId={worldId} productionId={prodId} entry={{ kind: "production", productionId: prodId }} subject={dockSubject}
+          dock={{ title: "Arke", subject: chapter.title, conversationFirst: true, subjectPrefix: dockPrefix, about: chapterLabel }} placeholder={"Ask about " + chapterLabel} emptyLine={"No conversation about " + chapterLabel + " yet."} />}
+      />}
+      <main className="fy-sw__centre" ref={chapterCentre} hidden={view === "timing"}>
         {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so
             the bar stays put when the switch below it changes view (the master draws Audiobook). */}
         {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
@@ -2046,37 +2090,9 @@ export function ChapterWorkspace({
                 Audiobook
               </button>
               <button type="button" className={cx("fy-seg__item", view === "timing" && "fy-seg__item--active")} onClick={() => chooseView("timing")}>
-                Timing
+                Audio Studio
               </button>
             </nav>
-            {/* Timing (turn 187a): the reading, then Play from the playhead with the timing as set. */}
-            {view === "timing" && (
-              <>
-                <ReadingMenu
-                  reading={production.audiobook?.reading ?? "narrator"}
-                  narrator={audiobook.narrator.label ?? narratorName}
-                  disabled={audiobook.run?.state === "reading" || connection !== "open"}
-                  onReading={(reading) => setAudiobookReading(worldId, prodId, reading)}
-                  onNarrator={() => setNarratorOpen(true)}
-                />
-                <span className="fy-ch__viewpush" />
-                {timingProposal.proposal === null && (
-                  <Button variant="secondary" disabled={timingLocked || timingProposal.pending} onClick={timingProposal.propose} data-testid="timing-propose">
-                    {timingProposal.pending ? "Proposing…" : "Propose timing"}
-                  </Button>
-                )}
-                {timingProposal.proposal === null && timingProposal.refused !== null && <span className="fy-mono fy-ch__who-where--warn">{timingProposal.refused}</span>}
-                {audiobook.mixPlayer.playing ? (
-                  <Button variant="ghost" onClick={() => dismissPlayback()} data-testid="timing-stop">Stop</Button>
-                ) : (
-                  <Button variant="primary" disabled={audiobook.mixPlayer.pending || audiobook.mixed.bars.length === 0} onClick={() => audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, playhead))} data-testid="timing-play">
-                    {audiobook.mixPlayer.pending ? "Mixing…" : "Play"}
-                  </Button>
-                )}
-                {audiobook.mixPlayer.refused !== null && <span className="fy-mono fy-ch__who-where--warn">{audiobook.mixPlayer.refused}</span>}
-                {arkePress}
-              </>
-            )}
             {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}{/* In Audiobook, Notes is the reading's book and chapter note (194, rule 5); the rail's sheet is the Manuscript's. */}{view !== "audiobook" && <button type="button" className="ui-btn ui-btn--secondary" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{phone ? <span className="fy-sr-only">Notes</span> : "Notes"}</button>}</div>}
             {view === "audiobook" && (
               <>
@@ -2172,35 +2188,6 @@ export function ChapterWorkspace({
                   })()}
                   onClose={() => setLinesFor(null)}
                 />
-              )}
-            </div>
-          )}
-          {view === "timing" && (
-            <div className="fy-ch__manuscript fy-ch__timing" data-testid="timing-column">
-              {openFailure !== null ? (
-                <EmptyState title={openFailure} />
-              ) : record === null ? (
-                <p className="fy-bible__empty">Opening…</p>
-              ) : (
-                <>
-                  {timingProposal.proposal !== null && (
-                    <TimingProposalCard proposal={timingProposal.proposal} onAccept={timingProposal.accept} onDiscard={timingProposal.discard} refused={timingProposal.refused} locked={timingLocked} />
-                  )}
-                  <TimingView
-                    timing={shownTiming}
-                    lanes={timingLanes(audiobook.rows)}
-                    rows={audiobook.rows}
-                    selected={audiobook.selected}
-                    onSelect={audiobook.setSelected}
-                    onTiming={onTiming}
-                    playhead={shownPlayhead}
-                    onPlayhead={setPlayhead}
-                    reactionLabels={Object.fromEntries(Object.entries(proposalView.record?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
-                    proposed={proposalView.proposed}
-                    // A proposal held is looked at, not edited around: accepted or discarded first.
-                    locked={timingLocked || timingProposal.proposal !== null}
-                  />
-                </>
               )}
             </div>
           )}
@@ -2403,7 +2390,6 @@ export function ChapterWorkspace({
               the manuscript's rail is hidden there by chapter-responsive.css, not unmounted, so
               Voices keeps its speakers' notes and the narrator's dialog. */}
           <div className="fy-ch__panels">
-          {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
           {/* A grouped read is confirmed in its sheet (design turn 185a): requests beside blocks and the estimate. */}
           {view === "audiobook" && audiobook.readSheet !== null && (
             <PageSheet open resetKey={audiobook.readSheet.token} title={audiobook.readSheet.title} subtitle={audiobook.readSheet.recovery?.chapter} preserveReturnFocus onClose={audiobook.readSheet.cancel} className={`fy-chapter-review-sheet${audiobook.readSheet.recovery !== null ? " fy-chapter-read-recovery" : ""}`} footer={audiobook.readSheet.recovery !== null ? <ReadSheetActions sheet={audiobook.readSheet} /> : undefined}>
@@ -2466,8 +2452,6 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          {/* The Timing view's side (turn 187a): the bar selected, the same values as the block panel's. */}
-          {view === "timing" && <ResponsiveSheet sheet={blockSheet} open={selectedBar !== null} title={`${selectedTimingRow?.mark ?? "Reaction"} · ${audiobook.selected ?? ""}`} onClose={() => audiobook.setSelected(null)} className="fy-chapter-block-sheet"><aside className="fy-ch__side fy-ch__block-side"><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows} onTiming={onTiming} onPlayFrom={(at) => { setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }} refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked} revision={audiobook.lastRecord?.seq} /></aside></ResponsiveSheet>}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
             <section className="fy-bible__panel">
@@ -2892,8 +2876,9 @@ export function ChapterWorkspace({
         />
       )}
 
-      {compact && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
-      <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
+      {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
+      {compact && view !== "timing" && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
+      {view !== "timing" && <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
         <ProductionConversation
           key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
@@ -2985,8 +2970,8 @@ export function ChapterWorkspace({
                 ),
               })}
         />
-      </ResponsiveSheet>
-      {((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
+      </ResponsiveSheet>}
+      {view !== "timing" && ((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>

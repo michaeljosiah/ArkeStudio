@@ -1,5 +1,14 @@
 # Code map
 
+Audio Studio (approved turn 226, first implementation slice): client
+`screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
+`EditorSheetSlot` and `useCutLayout` around the existing chapter script and `TimingView`.
+`chapter-workspace.tsx` retains timing/sound writes, selection, mix playback and chapter export;
+`production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
+Remembered Timing views canonicalise to Audio Studio without changing world data.
+`audiobook.tsx` adds the book menu entry. No new arrangement persistence or video command model
+is introduced. See [implementation scope and next slices](audio-studio.md), SPEC-047 R-185–R-190.
+
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves
 immutable source identities, verifies contained snapshots and persists receipts under leases;

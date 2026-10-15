@@ -237,7 +237,7 @@ it("reopens a chapter from its actual list row in the last view, with explicit a
   assert.equal(shown(), "audiobook");
   await act(async () => m.navigate(ROUTE + "?view=manuscript"));
   assert.equal(shown(), "manuscript");
-  await choose("Timing");
+  await choose("Audio Studio");
   await act(async () => m.navigate(ROUTE.replace("neap", "slack-water")));
   assert.equal(shown(), "manuscript", "another chapter has its own first-entry view");
   await act(async () => m.navigate(ROUTE));

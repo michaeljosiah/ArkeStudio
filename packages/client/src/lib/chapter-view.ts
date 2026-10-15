@@ -6,6 +6,8 @@ const views = new Map<string, ChapterView>();
 const key = (worldId: string, productionId: string, chapterId: string) => JSON.stringify([worldId, productionId, chapterId]);
 
 export function chapterView(worldId: string, productionId: string, chapterId: string, requested: string | null): ChapterView {
+  // Keep the timing preference and old links; Audio Studio is that view's new address.
+  if (requested === "audio-studio") return "timing";
   if (requested !== null) return requested === "audiobook" || requested === "timing" ? requested : "manuscript";
   return views.get(key(worldId, productionId, chapterId)) ?? "manuscript";
 }

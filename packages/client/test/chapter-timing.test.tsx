@@ -3,7 +3,7 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import {
   audiobookTextHash,
   timeChapter,
@@ -22,7 +22,8 @@ import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, Timi
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { playerChapters } from "../src/components/audiobook-player.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
-import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
+import { ChapterAudioStudio } from "../src/screens/chapter-audio-studio.js";
+import { __clearChapterViewsForTest, rememberChapterView } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -47,6 +48,7 @@ Object.assign(globalThis, {
   KeyboardEvent: dom.KeyboardEvent,
   IS_REACT_ACT_ENVIRONMENT: true,
   requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+  cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
 });
 
 const AT = "2026-10-03T14:00:00.000Z";
@@ -416,11 +418,14 @@ describe("the third view (turn 187a)", () => {
     return { ...FIXTURE_STATE, world: { ...world, productions: [...world.productions, { ...salt, meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" }, story: { ...(salt.story ?? { version: 1 }), version: 3 }, chapters: CHAPTERS }] } };
   }
 
-  it("opens from the address beside Manuscript and Audiobook, its bars from the chapter's blocks", async () => {
+  const Location = () => <output data-testid="studio-location">{useLocation().search}</output>;
+  for (const view of ["timing", "audio-studio", "remembered"]) it(`opens ${view} without authoring or rendering audio`, async () => {
+    if (view === "remembered") rememberChapterView(FIXTURE_WORLD_ID, "inkbound", "neap", "timing");
     const sent: ClientMessage[] = [];
     __setBridgeForTest({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) } as unknown as ArkeBridge);
     const m = await render(
-      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=timing`]}>
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?${view === "remembered" ? "" : `view=${view}&`}block=p1.0`]}>
+        <Location />
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} />
         </Routes>
@@ -432,11 +437,78 @@ describe("the third view (turn 187a)", () => {
       __applyEventForTest({ at: AT, type: "chapter.open-result", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", disposition: "opened", body: BODY, version: 4, hash: HASH, versions: [1, 2, 3] });
     });
     const tabs = all(m, "nav[aria-label='Chapter view'] button").map((button) => button.textContent);
-    assert.deepEqual(tabs, ["Manuscript", "Audiobook", "Timing"]);
+    assert.deepEqual(tabs, ["Manuscript", "Audiobook", "Audio Studio"]);
+    assert.ok(q(m, "[data-testid=audio-studio]"), "legacy Timing addresses open Audio Studio");
+    const params = new URLSearchParams(q(m, "[data-testid=studio-location]")!.textContent!);
+    assert.equal(params.get("view"), "audio-studio", "canonical route also selects the editor chrome");
+    assert.equal(params.get("block"), "p1.0", "canonicalising preserves the requested passage");
     assert.ok(q(m, "[data-testid=timing-view]"));
     assert.equal(all(m, "[data-testid=timing-bar]").length, 3, "the title and the two paragraphs, not read yet");
     assert.ok(all(m, "[data-testid=timing-bar]").every((bar) => bar.className.includes("fy-tm__bar--unread")));
     assert.ok(q(m, ".fy-ch__manuscript[hidden]"), "the editor stays mounted underneath, hidden");
+    assert.equal(sent.some(message => ["set-audiobook-timing", "read-audiobook-chapter", "render-audiobook-mix", "set-audiobook-bed", "set-audiobook-sound"].includes(message.kind)), false);
+    if (view === "audio-studio") {
+      await act(async () => q(m, '[data-passage="p1.0"]')!.click());
+      assert.equal((q(m, '[data-testid=timing-play-here]') as HTMLButtonElement).disabled, true, "unread audio cannot be played from the Inspector");
+      const start = q(m, '[data-testid=timing-start]') as HTMLInputElement;
+      start.value = "0.5";
+      await act(async () => start.dispatchEvent(new dom.Event("focusout", { bubbles: true }) as unknown as Event));
+      const writes = sent.filter(message => message.kind === "set-audiobook-timing");
+      assert.equal(writes.length, 1, "an explicit Inspector edit uses the existing chapter write");
+      assert.equal(writes[0]!.block, "p1.0");
+      assert.deepEqual(writes[0]!.timing, { start: 0.5 });
+    }
+  });
+});
+
+describe("Audio Studio composes the existing editor around chapter timing", () => {
+  const studio = (changes: Partial<React.ComponentProps<typeof ChapterAudioStudio>> = {}) => <ChapterAudioStudio
+    book="The Goat" title="Chapter one" rows={ROWS} timing={timingOf(record())} selected="p1.0" onSelect={() => {}}
+    playhead={4.4} onPlayhead={() => {}} timeline={<div>Chapter timeline</div>} inspector={<input aria-label="Kept inspector draft" defaultValue="0.4" />}
+    conversation={<div>Production conversation</div>} proposal={null} propose={null} reviewing={false} playing={false} pending={false} canPlay
+    onPlay={() => {}} onStop={() => {}} onBack={() => {}} onExport={() => {}} exportDisabled={false} problem={null} {...changes} />;
+
+  it("selects script and chosen media through the same chapter key without writing", async () => {
+    const selected: string[] = [], seeks: number[] = [];
+    const m = await render(studio({ onSelect: key => selected.push(key), onPlayhead: at => seeks.push(at) }));
+    await act(async () => q(m, '[data-passage="p2.0"]')!.click());
+    await act(async () => all(m, '.fy-audio-library__items button')[2]!.click());
+    assert.deepEqual(selected, ["p2.0", "p1.0"]);
+    assert.deepEqual(seeks, [7.4]);
+  });
+
+  it("keeps the inspector draft mounted across the shared Inspector / Arke tabs", async () => {
+    const m = await render(studio());
+    const input = q(m, '[aria-label="Kept inspector draft"]') as HTMLInputElement;
+    input.value = "0.7";
+    await act(async () => q(m, '#cut-arke-tab')!.click());
+    assert.equal(q(m, '#cut-inspector-panel')!.hidden, true);
+    await act(async () => q(m, '#cut-inspector-tab')!.click());
+    assert.equal(q(m, '[aria-label="Kept inspector draft"]'), input);
+    assert.equal(input.value, "0.7");
+  });
+
+  it("plays through the chapter mixer callbacks and does not audition an unaccepted timing proposal", async () => {
+    const plays: number[] = [];
+    const m = await render(studio({ onPlay: at => plays.push(at) }));
+    await act(async () => q(m, '[aria-label="Play"]')!.click());
+    assert.deepEqual(plays, [4.4]);
+    await act(async () => m.root.render(studio({ reviewing: true, onPlay: at => plays.push(at) })));
+    assert.equal((q(m, '[aria-label="Play"]') as HTMLButtonElement).disabled, true);
+    assert.ok(all(m, 'button').filter(button => /Listen from top|Export/.test(button.textContent ?? '')).every(button => (button as HTMLButtonElement).disabled));
+    let stops = 0;
+    await act(async () => m.root.render(studio({ reviewing: true, pending: true, onStop: () => { stops++; } })));
+    assert.equal((q(m, '[aria-label="Stop"]') as HTMLButtonElement).disabled, false);
+    await act(async () => q(m, '[aria-label="Stop"]')!.click());
+    assert.equal(stops, 1, "a pending mix can always be cancelled");
+  });
+
+  it("keeps unread script visible without offering stale recordings as chosen Library takes", async () => {
+    const timing = timeChapter({ blocks: ROWS.map(row => ({ key: row.block.key, text: row.block.text, lane: row.speakerKey ?? "narration" })), record: {}, reading: "cast", unmade: "estimate" });
+    const m = await render(studio({ timing, canPlay: false }));
+    assert.equal(all(m, '[data-passage]').length, ROWS.length);
+    assert.equal(all(m, '.fy-audio-library__items button').length, 0);
+    assert.equal((q(m, '[aria-label="Play"]') as HTMLButtonElement).disabled, true);
   });
 });
 

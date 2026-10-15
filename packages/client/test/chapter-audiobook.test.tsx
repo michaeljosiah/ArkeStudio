@@ -2173,7 +2173,7 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     assert.equal(dom.document.querySelector('dialog.fy-chapter-block-sheet[open]') === null, true);
   });
 
-  it("the Manuscript and Timing keep what they had on a phone: the ⋯ page menu, the floating Arke press, no hold", async () => {
+  it("the Manuscript keeps its phone menu while old Timing links use Audio Studio's editor panels", async () => {
     windowOf(390);
     const manuscript = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap`);
     assert.ok(q(manuscript, '.fy-scene-back [aria-label="Page actions"]'), "the page menu");
@@ -2183,14 +2183,14 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
     manuscript.container.remove();
     const timing = await mount(inkbound(), `${ROUTE.replace("view=audiobook", "view=timing")}`);
     await answerOpen(timing);
-    assert.ok(q(timing, ".fy-season-arke"), "Timing's floating press");
-    assert.ok(q(timing, '.fy-scene-back [aria-label="Page actions"]'));
+    assert.equal(q(timing, ".fy-season-arke"), null, "no duplicate floating Arke press");
+    assert.ok(q(timing, '.fy-cut-tools[aria-label="Audio Studio panels"]'));
+    assert.ok(q(timing, '.fy-cut-back [aria-label="Back to Audiobook"]'));
     assert.equal(q(timing, '[data-testid="audiobook-hold"]'), null);
   });
 
-  // 194h draws the Audiobook view; the bar is the same line in all three, so switching views does
-  // not move it.
-  for (const view of ["manuscript", "audiobook", "timing"] as const) {
+  // 194h retains the one-line bar for Manuscript and Audiobook. Audio Studio uses Cut's bar.
+  for (const view of ["manuscript", "audiobook"] as const) {
     it(`a phone's app bar is one line in the ${view}: the chevron back to Chapters, the chapter's title, one press`, async () => {
       windowOf(390);
       const m = await mount(inkbound(), ROUTE.replace("view=audiobook", `view=${view}`));
