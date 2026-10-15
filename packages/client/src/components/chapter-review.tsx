@@ -7,18 +7,19 @@ import { mediaUrl } from "../lib/media.js";
 import { decideChapterReview, requestChapterReview, subscribeChapterReview, useStore } from "../lib/store.js";
 
 function ChapterReviewEvidence({ slug, file, hash, block }: { slug: string; file: string; hash: string; block: string }) {
-  const [url, setUrl] = useState<string | null>(null), [error, setError] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null), [error, setError] = useState<string | null>(null), [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    setUrl(null); setError(null);
     const control = new AbortController(); let active = true, objectUrl: string | undefined;
     const timer = setTimeout(() => control.abort(), 30_000);
     void readChapterReviewImage(mediaUrl(slug, file), hash, control.signal).then(blob => {
       if (!active) return;
       objectUrl = URL.createObjectURL(blob); setUrl(objectUrl);
-    }).catch(err => { if (active) setError(control.signal.aborted ? "Image loading timed out. Refresh to try again." : err instanceof Error ? err.message : "Image evidence unavailable."); })
+    }).catch(err => { if (active) setError(control.signal.aborted ? "Image loading timed out. Retry the image." : err instanceof Error ? err.message : "Image evidence unavailable."); })
       .finally(() => clearTimeout(timer));
     return () => { active = false; control.abort(); clearTimeout(timer); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [slug, file, hash]);
-  return error ? <p role="alert">{error}</p> : url ? <img src={url} alt={`Review evidence for ${block}`} /> : <p>Checking image evidence…</p>;
+  }, [slug, file, hash, attempt]);
+  return error ? <div><p role="alert">{error}</p><Button onClick={() => setAttempt(value => value + 1)}>Retry image</Button></div> : url ? <img src={url} alt={`Review evidence for ${block}`} /> : <p>Checking image evidence…</p>;
 }
 
 export function ChapterReviewReport({ review, slug, disabled, onDecision }: {

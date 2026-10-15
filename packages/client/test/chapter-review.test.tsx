@@ -41,10 +41,16 @@ async function evidenceSettled(container: HTMLElement) {
   assert.doesNotMatch(container.textContent ?? "", /Checking image evidence/);
 }
 it("refuses changed pixels even while the report is still marked current", async () => {
-  mock.method(globalThis, "fetch", async () => new Response("replacement pixels", { headers: { "content-type": "image/png" } }));
+  let replaced = true;
+  mock.method(globalThis, "fetch", async () => new Response(replaced ? "replacement pixels" : "reviewed pixels", { headers: { "content-type": "image/png" } }));
   const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
   await act(async () => root!.render(<ChapterReviewReport review={review} slug="world" onDecision={() => {}} />));
   await evidenceSettled(container as unknown as HTMLElement);
   assert.equal(container.querySelector("img"), null);
   assert.match(container.textContent ?? "", /Image changed since review/);
+  replaced = false;
+  const retry = Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Retry image")!;
+  await act(async () => { retry.click(); });
+  await evidenceSettled(container as unknown as HTMLElement);
+  assert.match(container.querySelector("img")?.getAttribute("src") ?? "", /^blob:/);
 });
