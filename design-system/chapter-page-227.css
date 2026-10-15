@@ -223,3 +223,129 @@
 .ch227 .sheet .hd h3{margin:0;font:var(--type-h3)}
 .ch227 .sheet .done{height:48px;border-radius:12px;background:var(--primary);color:var(--primary-foreground);font:var(--type-ui)}
 .ch227 .scrim{position:absolute;inset:0;z-index:6;background:rgba(0,0,0,.5)}
+
+/* ===== Revision 2 · the Manuscript is a writing room; the hero and cast move to the Chapter view. ===== */
+/* The writing bar: the only chrome above the page. */
+.ch227 .wbar{display:flex;align-items:center;gap:14px;height:56px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--background)}
+.ch227 .wbar .gap{flex:1}
+.ch227 .goal{display:inline-flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .goal b{color:var(--foreground);font-weight:var(--weight-medium)}
+.ch227 .ring{width:18px;height:18px;border-radius:50%;background:conic-gradient(var(--foreground) calc(var(--p)*1%),color-mix(in srgb,var(--foreground) 18%,transparent) 0);-webkit-mask:radial-gradient(circle,transparent 5.5px,#000 6px);mask:radial-gradient(circle,transparent 5.5px,#000 6px)}
+.ch227 .seg.sm button{height:28px;padding:0 12px}
+.ch227 .ibtn{width:34px;height:34px;display:grid;place-items:center;border-radius:8px;color:var(--muted-foreground)}
+.ch227 .ibtn.on{background:var(--muted);color:var(--foreground)}
+
+/* The page: the chapter's heading is the top of the document, then the prose. */
+.ch227 .wpage{position:relative;height:100%;overflow:hidden}
+.ch227 .doc{width:min(var(--measure),100% - 2*var(--gut));margin:0 auto;padding:52px 0 120px}
+.ch227 .doc .kick{font:var(--type-label);color:var(--muted-foreground);margin-bottom:10px}
+.ch227 .doc .dt{margin:0 0 30px;font-weight:var(--weight-semibold);font-size:var(--text-4xl);line-height:1.1;letter-spacing:var(--tracking-tighter)}
+.ch227 .doc p{margin:0 0 18px;font-size:var(--text-lg);line-height:1.75}
+.ch227 .doc p.dim{opacity:.26}
+.ch227 .doc .orn{display:block;text-align:center;font:var(--type-ui);letter-spacing:.6em;color:var(--muted-foreground);margin:6px 0 24px}
+.ch227 .caret{display:inline-block;width:2px;height:1.15em;background:var(--foreground);vertical-align:-.2em;margin-left:1px}
+.ch227 .seltext{background:color-mix(in srgb,var(--foreground) 18%,transparent);border-radius:2px}
+
+/* Linked names: the world recognises its people and places in the prose. */
+.ch227 .nm{text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:5px;text-decoration-color:color-mix(in srgb,var(--v,var(--muted-foreground)) 60%,transparent)}
+.ch227 .nm.place{--v:var(--muted-foreground);text-decoration-style:dotted}
+.ch227 .nm.hot{background:color-mix(in srgb,var(--v) 20%,transparent);border-radius:3px;text-decoration-color:var(--v)}
+.ch227 .hc{position:absolute;z-index:6;width:320px;padding:14px;border-radius:var(--radius-xl);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);display:flex;flex-direction:column;gap:12px}
+.ch227 .hc .hd{display:flex;gap:12px;align-items:center}
+.ch227 .hc .hd img{width:52px;height:52px;border-radius:50%;object-fit:cover;object-view-box:inset(4% 18% 48% 18%);box-shadow:0 0 0 2px var(--popover),0 0 0 4px var(--v)}
+.ch227 .hc h3{margin:0;font:var(--type-ui);font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.ch227 .hc .sub{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .hc .facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .hc .facts span:nth-child(odd){color:var(--muted-foreground)}
+.ch227 .hc .row2{display:flex;gap:8px}
+.ch227 .hc .row2 .btn{height:32px;flex:1;justify-content:center;background:none}
+.ch227 .hc .voice{margin-top:0}
+
+/* The @ and / menus: one grammar, anchored at the caret. */
+.ch227 .menu{position:absolute;z-index:6;width:300px;padding:6px;border-radius:var(--radius-lg);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);display:flex;flex-direction:column}
+.ch227 .menu .it{display:grid;grid-template-columns:32px 1fr auto;align-items:center;gap:10px;height:44px;padding:0 10px 0 6px;border-radius:8px;font:var(--type-ui)}
+.ch227 .menu .it.on{background:var(--muted)}
+.ch227 .menu .it img{width:32px;height:32px;border-radius:50%;object-fit:cover;object-view-box:inset(4% 18% 48% 18%);box-shadow:0 0 0 1.5px var(--v)}
+.ch227 .menu .it .ic{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--muted);color:var(--foreground)}
+.ch227 .menu .it small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .menu .rule{height:1px;background:var(--border);margin:6px 4px}
+
+/* Arke inline: suggested edits sit in the prose; each kept or refused; the set held at the foot. */
+.ch227 del{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--destructive) 80%,transparent);color:color-mix(in srgb,var(--foreground) 50%,transparent);background:color-mix(in srgb,var(--destructive) 10%,transparent);border-radius:2px}
+.ch227 ins{text-decoration:none;background:color-mix(in srgb,var(--success) 20%,transparent);border-radius:2px;box-shadow:inset 0 -1.5px 0 color-mix(in srgb,var(--success) 70%,transparent)}
+.ch227 .edit-pop{display:inline-flex;gap:2px;vertical-align:2px;margin-left:6px;padding:2px;border-radius:8px;background:var(--popover);border:1px solid var(--border);box-shadow:0 6px 18px rgba(0,0,0,.3)}
+.ch227 .edit-pop button{height:24px;padding:0 9px;border-radius:6px;font:var(--type-label)}
+.ch227 .edit-pop button:first-child{background:var(--muted)}
+.ch227 .heldbar{position:absolute;z-index:5;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;height:48px;padding:0 8px 0 16px;border-radius:14px;background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);font:var(--type-ui);white-space:nowrap}
+.ch227 .heldbar small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .heldbar .btn{height:34px}
+
+/* Version compare: two pages side by side, the older one quiet. */
+.ch227 .cmp{display:grid;grid-template-columns:1fr 1fr;height:100%}
+.ch227 .cmp>div{padding:28px 40px;overflow:hidden}
+.ch227 .cmp>div+div{border-left:1px solid var(--border)}
+.ch227 .cmp .vh{display:flex;align-items:center;gap:10px;margin-bottom:22px;font:var(--type-ui)}
+.ch227 .cmp .vh small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .cmp .vh .gap{flex:1}
+.ch227 .cmp p{margin:0 0 16px;font-size:var(--text-md);line-height:1.75;max-width:560px}
+.ch227 .cmp .old p{color:var(--muted-foreground)}
+
+/* Focus: the window is the page. */
+.ch227.focus{grid-template-rows:minmax(0,1fr)}
+.ch227.focus .fx{position:relative;overflow:hidden}
+.ch227.focus .doc{padding:0;position:absolute;left:0;right:0;top:calc(50% - 160px)}
+.ch227.focus .nm{text-decoration:none}
+.ch227.focus .esc{position:absolute;top:18px;right:22px;display:flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227.focus .esc kbd{font:var(--type-meta);padding:2px 6px;border-radius:5px;border:1px solid var(--border)}
+.ch227.focus .fprog{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227.focus .fprog .track{width:220px;height:3px;border-radius:2px;background:color-mix(in srgb,var(--foreground) 15%,transparent);overflow:hidden}
+.ch227.focus .fprog .track i{display:block;height:100%;background:var(--foreground)}
+
+/* Ultrawide: the type steps up and the chapter's brief docks at the left. */
+.ch227.wide .doc p{font-size:var(--text-xl);line-height:1.72}
+.ch227.wide .doc .dt{font-size:var(--text-5xl)}
+.ch227 .wgrid{display:grid;grid-template-columns:320px minmax(0,1fr);height:100%}
+.ch227 .brief{border-right:1px solid var(--border);padding:24px;display:flex;flex-direction:column;gap:24px;overflow:hidden}
+.ch227 .brief h4{margin:0 0 8px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ch227 .brief p{margin:0;font:var(--type-body);color:var(--muted-foreground)}
+.ch227 .brief .faces{display:flex;gap:10px}
+.ch227 .brief .faces img,.ch227 .brief .faces .nar{width:36px;height:36px;border-radius:50%;object-fit:cover;object-view-box:inset(4% 18% 48% 18%);box-shadow:0 0 0 2px var(--background),0 0 0 3.5px var(--v)}
+.ch227 .brief .faces .nar{display:grid;place-items:center;background:color-mix(in srgb,var(--v) 26%,var(--background))}
+
+/* Chapter overview: the production home of the chapter. */
+.ch227 .ov{padding:8px var(--gut) 60px;display:flex;flex-direction:column;gap:34px}
+.ch227 .ov h2{margin:0 0 14px;display:flex;align-items:center;gap:10px;font:var(--type-h3)}
+.ch227 .ov h2 small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .ov h2 .gap{flex:1}
+.ch227 .ov h2 button{font:var(--type-ui);color:var(--muted-foreground)}
+.ch227 .steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ch227 .step{padding:14px 16px;border-radius:var(--radius-lg);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px;min-height:112px}
+.ch227 .step .k{display:flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .step .k i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-style:normal;background:var(--muted);color:var(--foreground)}
+.ch227 .step.done .k i{background:var(--foreground);color:var(--background)}
+.ch227 .step .k i svg{width:11px;height:11px}
+.ch227 .step b{font:var(--type-ui);font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.ch227 .step small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .step .btn{align-self:flex-start;height:30px;margin-top:auto;padding:0 12px;background:none}
+.ch227 .step.need{border-color:color-mix(in srgb,var(--warning) 50%,var(--border))}
+.ch227 .pics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.ch227 .pics div{aspect-ratio:3/2;border-radius:10px;background-size:cover;background-position:center}
+.ch227 .pics .more{display:grid;place-items:center;background:var(--muted);font:var(--type-ui);color:var(--muted-foreground)}
+.ch227 .two{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:40px}
+.ch227 .ov .cont{margin-bottom:12px}
+
+/* Phone writing: a slim bar, the page, the format bar that rides above the keyboard. */
+.ch227.phone .pcol{display:flex;flex-direction:column;height:100%;overflow:hidden}
+.ch227.phone .pbar{flex:none;display:flex;align-items:center;gap:6px;height:56px;padding:0 8px;border-bottom:1px solid var(--border)}
+.ch227.phone .pbar b{flex:1;font:var(--type-ui);font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch227.phone .doc{width:auto;padding:24px 20px 140px}
+.ch227.phone .doc .dt{font-size:var(--text-3xl);margin-bottom:22px}
+.ch227.phone .doc p{font-size:var(--text-md);line-height:1.72;margin-bottom:14px}
+.ch227 .kbar{position:absolute;z-index:6;left:0;right:0;bottom:290px;display:flex;align-items:center;gap:2px;height:48px;padding:0 6px;border-top:1px solid var(--border);background:var(--card)}
+.ch227 .kbar button{height:38px;min-width:38px;padding:0 8px;border-radius:8px;display:grid;place-items:center;font:var(--type-ui)}
+.ch227 .kbar .gap{flex:1}
+.ch227 .kbar .arke{display:flex;gap:6px;align-items:center;background:var(--muted)}
+.ch227 .kb{position:absolute;z-index:6;left:0;right:0;bottom:0;height:290px;background:var(--card);display:grid;grid-template-rows:repeat(4,1fr);gap:9px;padding:10px 4px 34px}
+.ch227 .kb div{display:flex;gap:6px;justify-content:center}
+.ch227 .kb i{width:31px;border-radius:6px;background:var(--muted)}
+.ch227 .kb i.w{width:180px}

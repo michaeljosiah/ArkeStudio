@@ -29,14 +29,21 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN CHAPTER PAGE 227
-  { group: "Chapter page · turn 227 · revision 1", screen: "Desktop 1360 · the chapter at full width", frame: "227a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Desktop 1360 · a face opens its voice", frame: "227b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Desktop 1360 · reading, with Notes open", frame: "227c", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Ultrawide 2560 · margins and Notes docked, Arke open", frame: "227d", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Fold 984 · pictures inside the column", frame: "227e", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Phone 390 · the picture first, Listen at the foot", frame: "227f", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Phone 390 · a face opens its voice as a sheet", frame: "227g", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
-  { group: "Chapter page · turn 227 · revision 1", screen: "Desktop 1360 · no picture and no cast yet", frame: "227h", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · the writing room, where a chapter opens", frame: "227a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · a linked name, hovered", frame: "227b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · @ inserts a name from the world", frame: "227c", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · / commands, Arke first", frame: "227d", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · Arke’s edits in the page, each kept or refused", frame: "227e", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · two versions side by side", frame: "227f", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Focus · the window is the page", frame: "227g", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Ultrawide 2560 · the type steps up, the Brief docked, Arke open", frame: "227h", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Chapter · the production home: picture, cast, progress, pictures", frame: "227i", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Chapter · a face opens its voice", frame: "227j", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Fold 984 · the writing room", frame: "227k", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Phone · writing, the format bar above the keyboard", frame: "227l", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Phone · Chapter, Write and Listen at the foot", frame: "227m", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Phone · a face opens its voice as a sheet", frame: "227n", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
+  { group: "Chapter · turn 227 · revision 2", screen: "Manuscript · a chapter with no words yet", frame: "227o", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["For review; not built."] },
   // END CHAPTER PAGE 227
 
   // BEGIN AUDIO STUDIO 226
@@ -751,7 +758,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
-  { file: "chapter-page-227.review.html", what: "Turn 227 revision 1: the chapter page at full width, hero picture, book strip, cast faces and voice card, speakers and pictures in the margins, Notes, Fold and phone.", state: "for review" },
+  { file: "chapter-page-227.review.html", what: "Turn 227 revision 2: the Manuscript as a writing room (linked names, @ and / menus, Arke edits in the page, compare, focus, Brief) and a Chapter view (hero, cast and voices, progress, pictures, continuity), desktop, ultrawide, Fold and phone.", state: "for review" },
   { file: "audio-studio.review.html", what: "Turn 226 revision 2: existing video editor comparison, script preview, chapter arrangement, replacement review and compact layouts.", state: "approved; implementation starting" },
   { file: "global-chat-224.native-review.html", what: "Turn 225 revision 3: actual Develop page and native composer/model controls compared with the proposed global Chat host. Build using global-chat-224.native-build.mjs.", state: "approved · implementation under validation" },
   { file: "global-chat-224.review.html", what: "Design turn 225: persistent contextual Chat, navigation, drafts, phone and world boundary. Interactive isolated fixture.", state: "approved · implementation under validation" },
