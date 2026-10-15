@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, type ChapterReview } from "../src/chapter-review.js";
+import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
@@ -20,4 +20,13 @@ it("bounds long findings to the chat receipt limit while retaining coverage disc
   const findings = Array.from({ length: 5 }, () => ({ observation: "x".repeat(1600) })) as ChapterReview["findings"];
   const summary = chapterReviewSummary({ status: "complete", stale: false, findings });
   assert.ok(summary.length <= 2000); assert.match(summary, /5 findings/); assert.match(summary, /Audio not listened to/);
+});
+
+it("only identical findings share a human decision or deduplication identity", () => {
+  const finding = { category: "clarity" as const, certainty: "possible-confusion" as const, quote: "She left.", imageBlocks: ["p0.0"], observation: "Movement unclear", impact: "Reader loses position", correction: "Name the exit" };
+  assert.equal(sameReviewFinding(finding, structuredClone(finding)), true);
+  for (const changed of [{ category: "continuity" as const }, { certainty: "contradiction" as const }, { quote: "He left." },
+    { imageBlocks: ["p1.0"] }, { observation: "Movement impossible" }, { impact: "Contradicts the next scene" }, { correction: "Change the next scene" }]) {
+    assert.equal(sameReviewFinding(finding, { ...finding, ...changed }), false);
+  }
 });

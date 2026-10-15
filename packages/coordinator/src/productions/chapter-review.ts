@@ -2,7 +2,7 @@ import { z } from "zod";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer,
+import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding,
   type ChapterReview, type ChapterReviewTarget, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
@@ -50,17 +50,19 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   let total = 0;
   for (const [block, picture] of selected) {
     signal?.throwIfAborted();
-    try {
-      const data = await readContainedMediaBytes(store.dir, picture.file, signal);
-      total += data.byteLength;
-      if (total > 120_000_000) throw new Error("Selected pictures exceed the 120 MB review source budget.");
-      images.push({ block, file: picture.file, hash: hash(data), textHash: picture.textHash });
-      bytes.set(block, data);
-    } catch (error) {
+    let data: Uint8Array;
+    try { data = await readContainedMediaBytes(store.dir, picture.file, signal); }
+    catch (error) {
       signal?.throwIfAborted();
       images.push({ block, file: picture.file, hash: "unavailable", textHash: picture.textHash,
         error: error instanceof Error ? error.message.slice(0, 500) : "Image unreadable." });
+      continue;
     }
+    total += data.byteLength;
+    // The whole-source budget is a refusal, not an unreadable-picture warning followed by paid work.
+    if (total > 120_000_000) throw new Error("Selected pictures exceed the 120 MB review source budget.");
+    images.push({ block, file: picture.file, hash: hash(data), textHash: picture.textHash });
+    bytes.set(block, data);
   }
   // The source binding includes narration and character directions, without sending the full
   // world's lore to every specialist or treating a mutable summary as authoritative canon.
@@ -258,8 +260,8 @@ export class ChapterReviewService {
           review.rejectedFindings += verified.rejected;
           if (task.specialist === "script") review.facts = verified.facts;
           for (const finding of verified.findings) {
-            if (review.findings.some(f => f.quote === finding.quote && f.observation === finding.observation && JSON.stringify(f.imageBlocks) === JSON.stringify(finding.imageBlocks))) continue;
-            const previous = sameSource ? prior.findings.find(f => f.quote === finding.quote && f.observation === finding.observation && JSON.stringify(f.imageBlocks) === JSON.stringify(finding.imageBlocks)) : undefined;
+            if (review.findings.some(f => sameReviewFinding(f, finding))) continue;
+            const previous = sameSource ? prior.findings.find(f => sameReviewFinding(f, finding)) : undefined;
             review.findings.push({ ...finding, id: randomUUID(), taskId: task.id, offset: source.chapter.body.indexOf(finding.quote),
               decision: previous?.decision ?? "open", ...(previous?.decisionNote ? { decisionNote: previous.decisionNote } : {}) });
           }

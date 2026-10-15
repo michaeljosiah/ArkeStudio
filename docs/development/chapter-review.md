@@ -10,7 +10,7 @@ The review uses a retained world store, independent of which world is selected. 
 
 ## Evidence and limits
 
-The initial implementation accepts at most 60,000 characters and 60 selected pictures, with a 120 MB total source-image budget. It runs one script task and sequential visual tasks in groups of three with neighboring context, at most five pictures per task. Images use the existing sanitized rendition and encoded-byte limits. Vision capability and current cloud-image policy are checked before dispatch. Unsupported models, unreadable images and failed tasks remain visible as incomplete coverage.
+The initial implementation accepts at most 60,000 characters and 60 selected pictures, with a 120 MB total source-image budget. Exceeding that aggregate budget refuses the run before any model call. It runs one script task and sequential visual tasks in groups of three with neighboring context, at most five pictures per task. Images use the existing sanitized rendition and encoded-byte limits. Vision capability and current cloud-image policy are checked before dispatch. Unsupported models, unreadable images and failed tasks remain visible as incomplete coverage.
 
 Visual tasks receive the current grouped block-to-passage map. A missing block or an image bound to older text is explicitly identified. The review checks perspective, usable objects, screen direction, eyelines, continuity, injuries, clothing, lighting and sequence readability. Intentional anomalies, cropping, occlusion and hidden screens are legitimate possibilities, not automatic errors. Character-reference matching and whole-book canon verification are outside this first pass.
 
@@ -24,7 +24,7 @@ Reviews are derived sidecars under `productions/<production>/.reviews/chapters/<
 
 The request ID determines a durable review identity. A replay reads the existing result, even after another review or a restart; it never silently retries an uncertain model call. Checkpoints use owned atomic writes before dispatch and after each task. World ownership is rechecked at dispatch, after asynchronous session and image preparation. An orphaned running review is marked interrupted. A new Review again request is an explicit new model run.
 
-Changing prose, selected image bytes, audiobook records or character narration marks prior results stale. Stale findings cannot receive decisions, and the UI hides potentially changed images while retaining the original quote and hash. Keep intentionally and Dismiss finding save assessments only. Exact matching decisions may carry to a new review of identical sources; no semantic matching or automatic suppression is claimed.
+Changing prose, selected image bytes, audiobook records or character narration marks prior results stale. Stale findings cannot receive decisions, and the UI hides potentially changed images while retaining the original quote and hash. Keep intentionally and Dismiss finding save assessments only. Decisions may carry to a new review of identical sources only when category, certainty, quote, image IDs, observation, impact and correction all match; no semantic matching or automatic suppression is claimed.
 
 ## Validation
 

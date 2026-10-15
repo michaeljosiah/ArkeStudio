@@ -67,3 +67,10 @@ export function chapterReviewSummary(review: Pick<ChapterReview, "status" | "fin
   const room = 2000 - head.length - tail.length;
   return head + (observations.length > room ? observations.slice(0, room - 1) + "…" : observations) + tail;
 }
+
+/** Decisions and deduplication belong to the whole finding, including its recommended change. */
+export function sameReviewFinding(a: z.infer<typeof ReviewFindingDraftSchema>, b: z.infer<typeof ReviewFindingDraftSchema>): boolean {
+  return a.category === b.category && a.certainty === b.certainty && a.quote === b.quote &&
+    a.observation === b.observation && a.impact === b.impact && a.correction === b.correction &&
+    a.imageBlocks.length === b.imageBlocks.length && a.imageBlocks.every((id, index) => id === b.imageBlocks[index]);
+}

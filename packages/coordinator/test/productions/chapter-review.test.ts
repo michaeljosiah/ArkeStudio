@@ -119,3 +119,23 @@ it("stopping during source preparation aborts before reading image bytes", async
   f.store.assertOwnership = async () => { await original(); if (++assertions === 1) stop.abort(); };
   await assert.rejects(captureReviewSource(f.store, f.target, stop.signal), /abort/i);
 });
+
+it("reopens a changed recommendation even when its quote and observation are unchanged", async () => {
+  const f = await fixture();
+  const first = await f.service(async () => answer).start(f.target, "assessed");
+  await f.service(async () => answer).decide(f.target, first.id, first.findings[0]!.id, "dismissed", "This suggestion is unsuitable");
+  const changed = structuredClone(answer); changed.findings[0]!.correction = "Establish the century through a different character.";
+  const second = await f.service(async () => changed).start(f.target, "changed-advice");
+  assert.equal(second.findings[0]?.decision, "open"); assert.equal(second.findings[0]?.decisionNote, undefined);
+});
+it("refuses an oversized image set before any model task or review checkpoint", async () => {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  // Each source is below the media reader's per-file limit; together they cross the review limit.
+  await writeFile(join(f.dir, "large-review.png"), Buffer.alloc(40_000_001));
+  record.pictures = Object.fromEntries(["p0.0", "p1.0", "p2.0"].map(block => [block, { file: "large-review.png", source: "generated" as const, textHash: "test-source", at: new Date().toISOString() }]));
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  let calls = 0;
+  await assert.rejects(f.service(async () => { calls++; return answer; }).start(f.target, "oversized"), /120 MB review source budget/);
+  assert.equal(calls, 0); assert.equal(await readChapterReview(f.store, f.target), null);
+});
