@@ -30,6 +30,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   const [draftNote, setDraftNote] = useState({ findingId: "", text: "" });
   const finding = review.findings.find(f => f.id === selectedId) ?? review.findings[0];
   const index = finding ? review.findings.indexOf(finding) : 0;
+  const representedIds = new Set([finding?.id, ...review.groups?.filter(g => g.representativeId === finding?.id).flatMap(g => g.memberIds) ?? []]);
   const note = draftNote.findingId === finding?.id ? draftNote.text : "";
   useEffect(() => { setSelectedId(finding?.id ?? null); setDraftNote({ findingId: finding?.id ?? "", text: "" }); }, [finding?.id]);
   const completed = review.tasks.filter(t => t.state === "complete").length;
@@ -62,7 +63,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
       {review.groups?.filter(g => g.representativeId === finding.id).map(group => <details key={group.representativeId}><summary>{group.memberIds.length} consolidated findings</summary>
         <p>{group.rationale}</p>{group.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id); return original && <div key={id}><strong>{original.taskId} · {original.imageBlocks.join(", ")}</strong><blockquote>{original.quote}</blockquote><p>{original.observation}</p><p>{original.correction}</p>{review.assessments?.filter(a => a.findingId === id).map(a => <p key={a.findingId}><strong>{a.effectiveVerdict ?? a.verdict} · {a.subject}</strong><br />{a.rationale}{a.effectiveVerdict && a.effectiveVerdict !== a.verdict && <><br />Original model verdict: {a.verdict}; adjusted for visibility and evidence.</>}</p>)}</div>; })}
       </details>)}
-      {review.conflicts?.filter(c => c.memberIds.includes(finding.id)).map((conflict, i) => <details key={i}><summary>Conflicting interpretations — kept uncertain</summary><p>{conflict.rationale}</p>{conflict.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id), assessment = review.assessments?.find(a => a.findingId === id); return <div key={id}><strong>{original?.taskId} · {assessment?.effectiveVerdict ?? assessment?.verdict}</strong><p>{original?.observation}</p><p>{assessment?.rationale}</p></div>; })}</details>)}
+      {review.conflicts?.filter(c => c.memberIds.some(id => representedIds.has(id))).map((conflict, i) => <details key={i}><summary>Conflicting interpretations — kept uncertain</summary><p>{conflict.rationale}</p>{conflict.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id), assessment = review.assessments?.find(a => a.findingId === id); return <div key={id}><strong>{original?.taskId} · {assessment?.effectiveVerdict ?? assessment?.verdict}</strong><p>{original?.observation}</p><p>{assessment?.rationale}</p></div>; })}</details>)}
       {finding.decisionNote && <p><strong>Your note:</strong> {finding.decisionNote}</p>}
       <label>Decision note<textarea value={note} maxLength={1000} onChange={e => setDraftNote({ findingId: finding.id, text: e.target.value })} /></label>
       <div className="fy-chreview__controls">

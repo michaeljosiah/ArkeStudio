@@ -97,4 +97,12 @@ it("shows conservative verdict changes and both sides of a conflict", async () =
   assert.match(container.textContent ?? "", /Conflicting interpretations/);
   assert.match(container.textContent ?? "", /Trousers conceal it/);
   assert.match(container.textContent ?? "", /No visible defect/);
+  // The retained representative need not itself be one of the original conflict members.
+  const representative = { ...original, id: "88888888-8888-4888-a888-888888888888" };
+  value.candidates.push(representative);
+  value.findings = [representative];
+  value.groups = [{ representativeId: representative.id, memberIds: [representative.id, original.id], rationale: "Same concealed support" }];
+  await act(async () => root!.render(<ChapterReviewReport review={value} slug="world" onDecision={() => {}} />));
+  assert.match(container.textContent ?? "", /Conflicting interpretations — kept uncertain/);
+  assert.match(container.textContent ?? "", /No visible defect/);
 });
