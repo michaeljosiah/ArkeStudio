@@ -197,3 +197,6 @@ export * from "./agent-media.js";
 export * from "./agent-audio.js";
 export * from "./agent-listening.js";
 export * from "./story-publication.js";
+export * from "./audio-arrangement-schema.js";
+export * from "./audio-arrangement.js";
+export * from "./audio-arrangement-migration.js";

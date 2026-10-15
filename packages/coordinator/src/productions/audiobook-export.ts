@@ -82,9 +82,9 @@ export async function exportAudiobookPlayer(
   options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal; scope?: AudiobookScope } ,
 ): Promise<AudiobookExportResult> {
   const scope = options.scope ?? { kind: "book" };
-  const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), scope };
+  const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), scope, finalAudio: true };
   const listening: AudiobookListening = await audiobookListening(store, productionId, listeningOptions);
-  const whole = listening.chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+  const whole = listening.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
   if (whole.length === 0) return { ok: false, blockers: [scope.kind === "chapter" ? "this chapter is not read whole yet" : "no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
   if (!EXPORT_ID.test(exportId)) throw new Error("invalid audiobook export id");
@@ -144,7 +144,7 @@ export async function exportAudiobookPlayer(
         let name = `media/chapter-${pad(chapter.order)}.wav`;
         if (options.ffmpeg !== undefined) {
           try {
-            await options.ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "128k", join(staging, encoded)], () => {}, signal);
+            await options.ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", chapter.audioStudio ? "2" : "1", "-ar", chapter.audioStudio ? "48000" : "44100", "-c:a", "aac", "-b:a", "128k", join(staging, encoded)], () => {}, signal);
             name = encoded;
           } catch {
             if (signal.aborted) return { ok: false, blockers: ["the export was cancelled"] };
@@ -238,7 +238,7 @@ export async function exportAudiobookPlayer(
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+      const again = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
       await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));

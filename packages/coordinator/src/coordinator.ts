@@ -353,6 +353,8 @@ import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRid
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
+import { audioStudioScript, audioStudioSnapshot, audioStudioSource, editAudioStudio } from "./productions/audio-studio.js";
+import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -15859,6 +15861,31 @@ export class Coordinator {
         }
         return;
       }
+      case "read-audio-studio":
+      case "edit-audio-studio":
+      case "read-audio-studio-source": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const ids = { requestId: msg.requestId, worldId: store.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        try {
+          const options = this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {};
+          if (msg.kind === "read-audio-studio-source") {
+            const source = await audioStudioSource(store, msg.productionId, msg.file, options);
+            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source });
+          } else {
+            if (msg.kind === "edit-audio-studio") {
+              const record = await editAudioStudio(store, msg.productionId, chapter.id, msg.base, msg.edit, options);
+              this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+              this.refreshIfStillOpen(store);
+            }
+            const studio = await audioStudioSnapshot(store, msg.productionId, chapter.id, options);
+            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio, source: null });
+          }
+        } catch (error) { this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: null, refused: describeCoordinatorError(error) }); }
+        return;
+      }
       case "set-audiobook-timing": {
         // One block's timing (turn 187, SPEC-047 R-81): held to the binding — under Performed a
         // grouped request's inside is the reader's (R-85) — written through the record's lane and
@@ -15954,6 +15981,11 @@ export class Coordinator {
         try {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator });
+          if (plan.record !== "unreadable" && plan.record?.arrangement) {
+            const rendered = await renderAudioStudioMix(store.dir, plan.record.arrangement.current, audioStudioScript(plan), { ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal });
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: { file: rendered.file, seconds: rendered.seconds, from: 0 } });
+            return;
+          }
           const mix = chapterMix(chapterTiming(store, plan, "skip"));
           if (mix.voices.length === 0) throw new MixRefusal("nothing made to play");
           const rendered = await renderChapterMix(store.dir, msg.productionId, chapter.file, mix, { ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}), ...(msg.window !== undefined ? { window: msg.window } : {}) });

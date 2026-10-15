@@ -125,13 +125,13 @@ async function fileStamp(store: WorldStore, file: string | null): Promise<string
  */
 async function planBook(store: WorldStore, productionId: string, options: AudiobookVideoOptions, ffmpeg: FfmpegRunner | undefined): Promise<Book> {
   const scope = options.scope ?? { kind: "book" };
-  const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true, scope });
+  const listening = await audiobookListening(store, productionId, { ...(ffmpeg !== undefined ? { ffmpeg } : {}), mixAll: true, scope, finalAudio: true });
   const narrator = await anyNarrator(store, productionId);
   const readBy = `Read by ${narrator.label ?? narrator.voiceId}’s voice`;
   const blockers: string[] = [];
   const chapters: PlannedChapter[] = [];
   for (const chapter of listening.chapters) {
-    if (chapter.state !== "read" || chapter.blocks.length === 0) {
+    if (chapter.state !== "read" || chapter.blocks.length === 0 && !chapter.audioStudio) {
       if (scope.kind === "chapter") blockers.push(`${chapter.title}: this chapter is not read whole yet`);
       continue;
     }

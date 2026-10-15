@@ -6,8 +6,12 @@ Audio Studio (approved turn 226, first implementation slice): client
 `chapter-workspace.tsx` retains timing/sound writes, selection, mix playback and chapter export;
 `production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
 Remembered Timing views canonicalise to Audio Studio without changing world data.
-`audiobook.tsx` adds the book menu entry. No new arrangement persistence or video command model
-is introduced. See [implementation scope and next slices](audio-studio.md), SPEC-047 R-185–R-190.
+`audiobook.tsx` adds the book menu entry. Contracts `audio-arrangement*.ts` own sample-domain
+placement, migration and durable history. Coordinator `productions/audio-studio.ts` owns read,
+source and revision-checked edit commands through the audiobook record lane; `audio-studio-mix.ts`
+streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`. `audio-studio-listening.ts`
+maps the same plan to Listen, captions and web/video exports. UI controls and private publication
+capture remain in progress. See [implementation scope](audio-studio.md), SPEC-047 R-185–R-194.
 
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves

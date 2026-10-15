@@ -23,10 +23,28 @@ Playback uses the existing chapter mixer and its mapping between estimated scrip
 made-audio time. Export opens the existing chapter export sheet. This slice does not change
 mix fidelity, source resolution, publication semantics or the video editor's frame clock.
 
+## Arrangement and rendering foundation
+
+The coordinator now exposes read, source preparation and revision-checked edit commands for
+the next editor slice. A chapter can own a versioned 48 kHz stereo arrangement with exact
+source hashes, conservative passage bindings and twenty durable undo steps. Opening a legacy
+chapter derives its arrangement without writing. Its first edit saves the arrangement and
+legacy recovery record together; schema floor 83 prevents older builds discarding it.
+
+The native renderer preserves stereo channels and streams the chapter through a single master
+gain. The pure sample plan owns placement, fades, loops and speech ducking. Source changes
+produce named draft repairs and block final rendering. Saved arrangements feed chapter mixing,
+Listen, web-player export and video export; exact-source word timings follow their clip windows.
+The editor controls and private publication capture are still being connected. Existing UI
+controls remain the initial shell above and cannot write legacy timing after migration.
+
+Focused tests are `packages/contracts/test/audio-arrangement.test.ts` and coordinator
+`test/productions/audio-studio.test.ts` / `audio-studio-mix.test.ts`. They cover stale edits,
+atomic migration, durable undo, source replacement, stereo preservation and exact sample clocks.
+
 ## Remaining slices
 
-1. Introduce a single durable audio arrangement authority and atomic migration from chapter
-   timing, including stable passage references, exact source versions and repair states.
+1. Route the existing chapter timing controls through the new arrangement once migrated.
 2. Connect shared editor gestures to that authority: free clip placement, trims, fixed-time
    and passage-linked cues, track controls, import, and persisted Undo/Redo.
 3. Add Current/Suggested replacement review for longer takes, stale-base guards, and explicit

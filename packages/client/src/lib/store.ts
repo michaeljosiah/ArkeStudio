@@ -813,6 +813,12 @@ export function subscribeAudiobookListening(listener: (answer: AudiobookListenin
 
 /** A chapter's mix rendered (design turn 187): answered to the ask that named it. */
 export type AudiobookMixAnswer = Extract<DomainEvent, { type: "audiobook.mix" }>;
+export type AudioStudioAnswer = Extract<DomainEvent, { type: "audio-studio.state" }>;
+const audioStudioListeners = new Set<(answer: AudioStudioAnswer) => void>();
+export function subscribeAudioStudio(listener: (answer: AudioStudioAnswer) => void): () => void {
+  audioStudioListeners.add(listener);
+  return () => audioStudioListeners.delete(listener);
+}
 const audiobookMixListeners = new Set<(answer: AudiobookMixAnswer) => void>();
 export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void {
   audiobookMixListeners.add(listener);
@@ -1808,6 +1814,7 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.mix") {
       for (const listener of audiobookMixListeners) listener(event);
     }
+    if (event.type === "audio-studio.state") for (const listener of audioStudioListeners) listener(event);
     if (event.type === "audiobook.timing-proposal") {
       for (const listener of audiobookTimingProposalListeners) listener(event);
     }
@@ -5764,6 +5771,18 @@ export function setAudiobookLook(worldId: string, productionId: string, chapterF
 export function setAudiobookTiming(worldId: string, productionId: string, chapterFile: string, block: string, timing: import("@arke-studio/contracts").BlockTimingInput): string | null {
   const requestId = ulid();
   return send({ kind: "set-audiobook-timing", worldId, productionId, chapterFile, block, timing, requestId }) ? requestId : null;
+}
+export function readAudioStudio(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-studio", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+export function editAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, edit: import("@arke-studio/contracts").AudioArrangementEdit): string | null {
+  const requestId = ulid();
+  return send({ kind: "edit-audio-studio", worldId, productionId, chapterFile, base, edit, requestId }) ? requestId : null;
+}
+export function readAudioStudioSource(worldId: string, productionId: string, chapterFile: string, file: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-studio-source", worldId, productionId, chapterFile, file, requestId }) ? requestId : null;
 }
 
 /** A reaction under a block set, changed by its key, or taken away with null (design turn 187, R-83). */

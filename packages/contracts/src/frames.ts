@@ -19,6 +19,7 @@ import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiob
 import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
+import { AudioArrangementEditSchema } from "./audio-arrangement-schema.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -3601,6 +3602,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("read-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("edit-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema }).strict(),
+  z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000) }).strict(),
   /**
    * A reaction, a bed or a sound at a block set, changed (by its key) or taken away (null) —
    * design turn 187, SPEC-047 R-83, R-84. A new one takes the next free key. Answered as

@@ -1,0 +1,120 @@
+import { createHash } from "node:crypto";
+import { open, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
+import { AUDIO_STUDIO_RATE, AudioArrangementRefusal, audioClipGain, resolveAudioArrangement, ulid, validateAudioArrangement,
+  type AudioArrangementState, type AudioScript, type AudioSource, type ResolvedAudioClip } from "@arke-studio/contracts";
+import { stereoWavFrames, stereoWavHeader, type StereoPcm } from "../audio/stereo-wav.js";
+import { StereoLoudness } from "../audio/stereo-loudness.js";
+import { renameWithRetry } from "../world/atomic.js";
+import { readContainedMediaBytes } from "../world/reference-files.js";
+import type { FfmpegRunner } from "../takes/export.js";
+import { AUDIO_STUDIO_SOURCE_BYTES, audioStudioCache, readAudioStudioSource } from "./audio-studio-source.js";
+
+const CHUNK = AUDIO_STUDIO_RATE;
+/** The loop seam overlaps its head and tail. Every subsequent loop advances by window - seam. */
+function sourceSample(channel: Float32Array, entry: ResolvedAudioClip, local: number): number {
+  const clip = entry.clip, length = clip.sourceOut - clip.sourceIn;
+  if (!clip.loop) return channel[clip.sourceIn + local] ?? 0;
+  const seam = clip.loopFade;
+  if (!seam) return channel[clip.sourceIn + local % length] ?? 0;
+  const period = length - seam;
+  const at = local < length ? local : seam + (local - length) % period;
+  if (at < period) return channel[clip.sourceIn + at] ?? 0;
+  const fade = (at - period) / seam;
+  return (channel[clip.sourceIn + at] ?? 0) * (1 - fade) + (channel[clip.sourceIn + at - period] ?? 0) * fade;
+}
+/** Exported for sample-level tests; all consumers render through the same function below. */
+export function mixAudioStudioChunk(entries: readonly ResolvedAudioClip[], sources: ReadonlyMap<string, StereoPcm>, from: number, length: number, speech: readonly { at: number; samples: number }[]) {
+  const left = new Float32Array(length), right = new Float32Array(length);
+  for (const entry of entries) {
+    const source = entry.clip.source, pcm = source ? sources.get(source.file) : undefined;
+    if (!pcm || entry.muted) continue;
+    const first = Math.max(from, entry.at), last = Math.min(from + length, entry.at + entry.samples);
+    // Balance preserves an imported stereo image at centre; a mono source is duplicated first.
+    const pan = entry.clip.pan, l = pan > 0 ? Math.cos(pan * Math.PI / 2) : 1, r = pan < 0 ? Math.cos(-pan * Math.PI / 2) : 1;
+    for (let at = first; at < last; at++) {
+      const gain = audioClipGain(entry, at, speech), local = at - entry.at, index = at - from;
+      left[index] = left[index]! + sourceSample(pcm.left, entry, local) * gain * l;
+      right[index] = right[index]! + sourceSample(pcm.right, entry, local) * gain * r;
+    }
+  }
+  return { left, right };
+}
+async function verifySource(dir: string, source: AudioSource, signal: AbortSignal): Promise<void> {
+  const bytes = await readContainedMediaBytes(dir, source.file, signal, AUDIO_STUDIO_SOURCE_BYTES);
+  if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) throw new AudioArrangementRefusal(`${source.label}: audio changed; review its replacement`);
+}
+/** A two-pass streamed mix: one master gain, retained tails, and no whole-chapter allocation. */
+export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean; solo?: string[] } = {}) {
+  const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
+  const unavailable = new Set<string>();
+  const files = new Map<string, AudioSource>();
+  for (const clip of state.clips) if (clip.source) {
+    const prior = files.get(clip.source.file);
+    if (prior && prior.hash !== clip.source.hash) throw new AudioArrangementRefusal(`${clip.label}: two clips expect different versions of the same file`);
+    files.set(clip.source.file, clip.source);
+  }
+  for (const source of files.values()) try { await verifySource(dir, source, signal); } catch (error) { if (signal.aborted) throw error; unavailable.add(source.file); }
+  const plan = resolveAudioArrangement(state, script, unavailable);
+  if (options.final && plan.issues.length) throw new AudioArrangementRefusal(`Audio Studio needs attention: ${plan.issues.map(issue => issue.message).join("; ")}`);
+  if (plan.samples === 0) throw new AudioArrangementRefusal("There is no arranged audio to play yet");
+  const header = stereoWavHeader(plan.samples);
+  const playable = plan.clips.filter(entry => entry.clip.source && !unavailable.has(entry.clip.source.file) && !entry.muted && (!options.solo?.length || options.solo.includes(entry.clip.trackId)));
+  const speech = playable.filter(entry => entry.clip.role === "speech").map(entry => ({ at: entry.at, samples: entry.samples }));
+  const folder = await audioStudioCache(dir, "mix"), id = ulid();
+  const rawPath = join(folder, `${id}.f32`), wavPath = join(folder, `${id}.wav`);
+  const hash = createHash("sha256").update(JSON.stringify({ renderer: 1, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
+  const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
+  const raw = await open(rawPath, "wx+");
+  let output: Awaited<ReturnType<typeof open>> | undefined;
+  const cache = new Map<string, StereoPcm>(); let cacheBytes = 0;
+  const meter = new StereoLoudness();
+  try {
+    for (let from = 0; from < plan.samples; from += CHUNK) {
+      signal.throwIfAborted();
+      const length = Math.min(CHUNK, plan.samples - from), entries = playable.filter(entry => entry.at < from + length && entry.at + entry.samples > from);
+      // Mix one source at a time; simultaneous tracks cannot multiply the decode memory ceiling.
+      const left = new Float32Array(length), right = new Float32Array(length);
+      for (const sourceFile of new Set(entries.map(entry => entry.clip.source!.file))) {
+        let pcm = cache.get(sourceFile);
+        if (!pcm) {
+          const source = files.get(sourceFile)!;
+          while (cacheBytes + source.samples * 8 > AUDIO_STUDIO_SOURCE_BYTES && cache.size) { const oldest = cache.keys().next().value!; const held = cache.get(oldest)!; cacheBytes -= held.left.byteLength + held.right.byteLength; cache.delete(oldest); }
+          const decoded = await readAudioStudioSource(dir, sourceFile, { ...options, signal, expectedHash: source.hash });
+          if (decoded.source.samples !== source.samples) throw new AudioArrangementRefusal(`${source.label}: decoded duration changed`);
+          pcm = decoded.pcm; cache.set(sourceFile, pcm); cacheBytes += pcm.left.byteLength + pcm.right.byteLength;
+        }
+        const mixed = mixAudioStudioChunk(entries.filter(entry => entry.clip.source!.file === sourceFile), new Map([[sourceFile, pcm]]), from, length, speech);
+        for (let i = 0; i < length; i++) { left[i] = left[i]! + mixed.left[i]!; right[i] = right[i]! + mixed.right[i]!; }
+      }
+      if (left.some(sample => !Number.isFinite(sample)) || right.some(sample => !Number.isFinite(sample))) throw new AudioArrangementRefusal("The mix exceeds the audio signal range; lower its clip levels");
+      meter.add(left, right);
+      const bytes = Buffer.alloc(length * 8);
+      for (let i = 0; i < length; i++) { bytes.writeFloatLE(left[i]!, i * 8); bytes.writeFloatLE(right[i]!, i * 8 + 4); }
+      await raw.writeFile(bytes); await setImmediate();
+    }
+    const measured = meter.measure();
+    const wanted = measured.lufs === null ? 0 : state.master.targetLufs - measured.lufs;
+    const gainDb = Math.min(wanted, measured.peakDb === null ? wanted : state.master.ceilingDb - measured.peakDb);
+    output = await open(wavPath, "wx"); await output.writeFile(header);
+    for (let from = 0; from < plan.samples; from += CHUNK) {
+      signal.throwIfAborted();
+      const length = Math.min(CHUNK, plan.samples - from), bytes = Buffer.alloc(length * 8);
+      let offset = 0;
+      while (offset < bytes.length) { const read = await raw.read(bytes, offset, bytes.length - offset, from * 8 + offset); if (!read.bytesRead) throw new Error("The audio render scratch file is truncated"); offset += read.bytesRead; }
+      const left = new Float32Array(length), right = new Float32Array(length);
+      for (let i = 0; i < length; i++) { left[i] = bytes.readFloatLE(i * 8); right[i] = bytes.readFloatLE(i * 8 + 4); }
+      await output.writeFile(stereoWavFrames(left, right, 10 ** (gainDb / 20))); await setImmediate();
+    }
+    await output.sync(); await output.close(); output = undefined;
+    // Even cached/long-playing sources must still be the reviewed bytes at publication time.
+    for (const source of files.values()) if (!unavailable.has(source.file)) await verifySource(dir, source, signal);
+    signal.throwIfAborted(); await renameWithRetry(wavPath, finalPath);
+    return { file, seconds: plan.samples / AUDIO_STUDIO_RATE, from: 0, issues: plan.issues, plan, gainDb, lufs: measured.lufs };
+  } finally {
+    await output?.close().catch(() => {}); await raw.close();
+    await Promise.all([rawPath, wavPath].map(path => rm(path, { force: true }).catch(() => {})));
+  }
+}

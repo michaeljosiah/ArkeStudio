@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookBookSchema,
+  AudioArrangementRefusal,
   ChapterAudiobookSchema,
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
@@ -44,7 +45,7 @@ import {
   type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
-import { AUDIOBOOK_MOTION_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_MOTION_SCHEMA_VERSION, AUDIO_STUDIO_SCHEMA_VERSION } from "../world/commit.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
@@ -124,9 +125,10 @@ export async function readAudiobookBook(store: WorldStore, productionId: string)
   });
 }
 
-async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string): Promise<void> {
+async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string, beforeWrite?: () => Promise<void>): Promise<void> {
   const absolute = join(store.dir, fromPortable(rel));
   await store.ownedWrite(async () => {
+    await beforeWrite?.();
     await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
     await atomicWriteFile(absolute, `${JSON.stringify(value, null, 2)}\n`);
     // The old file goes with the same claim the new one was written under: left behind, it
@@ -143,7 +145,8 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
  * PR 1186): its strict reader would otherwise take the record for unreadable and make the
  * chapter's paid takes again.
  */
-export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook): Promise<void> {
+export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook, beforeWrite?: () => Promise<void>): Promise<void> {
+  if (untimed.arrangement !== undefined) await store.ensureSchemaVersion(AUDIO_STUDIO_SCHEMA_VERSION, "audio-studio");
   // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
   // only when it holds something, and the world raised before the first record carrying any.
   const { timing, reactions, beds, sounds, ownLooks, seams, beats, ...bare } = untimed;
@@ -203,7 +206,7 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
     onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
   }
   if (renamed) await store.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "audiobook-note");
-  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...undirected, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...undirected, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile), beforeWrite);
 }
 
 /**
@@ -221,17 +224,23 @@ export async function updateAudiobook(
   chapter: { file: string; version: number; hash: string },
   /** The record to write, or null to leave the file as it is; may read the world afresh under the lane's turn. */
   mutate: (current: ChapterAudiobook) => ChapterAudiobook | null | Promise<ChapterAudiobook | null>,
+  options: { requireReadable?: boolean; beforeWrite?: () => Promise<void> } = {},
 ): Promise<ChapterAudiobook> {
   const key = `${store.dir}\n${productionId}\n${chapter.file}`;
   const ahead = recordLanes.get(key) ?? Promise.resolve();
   const turn = ahead.then(async () => {
     const held = await readAudiobook(store, productionId, chapter.file);
+    if (held === "unreadable" && options.requireReadable) throw new Error("The chapter's audio record is unreadable; restore it before editing");
     // An unreadable record is no record for a writer too: the takes it named stay on the shelf
     // as artifacts, and a run reads them afresh rather than guessing at a file it cannot read.
     const current = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
     const next = await mutate(current);
     if (next === null) return current;
-    await writeAudiobook(store, productionId, chapter.file, next);
+    if (current.arrangement && next.arrangement?.revision === current.arrangement.revision &&
+      ["timing", "reactions", "beds", "sounds"].some(key => JSON.stringify(current[key as keyof ChapterAudiobook]) !== JSON.stringify(next[key as keyof ChapterAudiobook]))) {
+      throw new AudioArrangementRefusal("This chapter is arranged in Audio Studio; edit its clips there");
+    }
+    await writeAudiobook(store, productionId, chapter.file, next, options.beforeWrite);
     return next;
   });
   // The lane holds nothing once its last turn settles (codex on PR 1186), as the file
