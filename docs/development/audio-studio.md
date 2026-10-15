@@ -19,6 +19,8 @@ Cues added beside a selected passage retain that passage anchor and their playhe
 Crossfade overlaps consecutive clips without changing their source windows or attachment modes.
 Looped beds retain sample phase across splits, including passage ranges. Source waveforms use
 bounded stereo peak data from the exact pinned decode, loaded sequentially for visible clips.
+Left trims advance source windows or loop phase together with their passage range. Deleted
+passages offer reviewed removal of their performances and attached cues, with protection and Undo.
 Track mute is persisted and labelled “in mix”; solo is transient audition state. Muted passage
 performances require explicit omission acknowledgement before final delivery.
 
@@ -38,6 +40,8 @@ source hashes, conservative passage bindings and twenty durable undo steps. Open
 chapter derives the arrangement without writing. Its first edit atomically includes migration,
 legacy recovery data and the command; schema floor 83 fences older builds. Stale bases,
 unreadable records and ownership loss refuse writes.
+Migration also refuses recovery JSON beyond 16 MiB before writing and revalidates every captured
+source at the write boundary. The maximum chapter clock matches the stereo RIFF WAV limit.
 
 The renderer streams the summed stereo mix through one master gain. The shared sample plan
 owns placement, source windows, fades, looping seams, pan and speech ducking. Missing sources,
@@ -45,6 +49,11 @@ unresolved passages and unacknowledged omissions remain named draft issues and b
 rendering. Reused mix caches are verified against their digest; source bytes are checked even
 when a rendered cache exists. Audition uses the single existing audio player with a physically
 cropped sample-aligned excerpt, including looping, and request-scoped render cancellation.
+The mix/window cache has an 8 GiB and 256-file budget with concurrent reservations and oldest-file
+eviction. Auditions retain files until Stop; Listen retains them until world close. Recent exports
+have a ten-minute copy grace period. If protected files fill the budget, another render is refused.
+Source sample rate/channel metadata precedes canonical conversion; high-rate input uses the host's
+band-limited resampler to avoid aliasing.
 
 Saved arrangements feed Listen, web-player and story video exports. Exact-source acoustic
 word timings are transformed through their source windows; unsupported overlaps remain

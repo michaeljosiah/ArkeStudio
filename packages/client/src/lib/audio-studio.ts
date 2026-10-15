@@ -59,20 +59,20 @@ export function useAudioStudioPlayer(input: { worldId: string; productionId: str
   const { worldId, productionId, chapterId, chapterFile, slug, title, connection } = input;
   const key = `audio-studio:${worldId}/${productionId}/${chapterId}`;
   const [pending, setPending] = useState(false), [problem, setProblem] = useState<string | null>(null), [issues, setIssues] = useState<string[]>([]), [offset, setOffset] = useState(0);
-  const request = useRef<{ id: string; loop: boolean } | null>(null);
+  const request = useRef<{ id: string; loop: boolean; answered?: boolean } | null>(null);
   const playback = usePlayback();
   const stop = useCallback(() => {
     if (request.current) stopAudioStudioPreview(worldId, request.current.id);
     request.current = null; setPending(false); dismissClip(key); releaseRead(key);
   }, [worldId, key]);
   useEffect(() => subscribeAudiobookMix(answer => {
-    if (answer.requestId !== request.current?.id) return;
-    const loop = request.current.loop; request.current = null; setPending(false);
+    if (answer.requestId !== request.current?.id || request.current.answered) return;
+    const loop = request.current.loop; request.current.answered = true; setPending(false);
     setIssues(answer.issues ?? []); setProblem(answer.refused ?? null);
-    if (!answer.mix) { releaseRead(key); return; }
+    if (!answer.mix) { stop(); return; }
     setOffset(answer.mix.from);
     void playClip({ id: key, url: mediaUrl(slug, answer.mix.file), title, sub: loop ? "Audio Studio · loop audition" : "Audio Studio", loop });
-  }), [key, slug, title]);
+  }), [key, slug, title, stop]);
   useEffect(() => () => stop(), [stop]);
   useEffect(() => { if (connection !== "open") stop(); }, [connection, stop]);
   useEffect(() => { if (pending && playback.clip && playback.clip.id !== key) stop(); }, [pending, playback.clip, key, stop]);

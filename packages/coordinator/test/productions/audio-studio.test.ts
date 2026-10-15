@@ -25,6 +25,17 @@ async function fixture(run: (store: WorldStore, worldDir: string) => Promise<voi
   try { await run(provider.openStore!()!, worldDir); } finally { await provider.close(); }
 }
 describe("Audio Studio durable authority", () => {
+  it("refuses an oversized valid legacy recovery record without changing its bytes", () => fixture(async (store, dir) => {
+    const plan = await planAudiobook(store, PRODUCTION, CHAPTER, { narrator: DEFAULT_NARRATOR });
+    const timing = { artifactId: `ar_${WORLD_ID}`, audioHash: `sha256:${"a".repeat(64)}`, textHash: "words", engine: { id: "test", version: "1", model: "test" }, seconds: 19000, at: store.now(),
+      words: Array.from({ length: 19000 }, (_, i) => ({ text: "x".repeat(500), startSec: i, endSec: i + 1, probability: 1 })) };
+    await updateAudiobook(store, PRODUCTION, plan.chapter, current => ({ ...current, wordTiming: { first: timing, second: timing } }));
+    const path = join(dir, "productions", PRODUCTION, ".audiobook", "chapters", `${CHAPTER}.json`), original = await readFile(path, "utf8");
+    assert.ok(original.length > 16 * 1024 * 1024); assert.notEqual(await readAudiobook(store, PRODUCTION, CHAPTER), "unreadable");
+    const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    await assert.rejects(editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack), /recovery record/);
+    assert.equal(await readFile(path, "utf8"), original);
+  }));
   it("preserves takes made by the book's selected narrator during migration", () => fixture(async (store, dir) => {
     const narrator = { ...DEFAULT_NARRATOR, voiceId: "af_heart", label: "Heart" };
     await writeAudiobookBook(store, PRODUCTION, { schemaVersion: 1, reading: "narrator", narrator });
@@ -46,6 +57,16 @@ describe("Audio Studio durable authority", () => {
     assert.ok(opened.state.clips.some(clip => clip.source?.artifactId === artifact.id));
     const saved = await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
     assert.ok(saved.arrangement?.current.clips.some(clip => clip.source?.artifactId === artifact.id));
+    const legacy = JSON.parse(saved.arrangement!.legacy);
+    // Restore the pre-migration record, then replace bytes precisely at the write boundary.
+    await writeFile(join(dir, "productions", PRODUCTION, ".audiobook", "chapters", `${CHAPTER}.json`), JSON.stringify(legacy));
+    const again = await openAudioStudio(store, PRODUCTION, CHAPTER), ensure = store.ensureSchemaVersion.bind(store);
+    store.ensureSchemaVersion = async (version, reason) => {
+      if (version === AUDIO_STUDIO_SCHEMA_VERSION) await writeFile(join(dir, "artifacts", artifact.file), "replaced during migration");
+      await ensure(version, reason);
+    };
+    await assert.rejects(editAudioStudio(store, PRODUCTION, CHAPTER, again.base, addTrack), /source changed while saving/);
+    assert.deepEqual(await readAudiobook(store, PRODUCTION, CHAPTER), legacy, "the rejected migration preserves its readable original record");
   }));
   it("resolves a no-op proposal without migrating or adding an Undo step", () => fixture(async store => {
     for (const migrated of [false, true]) {
@@ -202,6 +223,18 @@ describe("Audio Studio durable authority", () => {
 });
 
 describe("Audio Studio source decoding", () => {
+  it("uses a band-limited host conversion for high-rate WAV while retaining original source metadata", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, () => fixture(async (_store, dir) => {
+    const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
+    const exec = promisify(execFile), file = "artifacts/high-rate.wav";
+    const left = Float32Array.from({ length: 24000 }, (_, i) => .2 * Math.sin(i * 2 * Math.PI * 30000 / 96000));
+    const right = Float32Array.from({ length: 24000 }, (_, i) => .2 * Math.sin(i * 2 * Math.PI * 10000 / 96000));
+    await writeFile(join(dir, file), writeStereoWav({ rate: 96000, channels: 2, left, right }));
+    await assert.rejects(readAudioStudioSource(dir, file), /needs FFmpeg/);
+    const decoded = await readAudioStudioSource(dir, file, { ffmpeg: { slateFont: "", run: async (args, _progress, signal) => { await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", args, { signal, windowsHide: true, timeout: 30000 }); } } });
+    assert.equal(decoded.source.rate, 96000); assert.equal(decoded.source.channels, 2); assert.equal(decoded.pcm.rate, 48000);
+    const energy = (samples: Float32Array) => samples.subarray(1000, -1000).reduce((sum, sample) => sum + sample * sample, 0);
+    assert.ok(energy(decoded.pcm.left) < energy(decoded.pcm.right) / 1000, "ultrasonic energy does not alias into the audible band");
+  }));
   it("decodes a real imported MP3 into the canonical stereo clock", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, () => fixture(async (_store, dir) => {
     const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
     const exec = promisify(execFile), input = join(dir, "artifacts", "import.wav"), file = "artifacts/import.mp3";
@@ -211,8 +244,14 @@ describe("Audio Studio source decoding", () => {
     await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", ["-y", "-i", input, "-c:a", "libmp3lame", "-b:a", "192k", join(dir, file)], { windowsHide: true, timeout: 30000 });
     const decoded = await readAudioStudioSource(dir, file, { ffmpeg: { slateFont: "", run: async (args, _progress, signal) => { await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", args, { signal, windowsHide: true, timeout: 30000 }); } } });
     assert.equal(decoded.source.samples, 12000); assert.equal(decoded.pcm.rate, 48000); assert.equal(decoded.pcm.channels, 2);
+    assert.equal(decoded.source.rate, 44100); assert.equal(decoded.source.channels, 2);
     const energy = (samples: Float32Array) => samples.reduce((total, sample) => total + sample * sample, 0);
     assert.ok(energy(decoded.pcm.right) > energy(decoded.pcm.left) * 10, "independent stereo channels survive import");
+    const mono = "artifacts/mono.mp3";
+    await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", ["-y", "-i", input, "-ac", "1", "-c:a", "libmp3lame", join(dir, mono)], { windowsHide: true, timeout: 30000 });
+    const original = await readAudioStudioSource(dir, mono, { ffmpeg: { slateFont: "", run: async (args, _progress, signal) => { await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", args, { signal, windowsHide: true, timeout: 30000 }); } } });
+    assert.equal(original.source.rate, 44100); assert.equal(original.source.channels, 1); assert.equal(original.pcm.rate, 48000);
+    assert.deepEqual(original.pcm.left, original.pcm.right);
   }));
   it("preserves independent stereo channels and canonical sample counts", () => {
     const left = Float32Array.from([0.25, 0.5, -0.25, -0.5]), right = Float32Array.from([-0.5, -0.25, 0.5, 0.25]);

@@ -34,21 +34,27 @@ export async function readAudioStudioSource(dir: string, file: string, options: 
   if (options.expectedHash !== undefined && hash !== options.expectedHash) throw new AudioArrangementRefusal(`${file.split("/").pop()} changed; review its replacement before playing it`);
   let pcm: StereoPcm | undefined;
   try { pcm = readStereoWav(bytes); } catch { /* Other containers and encodings use the host decoder. */ }
-  if (!pcm) {
+  let rate = pcm?.rate, channels = pcm?.channels;
+  if (!pcm || pcm.rate > AUDIO_STUDIO_RATE) {
     if (!options.ffmpeg) throw new AudioArrangementRefusal("This audio format needs FFmpeg on this machine");
-    const folder = await audioStudioCache(dir, "decode"), id = ulid(), input = join(folder, `${id}.${file.split(".").pop()}`), output = join(folder, `${id}.wav`);
+    const folder = await audioStudioCache(dir, "decode"), id = ulid(), input = join(folder, `${id}.input.${file.split(".").pop()}`), output = join(folder, `${id}.decoded.wav`);
     try {
       await atomicWriteFile(input, bytes);
-      await options.ffmpeg.run(["-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "wav,mp3,flac,ogg,mov,aac,aiff,matroska,webm", "-i", input, "-vn", "-ac", "2", "-ar", String(AUDIO_STUDIO_RATE), "-c:a", "pcm_f32le", "-fs", String(AUDIO_STUDIO_SOURCE_BYTES), output], () => {}, signal);
-      const info = await stat(output);
-      if (info.size >= AUDIO_STUDIO_SOURCE_BYTES - 1024) throw new AudioArrangementRefusal("The decoded audio exceeds 256 MiB; import shorter sections");
-      pcm = readStereoWav(await readFile(output, { signal }));
+      const decode = async (canonical: boolean) => {
+        await options.ffmpeg!.run(["-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "wav,mp3,flac,ogg,mov,aac,aiff,matroska,webm", "-i", input, "-vn", ...(canonical ? ["-ac", "2", "-ar", String(AUDIO_STUDIO_RATE)] : []), "-c:a", "pcm_f32le", "-fs", String(AUDIO_STUDIO_SOURCE_BYTES), output], () => {}, signal);
+        const info = await stat(output);
+        if (info.size >= AUDIO_STUDIO_SOURCE_BYTES - 1024) throw new AudioArrangementRefusal("The decoded audio exceeds 256 MiB; import shorter sections");
+        return readStereoWav(await readFile(output, { signal }));
+      };
+      // Preserve source properties before canonical conversion; mono MP3 is not stereo input.
+      if (!pcm) { pcm = await decode(false); rate = pcm.rate; channels = pcm.channels; }
+      // The host resampler supplies the anti-alias filter for high-rate WAV and encoded input.
+      if (pcm.rate > AUDIO_STUDIO_RATE) pcm = await decode(true);
     } finally { await Promise.all([input, output].map(path => rm(path, { force: true }).catch(() => {}))); }
   }
-  const rate = pcm.rate, channels = pcm.channels;
-  if (pcm.left.length * AUDIO_STUDIO_RATE / rate * 8 > AUDIO_STUDIO_SOURCE_BYTES) throw new AudioArrangementRefusal("The decoded audio exceeds 256 MiB; import shorter sections");
+  if (pcm.left.length * AUDIO_STUDIO_RATE / pcm.rate * 8 > AUDIO_STUDIO_SOURCE_BYTES) throw new AudioArrangementRefusal("The decoded audio exceeds 256 MiB; import shorter sections");
   pcm = resampleStereo(pcm, AUDIO_STUDIO_RATE);
   if (pcm.left.length === 0) throw new AudioArrangementRefusal("The audio source has no samples");
   signal.throwIfAborted();
-  return { pcm, source: { file, hash, samples: pcm.left.length, rate, channels, label: file.split("/").pop()!.slice(0, 200) } };
+  return { pcm, source: { file, hash, samples: pcm.left.length, rate: rate!, channels: channels!, label: file.split("/").pop()!.slice(0, 200) } };
 }

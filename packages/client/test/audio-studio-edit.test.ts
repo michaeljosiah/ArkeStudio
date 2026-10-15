@@ -49,4 +49,16 @@ describe("Audio Studio edit preparation", () => {
     assert.equal(trim?.kind === "set-clip" && trim.changes.sourceIn, 2401);
     assert.deepEqual(trim?.kind === "set-clip" && trim.changes.placement, { kind: "sequence", offset: 2401 });
   });
+  it("left trims a passage range without restarting the source or loop phase", () => {
+    for (const loop of [false, true]) {
+      const snapshot = fixture(), original = resolveAudioArrangement(snapshot.state, snapshot.script).clips[0]!;
+      const clip = { ...original.clip, id: "bed", role: "music" as const, passageId: undefined, loop,
+        placement: { kind: "range" as const, from: { passageId: "passage", edge: "start" as const, offset: 0 }, to: { passageId: "passage", edge: "end" as const, offset: 0 } } };
+      const command = audioGestureCommand({ ...original, clip }, "trim-start", 12001);
+      assert.ok(command?.kind === "set-clip");
+      assert.equal(loop ? command.changes.loopOffset : command.changes.sourceIn, 12001);
+      assert.equal(command.changes.placement?.kind === "range" && command.changes.placement.from.offset, 12001);
+      assert.equal(command.changes.placement?.kind === "range" && command.changes.placement.to.offset, 0);
+    }
+  });
 });

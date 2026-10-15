@@ -19,7 +19,7 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
   if (JSON.stringify(opened.saved) !== JSON.stringify(arrangement) || opened.script.hash !== plan.chapter.hash) throw new Error("The chapter changed while preparing Listen; open it again");
   const state = arrangement.current;
   const unavailable = await audioStudioSourceProblems(store, input.productionId, state);
-  const rendered = await renderAudioStudioMix(store.dir, state, audioStudioScript(plan), { ...input, unavailable, signal: input.signal ? AbortSignal.any([store.closingSignal, input.signal]) : store.closingSignal });
+  const rendered = await renderAudioStudioMix(store.dir, state, audioStudioScript(plan), { ...input, unavailable, retainUntil: store.closingSignal, signal: input.signal ? AbortSignal.any([store.closingSignal, input.signal]) : store.closingSignal });
   const fresh = await openAudioStudio(store, input.productionId, input.chapterId, input);
   const currentAvailability = await audioStudioSourceProblems(store, input.productionId, state);
   if (fresh.base !== opened.base || JSON.stringify([...currentAvailability]) !== JSON.stringify([...unavailable])) throw new Error("The chapter or source clearance changed during rendering; open Listen again");

@@ -1,5 +1,5 @@
 import { textDigest } from "./subtitles.js";
-import { AUDIO_STUDIO_HISTORY, AUDIO_STUDIO_MAX_SAMPLES, AUDIO_STUDIO_RATE, AudioArrangementEditSchema, AudioArrangementStateSchema,
+import { AUDIO_STUDIO_HISTORY, AUDIO_STUDIO_MAX_SAMPLES, AUDIO_STUDIO_RATE, AudioArrangementEditSchema, AudioArrangementSchema, AudioArrangementStateSchema,
   type AudioArrangement, type AudioArrangementCommand, type AudioArrangementEdit, type AudioArrangementState, type AudioClip, type AudioSource, type AudioPlacement } from "./audio-arrangement-schema.js";
 
 export class AudioArrangementRefusal extends Error {}
@@ -239,6 +239,20 @@ function editedState(input: AudioArrangementState, commands: readonly AudioArran
         passage.key = command.key; passage.textHash = command.textHash; passage.confirmedHash = command.scriptHash; break;
       }
       case "add-passage": state.passages.push(structuredClone(command.passage)); break;
+      case "remove-passage": {
+        if (!state.passages.some(passage => passage.id === command.id)) throw new AudioArrangementRefusal("That passage no longer exists");
+        const affected = state.clips.filter(clip => clip.passageId === command.id ||
+          (clip.placement.kind === "passage" && clip.placement.anchor.passageId === command.id) ||
+          (clip.placement.kind === "range" && [clip.placement.from, clip.placement.to].some(anchor => anchor.passageId === command.id)));
+        for (const clip of affected) {
+          clipFor(clip.id);
+          if (clip.role === "speech" && !clip.repeated && clip.passageId && clip.passageId !== command.id) state.omissions.push({ id: clip.id, passageId: clip.passageId, label: clip.label, acknowledged: false });
+        }
+        state.clips = state.clips.filter(clip => !affected.includes(clip));
+        state.passages = state.passages.filter(passage => passage.id !== command.id);
+        state.omissions = state.omissions.filter(omission => omission.passageId !== command.id);
+        break;
+      }
       case "omit-passage": {
         if (!state.passages.some(passage => passage.id === command.id)) throw new AudioArrangementRefusal("That passage no longer exists");
         const id = `passage:${command.id}`;
@@ -278,7 +292,9 @@ export function editAudioArrangement(held: AudioArrangement, input: AudioArrange
 }
 
 export function initialAudioArrangement(current: AudioArrangementState, legacy: string): AudioArrangement {
-  return { schemaVersion: 1, sampleRate: AUDIO_STUDIO_RATE, channels: 2, revision: 1, current: validateAudioArrangement(current), undo: [], redo: [], legacy };
+  const parsed = AudioArrangementSchema.safeParse({ schemaVersion: 1, sampleRate: AUDIO_STUDIO_RATE, channels: 2, revision: 1, current: validateAudioArrangement(current), undo: [], redo: [], legacy });
+  if (!parsed.success) throw new AudioArrangementRefusal("This chapter's recovery record exceeds the Audio Studio migration limit; its original audio record was kept");
+  return parsed.data;
 }
 export function audioPassageId(key: string, textHash: string): string { return `passage:${textDigest(`${key}\n${textHash}`)}`; }
 export function newAudioClip(id: string, trackId: string, source: AudioSource | null, samples: number): AudioClip {

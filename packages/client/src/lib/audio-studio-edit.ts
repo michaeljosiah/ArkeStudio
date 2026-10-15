@@ -37,7 +37,7 @@ export function audioStudioReview(snapshot: AudioStudioSnapshot, edit: AudioArra
     return !before || before.at !== entry.at || before.samples !== entry.samples || JSON.stringify(before.clip) !== JSON.stringify(entry.clip)
       ? [{ id: entry.clip.id, label: entry.clip.label, before: before?.at, after: entry.at, samples: entry.samples }] : [];
   });
-  const removed = current.clips.filter(entry => !next.clips.some(clip => clip.id === entry.clip.id));
+  const removed = snapshot.state.clips.filter(clip => !next.clips.some(entry => entry.id === clip.id)).map(clip => ({ clip }));
   const trimsReset = edit.kind === "commands" && edit.commands.some(command => command.kind === "replace-source" && snapshot.state.clips.some(clip => clip.id === command.id && (clip.sourceIn > 0 || clip.sourceOut !== clip.source?.samples)));
   const details: string[] = [];
   for (const track of next.tracks) {
@@ -48,7 +48,7 @@ export function audioStudioReview(snapshot: AudioStudioSnapshot, edit: AudioArra
   for (const track of snapshot.state.tracks) if (!next.tracks.some(entry => entry.id === track.id)) details.push(`Remove track: ${track.name}`);
   if (JSON.stringify(next.master) !== JSON.stringify(snapshot.state.master)) details.push(`Chapter master: ${next.master.targetLufs} LUFS · ${next.master.ceilingDb} dBFS ceiling`);
   for (const omission of next.omissions) if (JSON.stringify(omission) !== JSON.stringify(snapshot.state.omissions.find(entry => entry.id === omission.id))) details.push(`${omission.label}: ${omission.acknowledged ? "omission acknowledged" : "omission needs acknowledgement"}`);
-  for (const omission of snapshot.state.omissions) if (!next.omissions.some(entry => entry.id === omission.id)) details.push(`${omission.label}: mark performance restored`);
+  for (const omission of snapshot.state.omissions) if (!next.omissions.some(entry => entry.id === omission.id)) details.push(`${omission.label}: ${next.passages.some(passage => passage.id === omission.passageId) ? "mark performance restored" : "remove obsolete omission"}`);
   const fixed = suggested.clips.filter(entry => entry.clip.placement.kind === "fixed" && current.clips.some(before => before.clip.id === entry.clip.id));
   return { base: snapshot.base, edit, current, suggested, changes, removed, trimsReset, next, fixed, details };
 }

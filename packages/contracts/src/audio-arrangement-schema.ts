@@ -4,7 +4,8 @@ import { isWorldAudioPath } from "./audiobook-timing.js";
 /** SPEC-047 R-186–R-194: this clock never borrows the video editor's frame rate. */
 export const AUDIO_STUDIO_RATE = 48_000;
 export const AUDIO_STUDIO_HISTORY = 20;
-export const AUDIO_STUDIO_MAX_SAMPLES = AUDIO_STUDIO_RATE * 24 * 60 * 60;
+// Classic RIFF, stereo 16-bit PCM, including its 36-byte RIFF payload header.
+export const AUDIO_STUDIO_MAX_SAMPLES = Math.floor((0xffffffff - 36) / 4);
 const Id = z.string().min(1).max(160);
 const Sample = z.number().int().min(0).max(AUDIO_STUDIO_MAX_SAMPLES);
 const Offset = z.number().int().min(-AUDIO_STUDIO_MAX_SAMPLES).max(AUDIO_STUDIO_MAX_SAMPLES);
@@ -78,6 +79,7 @@ export const AudioArrangementCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace-source"), id: Id, source: AudioSourceSchema }).strict(),
   z.object({ kind: z.literal("bind-passage"), id: Id, key: Id, textHash: z.string().min(1).max(128), scriptHash: z.string().min(1).max(128) }).strict(),
   z.object({ kind: z.literal("add-passage"), passage: AudioPassageSchema }).strict(),
+  z.object({ kind: z.literal("remove-passage"), id: Id }).strict(),
   z.object({ kind: z.literal("omit-passage"), id: Id, label: z.string().max(200), acknowledged: z.boolean() }).strict(),
   z.object({ kind: z.literal("acknowledge-omission"), id: Id, acknowledged: z.boolean() }).strict(),
   z.object({ kind: z.literal("clear-omission"), id: Id }).strict(),

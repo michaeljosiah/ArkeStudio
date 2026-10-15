@@ -40,6 +40,7 @@ export function readStereoWav(bytes: Uint8Array, maxDecodedBytes = 256 * 1024 * 
 
 export function resampleStereo(pcm: StereoPcm, rate: number): StereoPcm {
   if (pcm.rate === rate) return pcm;
+  if (pcm.rate > rate) throw new Error("Downsampling requires the host's band-limited decoder");
   const frames = Math.round(pcm.left.length * rate / pcm.rate);
   const channel = (input: Float32Array) => {
     const out = new Float32Array(frames);

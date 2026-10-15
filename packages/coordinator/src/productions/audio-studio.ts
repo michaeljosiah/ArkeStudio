@@ -173,6 +173,7 @@ export async function editAudioStudio(store: WorldStore, productionId: string, c
     const next = editAudioArrangement(held, edit);
     if (next === held && !proposal) return null;
     changedSources = await validateEditSources(store, productionId, audioStudioScript(plan), edit, options);
+    if (!current.arrangement && next !== held) for (const clip of held.current.clips) if (clip.source) changedSources.set(clip.source.file, clip.source);
     return { ...current, ...(next !== held ? { arrangement: next } : {}), updatedAt: store.now(), ...(proposal ? {
       audioStudioProposals: current.audioStudioProposals!.map(entry => entry.id === proposal.id ? { ...entry, status: "applied" as const, resultRevision: next === held ? current.arrangement?.revision ?? 0 : next.revision } : entry),
     } : {}) };

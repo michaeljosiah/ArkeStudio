@@ -12,6 +12,7 @@ import { readContainedMediaBytes } from "../world/reference-files.js";
 import { containedWorldFilePath } from "../world/contained-file.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { AUDIO_STUDIO_SOURCE_BYTES, audioStudioCache, readAudioStudioSource } from "./audio-studio-source.js";
+import { holdAudioStudioCache, reserveAudioStudioCache, retainAudioStudioCache, touchAudioStudioCache } from "./audio-studio-cache.js";
 
 const CHUNK = AUDIO_STUDIO_RATE;
 /** The loop seam overlaps its head and tail. Every subsequent loop advances by window - seam. */
@@ -49,7 +50,7 @@ async function verifySource(dir: string, source: AudioSource, signal: AbortSigna
   if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) throw new AudioArrangementRefusal(`${source.label}: audio changed; review its replacement`);
 }
 /** Accumulate sources on disk, measure the sum, then apply one master gain. */
-export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean; solo?: string[]; unavailable?: ReadonlyMap<string, string> } = {}) {
+export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; retainUntil?: AbortSignal; final?: boolean; solo?: string[]; unavailable?: ReadonlyMap<string, string> } = {}) {
   const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
   const unavailable = new Set<string>(options.unavailable?.keys());
@@ -76,6 +77,7 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   const hash = createHash("sha256").update(JSON.stringify({ renderer: 2, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
   const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
   const receiptFile = `.cache/audio-studio/mix/${hash}.json`;
+  const releaseCached = holdAudioStudioCache(dir, file);
   try {
     const bytes = await readContainedMediaBytes(dir, receiptFile, signal, 4096);
     const receipt = JSON.parse(Buffer.from(bytes).toString("utf8")) as { sha256?: string; gainDb?: number; lufs?: number | null };
@@ -83,11 +85,17 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
       const measured = await readPublicationFile(dir, file, 4 * 1024 ** 3, signal);
       if (measured.sha256 === receipt.sha256 && measured.byteLength === header.length + plan.samples * 4) {
         signal.throwIfAborted();
+        retainAudioStudioCache(dir, file, options.retainUntil); await touchAudioStudioCache(dir, file);
         return { file, seconds: plan.samples / AUDIO_STUDIO_RATE, from: 0, issues: plan.issues, plan, gainDb: receipt.gainDb!, lufs: receipt.lufs! };
       }
     }
   } catch (error) { if (signal.aborted) throw error; /* Missing or damaged derived cache is rebuilt. */ }
-  const raw = await open(rawPath, "wx+");
+  finally { releaseCached(); }
+  const releaseOutput = holdAudioStudioCache(dir, file);
+  let reservation: (() => void) | undefined;
+  let raw: Awaited<ReturnType<typeof open>>;
+  try { reservation = await reserveAudioStudioCache(dir, header.length + plan.samples * 4 + 512, 2, signal); raw = await open(rawPath, "wx+"); }
+  catch (error) { reservation?.(); releaseOutput(); throw error; }
   let output: Awaited<ReturnType<typeof open>> | undefined;
   const meter = new StereoLoudness();
   const readRaw = async (from: number, length: number) => {
@@ -148,21 +156,26 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     signal.throwIfAborted(); await renameWithRetry(wavPath, finalPath);
     const digest = await readPublicationFile(dir, file, 4 * 1024 ** 3, signal);
     await atomicWriteFile(await containedWorldFilePath(dir, receiptFile, true, "audio render receipt"), JSON.stringify({ sha256: digest.sha256, gainDb, lufs: measured.lufs }));
+    retainAudioStudioCache(dir, file, options.retainUntil);
     return { file, seconds: plan.samples / AUDIO_STUDIO_RATE, from: 0, issues: plan.issues, plan, gainDb, lufs: measured.lufs };
   } finally {
     await output?.close().catch(() => {}); await raw.close();
     await Promise.all([rawPath, wavPath].map(path => rm(path, { force: true }).catch(() => {})));
+    reservation(); releaseOutput();
   }
 }
 
 /** Crop the already mastered PCM on sample boundaries; range audition never masters again. */
-export async function audioStudioMixWindow(dir: string, mix: { file: string; seconds: number }, from: number, to: number, signal: AbortSignal) {
+export async function audioStudioMixWindow(dir: string, mix: { file: string; seconds: number }, from: number, to: number, signal: AbortSignal, retainUntil?: AbortSignal) {
   const total = Math.round(mix.seconds * AUDIO_STUDIO_RATE);
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > total) throw new AudioArrangementRefusal("Choose a loop range within the chapter");
   if (from === 0 && to === total) return { ...mix, from: 0 };
   const folder = await audioStudioCache(dir, "mix"), key = createHash("sha256").update(`${mix.file}/${from}/${to}`).digest("hex");
   const target = join(folder, `${key}.wav`), temp = join(folder, `${ulid()}.wav`);
-  const source = await open(await containedWorldFilePath(dir, mix.file, false, "audio audition"), "r");
+  const file = `.cache/audio-studio/mix/${key}.wav`, releaseSource = holdAudioStudioCache(dir, mix.file), releaseOutput = holdAudioStudioCache(dir, file);
+  let reservation: (() => void) | undefined, source: Awaited<ReturnType<typeof open>>;
+  try { reservation = await reserveAudioStudioCache(dir, 44 + (to - from) * 4, 1, signal); source = await open(await containedWorldFilePath(dir, mix.file, false, "audio audition"), "r"); }
+  catch (error) { reservation?.(); releaseSource(); releaseOutput(); throw error; }
   let output: Awaited<ReturnType<typeof open>> | undefined;
   try {
     output = await open(temp, "wx"); await output.writeFile(stereoWavHeader(to - from));
@@ -176,6 +189,7 @@ export async function audioStudioMixWindow(dir: string, mix: { file: string; sec
     }
     await output.sync(); await output.close(); output = undefined;
     signal.throwIfAborted(); await renameWithRetry(temp, target);
-    return { file: `.cache/audio-studio/mix/${key}.wav`, seconds: (to - from) / AUDIO_STUDIO_RATE, from: from / AUDIO_STUDIO_RATE };
-  } finally { await source.close(); await output?.close().catch(() => {}); await rm(temp, { force: true }).catch(() => {}); }
+    retainAudioStudioCache(dir, file, retainUntil);
+    return { file, seconds: (to - from) / AUDIO_STUDIO_RATE, from: from / AUDIO_STUDIO_RATE };
+  } finally { await source.close(); await output?.close().catch(() => {}); await rm(temp, { force: true }).catch(() => {}); reservation(); releaseSource(); releaseOutput(); }
 }

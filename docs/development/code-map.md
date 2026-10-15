@@ -15,7 +15,8 @@ placement, migration and durable history. Coordinator `productions/audio-studio.
 source, proposal decisions and revision-checked edit commands through the audiobook record lane;
 `world-chat/audio-studio-proposals.ts` stages reviewed command families through the native
 conversation lifecycle, using the `get_chapter` audio-studio read section. `audio-studio-mix.ts`
-streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`. `audio-studio-listening.ts`
+streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`; `audio-studio-cache.ts`
+reserves bounded disk space and protects playback files through audition/world lifetimes. `audio-studio-listening.ts`
 maps the same plan to Listen, captions and web/video exports. `audio-studio-preview.ts` drains
 cancelled auditions; `audio-studio-import.ts` files before revision-checked placement. Private
 publication `story-review.ts` captures exact arrangements and sources, and `story.ts` renders

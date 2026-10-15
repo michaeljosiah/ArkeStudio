@@ -20,6 +20,7 @@ export function AudioStudioRepairs({ snapshot, plan, disabled, onSelect, onRevie
           event.preventDefault(); const key = String(new FormData(event.currentTarget).get("passage")); const target = snapshot.script.passages.find(entry => entry.key === key);
           if (target) onReview("Reattach passage", [{ kind: "bind-passage", id: passage.id, key, textHash: target.textHash, scriptHash: snapshot.script.hash }]);
         }}><Select label="Reattach to passage" name="passage">{snapshot.passages.filter(entry => ![...bindings.values()].some(bound => bound.key === entry.key)).map(entry => <option key={entry.key} value={entry.key}>{entry.text.slice(0, 100)}</option>)}</Select><Button type="submit" size="sm" disabled={disabled}>Review attachment</Button></form>}
+        {passage && !bindings.has(passage.id) && <Button size="sm" disabled={disabled} onClick={() => onReview("Remove deleted passage audio and attached cues", [{ kind: "remove-passage", id: passage.id }])}>Review removal</Button>}
         {(current || passage && bindings.has(passage.id)) && <Button size="sm" disabled={disabled} onClick={() => {
           const id = passage?.id ?? audioPassageId(current!.key, current!.textHash);
           const commands: AudioArrangementCommand[] = passage ? [] : [{ kind: "add-passage", passage: { id, ...current!, confirmedHash: snapshot.script.hash } }];

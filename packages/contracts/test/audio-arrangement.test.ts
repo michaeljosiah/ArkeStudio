@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AudioArrangementSchema, AUDIO_STUDIO_HISTORY, type AudioArrangementCommand, type AudioArrangementState, type AudioSource } from "../src/audio-arrangement-schema.js";
+import { AudioArrangementSchema, AUDIO_STUDIO_HISTORY, AUDIO_STUDIO_MAX_SAMPLES, type AudioArrangementCommand, type AudioArrangementState, type AudioSource } from "../src/audio-arrangement-schema.js";
 import { audioCrossfade, audioClipGain, audioReplacementDiff, audioSamples, bindAudioPassages, editAudioArrangement, initialAudioArrangement, newAudioClip, resolveAudioArrangement, validateAudioArrangement } from "../src/audio-arrangement.js";
 import { migrateAudioArrangement } from "../src/audio-arrangement-migration.js";
 import { audiobookTimingHash, timeChapter } from "../src/audiobook-timing.js";
@@ -19,6 +19,24 @@ function state(): AudioArrangementState {
 const change = (held: AudioArrangementState, commands: AudioArrangementCommand[]) => editAudioArrangement(initialAudioArrangement(held, "{}"), { kind: "commands", label: "Edit", commands });
 
 describe("Audio Studio sample clock and source review (SPEC-047 R-187..R-194)", () => {
+  it("removes deleted passage audio and dependent cues with one protected, undoable review", () => {
+    const current = state(), deleted = { hash: "edited", passages: [script.passages[1]!] };
+    assert.ok(resolveAudioArrangement(current, deleted).issues.length);
+    const saved = change(current, [{ kind: "remove-passage", id: "one" }]);
+    assert.deepEqual(saved.current.clips.map(clip => clip.id), ["second", "fixed"]);
+    assert.deepEqual(resolveAudioArrangement(saved.current, deleted).issues, []);
+    assert.deepEqual(editAudioArrangement(saved, { kind: "undo" }).current, current);
+    current.clips[2]!.protected = true;
+    assert.throws(() => change(current, [{ kind: "remove-passage", id: "one" }]), /protection/);
+  });
+  it("refuses oversized recovery and placements beyond the actual WAV limit before saving", () => {
+    assert.throws(() => initialAudioArrangement(state(), "x".repeat(16 * 1024 * 1024 + 1)), /recovery record/);
+    const current = state(), clip = current.clips[3]!;
+    clip.placement = { kind: "fixed", at: AUDIO_STUDIO_MAX_SAMPLES - clip.sourceOut };
+    assert.equal(resolveAudioArrangement(validateAudioArrangement(current), script).samples, AUDIO_STUDIO_MAX_SAMPLES);
+    clip.placement.at++;
+    assert.throws(() => validateAudioArrangement(current), /chapter clock/);
+  });
   it("crossfades exact windows with linked placement and one undo entry", () => {
     const current = state();
     const commands = audioCrossfade(current, script, "first", "second", audioSamples(.5));
