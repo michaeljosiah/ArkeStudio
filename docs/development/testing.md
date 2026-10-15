@@ -1086,3 +1086,5 @@ boundary. CI shard 1 on Windows/Linux runs the stdlib Python worker protocol tes
 or GPU. The ordinary coordinator suite includes listening schemas, canonical waveform handoff,
 native Stop/output bounds, lease/source revocation, MCP and schema-81 replay. Actual music,
 perceived-emotion and voice-delivery accuracy requires an installed-model smoke and human review.
+
+Chapter review: run the contract evidence tests, coordinator production and harness review tests, and client review tests described in [chapter-review.md](chapter-review.md). Include action registry and picture-brief tests when changing orchestration or camera guidance. Fixture tests do not establish live-model judgment quality.

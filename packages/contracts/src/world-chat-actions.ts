@@ -831,6 +831,8 @@ const ProductionSceneModelActionSchema = z
 const ProductionEpisodeOrderModelActionSchema = z
   .object({ kind: z.literal("production-episode-order"), productionId: SlugSchema, orderedIds: z.array(EpisodeIdSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
+const ChapterReviewModelActionSchema = z.object({ kind: z.literal("chapter-review"), productionId: SlugSchema,
+  chapterId: SlugSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 const ProductionChapterOrderModelActionSchema = z
   .object({ kind: z.literal("production-chapter-order"), productionId: SlugSchema, orderedIds: z.array(SlugSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
@@ -1400,6 +1402,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionPicturesProposeModelActionSchema.extend(ActionSequencingShape),
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
+  ChapterReviewModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1476,6 +1479,7 @@ export const WorldChatProductionEpisodeActionSchema = preparedAction("world-chat
 export const WorldChatProductionChapterActionSchema = preparedAction("world-chat-production-chapter", ProductionChapterModelActionSchema);
 export const WorldChatProductionSceneActionSchema = preparedAction("world-chat-production-scene", ProductionSceneModelActionSchema);
 export const WorldChatProductionEpisodeOrderActionSchema = preparedAction("world-chat-production-episode-order", ProductionEpisodeOrderModelActionSchema);
+export const WorldChatChapterReviewActionSchema = preparedAction("world-chat-chapter-review", ChapterReviewModelActionSchema);
 export const WorldChatProductionChapterOrderActionSchema = preparedAction("world-chat-production-chapter-order", ProductionChapterOrderModelActionSchema);
 export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-chat-production-scene-order", ProductionSceneOrderModelActionSchema);
 export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
@@ -1718,6 +1722,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionChapterActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionEpisodeOrderActionSchema,
+  WorldChatChapterReviewActionSchema,
   WorldChatProductionChapterOrderActionSchema,
   WorldChatProductionSceneOrderActionSchema,
   WorldChatProductionSceneDeleteActionSchema,

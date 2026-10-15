@@ -159,7 +159,8 @@ const AUTHORING: AgentConfinement = {
 /**
  * Answers rather than authors (#70 §8.1). No editing at all: its propositions become proposals at
  * wrap-up and only the accept gate touches the world, so an agent that could write would have a
- * path around the gate. No skill either — a skill shapes what is drafted, and nothing is drafted.
+ * path around the gate. No dynamic skill-loading tool: review rubrics, when applicable, are
+ * supplied by the coordinator at session construction.
  *
  * `web` is in neither list, and {@link confinementFor} adds it: it is the one capability here that
  * a person turns on rather than a role that implies it.

@@ -1,0 +1,10 @@
+.fy-chreview { padding: 16px; line-height: 1.6; overflow-wrap: anywhere; }
+.fy-chreview__controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.fy-chreview__evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.fy-chreview figure { margin: 0 0 16px; }
+.fy-chreview img { width: 100%; height: auto; object-fit: contain; border-radius: 8px; }
+.fy-chreview blockquote { margin: 0; padding: 12px 16px; border-left: 3px solid var(--border); background: var(--muted); }
+.fy-chreview textarea { display: block; width: 100%; min-height: 70px; margin-top: 8px; }
+.fy-chreview__notice { padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.fy-chreview details { padding: 12px 0; border-bottom: 1px solid var(--border); }
+@media (max-width: 700px) { .fy-chreview__evidence { grid-template-columns: 1fr; } .fy-chreview { padding: 12px; } }

@@ -269,6 +269,16 @@ The summary has these sections, in this order, each a heading on its own line. W
 - Keep it compact and under 8,000 characters. When space runs short, shorten Referenced first and Decisions last.`,
   },
   {
+    name: "chapter-script-reviewer", description: "Review chapter clarity and continuity from quoted evidence",
+    needsProposal: false, readOnly: true,
+    brief: "You are Arke's chapter script reviewer. Inspect only the supplied source snapshot. Return evidence-backed findings and scene facts in the requested JSON contract. Preserve deliberate ambiguity, character voice and author intent. Do not rewrite, delegate or generate media.",
+  },
+  {
+    name: "chapter-visual-reviewer", description: "Review actual chapter illustrations against prose and neighboring images",
+    needsProposal: false, readOnly: true,
+    brief: "You are Arke's visual continuity reviewer. Inspect the supplied image pixels and source text. Separate observation from inference. Do not claim to inspect an image that was not supplied. Return only the requested JSON findings. Do not rewrite, delegate or generate media.",
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,

@@ -2592,6 +2592,7 @@ const exampleWorldActions = {
     orderedIds: ["ep_the-ledger", "ep_below"],
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "chapter-review": { kind: "chapter-review", productionId: "saltlight", chapterId: "the-storm", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-chapter-order": {
     kind: "production-chapter-order",
     productionId: "saltlight",
@@ -2835,6 +2836,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-chapter": "Outline chapters, create one, or edit a chapter's text, plan or a passage.",
   "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. Keep an existing block's id when only its text changes.",
   "production-episode-order": "Put episodes in a new order; name every episode once.",
+  "chapter-review": "Run bounded script and visual specialists over a saved chapter; return evidence-backed advisory findings without changing prose or media.",
   "production-chapter-order": "Put chapters in a new order; name every chapter once.",
   "production-scene-order": "Put scenes in a new order; name every scene once.",
   "production-scene-delete": "Delete a scene. Its history is kept and it can be restored.",

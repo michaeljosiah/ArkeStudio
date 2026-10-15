@@ -1,3 +1,4 @@
+import { ChapterReviewControl } from "../components/chapter-review.js";
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -1932,6 +1933,7 @@ export function ChapterWorkspace({
             the bar stays put when the switch below it changes view (the master draws Audiobook). */}
         {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
         <header className="fy-sw__head">
+          <ChapterReviewControl worldId={worldId} productionId={prodId} chapterId={chapter.id} slug={worldSlug} held={locked || saving || draft !== null || stagedDraft !== undefined || saveRefusal !== null} />
           {/* The page head is the Manuscript's (design turn 194, rule 2): the label, the title, the
               synopsis and the marks are set there. Audiobook and Timing open on their toolbar, and
               the chapter's title is the app bar's last crumb. */}

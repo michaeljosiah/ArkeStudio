@@ -688,3 +688,7 @@ their existing paths. Regressions: `test/world/provider.test.ts` and
 world switches (2026-10-14); navigation is no longer treated as closing the job's world under
 SPEC-047 R-16. The available private spec folder is not a Git checkout, so no private amendment
 commit was possible in this session.
+
+## Chapter review
+
+See [chapter-review.md](chapter-review.md). Contracts and evidence validation live in `packages/contracts/src/chapter-review.ts`; retained workflow and sidecars in coordinator `productions/chapter-review.ts`; confined specialist sessions in `harness/review-task.ts`, with versioned guidance in `harness/skills/chapter-*-review.md`. Client `components/chapter-review.tsx` displays findings from the chapter workspace. World Chat reaches the same service through the typed `chapter-review` action.
