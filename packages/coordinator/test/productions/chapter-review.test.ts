@@ -253,6 +253,18 @@ it("consolidation receives verified subjects but never private human decision no
   assert.doesNotMatch(prompt, /Private annotation|decisionNote|dismissed/);
 });
 
+it("supplies consolidation eligibility without mixing image and clarity labels", () => {
+  const first = { ...answer.findings[0]!, category: "image" as const, imageBlocks: ["p1.0"], id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0, decision: "open" as const };
+  const duplicate = { ...first, id: "00000000-0000-4000-a000-000000000002" };
+  const clarity = { ...first, id: "00000000-0000-4000-a000-000000000003", category: "clarity" as const };
+  const otherImage = { ...first, id: "00000000-0000-4000-a000-000000000004", imageBlocks: ["p2.0"] };
+  const prompt = consolidationPrompt([first, duplicate, clarity, otherImage]);
+  const input = JSON.parse(prompt.split("FINDINGS AND SUBJECT ASSESSMENTS: ")[1]!);
+  assert.deepEqual(input.duplicateEligibility, [{ category: "image", imageBlocks: ["p1.0"], memberIds: [first.id, duplicate.id] }]);
+  assert.match(prompt, /Categories are immutable/);
+  assert.match(prompt, /matching post-conflict certainty/);
+});
+
 it("keeps exact script duplicates folded when image verification fails", async () => {
   const f = await visualFixture();
   const review = await f.service(async input => {
