@@ -243,3 +243,10 @@ it("retains exact text-only duplicate provenance without an extra model call", a
   assert.equal(review.groups?.[0]?.memberIds.length, 2);
   assert.equal(review.tasks[0]?.skill, "chapter-script-review@v2");
 });
+
+it("consolidation receives verified subjects but never private human decision notes", () => {
+  const finding = { ...answer.findings[0]!, id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0, decision: "dismissed" as const, decisionNote: "Private annotation must stay local" };
+  const prompt = consolidationPrompt([finding], [{ findingId: finding.id, taskId: "verify-1", verdict: "supported", subject: "Patient in the blue fleece", rationale: "Quote describes the patient, not the doctor." }]);
+  assert.match(prompt, /Patient in the blue fleece/); assert.match(prompt, /not the doctor/);
+  assert.doesNotMatch(prompt, /Private annotation|decisionNote|dismissed/);
+});
