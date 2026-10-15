@@ -26,8 +26,12 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   review: ChapterReview; slug: string; disabled?: boolean;
   onDecision: (id: string, decision: "open" | "intentional" | "dismissed", note?: string) => void;
 }) {
-  const [index, setIndex] = useState(0), [note, setNote] = useState("");
-  const finding = review.findings[Math.min(index, Math.max(0, review.findings.length - 1))];
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draftNote, setDraftNote] = useState({ findingId: "", text: "" });
+  const finding = review.findings.find(f => f.id === selectedId) ?? review.findings[0];
+  const index = finding ? review.findings.indexOf(finding) : 0;
+  const note = draftNote.findingId === finding?.id ? draftNote.text : "";
+  useEffect(() => { setSelectedId(finding?.id ?? null); setDraftNote({ findingId: finding?.id ?? "", text: "" }); }, [finding?.id]);
   const completed = review.tasks.filter(t => t.state === "complete").length;
   const supplied = new Set(review.tasks.filter(t => t.specialist === "visual" && t.state === "complete").flatMap(t => t.images));
   return <div className="fy-chreview">
@@ -43,9 +47,9 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
       {review.assessments.filter(a => a.verdict === "rejected").map(a => { const original = review.candidates?.find(c => c.id === a.findingId); return <div key={a.findingId}><strong>{a.subject} · {original?.taskId}</strong><blockquote>{original?.quote}</blockquote><p>{original?.observation}</p><p>{a.rationale}</p></div>; })}
     </details>}
     {finding ? <>
-      <div className="fy-chreview__controls"><Button disabled={index <= 0} onClick={() => { setIndex(index - 1); setNote(""); }}>Previous</Button>
+      <div className="fy-chreview__controls"><Button disabled={index <= 0} onClick={() => { setSelectedId(review.findings[index - 1]!.id); }}>Previous</Button>
         <span>Finding {Math.min(index + 1, review.findings.length)} of {review.findings.length}</span>
-        <Button disabled={index >= review.findings.length - 1} onClick={() => { setIndex(index + 1); setNote(""); }}>Next</Button></div>
+        <Button disabled={index >= review.findings.length - 1} onClick={() => { setSelectedId(review.findings[index + 1]!.id); }}>Next</Button></div>
       <p><strong>{finding.category}</strong> · {finding.certainty.replaceAll("-", " ")} · {finding.decision}</p>
       <div className="fy-chreview__evidence"><div><blockquote>{finding.quote}</blockquote><p>{finding.observation}</p><p><strong>Audience effect:</strong> {finding.impact}</p><p><strong>Suggested correction:</strong> {finding.correction}</p></div>
         <div>{finding.imageBlocks.map(block => { const image = review.images.find(i => i.block === block); return image ? <figure key={block}>
@@ -56,10 +60,10 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
         {review.assessments.filter(a => a.findingId === finding.id).map(a => <p key={a.findingId}><strong>{a.verdict} · {a.subject}</strong><br />{a.rationale}</p>)}
       </details>}
       {review.groups?.filter(g => g.representativeId === finding.id).map(group => <details key={group.representativeId}><summary>{group.memberIds.length} consolidated findings</summary>
-        <p>{group.rationale}</p>{group.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id); return original && <div key={id}><strong>{original.taskId} · {original.imageBlocks.join(", ")}</strong><blockquote>{original.quote}</blockquote><p>{original.observation}</p><p>{original.correction}</p></div>; })}
+        <p>{group.rationale}</p>{group.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id); return original && <div key={id}><strong>{original.taskId} · {original.imageBlocks.join(", ")}</strong><blockquote>{original.quote}</blockquote><p>{original.observation}</p><p>{original.correction}</p>{review.assessments?.filter(a => a.findingId === id).map(a => <p key={a.findingId}><strong>{a.verdict} · {a.subject}</strong><br />{a.rationale}</p>)}</div>; })}
       </details>)}
       {finding.decisionNote && <p><strong>Your note:</strong> {finding.decisionNote}</p>}
-      <label>Decision note<textarea value={note} maxLength={1000} onChange={e => setNote(e.target.value)} /></label>
+      <label>Decision note<textarea value={note} maxLength={1000} onChange={e => setDraftNote({ findingId: finding.id, text: e.target.value })} /></label>
       <div className="fy-chreview__controls">
         <Button disabled={disabled || review.stale} onClick={() => onDecision(finding.id, "intentional", note || undefined)}>Keep intentionally</Button>
         <Button disabled={disabled || review.stale} onClick={() => onDecision(finding.id, "dismissed", note || undefined)}>Dismiss finding</Button>

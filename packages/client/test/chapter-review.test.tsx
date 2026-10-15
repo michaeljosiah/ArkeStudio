@@ -61,11 +61,24 @@ it("shows rejected attribution reasons and preserves consolidated source provena
   value.candidates = [original, { ...original, id: "33333333-3333-4333-a333-333333333333", taskId: "visual-2", observation: "The display is directed away from its reader." },
     { ...original, id: "44444444-4444-4444-a444-444444444444", observation: "Wrong sleeve on doctor" }];
   value.groups = [{ representativeId: original.id, memberIds: value.candidates.slice(0,2).map(c => c.id), rationale: "Same screen orientation and correction" }];
-  value.assessments = [{ findingId: value.candidates[2]!.id, taskId: "verify-1", verdict: "rejected", subject: "Patient", rationale: "The sleeve quote belongs to the patient, not the doctor." }];
+  value.assessments = [{ findingId: value.candidates[1]!.id, taskId: "verify-2", verdict: "supported", subject: "Tablet reader", rationale: "Distinct member explanation retained." }, { findingId: value.candidates[2]!.id, taskId: "verify-1", verdict: "rejected", subject: "Patient", rationale: "The sleeve quote belongs to the patient, not the doctor." }];
   const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
   await act(async () => root!.render(<ChapterReviewReport review={value} slug="world" onDecision={() => {}} />));
   assert.match(container.textContent ?? "", /2 consolidated findings/);
   assert.match(container.textContent ?? "", /visual-2/);
+  assert.match(container.textContent ?? "", /Distinct member explanation retained/);
   assert.match(container.textContent ?? "", /belongs to the patient, not the doctor/);
   assert.match(container.textContent ?? "", /has not completed for this finding/);
+});
+
+it("keeps selection by identity when verification removes an earlier candidate", async () => {
+  const value = structuredClone(review); value.stale = true;
+  value.findings.push({ ...value.findings[0]!, id: "55555555-5555-4555-a555-555555555555", observation: "Second candidate" });
+  const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
+  const render = (v: ChapterReview) => root!.render(<ChapterReviewReport review={v} slug="world" onDecision={() => {}} />);
+  await act(async () => render(value));
+  await act(async () => { Array.from(container.querySelectorAll("button")).find(b => b.textContent === "Next")!.click(); });
+  await act(async () => render({ ...value, findings: [value.findings[1]!, { ...value.findings[0]!, id: "66666666-6666-4666-a666-666666666666", observation: "Third candidate" }] }));
+  assert.match(container.textContent ?? "", /Second candidate/);
+  assert.doesNotMatch(container.textContent ?? "", /Third candidate/);
 });

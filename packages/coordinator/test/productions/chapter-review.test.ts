@@ -235,3 +235,11 @@ it("malformed consolidation cannot hide findings or lose original task provenanc
   }).start(f.target, "bad-groups");
   assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2); assert.equal(review.candidates?.length, 2);
 });
+
+it("retains exact text-only duplicate provenance without an extra model call", async () => {
+  const f = await fixture(); let calls = 0;
+  const review = await f.service(async () => { calls++; return { ...answer, findings: [answer.findings[0]!, answer.findings[0]!] }; }).start(f.target, "text-duplicates");
+  assert.equal(calls, 1); assert.equal(review.findings.length, 1); assert.equal(review.candidates?.length, 2);
+  assert.equal(review.groups?.[0]?.memberIds.length, 2);
+  assert.equal(review.tasks[0]?.skill, "chapter-script-review@v2");
+});

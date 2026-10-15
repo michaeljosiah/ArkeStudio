@@ -2,7 +2,7 @@ import { z } from "zod";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups,
+import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, skillFor, skillLabel,
   type ChapterReview, type ChapterReviewTarget, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
@@ -225,14 +225,14 @@ export class ChapterReviewService {
     const source = await captureReviewSource(store, target, signal), runner = this.deps.runner(store);
     const prior = await readChapterReview(store, target);
     const sameSource = prior && sameChapterReviewSource(prior, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images });
-    const tasks: ReviewTask[] = [{ id: "script", specialist: "script", state: "pending", images: [], skill: "chapter-script-review@v2" }];
+    const tasks: ReviewTask[] = [{ id: "script", specialist: "script", state: "pending", images: [], skill: skillLabel(skillFor("chapter-script-review", "chapter-review")!) }];
     const available = source.images.filter(i => !i.error);
     for (let at = 0; at < available.length; at += 3) {
       const batch = available.slice(Math.max(0, at - 1), Math.min(available.length, at + 4));
-      tasks.push({ id: `visual-${at / 3 + 1}`, specialist: "visual", state: "pending", images: batch.map(i => i.block), skill: "chapter-visual-review@v2" });
-      tasks.push({ id: `verify-${at / 3 + 1}`, specialist: "verification", state: "pending", images: batch.map(i => i.block), skill: "chapter-visual-review@v2" });
+      tasks.push({ id: `visual-${at / 3 + 1}`, specialist: "visual", state: "pending", images: batch.map(i => i.block), skill: skillLabel(skillFor("chapter-visual-review", "chapter-review")!) });
+      tasks.push({ id: `verify-${at / 3 + 1}`, specialist: "verification", state: "pending", images: batch.map(i => i.block), skill: skillLabel(skillFor("chapter-visual-review", "chapter-review")!) });
     }
-    if (available.length) tasks.push({ id: "consolidation", specialist: "consolidation", state: "pending", images: [], skill: "chapter-script-review@v2" });
+    if (available.length) tasks.push({ id: "consolidation", specialist: "consolidation", state: "pending", images: [], skill: skillLabel(skillFor("chapter-script-review", "chapter-review")!) });
     tasks.push({ id: "narration", specialist: "narration", state: "complete", images: [], skill: "record-audit@v1", detail: "Saved-record audit only. Compiled request and audio delivery were not inspected." });
     const now = new Date().toISOString();
     let review: ChapterReview = { ...target, schemaVersion: 1, requestId, id, title: source.chapter.title,
@@ -315,6 +315,13 @@ export class ChapterReviewService {
             for (const finding of linked.findings) {
               const candidate = { ...finding, id: randomUUID(), taskId: task.id, offset: source.chapter.body.indexOf(finding.quote) };
               review.candidates!.push(candidate);
+              const identical = !available.length ? review.findings.find(f => sameReviewFinding(f, finding)) : undefined;
+              if (identical) {
+                const group = review.groups!.find(g => g.representativeId === identical.id);
+                if (group) group.memberIds.push(candidate.id);
+                else review.groups!.push({ representativeId: identical.id, memberIds: [identical.id, candidate.id], rationale: "All finding fields are identical; no semantic inference was used." });
+                continue;
+              }
               const previous = sameSource ? prior.findings.find(f => sameReviewFinding(f, finding)) : undefined;
               review.findings.push({ ...candidate, decision: previous?.decision ?? "open", ...(previous?.decisionNote ? { decisionNote: previous.decisionNote } : {}) });
             }
