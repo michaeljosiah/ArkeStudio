@@ -12,8 +12,8 @@
 .ch227 .tb>b small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
 .ch227 .tb .crumb{display:flex;gap:14px}.ch227 .tb .crumb span{color:var(--foreground)}
 .ch227 .tb .util{display:flex;gap:16px;align-items:center}
-.ch227 .body{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;min-height:0}
-.ch227.arke-open .body{grid-template-columns:42px minmax(0,1fr) 331px}
+.ch227 .body{display:grid;grid-template-columns:42px minmax(0,1fr);min-height:0}
+.ch227.arke-open .body{grid-template-columns:42px minmax(0,1fr) 400px}
 .ch227 .rail{border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:12px;color:var(--muted-foreground)}
 .ch227 .rail button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
 .ch227 .rail button.on{background:var(--muted);color:var(--foreground)}
@@ -419,3 +419,27 @@
 .ch227 .kb div{display:flex;gap:6px;justify-content:center}
 .ch227 .kb i{width:31px;border-radius:6px;background:var(--muted)}
 .ch227 .kb i.w{width:180px}
+
+/* ===== Revision 4 · turn 225's Chat in the chapter; a new chapter. ===== */
+.ch227 .tb .uon{display:grid;place-items:center;width:30px;height:30px;margin:-7px;border-radius:8px;background:var(--muted);color:var(--foreground)}
+.ch227 .gc224.gc224-panel{height:auto;min-height:0;border-left:1px solid var(--border)}
+.ch227 .gc224 .qasks{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:-6px}
+.ch227 .gc224 .qasks button{min-height:34px;padding:6px 14px;border-radius:var(--radius-pill);font:var(--type-ui)}
+.ch227 .gc224 .gc224-sent-files{display:block;margin-top:8px;font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .gc224 .waitcard div{padding:12px 13px 10px}
+.ch227 .gc224 .reading{display:flex;align-items:center;gap:8px;margin:-10px 0 18px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:var(--type-label)}
+.ch227 .gc224 .reading .gap{flex:1}
+.ch227 .gc224 .reading button.mini{min-height:26px;padding:2px 10px;font:var(--type-label)}
+.ch227 .gc224 .gc224-read-replies.is-on{background:var(--secondary)!important;color:var(--foreground)!important}
+.ch227 .gc224 .gc224-mic[aria-pressed="true"]{background:var(--foreground)!important;color:var(--background)!important}
+.ch227 .props{display:grid;grid-template-columns:120px 1fr;gap:10px 18px;margin:-8px 0 34px;padding:16px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .props>div{display:contents}
+.ch227 .props span{color:var(--muted-foreground)}
+.ch227 .props p{margin:0;font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.5}
+.ch227 .props .pov{height:26px;color:var(--foreground)}
+.ch227 .props .pov img{width:20px;height:20px}
+.ch227 .doc p.ph{color:var(--muted-foreground)}
+.ch227 .csheet{position:absolute;z-index:7;left:0;right:0;bottom:0;height:620px;border-radius:22px 22px 0 0;overflow:hidden;border-top:1px solid var(--border);box-shadow:0 -20px 60px rgba(0,0,0,.5);display:flex}
+.ch227 .csheet .gc224-panel{width:100%;border:0;background:var(--popover)}
+.ch227.phone .props{grid-template-columns:96px 1fr}
+.ch227 .gc224-panel-head>button{border-color:transparent}

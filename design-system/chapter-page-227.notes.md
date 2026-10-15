@@ -1,6 +1,36 @@
 # The chapter — a writing room, working with Arke, and a Chapter view · turn 227
 
-Status: **revision 3, drawn for review, 15 October 2026.** Nothing is built.
+Status: **revision 4, drawn for review, 15 October 2026.** Nothing is built.
+
+## Revision 4
+
+The owner approved revision 3 and asked for two more things:
+- what a new chapter looks like
+- the full chat, drawn with the existing design: voice, upload and the other controls
+
+**Chat is turn 225's global Chat.** The chat panel and composer come straight from turn 225's own drawing:
+- the composer from `global-chat-224.composer.mjs`
+- the model chip from turn 225's `ModelChip` specimens
+- the styles from turn 225's own section of the master
+
+None of it is redrawn. Chat opens from the titlebar's chat mark as a 400px panel, or a sheet on a phone. The folded Arke column beside the page is gone.
+
+**The composer** has:
+- attach, with file chips showing File in world and ×
+- the mic for dictation, with "Listening — click mic to stop"
+- the model chip
+- Read replies; when it's on, the answer being read carries Reading aloud with Stop
+- send
+
+| Frame | What |
+|---|---|
+| 227u | A new chapter. The title, then its brief as fields (synopsis, point of view, when, goal), then Start writing. Chat opens on "Let's write Chapter 26" with Draft from the synopsis, Draft the opening and Plan the beats. |
+| 227v | Arke's draft waits in the page as grey text, with Draft · words · Discard · Keep. The chat answer names it and offers Show in page. The sent message carries its attached notes. |
+| 227w | Voice and upload. A picture attached in the composer, dictation listening, and Read replies on with the answer being read aloud. |
+| 227x | The Chapter view of a new chapter: a bare hero with Write, and four steps not started. |
+| 227y | Phone: a new chapter with Chat as a sheet. |
+
+Turn 225's section of the master carries more styles than `global-chat-224.css`, including the model chip. The review page borrows that section's styles when it is built, so it shows the approved drawing.
 
 ## Revision 3
 
