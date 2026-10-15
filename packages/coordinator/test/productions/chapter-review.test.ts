@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ReviewAnswer, ChapterReview } from "@arke-studio/contracts";
 import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt } from "../../src/productions/chapter-review.js";
@@ -47,6 +47,7 @@ it("rejects stale decisions and preserves the reviewed text after edits", async 
   const source = await captureReviewSource(f.store, f.target);
   await saveChapter(f.store, f.target.productionId, source.chapter.file, source.chapter.body + "\n\nLater, she left.", { baseHash: source.chapter.hash });
   await assert.rejects(service.decide(f.target, review.id, review.findings[0]!.id, "dismissed"), /source changed/i);
+  assert.equal(f.updates.at(-1)?.stale, true, "the refusal publishes stale evidence immediately");
   const refreshed = await service.read(f.target);
   assert.equal(refreshed?.stale, true); assert.equal(refreshed?.body, review.body);
 });
@@ -97,4 +98,24 @@ it("finishes in its retained world after the UI selects another world", async ()
     assert.equal(result.status, "complete"); assert.equal(result.worldId, first.worldId);
     assert.equal(provider.openStore()?.worldId, second.worldId);
   } finally { release(); await service.stop(); await provider.close(); }
+});
+
+it("latest follows the authoritative paid checkpoint even if the pointer was not rewritten", async () => {
+  const f = await fixture(); const review = await f.service(async () => answer).start(f.target, "checkpoint");
+  const pointerPath = join(f.dir, "productions", f.target.productionId, ".reviews", "chapters", f.target.chapterId, "latest.json");
+  const pointer = await readFile(pointerPath, "utf8");
+  assert.equal(JSON.parse(pointer).body, undefined);
+  review.findings[0]!.observation = "Newer durable response";
+  await saveChapterReview(f.store, review, false);
+  assert.equal(await readFile(pointerPath, "utf8"), pointer);
+  assert.equal((await readChapterReview(f.store, f.target))?.findings[0]?.observation, "Newer durable response");
+  // Upgrade a development-era full-copy index by following its ID, not its stale contents.
+  await writeFile(pointerPath, JSON.stringify({ ...review, findings: [] }));
+  assert.equal((await readChapterReview(f.store, f.target))?.findings.length, 1);
+});
+it("stopping during source preparation aborts before reading image bytes", async () => {
+  const f = await fixture(); const stop = new AbortController();
+  const original = f.store.assertOwnership.bind(f.store); let assertions = 0;
+  f.store.assertOwnership = async () => { await original(); if (++assertions === 1) stop.abort(); };
+  await assert.rejects(captureReviewSource(f.store, f.target, stop.signal), /abort/i);
 });

@@ -1,3 +1,4 @@
+import { chapterReviewSummary } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
@@ -1660,7 +1661,7 @@ export class Coordinator {
       runner: store => {
         const adapter = this.opts.adapter;
         if (!adapter?.readiness().ready) throw new Error("The configured writing harness is unavailable.");
-        return makeReviewTaskRunner({ adapter, sessionInput: this.sessionInput, scratch: this.extractScratch(),
+        return makeReviewTaskRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
           ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
           cloudAllowed: async provider => {
             const settings = this.appSettings ? await this.appSettings.load() : null;
@@ -20812,13 +20813,13 @@ export class Coordinator {
     return {
       reconcileChapterReview: async (productionId, chapterId, requestId) => {
         const review = await this.chapterReviews().read({ worldId: store.worldId, productionId, chapterId }, requestId);
-        return review && review.status !== "running" ? { id: review.id, summary: `${review.status}: ${review.findings.length} findings. Open Chapter review for evidence. Interrupted tasks were not retried.` } : null;
+        return review && review.status !== "running" ? { id: review.id, summary: chapterReviewSummary(review) } : null;
       },
       reviewChapter: async (productionId, chapterId, requestId) => {
         const target = { worldId: store.worldId, productionId, chapterId };
         const review = await this.chapterReviews().start(target, requestId);
         if (!review) throw new Error("Chapter review did not produce a durable result.");
-        return { id: review.id, summary: `${review.status}: ${review.findings.length} findings. ${review.findings.slice(0, 5).map(f => f.observation).join(" ")} Open Chapter review for evidence and full coverage. Audio not listened to.` };
+        return { id: review.id, summary: chapterReviewSummary(review) };
       },
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,

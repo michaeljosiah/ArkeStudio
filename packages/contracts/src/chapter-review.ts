@@ -58,3 +58,12 @@ export function verifiedReviewAnswer(body: string, answer: ReviewAnswer, supplie
 export function chapterReviewKey(target: ChapterReviewTarget): string {
   return `${target.worldId}/${target.productionId}/${target.chapterId}`;
 }
+
+/** Keep chat receipts within their wire limit; the complete evidence remains in the review. */
+export function chapterReviewSummary(review: Pick<ChapterReview, "status" | "findings" | "stale">): string {
+  const head = `${review.status}${review.stale ? " (source check needed)" : ""}: ${review.findings.length} findings. `;
+  const tail = " Open Chapter review for evidence and full coverage. Audio not listened to.";
+  const observations = review.findings.slice(0, 5).map(f => f.observation).join(" ");
+  const room = 2000 - head.length - tail.length;
+  return head + (observations.length > room ? observations.slice(0, room - 1) + "…" : observations) + tail;
+}

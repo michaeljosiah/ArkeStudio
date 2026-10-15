@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
@@ -24,15 +25,20 @@ const pathOf = (target: ChapterReviewTarget, id = "latest") => {
   return `productions/${target.productionId}/.reviews/chapters/${target.chapterId}/${id}.json`;
 };
 
-export async function captureReviewSource(store: WorldStore, raw: ChapterReviewTarget) {
+export async function captureReviewSource(store: WorldStore, raw: ChapterReviewTarget, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const target = ChapterReviewTargetSchema.parse({ worldId: raw.worldId, productionId: raw.productionId, chapterId: raw.chapterId });
   if (store.worldId !== target.worldId) throw new Error("The review belongs to another world.");
   await store.assertOwnership();
+  signal?.throwIfAborted();
   const chapter = await openChapter(store, target.productionId, target.chapterId, { canonicalId: true });
   if (!chapter.body.trim()) throw new Error("Save chapter prose before reviewing it.");
   if (chapter.body.length > 60_000) throw new Error("This review supports chapters up to 60,000 characters. No text has been truncated or sent.");
+  signal?.throwIfAborted();
   const record = await readAudiobook(store, target.productionId, chapter.file);
+  signal?.throwIfAborted();
   const book = await readAudiobookBook(store, target.productionId);
+  signal?.throwIfAborted();
   const cast = await readVoices(store, target.productionId, chapter.file);
   if (record === "unreadable" || book === "unreadable" || cast === "unreadable") throw new Error("The audiobook record is unreadable; repair it before review.");
   const selected = Object.entries(record?.pictures ?? {}).sort(([a], [b]) => {
@@ -43,53 +49,72 @@ export async function captureReviewSource(store: WorldStore, raw: ChapterReviewT
   const images: ChapterReview["images"] = [], bytes = new Map<string, Uint8Array>();
   let total = 0;
   for (const [block, picture] of selected) {
+    signal?.throwIfAborted();
     try {
-      const data = await readContainedMediaBytes(store.dir, picture.file);
+      const data = await readContainedMediaBytes(store.dir, picture.file, signal);
       total += data.byteLength;
       if (total > 120_000_000) throw new Error("Selected pictures exceed the 120 MB review source budget.");
       images.push({ block, file: picture.file, hash: hash(data), textHash: picture.textHash });
       bytes.set(block, data);
     } catch (error) {
+      signal?.throwIfAborted();
       images.push({ block, file: picture.file, hash: "unavailable", textHash: picture.textHash,
         error: error instanceof Error ? error.message.slice(0, 500) : "Image unreadable." });
     }
   }
   // The source binding includes narration and character directions, without sending the full
   // world's lore to every specialist or treating a mutable summary as authoritative canon.
+  signal?.throwIfAborted();
   const sheets = store.getBundle().sheets.map(s => ({ id: s.id, narration: s.narration }));
   const contextHash = jsonHash({ record, book, cast, sheets });
   const blocks = audiobookBlocks(chapter.body, cast, audiobookHeading(chapter.order, chapter.title), audiobookBlockOptions(book, record)).blocks;
   await store.assertOwnership();
   const after = await openChapter(store, target.productionId, target.chapterId, { canonicalId: true });
   if (chapter.hash !== after.hash) throw new Error("The chapter changed while preparing its review.");
+  signal?.throwIfAborted();
   const currentContext = jsonHash({ record: await readAudiobook(store, target.productionId, chapter.file),
     book: await readAudiobookBook(store, target.productionId), cast: await readVoices(store, target.productionId, chapter.file),
     sheets: store.getBundle().sheets.map(s => ({ id: s.id, narration: s.narration })) });
+  signal?.throwIfAborted();
   if (contextHash !== currentContext) throw new Error("Chapter media or direction changed while preparing review.");
   return { chapter, images, bytes, contextHash, record, book, cast, blocks };
 }
 export type ReviewSource = Awaited<ReturnType<typeof captureReviewSource>>;
+
+const ReviewPointerSchema = ChapterReviewTargetSchema.extend({ schemaVersion: z.literal(1), id: z.string().uuid() }).strict();
 
 export async function saveChapterReview(store: WorldStore, raw: ChapterReview, latest = true): Promise<void> {
   const review = ChapterReviewSchema.parse(raw);
   if (store.worldId !== review.worldId) throw new Error("Wrong review world.");
   await store.ownedWrite(async () => {
     await atomicWriteFile(await containedWorldFilePath(store.dir, pathOf(review, review.id), true), JSON.stringify(review) + "\n");
-    if (latest) await atomicWriteFile(await containedWorldFilePath(store.dir, pathOf(review), true), JSON.stringify(review) + "\n");
+    if (latest) await atomicWriteFile(await containedWorldFilePath(store.dir, pathOf(review), true), JSON.stringify({ schemaVersion: 1, id: review.id, worldId: review.worldId, productionId: review.productionId, chapterId: review.chapterId }) + "\n");
   });
 }
 export async function readChapterReview(store: WorldStore, target: ChapterReviewTarget, id?: string): Promise<ChapterReview | null> {
   if (target.worldId !== store.worldId) throw new Error("Wrong review world.");
   let review: ChapterReview;
-  try { review = ChapterReviewSchema.parse(JSON.parse(await readFile(await containedWorldFilePath(store.dir, pathOf(target, id)), "utf8"))); }
+  let expectedId = id;
+  let raw: unknown;
+  try { raw = JSON.parse(await readFile(await containedWorldFilePath(store.dir, pathOf(target, id)), "utf8")); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-  if (chapterReviewKey(review) !== chapterReviewKey(target)) throw new Error("The review source identity does not match.");
+  if (id === undefined) {
+    // A pointer names the authoritative checkpoint. Older development builds wrote a full
+    // copy here; follow its ID too, never prefer that potentially older copy over paid results.
+    const pointer = ReviewPointerSchema.safeParse(raw);
+    const reference = pointer.success ? pointer.data : ChapterReviewSchema.parse(raw);
+    if (chapterReviewKey(reference) !== chapterReviewKey(target)) throw new Error("The review pointer belongs to another chapter.");
+    expectedId = reference.id;
+    raw = JSON.parse(await readFile(await containedWorldFilePath(store.dir, pathOf(target, reference.id)), "utf8"));
+  }
+  review = ChapterReviewSchema.parse(raw);
+  if (review.id !== expectedId || chapterReviewKey(review) !== chapterReviewKey(target)) throw new Error("The review source identity does not match.");
   return review;
 }
-export async function refreshChapterReview(store: WorldStore, review: ChapterReview): Promise<ChapterReview> {
+export async function refreshChapterReview(store: WorldStore, review: ChapterReview, signal?: AbortSignal): Promise<ChapterReview> {
   const reasons: string[] = [];
   try {
-    const source = await captureReviewSource(store, review);
+    const source = await captureReviewSource(store, review, signal);
     if (source.chapter.hash !== review.sourceHash) reasons.push("Chapter text or metadata changed.");
     if (source.contextHash !== review.contextHash) reasons.push("Pictures, narration or character directions changed.");
     if (jsonHash(source.images) !== jsonHash(review.images)) reasons.push("Selected image bytes changed or became unavailable.");
@@ -160,7 +185,10 @@ export class ChapterReviewService {
       let review = await readChapterReview(store, target);
       if (!review || review.id !== id) throw new Error("The review changed; reopen it before deciding.");
       review = await refreshChapterReview(store, review);
-      if (review.stale) throw new Error("The source changed. Review the current chapter before deciding.");
+      if (review.stale) {
+        this.deps.publish(target, review);
+        throw new Error("The source changed. Review the current chapter before deciding.");
+      }
       const finding = review.findings.find(f => f.id === findingId);
       if (!finding) throw new Error("The finding is unavailable.");
       finding.decision = decision;
@@ -180,14 +208,14 @@ export class ChapterReviewService {
         existing.tasks.forEach(task => { if (["running", "pending"].includes(task.state)) { task.state = "cancelled"; task.detail = "Interrupted request; not retried."; } });
         await saveChapterReview(store, existing, false);
       }
-      const result = await refreshChapterReview(store, existing);
+      const result = await refreshChapterReview(store, existing, signal);
       this.deps.publish(target, result);
       return result;
     }
     signal.throwIfAborted();
-    const source = await captureReviewSource(store, target), runner = this.deps.runner(store);
+    const source = await captureReviewSource(store, target, signal), runner = this.deps.runner(store);
     const prior = await readChapterReview(store, target);
-    const sameSource = prior && !(await refreshChapterReview(store, prior)).stale;
+    const sameSource = prior && !(await refreshChapterReview(store, prior, signal)).stale;
     const tasks: ReviewTask[] = [{ id: "script", specialist: "script", state: "pending", images: [], skill: "chapter-script-review@v1" }];
     const available = source.images.filter(i => !i.error);
     for (let at = 0; at < available.length; at += 3) {
@@ -250,7 +278,7 @@ export class ChapterReviewService {
       review.checks.push(error instanceof Error ? error.message.slice(0, 1000) : "Review interrupted.");
     } finally {
       for (const task of tasks) if (["pending", "running"].includes(task.state)) task.state = "cancelled";
-      review = await refreshChapterReview(store, review);
+      review = signal.aborted ? { ...review, stale: true, staleReasons: ["Source freshness was not checked after cancellation."] } : await refreshChapterReview(store, review, signal);
       await persist();
     }
     return review;
