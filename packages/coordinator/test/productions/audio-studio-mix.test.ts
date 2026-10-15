@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { initialAudioArrangement, editAudioArrangement, newAudioClip, resolveAudioArrangement, type AudioArrangementState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { readStereoWav, writeStereoWav } from "../../src/audio/stereo-wav.js";
+import { readStereoWav, stereoWavHeader, writeStereoWav } from "../../src/audio/stereo-wav.js";
 import { integratedLoudness } from "../../src/audio/speech-wav.js";
 import { StereoLoudness } from "../../src/audio/stereo-loudness.js";
 import { readAudioStudioSource } from "../../src/productions/audio-studio-source.js";
@@ -22,6 +23,25 @@ async function fixture() {
   return { dir, arranged, pcm, source };
 }
 describe("Audio Studio canonical stereo rendering", () => {
+  it("decodes each layered source once across output chunks and repeated placements", async () => {
+    const dir = await tempDir("arke-layered-decodes-"); await mkdir(join(dir, "artifacts"));
+    const arranged = state(), samples = 48000 * (process.env.ARKE_AUDIO_MEMORY_SMOKE === "1" ? 360 : 2);
+    for (const name of ["a", "b"]) {
+      const bytes = Buffer.from(`encoded-${name}`), file = `artifacts/${name}.mp3`;
+      await writeFile(join(dir, file), bytes);
+      const source = { file, label: name, hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, samples, rate: 48000, channels: 2 as const };
+      const clip = newAudioClip(name, "fx", source, samples); clip.sourceOut = 4800; clip.loop = true; clip.loopDuration = 3 * 48000;
+      arranged.clips.push(clip, { ...clip, id: `${name}-repeat`, placement: { kind: "fixed", at: 48000 } });
+    }
+    let decodes = 0;
+    const mix = await renderAudioStudioMix(dir, arranged, script, { ffmpeg: { slateFont: "", run: async args => {
+      decodes++;
+      const output = await open(args.at(-1)!, "w");
+      try { await output.writeFile(stereoWavHeader(samples)); await output.truncate(44 + samples * 4); } finally { await output.close(); }
+    } } });
+    assert.equal(mix.seconds, 4); assert.equal(decodes, 2);
+    assert.equal(readStereoWav(await readFile(join(dir, mix.file))).left.length, 4 * 48000);
+  });
   it("splits looped source windows without resetting phase or altering the audible samples", async () => {
     const { arranged, pcm, source } = await fixture();
     const clip = arranged.clips[0]!; clip.loop = true; clip.loopFade = 1200; clip.loopDuration = 130007;

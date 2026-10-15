@@ -14,7 +14,7 @@ import { openChapter } from "../productions/ops.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
 import { readPublicationFile } from "./files.js";
-import { audioStudioScript } from "../productions/audio-studio.js";
+import { audioStudioScript, audioStudioSourceProblems } from "../productions/audio-studio.js";
 
 export const storyDigest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const STORY_COMPILER = { compiler: "arke-private-story", compilerVersion: "2" };
@@ -57,12 +57,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
         const resolved = resolveAudioArrangement(studio.state, studio.script);
         audioProblems.push(...resolved.issues.map(issue => issue.message));
         if (!resolved.samples) audioProblems.push("No arranged audio.");
-        for (const clip of studio.state.clips) {
-          const artifact = scan.bundle.artifacts.find(row => `artifacts/${row.file}` === clip.source?.file);
-          const generation = artifact?.generation;
-          if (generation?.source === "audiobook" && generation.recording && !effectiveAudioRights(rights, generation.recording.preparedHash, "recorded-take").some(event => event.id === generation.recording!.acknowledgementId)) audioProblems.push(`${clip.label}: recording clearance needs review.`);
-          if (clip.source?.artifactId && (!artifact || artifact.retiredAt || artifact.production && artifact.production !== productionId)) audioProblems.push(`${clip.label}: the source is no longer available in this production.`);
-        }
+        audioProblems.push(...(await audioStudioSourceProblems(view, productionId, studio.state)).values());
       } catch (error) { audioProblems.push(error instanceof Error ? error.message : "The arrangement could not be read."); }
     }
     else {

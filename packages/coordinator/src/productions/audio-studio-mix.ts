@@ -48,7 +48,7 @@ async function verifySource(dir: string, source: AudioSource, signal: AbortSigna
   const bytes = await readContainedMediaBytes(dir, source.file, signal, AUDIO_STUDIO_SOURCE_BYTES);
   if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) throw new AudioArrangementRefusal(`${source.label}: audio changed; review its replacement`);
 }
-/** A two-pass streamed mix: one master gain, retained tails, and no whole-chapter allocation. */
+/** Accumulate sources on disk, measure the sum, then apply one master gain. */
 export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean; solo?: string[]; unavailable?: ReadonlyMap<string, string> } = {}) {
   const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
@@ -73,7 +73,7 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   const folder = await audioStudioCache(dir, "mix"), id = ulid();
   const rawPath = join(folder, `${id}.f32`), wavPath = join(folder, `${id}.wav`);
   const decoder = options.ffmpeg?.identity ? await options.ffmpeg.identity(signal) : "native-or-injected";
-  const hash = createHash("sha256").update(JSON.stringify({ renderer: 1, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
+  const hash = createHash("sha256").update(JSON.stringify({ renderer: 2, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
   const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
   const receiptFile = `.cache/audio-studio/mix/${hash}.json`;
   try {
@@ -89,31 +89,47 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   } catch (error) { if (signal.aborted) throw error; /* Missing or damaged derived cache is rebuilt. */ }
   const raw = await open(rawPath, "wx+");
   let output: Awaited<ReturnType<typeof open>> | undefined;
-  const cache = new Map<string, StereoPcm>(); let cacheBytes = 0;
   const meter = new StereoLoudness();
+  const readRaw = async (from: number, length: number) => {
+    const bytes = Buffer.alloc(length * 8);
+    let offset = 0;
+    while (offset < bytes.length) { const read = await raw.read(bytes, offset, bytes.length - offset, from * 8 + offset); if (!read.bytesRead) throw new Error("The audio render scratch file is truncated"); offset += read.bytesRead; }
+    return bytes;
+  };
   try {
+    await raw.truncate(plan.samples * 8);
+    // Finish every placement of a source before releasing its decode. Chunk-first eviction
+    // redecoded whole long files once per output second when overlapping sources exceeded RAM.
+    for (const sourceFile of new Set(playable.map(entry => entry.clip.source!.file))) {
+      signal.throwIfAborted();
+      const source = files.get(sourceFile)!, entries = playable.filter(entry => entry.clip.source!.file === sourceFile);
+      const decoded = await readAudioStudioSource(dir, sourceFile, { ...options, signal, expectedHash: source.hash });
+      if (decoded.source.samples !== source.samples) throw new AudioArrangementRefusal(`${source.label}: decoded duration changed`);
+      const sources = new Map([[sourceFile, decoded.pcm]]);
+      const first = Math.floor(Math.min(...entries.map(entry => entry.at)) / CHUNK) * CHUNK;
+      const last = Math.max(...entries.map(entry => entry.at + entry.samples));
+      for (let from = first; from < last; from += CHUNK) {
+        signal.throwIfAborted();
+        const length = Math.min(CHUNK, plan.samples - from), active = entries.filter(entry => entry.at < from + length && entry.at + entry.samples > from);
+        if (!active.length) continue;
+        const mixed = mixAudioStudioChunk(active, sources, from, length, speech), bytes = await readRaw(from, length);
+        for (let i = 0; i < length; i++) {
+          bytes.writeFloatLE(bytes.readFloatLE(i * 8) + mixed.left[i]!, i * 8);
+          bytes.writeFloatLE(bytes.readFloatLE(i * 8 + 4) + mixed.right[i]!, i * 8 + 4);
+        }
+        let offset = 0;
+        while (offset < bytes.length) { const written = await raw.write(bytes, offset, bytes.length - offset, from * 8 + offset); if (!written.bytesWritten) throw new Error("The audio render scratch file could not be written"); offset += written.bytesWritten; }
+        await setImmediate();
+      }
+    }
     for (let from = 0; from < plan.samples; from += CHUNK) {
       signal.throwIfAborted();
-      const length = Math.min(CHUNK, plan.samples - from), entries = playable.filter(entry => entry.at < from + length && entry.at + entry.samples > from);
-      // Mix one source at a time; simultaneous tracks cannot multiply the decode memory ceiling.
+      const length = Math.min(CHUNK, plan.samples - from), bytes = await readRaw(from, length);
       const left = new Float32Array(length), right = new Float32Array(length);
-      for (const sourceFile of new Set(entries.map(entry => entry.clip.source!.file))) {
-        let pcm = cache.get(sourceFile);
-        if (!pcm) {
-          const source = files.get(sourceFile)!;
-          while (cacheBytes + source.samples * 8 > AUDIO_STUDIO_SOURCE_BYTES && cache.size) { const oldest = cache.keys().next().value!; const held = cache.get(oldest)!; cacheBytes -= held.left.byteLength + held.right.byteLength; cache.delete(oldest); }
-          const decoded = await readAudioStudioSource(dir, sourceFile, { ...options, signal, expectedHash: source.hash });
-          if (decoded.source.samples !== source.samples) throw new AudioArrangementRefusal(`${source.label}: decoded duration changed`);
-          pcm = decoded.pcm; cache.set(sourceFile, pcm); cacheBytes += pcm.left.byteLength + pcm.right.byteLength;
-        }
-        const mixed = mixAudioStudioChunk(entries.filter(entry => entry.clip.source!.file === sourceFile), new Map([[sourceFile, pcm]]), from, length, speech);
-        for (let i = 0; i < length; i++) { left[i] = left[i]! + mixed.left[i]!; right[i] = right[i]! + mixed.right[i]!; }
-      }
+      for (let i = 0; i < length; i++) { left[i] = bytes.readFloatLE(i * 8); right[i] = bytes.readFloatLE(i * 8 + 4); }
       if (left.some(sample => !Number.isFinite(sample)) || right.some(sample => !Number.isFinite(sample))) throw new AudioArrangementRefusal("The mix exceeds the audio signal range; lower its clip levels");
       meter.add(left, right);
-      const bytes = Buffer.alloc(length * 8);
-      for (let i = 0; i < length; i++) { bytes.writeFloatLE(left[i]!, i * 8); bytes.writeFloatLE(right[i]!, i * 8 + 4); }
-      await raw.writeFile(bytes); await setImmediate();
+      await setImmediate();
     }
     const measured = meter.measure();
     const wanted = measured.lufs === null ? 0 : state.master.targetLufs - measured.lufs;
@@ -121,9 +137,7 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     output = await open(wavPath, "wx"); await output.writeFile(header);
     for (let from = 0; from < plan.samples; from += CHUNK) {
       signal.throwIfAborted();
-      const length = Math.min(CHUNK, plan.samples - from), bytes = Buffer.alloc(length * 8);
-      let offset = 0;
-      while (offset < bytes.length) { const read = await raw.read(bytes, offset, bytes.length - offset, from * 8 + offset); if (!read.bytesRead) throw new Error("The audio render scratch file is truncated"); offset += read.bytesRead; }
+      const length = Math.min(CHUNK, plan.samples - from), bytes = await readRaw(from, length);
       const left = new Float32Array(length), right = new Float32Array(length);
       for (let i = 0; i < length; i++) { left[i] = bytes.readFloatLE(i * 8); right[i] = bytes.readFloatLE(i * 8 + 4); }
       await output.writeFile(stereoWavFrames(left, right, 10 ** (gainDb / 20))); await setImmediate();

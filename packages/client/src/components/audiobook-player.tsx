@@ -49,7 +49,7 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
 
 /** Whether anything of the book is made yet: Listen waits for one block anywhere (R-67). */
 export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | null): boolean {
-  return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0);
+  return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && (chapter.audiobook.takes > 0 || chapter.audiobook.arranged === true));
 }
 
 /**
@@ -60,7 +60,7 @@ export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | nu
 export function listenLeads(production: Pick<ProductionBundle, "chapters"> | null, chapterId?: string): boolean {
   if (chapterId === undefined) return bookHasTakes(production);
   const chapter = production?.chapters.find((candidate) => candidate.id === chapterId);
-  return chapter !== undefined && !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && chapter.audiobook.takes > 0;
+  return chapter !== undefined && !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && (chapter.audiobook.takes > 0 || chapter.audiobook.arranged === true);
 }
 
 /** What moves the plan while the player is open: each chapter's record and the runs reading it. */

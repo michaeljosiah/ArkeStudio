@@ -1,7 +1,7 @@
 # Audio Studio implementation
 
 The approved [turn 226](../../design-system/Arke%20Studio.dc.html#t226) is the target design.
-SPEC-047 R-185–R-194 defines the implementation contract; PR #1780 is still in progress.
+SPEC-047 R-185–R-194 defines the implementation contract, implemented in PR #1780.
 
 ## Chapter workspace
 
@@ -68,11 +68,7 @@ acknowledge omissions or declare a passage restored. Those decisions remain expl
 controls. Staging and declining do not migrate or change audio, and do not invalidate the audio
 base. Proposal metadata is kept outside the arrangement undo history.
 
-## Work remaining before release
-
-Full browser interaction and real playback acceptance, video regressions and the final
-cross-platform code gate are still being completed for PR #1780. Editable automation lanes,
-stems and word-level attachment remain later design scope.
+Editable automation lanes, stems and word-level attachment remain later design scope.
 
 ## Validation
 

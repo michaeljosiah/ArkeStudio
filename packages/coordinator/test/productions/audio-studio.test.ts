@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ChapterAudiobookSchema, initialAudioArrangement, newAudioClip, DEFAULT_NARRATOR, type AudioArrangementEdit } from "@arke-studio/contracts";
+import { ChapterAudiobookSchema, audiobookTextHash, initialAudioArrangement, newAudioClip, DEFAULT_NARRATOR, type AudioArrangementEdit } from "@arke-studio/contracts";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { openAudioStudio, editAudioStudio, stageAudioStudioProposal, decideAudioStudioProposal, audioStudioSnapshot } from "../../src/productions/audio-studio.js";
 import { readAudioStudioSource } from "../../src/productions/audio-studio-source.js";
 import { readStereoWav, resampleStereo, writeStereoWav } from "../../src/audio/stereo-wav.js";
 import { AUDIO_STUDIO_SCHEMA_VERSION } from "../../src/world/commit.js";
-import { planAudiobook, readAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
+import { planAudiobook, readAudiobook, updateAudiobook, writeAudiobookBook } from "../../src/productions/audiobook.js";
 import { audiobookListening } from "../../src/productions/audiobook-listening.js";
 import { exportAudiobookPlayer } from "../../src/productions/audiobook-export.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
-import { fileArtifact } from "../../src/artifacts/filing.js";
+import { fileArtifact, fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 
 const PRODUCTION = "the-ledger-of-nights", CHAPTER = "01-neap";
 const addTrack: AudioArrangementEdit = { kind: "commands", label: "Add sound effects track", commands: [{ kind: "add-track", track: { id: "fx", name: "Sound effects", gainDb: -6, muted: false } }] };
@@ -25,6 +25,39 @@ async function fixture(run: (store: WorldStore, worldDir: string) => Promise<voi
   try { await run(provider.openStore!()!, worldDir); } finally { await provider.close(); }
 }
 describe("Audio Studio durable authority", () => {
+  it("preserves takes made by the book's selected narrator during migration", () => fixture(async (store, dir) => {
+    const narrator = { ...DEFAULT_NARRATOR, voiceId: "af_heart", label: "Heart" };
+    await writeAudiobookBook(store, PRODUCTION, { schemaVersion: 1, reading: "narrator", narrator });
+    const plan = await planAudiobook(store, PRODUCTION, CHAPTER, { narrator }), row = plan.blocks[0]!;
+    const sourcePath = join(dir, "heart.wav"), samples = new Float32Array(4800).fill(.1);
+    await writeFile(sourcePath, writeStereoWav({ rate: 48000, channels: 2, left: samples, right: samples }));
+    const textHash = audiobookTextHash(row.block.text);
+    const artifact = await fileGeneratedArtifact(store, { sourcePath, production: PRODUCTION,
+      generation: { source: "audiobook", productionId: PRODUCTION, chapterId: plan.chapter.id, chapterVersion: plan.chapter.version,
+        block: row.block.key, paragraph: row.block.paragraph, textHash, provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId,
+        parts: 1, characters: row.block.text.length, estimatedMicroUsd: 0, costMicroUsd: 0 },
+      mediaProbe: { durationSec: async () => .1, info: async () => ({ durationSec: .1, hasAudio: true }) } });
+    await updateAudiobook(store, PRODUCTION, plan.chapter, current => ({ ...current, takes: { [row.block.key]: {
+      artifactId: artifact.id, textHash, reader: narrator, assigned: narrator, format: "wav", parts: 1, characters: row.block.text.length,
+      estimatedMicroUsd: 0, costMicroUsd: 0, madeAt: store.now(),
+    } } }));
+    await store.reload();
+    const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    assert.ok(opened.state.clips.some(clip => clip.source?.artifactId === artifact.id));
+    const saved = await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
+    assert.ok(saved.arrangement?.current.clips.some(clip => clip.source?.artifactId === artifact.id));
+  }));
+  it("resolves a no-op proposal without migrating or adding an Undo step", () => fixture(async store => {
+    for (const migrated of [false, true]) {
+      let opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+      if (migrated) { await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack); opened = await openAudioStudio(store, PRODUCTION, CHAPTER); }
+      const proposal = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, `noop-${migrated}`, { base: opened.base, summary: "Keep master level", commands: [{ kind: "set-master", master: opened.state.master }] });
+      const applied = await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, proposal.id, 1, "apply");
+      assert.deepEqual(applied.arrangement ?? null, opened.saved);
+      assert.equal(applied.audioStudioProposals?.at(-1)?.status, "applied");
+      assert.equal(applied.audioStudioProposals?.at(-1)?.resultRevision, opened.saved?.revision ?? 0);
+    }
+  }));
   it("stages without migrating, keeps decisions across revisions, and applies an exact version with one Undo", () => fixture(async store => {
     assert.equal(addTrack.kind, "commands"); if (addTrack.kind !== "commands") return;
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
@@ -141,6 +174,9 @@ describe("Audio Studio durable authority", () => {
       role: "speech" as const, passageId: passage.id, placement: { kind: "sequence" as const, offset: 0 } }));
     const plan = await planAudiobook(store, PRODUCTION, CHAPTER, { narrator: DEFAULT_NARRATOR });
     await updateAudiobook(store, PRODUCTION, plan.chapter, current => ({ ...current, arrangement: initialAudioArrangement(state, JSON.stringify(current)) }));
+    await store.reload();
+    const summary = store.getBundle().productions.find(production => production.meta.id === PRODUCTION)!.chapters.find(chapter => chapter.id === plan.chapter.id)!.audiobook;
+    assert.ok(summary && "takes" in summary && summary.takes === 0 && summary.arranged === true, "the scanned summary exposes imported arrangements to Listen");
     const scope = { kind: "chapter" as const, chapterId: plan.chapter.id };
     const listening = await audiobookListening(store, PRODUCTION, { scope });
     const chapter = listening.chapters[0]!;

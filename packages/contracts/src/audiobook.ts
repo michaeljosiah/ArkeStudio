@@ -794,6 +794,7 @@ export const ChapterAudiobookSummarySchema = z
     updatedAt: IsoDateTimeSchema,
     takes: z.number().int().min(0),
     flagged: z.number().int().min(0),
+    arranged: z.boolean().optional(),
   })
   .strict();
 export type ChapterAudiobookSummary = z.infer<typeof ChapterAudiobookSummarySchema>;
@@ -807,6 +808,7 @@ export function summariseAudiobook(record: ChapterAudiobook): ChapterAudiobookSu
     updatedAt: record.updatedAt,
     takes: Object.keys(record.takes).length,
     flagged: Object.keys(record.flags).length,
+    ...(record.arrangement ? { arranged: true } : {}),
   };
 }
 

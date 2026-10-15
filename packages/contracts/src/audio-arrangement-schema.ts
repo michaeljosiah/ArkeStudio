@@ -104,7 +104,7 @@ export const AudioStudioProposalSchema = z.object({
     actionId: Id, number: z.number().int().min(1), base: z.string().regex(/^[a-f0-9]{64}$/),
     summary: z.string().min(1).max(200), commands: z.array(AudioArrangementCommandSchema).min(1).max(100),
   }).strict()).min(1).max(20),
-  resultRevision: z.number().int().min(1).optional(),
+  resultRevision: z.number().int().min(0).optional(),
 }).strict();
 export type AudioStudioProposal = z.infer<typeof AudioStudioProposalSchema>;
 

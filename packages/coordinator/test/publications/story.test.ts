@@ -135,6 +135,23 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true) {
   return { plan, takes };
 }
 describe("publication narration identity", () => {
+  it("checks source catalogue scope even when a saved source has no artifactId", async () => {
+    const h = await setup(); await narrate(h);
+    const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");
+    const opened = await openAudioStudio(h.store, h.productionId, h.chapter.id), clip = opened.state.clips[0]!;
+    const { artifactId: _id, ...source } = clip.source!;
+    await editAudioStudio(h.store, h.productionId, h.chapter.id, opened.base, { kind: "commands", label: "Pin source bytes", commands: [{ kind: "replace-source", id: clip.id, source }] });
+    const path = join(h.dir, `${source.file}.json`), original = await readFile(path, "utf8"), sidecar = JSON.parse(original);
+    const settings = { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] };
+    assert.deepEqual((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems, []);
+    for (const changed of [{ ...sidecar, retiredAt: new Date().toISOString() }, { ...sidecar, production: "another-story" }, { ...sidecar, hash: "sha256:" + "0".repeat(12) }]) {
+      await writeFile(path, JSON.stringify(changed));
+      const review = await h.service.review(h.store, h.productionId, settings);
+      assert.ok(review.chapters[0]!.audioProblems.some(problem => problem.includes("no longer available")));
+    }
+    await rename(path, path + ".removed");
+    assert.ok((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems.some(problem => problem.includes("no longer available")));
+  });
   it("captures the arranged stereo mix, retries from frozen sources, and refuses a later arrangement change", async () => {
     const h = await setup(); await narrate(h);
     const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");

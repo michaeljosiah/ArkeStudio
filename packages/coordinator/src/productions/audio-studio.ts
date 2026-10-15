@@ -8,7 +8,7 @@ import {
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
-import { planAudiobook, readAudiobook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { planAudiobook, readAudiobook, readAudiobookBook, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { chapterTiming } from "./audiobook-timing.js";
 import { readAudioStudioSource } from "./audio-studio-source.js";
 import { AUDIO_STUDIO_SOURCE_BYTES } from "./audio-studio-source.js";
@@ -28,7 +28,9 @@ function baseOf(plan: AudiobookPlan): string {
   return digest({ chapter: plan.chapter.hash, record, book: plan.book, blocks: plan.blocks.map(({ block }) => block) });
 }
 async function currentPlan(store: WorldStore, productionId: string, chapterId: string): Promise<AudiobookPlan> {
-  const plan = await planAudiobook(store, productionId, chapterId, { narrator: DEFAULT_NARRATOR });
+  const book = await readAudiobookBook(store, productionId);
+  if (book === "unreadable") throw new AudioArrangementRefusal("The book's narration choices are unreadable; restore them before opening Audio Studio");
+  const plan = await planAudiobook(store, productionId, chapterId, { narrator: book?.narrator ?? DEFAULT_NARRATOR });
   if (plan.record === "unreadable") throw new AudioArrangementRefusal("The chapter's audio record is unreadable; restore it before opening Audio Studio");
   return plan;
 }
@@ -169,10 +171,10 @@ export async function editAudioStudio(store: WorldStore, productionId: string, c
       }
     }
     const next = editAudioArrangement(held, edit);
-    if (next === held) return null;
+    if (next === held && !proposal) return null;
     changedSources = await validateEditSources(store, productionId, audioStudioScript(plan), edit, options);
-    return { ...current, arrangement: next, updatedAt: store.now(), ...(proposal ? {
-      audioStudioProposals: current.audioStudioProposals!.map(entry => entry.id === proposal.id ? { ...entry, status: "applied" as const, resultRevision: next.revision } : entry),
+    return { ...current, ...(next !== held ? { arrangement: next } : {}), updatedAt: store.now(), ...(proposal ? {
+      audioStudioProposals: current.audioStudioProposals!.map(entry => entry.id === proposal.id ? { ...entry, status: "applied" as const, resultRevision: next === held ? current.arrangement?.revision ?? 0 : next.revision } : entry),
     } : {}) };
   }, { requireReadable: true, beforeWrite: verify });
 }
