@@ -10,11 +10,15 @@ The review uses a retained world store, independent of which world is selected. 
 
 ## Evidence and limits
 
-The initial implementation accepts at most 60,000 characters and 60 selected pictures, with a 120 MB total source-image budget. Exceeding that aggregate budget refuses the run before any model call. It runs one script task and sequential visual tasks in groups of three with neighboring context, at most five pictures per task. Images use the existing sanitized rendition and encoded-byte limits. Vision capability and current cloud-image policy are checked before dispatch. Unsupported models, unreadable images and failed tasks remain visible as incomplete coverage.
+The initial implementation accepts at most 60,000 characters and 60 selected pictures, with a 120 MB total source-image budget. Exceeding that aggregate budget refuses the run before any model call. It runs one script task and sequential visual tasks in groups of three with neighboring context, at most five pictures per task. Each nonempty visual result receives a separate evidence-check session with the same pixels. A final text-only task consolidates duplicates; these extra model calls are recorded separately. Images use the existing sanitized rendition and encoded-byte limits. Vision capability and current cloud-image policy are checked before dispatch. Unsupported models, unreadable images and failed tasks remain visible as incomplete coverage.
 
-Visual tasks receive the current grouped block-to-passage map. A missing block or an image bound to older text is explicitly identified. The review checks perspective, usable objects, screen direction, eyelines, continuity, injuries, clothing, lighting and sequence readability. Intentional anomalies, cropping, occlusion and hidden screens are legitimate possibilities, not automatic errors. Character-reference matching and whole-book canon verification are outside this first pass.
+Visual tasks receive the current grouped block-to-passage map and the saved shot frame, depicted people, deliberate exclusions, expressions and detail instructions when available. Shot intent is pinned in the review; missing legacy intent is not reconstructed. Intent helps interpret framing but cannot override the manuscript. A missing block or an image bound to older text is explicitly identified. The review checks perspective, usable objects, screen direction, eyelines, continuity, injuries, clothing, lighting and sequence readability. Intentional anomalies, cropping, occlusion and hidden screens are legitimate possibilities, not automatic errors. Character-reference matching and whole-book canon verification are outside this first pass.
 
 Every model finding must quote an exact chapter span. Image findings must cite supplied image IDs. The application rejects unplaceable citations; this does not prove a model's interpretation is correct. Findings distinguish contradictions, possible confusion and inability to assess. Derived facts never outrank the original source.
+
+The independent evidence check names the subject of each quote and assesses whether it supports the claim about the pictured person and moment. Wrong-subject or wrong-scene citations are rejected with an explanation; uncertainty becomes cannot-assess. This is model judgment, not a guarantee of correctness. The report calls mechanically checked results **source-linked**. An incomplete assessment fails its task, retains the original candidates and reports partial coverage without retry.
+
+Consolidation proposes disjoint duplicate groups with existing IDs. The coordinator refuses unknown members, overlaps, different categories, certainty or image sets. Distinct defects in one prop must remain separate. Original findings, task IDs, quotes and assessment reasons remain in the sidecar and report, including rejected claims. No manuscript or media changes follow automatically. Consolidation has a 160,000-character input budget; an oversized set retains individual findings and marks that task failed. Legacy reviews remain readable; reviews with newly pinned shot intent require a fresh source check.
 
 Narration is currently a saved-record audit. It reports record availability and counts; it does not claim to inspect compiled provider requests, assess pronunciation or listen to audio. Future specialist stages can extend this same workflow without changing its ownership model.
 
@@ -31,3 +35,22 @@ Changing prose, selected image bytes, audiobook records or character narration m
 Run contracts `test/chapter-review.test.ts`, coordinator `test/productions/chapter-review.test.ts` and `test/harness/review-task.test.ts`, and client `test/chapter-review.test.tsx` and `test/chapter-review-evidence.test.ts` from their package roots with `node --import tsx --test <file>`. Also run action registry/parity, shipped skill and audiobook picture-brief tests, then the standard lint, typecheck, build and test gates.
 
 The tests use fixtures and fake model responses. They verify data boundaries and recovery, not the accuracy of a live model's visual judgment. A useful evaluation set includes a backwards tablet, a valid shared over-the-shoulder view, a deliberately impossible environment, an off-camera teammate, changing injury state and a recurring prop that changes appearance.
+
+## Visibility and disagreement (issue #1787)
+
+Version 3 review skills require an explicit visibility and evidence-basis assessment for each
+visual candidate. The coordinator retains the original model verdict, but a hidden, cropped,
+ambiguous or unobservable discrepancy cannot be effective support. A no-defect assessment
+rejects the candidate. Legacy reports remain readable. Explicit standalone no-change corrections
+are filtered before verification; substantive correction text is not filtered by that rule.
+
+The final text-only stage receives all original candidates and assessments, including rejected
+ones, without human decision notes. It identifies contrary verdicts about the same image set,
+subject and proposition before proposing duplicates. Valid conflict groups can only lower
+retained findings to cannot-assess; rejected originals are never restored. Both rationales stay
+inspectable in the report. Unknown, overlapping or incompatible groups fail before mutating the
+results. Semantic equivalence remains a model judgment, not a mechanically proven fact.
+
+Regression fixtures cover a hidden brace, opaque nested packaging, no-change findings, missing
+visibility fields, contrary verdicts, rejected-original preservation and conflict display. Live
+reviews remain necessary to assess actual visual accuracy.

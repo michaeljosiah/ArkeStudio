@@ -7,6 +7,7 @@ import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } fro
 
 export interface ReviewTaskInput {
   specialist: "script" | "visual";
+  phase?: "verification" | "consolidation";
   prompt: string;
   images: Array<{ block: string; bytes: Uint8Array; extension: string }>;
 }
@@ -33,7 +34,9 @@ export function makeReviewTaskRunner(deps: {
       const session = await createPreparedSession(deps.adapter, dir, isolated,
         { purpose: "ask", agent }, undefined, signal);
       sessionId = session.sessionId;
-      const parts: MessagePart[] = [{ type: "text", text: input.prompt }];
+      // Some harnesses flatten text before attachments; adjacency is not a reliable label.
+      const imageOrder = input.images.length ? `\nIMAGE ATTACHMENT ORDER (${input.images.length} images, in this exact order):\n${input.images.map((image, i) => `${i + 1}. Image block ${image.block}`).join("\n")}\nText labels may be collected before all images by the transport. Match each image by attachment order, not by the nearest text label.` : "";
+      const parts: MessagePart[] = [{ type: "text", text: input.prompt + imageOrder }];
       let provider: string | undefined, disclosure: string | undefined, cloudProvider: string | undefined;
       if (input.images.length) {
         if (deps.adapter.imageInput !== true || deps.adapter.imageInputForSession?.(session.sessionId) !== true)
@@ -49,8 +52,7 @@ export function makeReviewTaskRunner(deps: {
           const rendered = await imageRendition(image.bytes, image.extension, deps.maker, signal);
           encoded += 4 * Math.ceil(rendered.data.length / 3);
           if (encoded > IMAGE_RUN_ENCODED_BYTES) throw new Error("This visual task exceeds the image inspection byte budget.");
-          parts.push({ type: "text", text: `Image block ${image.block}:` },
-            { type: "image", mimeType: "image/png", data: Buffer.from(rendered.data).toString("base64") });
+          parts.push({ type: "image", mimeType: "image/png", data: Buffer.from(rendered.data).toString("base64") });
         }
       }
       // Durably record the destination before dispatch. This is not a completed inspection receipt.

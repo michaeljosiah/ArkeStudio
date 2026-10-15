@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ReviewAnswer, ChapterReview } from "@arke-studio/contracts";
-import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt } from "../../src/productions/chapter-review.js";
+import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt } from "../../src/productions/chapter-review.js";
 import { emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -160,4 +160,185 @@ it("a delayed old read cannot publish over a newly completed review", async () =
     assert.equal(f.updates.at(-1)?.id, next.id);
     assert.ok(f.updates.every(update => update?.id === next.id));
   } finally { release(); await reading; }
+});
+
+async function visualFixture() {
+  const f = await fixture(), source = await captureReviewSource(f.store, f.target);
+  const block = source.blocks.find(b => b.key !== "title")!;
+  const record = emptyAudiobook(source.chapter.version, source.chapter.hash, new Date().toISOString());
+  await writeFile(join(f.dir, "review-image.png"), "pinned-pixels");
+  record.pictures = { [block.key]: { file: "review-image.png", source: "generated", textHash: "old", at: new Date().toISOString(),
+    shot: { frame: "Doctor seen through glass from patient's room", inFrame: ["doctor"], notInFrame: ["patient", "teammate"], expressions: {}, details: [], checks: [] } } };
+  await writeAudiobook(f.store, f.target.productionId, source.chapter.file, record);
+  const visual = { ...answer.findings[0]!, category: "image" as const, imageBlocks: [block.key] };
+  return { ...f, block, visual };
+}
+it("pins shot intent and documents negative framing cases without elevating intent over source", async () => {
+  const f = await visualFixture(), source = await captureReviewSource(f.store, f.target);
+  const prompt = verificationPrompt(source, [], [f.block.key]);
+  assert.match(prompt, /"notInFrame":\["patient","teammate"\]/);
+  assert.match(prompt, /patient's room/); assert.match(prompt, /cropped poses/);
+  assert.match(prompt, /REQUIRED ASSESSMENT IDS \(0 total\): \[\]/);
+  assert.match(prompt, /never invent a placeholder/);
+  assert.match(prompt, /not necessarily the same vehicle/); assert.match(prompt, /cannot excuse an actual contradiction/);
+  assert.match(consolidationPrompt([]), /symbol shape and a pointed spike tip are separate/);
+});
+it("independently checks pictured subjects, preserves rejected originals and consolidates paraphrases", async () => {
+  const f = await visualFixture();
+  const service = f.service(async (input, _signal, receipt) => {
+    await receipt({ sessionId: input.phase ?? input.specialist, model: "fake" });
+    if (input.phase === "verification") {
+      assert.equal(Buffer.from(input.images[0]!.bytes).toString(), "pinned-pixels");
+      const saved = (await readChapterReview(f.store, f.target))!;
+      const candidates = saved.candidates!.filter(c => c.taskId === "visual-1");
+      return { facts: [], findings: [], assessments: candidates.map((c, i) => ({ findingId: c.id,
+        verdict: i === 0 ? "rejected" as const : i === 3 ? "uncertain" as const : "supported" as const,
+        visibility: "visible" as const, basis: "observed-contradiction" as const, subject: i === 0 ? "Patient rather than doctor" : "Injured hand", rationale: i === 0 ? "Quote refers to the patient in a different scene." : "Visible support checked." })) };
+    }
+    if (input.phase === "consolidation") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      const duplicates = saved.findings.filter(c => c.taskId === "visual-1" && c.certainty !== "cannot-assess");
+      return { facts: [], findings: [], conflicts: [], groups: [{ representativeId: duplicates[0]!.id, memberIds: duplicates.map(c => c.id), rationale: "Same missing splint." }] };
+    }
+    if (input.specialist === "script") return answer;
+    return { facts: [], findings: [0, 1, 2, 3].map(i => ({ ...f.visual, observation: `Concern ${i}` })) };
+  });
+  const review = await service.start(f.target, "adjudicated");
+  assert.equal(review.status, "complete"); assert.equal(review.candidates?.length, 5);
+  assert.equal(review.assessments?.length, 4); assert.equal(review.rejectedFindings, 1);
+  assert.equal(review.groups?.[0]?.memberIds.length, 2); assert.equal(review.findings.length, 3);
+  assert.equal(review.findings.some(f => f.observation === "Concern 0"), false);
+  assert.equal(review.candidates?.some(f => f.observation === "Concern 0"), true);
+  assert.equal(review.findings.find(f => f.observation === "Concern 3")?.certainty, "cannot-assess");
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.candidates, review.candidates);
+});
+it("failed evidence checking keeps source-linked candidates and reports partial coverage without retry", async () => {
+  const f = await visualFixture(); let audits = 0;
+  const service = f.service(async input => {
+    if (input.phase === "verification") { audits++; throw new Error("uncertain audit outcome"); }
+    if (input.phase === "consolidation") return { facts: [], findings: [], conflicts: [], groups: [] };
+    return input.specialist === "script" ? answer : { facts: [], findings: [f.visual] };
+  });
+  const review = await service.start(f.target, "failed-audit");
+  assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2);
+  assert.equal(review.tasks.find(t => t.specialist === "verification")?.state, "failed");
+  assert.equal(review.tasks.find(t => t.specialist === "consolidation")?.state, "unavailable");
+  await service.start(f.target, "failed-audit"); assert.equal(audits, 1);
+});
+it("malformed consolidation cannot hide findings or lose original task provenance", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "verification") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], assessments: saved.candidates!.filter(c => c.taskId === "visual-1").map(c => ({ findingId: c.id, verdict: "supported" as const, visibility: "visible" as const, basis: "observed-contradiction" as const, subject: "hand", rationale: "Supported" })) };
+    }
+    if (input.phase === "consolidation") return { facts: [], findings: [], conflicts: [], groups: [{ representativeId: "invented", memberIds: ["invented", "other"], rationale: "No" }] };
+    return input.specialist === "script" ? answer : { facts: [], findings: [f.visual] };
+  }).start(f.target, "bad-groups");
+  assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2); assert.equal(review.candidates?.length, 2);
+});
+
+it("retains exact text-only duplicate provenance without an extra model call", async () => {
+  const f = await fixture(); let calls = 0;
+  const review = await f.service(async () => { calls++; return { ...answer, findings: [answer.findings[0]!, answer.findings[0]!] }; }).start(f.target, "text-duplicates");
+  assert.equal(calls, 1); assert.equal(review.findings.length, 1); assert.equal(review.candidates?.length, 2);
+  assert.equal(review.groups?.[0]?.memberIds.length, 2);
+  assert.equal(review.tasks[0]?.skill, "chapter-script-review@v3");
+});
+
+it("consolidation receives verified subjects but never private human decision notes", () => {
+  const finding = { ...answer.findings[0]!, id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0, decision: "dismissed" as const, decisionNote: "Private annotation must stay local" };
+  const prompt = consolidationPrompt([finding], [{ findingId: finding.id, taskId: "verify-1", verdict: "supported", subject: "Patient in the blue fleece", rationale: "Quote describes the patient, not the doctor." }]);
+  assert.match(prompt, /Patient in the blue fleece/); assert.match(prompt, /not the doctor/);
+  assert.doesNotMatch(prompt, /Private annotation|decisionNote|dismissed/);
+});
+
+it("supplies consolidation eligibility without mixing image and clarity labels", () => {
+  const first = { ...answer.findings[0]!, category: "image" as const, imageBlocks: ["p1.0"], id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0, decision: "open" as const };
+  const duplicate = { ...first, id: "00000000-0000-4000-a000-000000000002" };
+  const clarity = { ...first, id: "00000000-0000-4000-a000-000000000003", category: "clarity" as const };
+  const otherImage = { ...first, id: "00000000-0000-4000-a000-000000000004", imageBlocks: ["p2.0"] };
+  const prompt = consolidationPrompt([first, duplicate, clarity, otherImage]);
+  const input = JSON.parse(prompt.split("FINDINGS AND SUBJECT ASSESSMENTS: ")[1]!);
+  assert.deepEqual(input.duplicateEligibility, [{ category: "image", imageBlocks: ["p1.0"], memberIds: [first.id, duplicate.id] }]);
+  assert.match(prompt, /Categories are immutable/);
+  assert.match(prompt, /matching post-conflict certainty/);
+});
+
+it("keeps exact script duplicates folded when image verification fails", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "verification") throw new Error("Audit unavailable");
+    return input.specialist === "script" ? { ...answer, findings: [answer.findings[0]!, answer.findings[0]!] } : { facts: [], findings: [f.visual] };
+  }).start(f.target, "partial-script-duplicates");
+  assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2);
+  assert.equal(review.candidates?.length, 3); assert.equal(review.groups?.[0]?.memberIds.length, 2);
+});
+it("preserves exact script duplicate provenance after semantic consolidation", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "consolidation") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], conflicts: [], groups: [{ representativeId: saved.findings[0]!.id, memberIds: saved.findings.map(f => f.id), rationale: "Same concern expressed differently" }] };
+    }
+    if (input.specialist === "visual") return { facts: [], findings: [] };
+    return { ...answer, findings: [answer.findings[0]!, answer.findings[0]!, { ...answer.findings[0]!, observation: "Paraphrased concern" }] };
+  }).start(f.target, "combined-script-duplicates");
+  assert.equal(review.status, "complete"); assert.equal(review.findings.length, 1);
+  assert.equal(review.candidates?.length, 3); assert.equal(review.groups?.length, 1);
+  assert.equal(review.groups?.[0]?.memberIds.length, 3);
+});
+it("carries a decision only when the final uncertainty-normalized finding is unchanged", async () => {
+  const f = await visualFixture(); let changed = false;
+  const service = f.service(async input => {
+    if (input.phase === "verification") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], assessments: saved.candidates!.map(c => ({ findingId: c.id, verdict: "uncertain" as const, visibility: "out-of-frame" as const, basis: "unobservable" as const, subject: "Hand", rationale: "Cropped from view" })) };
+    }
+    if (input.specialist === "script") return { facts: [], findings: [] };
+    return { facts: [], findings: [{ ...f.visual, ...(changed ? { correction: "A different correction" } : {}) }] };
+  });
+  const first = await service.start(f.target, "uncertain-first");
+  await service.decide(f.target, first.id, first.findings[0]!.id, "intentional", "Framing is intentional");
+  const next = await service.start(f.target, "uncertain-again");
+  assert.equal(next.findings[0]?.certainty, "cannot-assess");
+  assert.equal(next.findings[0]?.decision, "intentional"); assert.equal(next.findings[0]?.decisionNote, "Framing is intentional");
+  changed = true;
+  const last = await service.start(f.target, "uncertain-changed");
+  assert.equal(last.findings[0]?.decision, "open"); assert.equal(last.findings[0]?.decisionNote, undefined);
+});
+
+it("retains original verdicts but refuses support for packaging hidden inside a closed case", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "verification") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], assessments: saved.candidates!.map(c => ({ findingId: c.id, verdict: "supported" as const, visibility: "occluded" as const, basis: "unobservable" as const, subject: "Internal bags", rationale: "The bags could be inside the opaque case." })) };
+    }
+    if (input.specialist === "script") return { facts: [], findings: [] };
+    return { facts: [], findings: [f.visual] };
+  }).start(f.target, "hidden-packaging");
+  assert.equal(review.status, "complete"); assert.equal(review.findings[0]!.certainty, "cannot-assess");
+  assert.equal(review.assessments![0]!.verdict, "supported"); assert.equal(review.assessments![0]!.effectiveVerdict, "uncertain");
+});
+
+it("reconciles contrary claims conservatively and preserves a rejected original", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "verification") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], assessments: saved.candidates!.map((c, i) => ({ findingId: c.id, verdict: i ? "rejected" as const : "supported" as const, visibility: "visible" as const, basis: i ? "no-defect" as const : "observed-contradiction" as const, subject: "Brace under trousers", rationale: i ? "The support can be hidden." : "Support appears absent." })) };
+    }
+    if (input.phase === "consolidation") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      assert.match(input.prompt, /The support can be hidden/);
+      return { facts: [], findings: [], groups: [], conflicts: [{ memberIds: saved.candidates!.map(c => c.id), rationale: "Same concealed support has opposing assessments." }] };
+    }
+    if (input.specialist === "script") return { facts: [], findings: [] };
+    return { facts: [], findings: [f.visual, { ...f.visual, observation: "Support not seen" }] };
+  }).start(f.target, "opposing-assessments");
+  assert.equal(review.status, "complete"); assert.equal(review.findings.length, 1);
+  assert.equal(review.findings[0]!.certainty, "cannot-assess"); assert.equal(review.conflicts?.length, 1);
+  assert.equal(review.candidates?.length, 2); assert.equal(review.assessments?.length, 2);
+  assert.equal((await readChapterReview(f.store, f.target))?.conflicts?.length, 1);
 });

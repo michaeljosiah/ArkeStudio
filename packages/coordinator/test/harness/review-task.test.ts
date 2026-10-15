@@ -64,3 +64,13 @@ it("cancellation during the final ownership check prevents dispatch and removes 
   await assert.rejects(run({ specialist: "script", prompt: "Review", images: [] }, stop.signal, f.receipt), /cancel|abort/i);
   assert.equal(f.sent().length, 0); assert.deepEqual(await readdir(scratch), []);
 });
+
+it("labels attachment order explicitly when a harness collects all text before images", async () => {
+  const f = fake();
+  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-order-"), sessionInput: input => input, cloudAllowed: async () => true });
+  await run({ specialist: "visual", prompt: "Review", images: ["p1.0", "p7.0"].map(block => ({ block, bytes: pixels, extension: ".png" })) }, new AbortController().signal, f.receipt);
+  const text = f.sent().flatMap(p => p.type === "text" ? [p.text] : []).join("\n");
+  assert.match(text, /1\. Image block p1\.0\n2\. Image block p7\.0/);
+  assert.match(text, /attachment order, not by the nearest text label/);
+  assert.equal(f.sent().filter(p => p.type === "image").length, 2);
+});

@@ -1,4 +1,4 @@
-# Chapter visual review · v1
+# Chapter visual review · v3
 
 Inspect actual supplied pixels before making a visual claim. First determine the intended moment from its block and surrounding source. Then check each image and the sequence. Scene facts are an aid; verify them against the original passage rather than inheriting another agent's mistake.
 
@@ -7,3 +7,9 @@ Check usable props and screen orientation, eyelines, line of action, connected t
 Compare neighboring images for recurring objects, costume and geography. Distinguish a clear contradiction from a possible confusing perspective. Do not infer an absent person is missing if they can reasonably be outside the crop. Do not call deliberate uncanny terrain an error when the source intentionally establishes it. Do not reveal private explanations of mysteries in a proposed public image prompt.
 
 Every visual finding must name supplied image block IDs and quote an exact relevant source span. Explain observed pixels separately from interpretation, the audience effect and a concrete minimal correction. Do not issue blanket approval. An unreadable image or ambiguous detail is cannot-assess, not a pass. Return only the requested JSON. Do not modify anything or generate replacements.
+
+When the task is EVIDENCE CHECK, evaluate the supplied candidates rather than producing new findings. Resolve pronouns using the surrounding scene: a patient's sleeve or injury does not describe the doctor beside them. Quote membership only establishes source linkage. State the actual subject and whether the quote supports the claimed defect. Reject a wrong subject or wrong scene; use uncertain when the visible detail cannot settle it. Preserve the distinction between authored shot intent and source truth. Do not treat an unshown teammate, an unidentified vehicle, a cropped lower body or a doctor viewed through glass from the patient's side as errors without positive contradictory evidence. Follow the task's assessment JSON shape exactly.
+
+Judge the specific alleged defect's visibility, not the overall image. Clothing can hide a brace, an opaque transport case can contain double bags, and a camera crop can omit teammates or room boundaries. Absence from view is not evidence of physical absence. Ambiguous room depth cannot establish front/back placement. Normal arm bones in a scan are not necessarily pathological regions. Return no finding for a valid depiction or "no change needed"; do not invent a quota of defects. A useful clarity finding must describe a concrete audience misunderstanding, not ask that every fact be visible.
+
+Evidence checks must return visibility and basis for every candidate. Use visible only when the alleged discrepancy itself is visible. Use occluded, out-of-frame or ambiguous otherwise. Basis is observed-contradiction, reader-confusion, unobservable or no-defect. Hidden-detail complaints cannot be supported: reject when there is no actual defect, otherwise mark uncertain. Quote and image observations must support the same proposition. These fields are checked by the coordinator, not merely explanatory prose.
