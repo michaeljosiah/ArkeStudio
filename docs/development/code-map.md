@@ -714,3 +714,10 @@ commit was possible in this session.
 ## Chapter review
 
 See [chapter-review.md](chapter-review.md). Contracts and evidence validation live in `packages/contracts/src/chapter-review.ts`; retained workflow and sidecars in coordinator `productions/chapter-review.ts`; confined specialist sessions in `harness/review-task.ts`, with versioned guidance in `harness/skills/chapter-*-review.md`. Client `components/chapter-review.tsx` displays findings from the chapter workspace; `lib/chapter-review.ts` bounds and verifies image bytes before display and folds review-run updates without cross-run clock ordering. World Chat reaches the same service through the typed `chapter-review` action.
+
+Chapter review evidence quality (#1785): `contracts/src/chapter-review.ts` validates complete
+assessment coverage and disjoint duplicate groups. `productions/chapter-review.ts` captures
+saved shot intent, orchestrates separate visual evidence checks and a bounded text-only
+consolidation task, retaining raw candidates and reasons. Version 2 review skills distinguish
+subject attribution from quote membership. `components/chapter-review.tsx` exposes rejected
+interpretations and every consolidated source. See the chapter-review guide for limits.

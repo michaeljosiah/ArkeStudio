@@ -54,3 +54,18 @@ it("refuses changed pixels even while the report is still marked current", async
   await evidenceSettled(container as unknown as HTMLElement);
   assert.match(container.querySelector("img")?.getAttribute("src") ?? "", /^blob:/);
 });
+
+it("shows rejected attribution reasons and preserves consolidated source provenance", async () => {
+  const value = structuredClone(review), original = value.findings[0]!;
+  value.stale = true;
+  value.candidates = [original, { ...original, id: "33333333-3333-4333-a333-333333333333", taskId: "visual-2", observation: "The display is directed away from its reader." },
+    { ...original, id: "44444444-4444-4444-a444-444444444444", observation: "Wrong sleeve on doctor" }];
+  value.groups = [{ representativeId: original.id, memberIds: value.candidates.slice(0,2).map(c => c.id), rationale: "Same screen orientation and correction" }];
+  value.assessments = [{ findingId: value.candidates[2]!.id, taskId: "verify-1", verdict: "rejected", subject: "Patient", rationale: "The sleeve quote belongs to the patient, not the doctor." }];
+  const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
+  await act(async () => root!.render(<ChapterReviewReport review={value} slug="world" onDecision={() => {}} />));
+  assert.match(container.textContent ?? "", /2 consolidated findings/);
+  assert.match(container.textContent ?? "", /visual-2/);
+  assert.match(container.textContent ?? "", /belongs to the patient, not the doctor/);
+  assert.match(container.textContent ?? "", /has not completed for this finding/);
+});

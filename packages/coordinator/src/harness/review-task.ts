@@ -7,6 +7,7 @@ import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } fro
 
 export interface ReviewTaskInput {
   specialist: "script" | "visual";
+  phase?: "verification" | "consolidation";
   prompt: string;
   images: Array<{ block: string; bytes: Uint8Array; extension: string }>;
 }

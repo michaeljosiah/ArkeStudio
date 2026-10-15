@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, type ChapterReview } from "../src/chapter-review.js";
+import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
@@ -39,5 +39,27 @@ it("binds carried decisions to the captured prose, context and image versions", 
   assert.equal(sameChapterReviewSource(previous, { ...previous, contextHash: "directions-2" }), false);
   for (const image of [{ ...previous.images[0]!, hash: "pixels-2" }, { ...previous.images[0]!, textHash: "text-2" }]) {
     assert.equal(sameChapterReviewSource(previous, { ...previous, images: [image] }), false);
+  }
+});
+
+const draft = { category: "image" as const, certainty: "contradiction" as const, quote: "Her fingers were splinted.", imageBlocks: ["p1.0"], observation: "No splint", impact: "Injury lost", correction: "Show the splint" };
+const candidate = { ...draft, id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0 };
+const duplicate = { ...candidate, id: "00000000-0000-4000-a000-000000000002", taskId: "visual-2", observation: "Fingers are unbound" };
+it("requires exactly one evidence assessment for each original candidate", () => {
+  const assessment = { findingId: candidate.id, verdict: "rejected" as const, subject: "The patient, not the doctor", rationale: "This quote describes another person." };
+  assert.deepEqual(validateReviewAssessments([candidate], { facts: [], findings: [], assessments: [assessment] }), [assessment]);
+  for (const assessments of [undefined, [], [assessment, assessment], [{ ...assessment, findingId: duplicate.id }]]) {
+    assert.throws(() => validateReviewAssessments([candidate], { facts: [], findings: [], assessments }), /every candidate/);
+  }
+});
+it("consolidates paraphrases only with valid disjoint compatible membership", () => {
+  const findings = [candidate, duplicate].map(c => ({ ...c, decision: "open" as const }));
+  const group = { representativeId: candidate.id, memberIds: [candidate.id, duplicate.id], rationale: "Same injured fingers, missing splint and correction" };
+  assert.deepEqual(validateReviewGroups(findings, { facts: [], findings: [], groups: [group] }), [group]);
+  for (const groups of [undefined, [group, group], [{ ...group, memberIds: [candidate.id, candidate.id] }], [{ ...group, representativeId: "unknown" }]]) {
+    assert.throws(() => validateReviewGroups(findings, { facts: [], findings: [], groups }));
+  }
+  for (const change of [{ imageBlocks: ["p2.0"] }, { certainty: "cannot-assess" as const }, { category: "clarity" as const }]) {
+    assert.throws(() => validateReviewGroups([findings[0]!, { ...findings[1]!, ...change }], { facts: [], findings: [], groups: [group] }), /incompatible/);
   }
 });
