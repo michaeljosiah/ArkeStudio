@@ -1,4 +1,4 @@
-import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
@@ -4892,7 +4892,7 @@ export class Coordinator {
     // it closes any run still marked running, and on the open world that could be a live turn
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
     // does check, but a repair that can destroy live state should not depend on it.
-    const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
+    const wasAlreadyOpen = this.opts.provider.isWorldLoaded?.(worldId) ?? (this.opts.provider.openStore?.()?.worldId === worldId);
     const loaded = await this.opts.provider.loadWorld(worldId);
     // Requests are remembered for one world's session, which is as long as a window holds them.
     if (!wasAlreadyOpen) {
@@ -6494,9 +6494,13 @@ export class Coordinator {
     const speechChecks = new Map<string, Promise<void>>();
     const outcome = await enqueueInputs(inputs, async input => {
       if (input.params.audioReferences !== undefined) {
-        const store = this.opts.provider.openStore?.();
-        if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
-        await readCharacterAudioInputs(store, input, true);
+        const check = (store: WorldStore) => readCharacterAudioInputs(store, input, true);
+        if (this.opts.provider.withWorldStore) await this.opts.provider.withWorldStore(input.worldId, check);
+        else {
+          const store = this.opts.provider.openStore?.();
+          if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
+          await check(store);
+        }
       }
       return this.enqueueWithSpeechChecks(input, speechChecks);
     }, halted);
@@ -6776,7 +6780,17 @@ export class Coordinator {
     benchDispatchHeld = false,
     genesisDecisionHeld = false,
     browserImportStore?: WorldStore,
+    audiobookStore?: WorldStore,
   ): Promise<void> {
+    // A request owns its world independently of the renderer route. Use the same authenticated
+    // commands and store, never a second coordinator or an unowned filesystem writer.
+    if (!audiobookStore && "worldId" in msg && msg.worldId &&
+      ["read-audiobook-chapter", "read-audiobook-book", "open-audiobook", "open-audiobook-listening", "keep-audiobook-split", "export-audiobook-player"].includes(msg.kind) &&
+      this.opts.provider.withBackgroundWorldStore) {
+      if (this.stopping) return;
+      return this.opts.provider.withBackgroundWorldStore(msg.worldId, store =>
+        this.handleClientMessage(msg, benchTakeActionHeld, benchDispatchHeld, genesisDecisionHeld, browserImportStore, store));
+    }
     if (!genesisDecisionHeld && (msg.kind === "genesis-propose-world" || msg.kind === "genesis-import-resolve" || msg.kind === "genesis-voice-generate" || msg.kind === "genesis-voice-decide" || msg.kind === "genesis-image-generate" || msg.kind === "genesis-image-decide" || msg.kind === "generate-look-preview" || msg.kind === "genesis-discard" || msg.kind === "genesis-chat" || msg.kind === "genesis-decide" || msg.kind === "genesis-review" || msg.kind === "genesis-readiness" || msg.kind === "genesis-readiness-leave" || msg.kind === "genesis-voices" || msg.kind === "genesis-images" || msg.kind === "genesis-imports" || msg.kind === "begin-founding-build" || msg.kind === "genesis-attach" || msg.kind === "genesis-attach-files" || msg.kind === "create-world") && msg.genesisId) {
       return serializeFileMutation(`founding-decisions:${msg.genesisId}`, () => this.handleClientMessage(msg, false, false, true));
     }
@@ -12654,7 +12668,7 @@ export class Coordinator {
         // before it cannot parse, and that build drops the line and would number its next event
         // over it: the world is raised first, as the audiobook's direction raises it.
         if (msg.params.kind === "voice" && msg.params.direction !== undefined) {
-          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? EXPRESSIVE_DIRECTION_SCHEMA_VERSION : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
+          await this.opts.provider.openStore?.()?.ensureSchemaVersion(needsExpressiveDirection(msg.params.direction) ? directionSchemaVersion(msg.params.direction) : AUDIOBOOK_NOTE_SCHEMA_VERSION, "voice-direction");
         }
         await bench.store.append(
           {
@@ -14255,7 +14269,7 @@ export class Coordinator {
       case "export-audiobook-player": {
         // The audiobook as the player (turn 186e, SPEC-047 R-72): the chapters read whole, their
         // audio joined where this machine has ffmpeg, their pictures, in a package under exports/.
-        const store = this.opts.provider.openStore?.();
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
@@ -14473,9 +14487,10 @@ export class Coordinator {
         return;
       }
       case "stop-audiobook": {
-        const store = this.opts.provider.openStore?.();
-        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        this.readingAudiobooks.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        for (const [key, run] of this.readingAudiobooks) {
+          if (run.worldId === msg.worldId && run.productionId === msg.productionId &&
+            (run.chapterId === msg.chapterFile || key === `${msg.worldId}/${msg.productionId}/${msg.chapterFile}`)) run.control.abort();
+        }
         return;
       }
       case "stage-audiobook-take": {
@@ -14955,7 +14970,7 @@ export class Coordinator {
       case "keep-audiobook-split": {
         // A cut whose words did not match, kept as the block's take because the author heard it
         // and keeps it (design turn 185c). Only while the flag and the words it was cut for stand.
-        const store = this.opts.provider.openStore?.();
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
@@ -15299,10 +15314,10 @@ export class Coordinator {
       case "read-audiobook-chapter": {
         // The audiobook (turn 146, SPEC-047 R-16..R-18): a chapter read into kept takes — one
         // run per chapter at a time, keyed by world as continuity's and the cast's runs are,
-        // ended with the world that began it, and every ending short of read leaving the takes
+        // retained across navigation, and every ending short of read leaving the takes
         // made so far standing. The run itself lives in productions/audiobook-run.ts; this is
         // the harness around it: the narrator, the catalogue, the queue and the events.
-        const store = this.opts.provider.openStore?.();
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
@@ -15359,7 +15374,7 @@ export class Coordinator {
       case "open-audiobook": {
         // The door (turn 146, SPEC-047 R-29): every chapter prepared as its press would prepare
         // it — the counts, who reads, the price — answered to the window that asked.
-        const store = this.opts.provider.openStore?.();
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         try {
@@ -15376,7 +15391,7 @@ export class Coordinator {
         // The book as a listener hears it (turn 186, SPEC-047 R-66..R-71): every chapter planned
         // as its press would plan it, the made takes on one clock and the pictures placed on it,
         // answered to the window that asked. Nothing written, nothing asked of a provider.
-        const store = this.opts.provider.openStore?.();
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId };
@@ -15952,8 +15967,8 @@ export class Coordinator {
       case "read-audiobook-book": {
         // `Read the book` (turn 146, SPEC-047 R-16..R-18): every chapter with prose, in order,
         // priced once, a chapter at a time on the book's answer — one run per production, keyed
-        // by world, ended with the world, the chapters' own runs under its signal.
-        const store = this.opts.provider.openStore?.();
+        // by world, retained across navigation, the chapters' own runs under its signal.
+        const store = audiobookStore ?? this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         if (!store.getBundle().productions.some((p) => p.meta.id === msg.productionId)) return;
         const key = `${msg.worldId}/${msg.productionId}`;

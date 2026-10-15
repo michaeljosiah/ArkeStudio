@@ -704,3 +704,48 @@ it("a paid performed-v4 sound reaction retains the identity needed for crash rec
       provider: model.provider, model: model.id, voiceId: "calen", parts: 1, audioFormat: "wav", directionHash: block.takeHash! }, 0)?.job.id, job.id);
   } finally { await w.close(); }
 });
+
+it("performed Gemini queues scoped character turns in both grouped and per-paragraph reads", async () => {
+  const { MarkdownFile, sha256 } = await import("../../src/world/text-files.js");
+  for (const requests of [undefined, "per-paragraph"] as const) {
+    const w = await world();
+    try {
+      const file = join(w.worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      const doc = MarkdownFile.parse(await readFile(file, "utf8"));
+      const body = '"Hold." Zeb checked the ridge. "Move."\n\nThe line held.';
+      const head = (await readFile(file, "utf8")).split(/^---\s*$/m)[1]!;
+      await writeFile(file, `---\n${head.trim()}\n---\n\n${body}\n`);
+      await mkdir(join(w.worldDir, "productions", LEDGER, ".voices"), { recursive: true });
+      const actual = MarkdownFile.parse(await readFile(file,"utf8"));
+      await writeFile(join(w.worldDir,"productions",LEDGER,".voices","01-neap.json"), JSON.stringify({version:doc.data.version,hash:sha256(actual.body),derivedAt:"2026-10-03T09:00:00.000Z",passes:1,dropped:0,omitted:0,lines:[
+        {paragraph:0,occurrence:0,speaker:"Zeb",quote:'"Hold."'}, {paragraph:0,occurrence:0,speaker:"Jace",quote:'"Move."'},
+      ]}));
+      await writeAudiobookBookRaised(w.store,LEDGER,{schemaVersion:1,reading:"performed",note:"natural American narration",notes:{Zeb:"dry British delivery",Jace:"calm stoic American delivery"},...(requests?{requests}:{})});
+      const h=await harness(w.store);
+      await h.run();const q=priced(h.events)!;assert.ok(q,JSON.stringify(h.events));await h.run({confirmationToken:q.confirmationToken});
+      const sent=h.sent.find(j=>String(j.params.text).includes('"Hold."'))!;assert.ok(sent);
+      const turns=sent.params.turns as SpeechTurn[];
+      const start=turns.findIndex(turn=>turn.text==='"Hold."');
+      assert.deepEqual(turns.slice(start,start+3),[
+        {text:'"Hold."',instructions:"dry British delivery"},
+        {text:"Zeb checked the ridge.",instructions:"Natural American narration."},
+        {text:'"Move."',instructions:"calm stoic American delivery"},
+      ]);
+      assert.equal(sent.params.instructions,undefined);
+      assert.equal(sent.params.voiceId,READER.voiceId);
+      assert.equal((await planAudiobook(w.store,LEDGER,"neap",{narrator:READER})).blocks.find(b=>b.block.key==="p0.0")?.state,"made","newly compiled takes remain current");
+    } finally {await w.close();}
+  }
+});
+
+it("new vocal events raise the reader boundary before writing a chapter record", async () => {
+  const w=await world();
+  try {
+    const plan=await planAudiobook(w.store,LEDGER,"neap",{narrator:READER});const block=plan.blocks[0]!.block;
+    await writeBlockDirection(w.store,LEDGER,plan.chapter,plan.blocks.map(b=>b.block),block.key,
+      directionEntry(block.text,directionPlan(block.text,{speed:1,cues:[{kind:"sound",sound:"grunts",at:0}]}),w.store.now()));
+    assert.equal((await readWorldMeta(w.worldDir)).schemaVersion,82);
+    await assert.rejects(readWorldMeta(w.worldDir,{supports:81}),/newer|schema|version/i);
+    assert.equal((await recordOf(w.worldDir)).direction[block.key]!.plan.cues[0]!.kind,"sound");
+  } finally {await w.close();}
+});

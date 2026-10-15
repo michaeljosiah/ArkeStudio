@@ -166,6 +166,7 @@ async function withHarness(
   run: (h: {
     root: string;
     worldDir: string;
+    provider: FsWorldProvider;
     store: WorldStore;
     events: DomainEvent[];
     spoken: string[];
@@ -246,6 +247,7 @@ async function withHarness(
     await run({
       root,
       worldDir,
+      provider,
       store,
       events,
       spoken,
@@ -2168,6 +2170,56 @@ describe("an explicit book narrator never falls back (#1752)", () => {
       assert.match(events.findLast(e => e.type === "audiobook.finished")?.reason ?? "", /Calen Voss.*unavailable/);
       assert.equal(events.filter(e => e.type === "audiobook.priced").length, 1);
       assert.deepEqual(spoken, []);
+    });
+  });
+});
+
+
+describe("audiobook background API", () => {
+  for (const scope of ["chapter", "book"] as const) it(`${scope} generation survives world switches and API reads never select their owner`, async () => {
+    let release!: () => void, ready!: () => void, first = true;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    await withHarness({ synthesize: async (_request, options) => {
+      if (first) { first = false; ready(); await barrier; assert.equal(options?.signal?.aborted, false); }
+      return wav();
+    } }, async ({ provider, store, send, events, worldDir }) => {
+      const other = await provider.createWorld({ name: "Other Selected World" });
+      await provider.loadWorld(other.worldId);
+      const running = scope === "chapter" ? read(send) : send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
+      try {
+        await started;
+        assert.equal(provider.openStore()?.worldId, other.worldId);
+        await send({ kind: "open-world", worldId: WORLD_ID });
+        const retained = provider.openStore()!;
+        assert.notEqual(retained, store, "the old selected store was closed before background acquisition");
+        await send({ kind: "open-world", worldId: other.worldId });
+        assert.equal(retained.isClosed(), false);
+        release(); await running;
+        const finish = events.filter(e => e.type === (scope === "chapter" ? "audiobook.finished" : "audiobook.book-finished")).at(-1);
+        assert.equal(finish && "outcome" in finish && finish.outcome, "read");
+        assert.ok(Object.keys((await readRecord(worldDir)).takes).length > 0);
+        assert.equal(provider.openStore()?.worldId, other.worldId);
+        assert.equal(retained.isClosed(), true);
+      } finally { release(); await running; }
+    });
+  });
+
+  it("Stop resolves a background chapter by its ID without reading the selected world's chapter", async () => {
+    let ready!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    await withHarness({ synthesize: async (_request, options) => {
+      ready(); await new Promise<void>(resolve => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("stopped synthesis");
+    } }, async ({ provider, send, events }) => {
+      const other = await provider.createWorld({ name: "Other Selected World" });
+      const running = read(send);
+      await started;
+      await provider.loadWorld(other.worldId);
+      await send({ kind: "stop-audiobook", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "neap" });
+      await running;
+      assert.ok(events.some(e => e.type === "audiobook.finished" && e.outcome === "stopped"));
+      assert.equal(provider.openStore()?.worldId, other.worldId);
     });
   });
 });

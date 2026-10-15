@@ -29,7 +29,8 @@ injects the supervised `VoiceService.transcribeWords` seam; recognized speech ra
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
-Shared character compilation lives in contracts `audiobook-performance.ts`; chapter preview and
+Shared character compilation lives in contracts `audiobook-performance.ts` (v4 tags) and
+`audiobook-styled-performance.ts` (Gemini scoped metadata turns); chapter preview and
 coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
 Chapter **Export…** (approved turn209, SPEC-047 R-179) opens `AudiobookExportSheet` with the
 chapter identity. `AudiobookScope` travels through listening/player commands and video options
@@ -682,3 +683,17 @@ client `character-narration-source`, `character-narration`, `audiobook-door` and
 `chapter-audiobook`; contracts `audiobook-performance`, `audiobook-performed`, `grouped-reads`.
 
 Character and audiobook direction previews share available-narrator resolution in `packages/client/src/lib/audiobook-narrator.ts`; chapter screens re-export it for existing callers.
+
+
+Background audiobook reads: `world/provider.ts` owns reference-counted background stores
+through `WorldProvider.withBackgroundWorldStore`. Acquisition/release serialize with selection,
+but synthesis does not hold the navigation queue. Coordinator chapter/book reads, audiobook
+reads/review and player export acquire the named world without selecting it. Returning to a
+retained world reuses its store and does not run live-session recovery. Explicit Stop resolves
+world/production/chapter IDs independently of selection. Shutdown and ownership loss abort work;
+archiving an active owner is refused. Global audiobook activity and durable job recovery retain
+their existing paths. Regressions: `test/world/provider.test.ts` and
+`test/productions/audiobook.test.ts`. Requirement: user-requested background generation across
+world switches (2026-10-14); navigation is no longer treated as closing the job's world under
+SPEC-047 R-16. The available private spec folder is not a Git checkout, so no private amendment
+commit was possible in this session.

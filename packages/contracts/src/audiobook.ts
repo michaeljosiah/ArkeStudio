@@ -1062,7 +1062,7 @@ export function audiobookBlockState(
   if (!sameReader(take.assigned ?? take.reader, assigned)) return "stale";
   // The direction the take was made under against the one that stands (R-14): a direction
   // added, changed or dropped since is a different take; one authored for other words is none.
-  const turns = performed && assigned.provider === "elevenlabs" && assigned.model === "eleven_v4" ? block : undefined;
+  const turns = performed && (assigned.provider === "google" || assigned.provider === "elevenlabs" && assigned.model === "eleven_v4") ? block : undefined;
   if (audiobookTakeDirectionHash(audiobookBlockPlan(record, block), note, reading, turns) !== take.directionHash) return "stale";
   return "made";
 }

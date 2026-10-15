@@ -1,4 +1,4 @@
-import { needsExpressiveDirection, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { estimateSpeechMicroUsd, ONE_REQUEST_HOLD } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -63,7 +63,7 @@ export function compilePerformanceGeneration(store: WorldStore, model: ManifestM
 
 export async function retainPerformanceGenerationQuote(store: WorldStore, value: PerformanceGenerationQuote): Promise<void> {
   const quote = PerformanceGenerationQuoteSchema.parse(value);
-  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "voice-direction");
+  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(directionSchemaVersion(quote.cadencePlan), "voice-direction");
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
 }
 export async function readPerformanceGenerationQuote(store: WorldStore, operationId: string): Promise<PerformanceGenerationQuote> {
@@ -104,7 +104,7 @@ export function performanceGenerationJob(store: WorldStore, quote: PerformanceGe
 export async function finalizeGeneratedPerformance(store: WorldStore, tools: AudioMediaTools | undefined, quote: PerformanceGenerationQuote,
   id: string, bytes: Uint8Array, format: VoiceAudioFormat, cost: TakeCost, jobId?: string, signal = store.closingSignal) {
   PerformanceIdSchema.parse(id);
-  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "voice-direction");
+  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(directionSchemaVersion(quote.cadencePlan), "voice-direction");
   await requireUnpurgedPerformance(store, quote.target.productionId, id);
   const existing = await readPerformance(store, quote.target.productionId, id).catch(() => null);
   if (existing) {

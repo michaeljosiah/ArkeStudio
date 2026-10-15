@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { cadenceSupport, sentAs, supportedDeliveries, SOUNDS, EXTENDED_SOUNDS, type CadencePlan } from "@arke-studio/contracts";
+import { cadenceSupport, sentAs, supportedDeliveries, SOUNDS, NEW_VOCAL_SOUNDS, type CadencePlan } from "@arke-studio/contracts";
 import { requireModel, SHIPPED_MANIFEST } from "../src/index.js";
 
 // Design turn 181: one direction, every reader in its own syntax — the shipped rows, not stand-ins.
@@ -63,8 +63,8 @@ it("support comes from the cadence row alone: Eleven v3 offers its six deliverie
   }
   // Gemini keeps the portable set; Eleven also offers the extended vocalizations.
   for (const sound of SOUNDS) {
-    assert.equal(cadenceSupport(row("gemini-3.8-flash-tts")).sounds[sound].status, EXTENDED_SOUNDS.includes(sound) ? "unsupported" : "best-effort", sound);
-    assert.equal(cadenceSupport(row("eleven-v3")).sounds[sound].status, "best-effort", sound);
+    assert.equal(cadenceSupport(row("gemini-3.8-flash-tts")).sounds[sound].status, ["wheezing", "laughs harder", "starts laughing"].includes(sound) ? "unsupported" : "best-effort", sound);
+    assert.equal(cadenceSupport(row("eleven-v3")).sounds[sound].status, (NEW_VOCAL_SOUNDS as readonly string[]).includes(sound) ? "unsupported" : "best-effort", sound);
     assert.equal(cadenceSupport(row("eleven_v4")).sounds[sound].status, "best-effort", sound);
     assert.equal(cadenceSupport(row("kokoro-82m")).sounds[sound].status, "unsupported", sound);
   }

@@ -327,7 +327,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
             note,
             cues: [
               { kind: "sound", after: "I am telling you.", sound: "chuckles" },
-              { kind: "sound", after: "like this,", sound: "giggles" },
+              { kind: "sound", after: "like this,", sound: "wheezing" },
               { kind: "delivery", words: "like say na me get the car.", delivery: "whispered" },
               { kind: "pause", after: "like this,", length: "short" },
             ],
@@ -341,7 +341,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.deepEqual(first.cues.map((cue) => cue.kind === "sound" && cue.sound), ["chuckles"], "the laugh in narration is dropped; the one right after the closing mark stands");
     const second = verified.proposed["p1.0"]!;
     assert.equal(second.note, note, "an instruction reader takes the note whole");
-    assert.deepEqual(second.cues.map((cue) => cue.kind), ["sound", "pause", "delivery"], "the made-up sound is dropped; the turn is anchored to its words");
+    assert.deepEqual(second.cues.map((cue) => cue.kind), ["sound", "pause", "delivery"], "the unmapped sound is dropped; the turn is anchored to its words");
     const turn = second.cues.find((cue) => cue.kind === "delivery");
     assert.equal(turn?.kind === "delivery" ? turn.span.text : undefined, "like say na me get the car.");
     assert.equal(verified.dropped, 2, "the narration's laugh and the sound off the list, counted");

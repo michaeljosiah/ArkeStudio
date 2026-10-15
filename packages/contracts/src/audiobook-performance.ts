@@ -1,6 +1,8 @@
 import type { AudiobookBlock, AudiobookBook } from "./audiobook.js";
 import { audiobookNoteKey } from "./audiobook.js";
 import { isPointCue, markerSegments, normalizeSpeechText, performanceNote, readingNotesLead, sentAs, type CadenceCue, type CadencePlan, type HeldControl } from "./cadence.js";
+import { compileStyledPerformance } from "./audiobook-styled-performance.js";
+import type { SpeechTurn } from "./grouped-reads.js";
 import type { ManifestModel } from "./manifest.js";
 import { speechInputFits, splitSpeechInput } from "./speech-input.js";
 
@@ -20,7 +22,7 @@ export function audiblePerformanceBrief(brief: string): string {
  * scaffolding cleanup must not make an editor promise words the request will discard. */
 export function characterPerformanceDirection(note: string | undefined, model: ManifestModel) {
   if (note === undefined) return null;
-  const audible = model.provider === "elevenlabs" && model.id === "eleven_v4" ? audiblePerformanceBrief(note) : note;
+  const audible = (model.provider === "elevenlabs" && model.id === "eleven_v4" || model.provider === "google") ? audiblePerformanceBrief(note) : note;
   return audible.trim() === "" ? null : { audible, ...performanceNote(audible, model) };
 }
 
@@ -34,7 +36,7 @@ function shortAttribution(text: string): boolean {
 export interface PerformancePassage {
   lead: string;
   narration: string;
-  runs: Array<{ identity: string; text: string; restore?: boolean; directed?: boolean; attribution?: boolean }>;
+  runs: Array<{ identity: string; text: string; directed?: boolean; attribution?: boolean }>;
 }
 export interface PerformanceState { narration: string; lead: string; identity: string; directed: boolean }
 
@@ -45,17 +47,32 @@ export function renderPerformancePassage(passage: PerformancePassage, previous?:
   let directed = !fresh && previous.directed;
   const words: string[] = fresh && passage.lead ? [passage.lead] : [];
   for (const run of passage.runs) {
-    if (run.attribution && !directed && !run.directed && !run.restore && identity !== passage.narration) {
+    if (run.attribution && !directed && !run.directed && identity !== passage.narration) {
       words.push(run.text);
       continue;
     }
-    if (directed) words.push("[normal speaking voice]");
-    if (run.identity !== identity || run.restore || directed) words.push(run.identity);
+    // A changed identity already restores its baseline, including the narrator's accent.
+    // Only the same character needs an explicit end to temporary delivery.
+    if (directed && run.identity === identity && identity !== passage.narration) words.push("[normal speaking voice]");
+    if (run.identity !== identity || directed) words.push(run.identity);
     words.push(run.text);
     identity = run.identity;
     directed = run.directed === true;
   }
   return { text: words.filter(Boolean).join(" "), state: { narration: passage.narration, lead: passage.lead, identity, directed } };
+}
+
+/** Quote punctuation is part of the spoken turn, never a separate style-only fragment. */
+function quotedPerformancePlan(text: string, plan: CadencePlan | null): CadencePlan | null {
+  if (plan === null) return null;
+  const whole = normalizeSpeechText(text);
+  return { ...plan, cues: plan.cues.map(cue => {
+    if (cue.kind !== "delivery") return cue;
+    let { from, to } = cue.span;
+    if (from > 0 && /["“]/.test(whole[from - 1]!)) from--;
+    to += /^[.,!?;:…]*["”]?/.exec(whole.slice(to))![0].length;
+    return { ...cue, span: { from, to, text: whole.slice(from, to) } };
+  }) };
 }
 
 /** Single-performer v4 direction. Speaker boundaries are resolved in clean source coordinates,
@@ -64,7 +81,9 @@ export function renderPerformancePassage(passage: PerformancePassage, previous?:
  */
 export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<AudiobookBook, "reading" | "notes"> | null,
   plan: CadencePlan | null, model: ManifestModel, reading?: { book?: string; chapter?: string }):
-  { text: string; parts: string[]; passages: PerformancePassage[]; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
+  { text: string; parts: string[]; passages: PerformancePassage[]; styledParts?: SpeechTurn[][]; held: HeldControl[]; readingHeld: ReturnType<typeof readingNotesLead>["held"]; noteHeld: boolean } | null {
+  plan = quotedPerformancePlan(block.text, plan);
+  if (model.provider === "google" && model.cadence?.phrase === "best-effort-instruction" && book?.reading === "performed") return compileStyledPerformance(block, book, plan, model, reading);
   if (model.provider !== "elevenlabs" || model.id !== "eleven_v4" || book?.reading !== "performed") return null;
   const whole = normalizeSpeechText(block.text);
   const rows = block.rows ?? [block];
@@ -125,10 +144,11 @@ export function compileAudiobookPerformance(block: AudiobookBlock, book: Pick<Au
       const segments = markerSegments(words, local, model);
       for (const segment of segments) {
         const mapped = sentAs(segment.text, segment.plan, model);
-        // A parts-only marker has no inline reset. Restate normal delivery and character
-        // identity before each segment so a whisper cannot spill into the following words.
+        // Keep segment boundaries structured: the renderer owns resets once the actual
+        // request is grouped, so a local marker cannot add a second narrator reset.
         const directed = mapped.sent.delivery !== undefined && mapped.sent.delivery !== "measured" || mapped.sent.note !== undefined || mapped.sent.cues.some(cue => cue.kind === "delivery");
-        const run = { identity, directed, attribution, text: `${segments.length > 1 ? "[normal speaking voice] " : ""}${mapped.text}`, ...(segments.length > 1 ? { restore: true } : {}) };
+        // A marked attribution is narration throughout, including any unmarked prefix.
+        const run = { identity, directed, attribution: attribution && segments.length === 1, text: mapped.text };
         if (!speechInputFits(renderPerformancePassage({ lead, narration, runs: [run] }).text, model.limits)) {
           if (segment.text.length < 2) throw new Error("The speech direction leaves no room for words in this request.");
           for (const piece of splitSpeechInput(segment.text, { maxPromptChars: Math.floor(segment.text.length / 2) })) render(from + segment.from + piece.from, from + segment.from + piece.to);

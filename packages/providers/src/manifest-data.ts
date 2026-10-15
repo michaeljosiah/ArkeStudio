@@ -1,5 +1,5 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
-import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
+import { BREEZE_DELIVERY, BREEZE_SOUNDS, ELEVEN_V3_SOUNDS, ELEVEN_V4_SOUNDS, FISH_DELIVERY, FISH_SOUNDS } from "./voice-direction.js";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
 import { geminiSpeechModel } from "./gemini-tts-models.js";
 import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
@@ -292,7 +292,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "perCharacter", microUsdPerCharacter: 80 },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: null,
         pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none", phrase: "best-effort-tag", tagChars: 160, groupable: true,
-        sounds: ELEVEN_V3_SOUNDS,
+        sounds: ELEVEN_V4_SOUNDS,
         deliveryMappings: { measured: { settings: {} }, whispered: { settings: {}, tag: "whispers" },
           breaking: { settings: {}, tag: "crying" }, cold: { settings: {}, tag: "coldly" },
           warm: { settings: {}, tag: "warmly" }, urgent: { settings: {}, tag: "urgent" } } },
