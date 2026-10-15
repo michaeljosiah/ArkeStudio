@@ -2,8 +2,24 @@ import { useEffect, useState } from "react";
 import type { ChapterReview } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
 import { Button } from "./ui.js";
+import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
 import { decideChapterReview, requestChapterReview, subscribeChapterReview, useStore } from "../lib/store.js";
+
+function ChapterReviewEvidence({ slug, file, hash, block }: { slug: string; file: string; hash: string; block: string }) {
+  const [url, setUrl] = useState<string | null>(null), [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const control = new AbortController(); let active = true, objectUrl: string | undefined;
+    const timer = setTimeout(() => control.abort(), 30_000);
+    void readChapterReviewImage(mediaUrl(slug, file), hash, control.signal).then(blob => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob); setUrl(objectUrl);
+    }).catch(err => { if (active) setError(control.signal.aborted ? "Image loading timed out. Refresh to try again." : err instanceof Error ? err.message : "Image evidence unavailable."); })
+      .finally(() => clearTimeout(timer));
+    return () => { active = false; control.abort(); clearTimeout(timer); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [slug, file, hash]);
+  return error ? <p role="alert">{error}</p> : url ? <img src={url} alt={`Review evidence for ${block}`} /> : <p>Checking image evidence…</p>;
+}
 
 export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
   review: ChapterReview; slug: string; disabled?: boolean;
@@ -29,7 +45,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
       <p><strong>{finding.category}</strong> · {finding.certainty.replaceAll("-", " ")} · {finding.decision}</p>
       <div className="fy-chreview__evidence"><div><blockquote>{finding.quote}</blockquote><p>{finding.observation}</p><p><strong>Audience effect:</strong> {finding.impact}</p><p><strong>Suggested correction:</strong> {finding.correction}</p></div>
         <div>{finding.imageBlocks.map(block => { const image = review.images.find(i => i.block === block); return image ? <figure key={block}>
-          {review.stale ? <p>Image hidden because the source may have changed. The original evidence hash is retained.</p> : <img src={mediaUrl(slug, image.file)} alt={`Review evidence for ${block}`} />}
+          {review.stale ? <p>Image hidden because the source may have changed. The original evidence hash is retained.</p> : <ChapterReviewEvidence key={`${slug}/${image.file}/${image.hash}`} slug={slug} file={image.file} hash={image.hash} block={block} />}
           <figcaption>{block}</figcaption></figure> : null; })}</div></div>
       {finding.decisionNote && <p><strong>Your note:</strong> {finding.decisionNote}</p>}
       <label>Decision note<textarea value={note} maxLength={1000} onChange={e => setNote(e.target.value)} /></label>
@@ -55,12 +71,7 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
       if (event.worldId !== worldId || event.productionId !== productionId || event.chapterId !== chapterId) return;
       setStarting(false);
       if (event.error) setError(event.error);
-      else { setError(null); setReview(previous => {
-        const next = event.review;
-        if (!next) return previous;
-        if (previous && (next.createdAt < previous.createdAt || (next.id === previous.id && next.updatedAt < previous.updatedAt))) return previous;
-        return next;
-      }); }
+      else { setError(null); setReview(previous => acceptChapterReviewUpdate(previous, event.review)); }
     });
   }, [worldId, productionId, chapterId]);
   useEffect(() => { if (open && connection === "open") requestChapterReview("chapter-review-read", worldId, productionId, chapterId); }, [open, connection, worldId, productionId, chapterId]);

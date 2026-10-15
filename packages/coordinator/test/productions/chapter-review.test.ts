@@ -37,8 +37,12 @@ it("checkpoints evidence and deduplicates request IDs across new services and la
   await f.service(runner).decide(f.target, first.id, first.findings[0]!.id, "intentional", "Period contrast is intentional");
   const second = await f.service(runner).start(f.target, "second-request");
   assert.equal(second.findings[0]?.decision, "intentional");
+  f.updates.length = 0;
   const replay = await f.service(runner).start(f.target, "first-request");
   assert.equal(replay.id, first.id); assert.equal(calls, 2);
+  assert.equal(f.updates.length, 0, "archived replay cannot replace the displayed current review");
+  await f.service(runner).read(f.target, "first-request");
+  assert.equal(f.updates.length, 0, "archived reads do not publish over the current review");
   assert.equal((await readChapterReview(f.store, f.target))?.id, second.id, "old replays cannot replace latest");
 });
 it("rejects stale decisions and preserves the reviewed text after edits", async () => {
@@ -138,4 +142,22 @@ it("refuses an oversized image set before any model task or review checkpoint", 
   let calls = 0;
   await assert.rejects(f.service(async () => { calls++; return answer; }).start(f.target, "oversized"), /120 MB review source budget/);
   assert.equal(calls, 0); assert.equal(await readChapterReview(f.store, f.target), null);
+});
+
+it("a delayed old read cannot publish over a newly completed review", async () => {
+  const f = await fixture(), service = f.service(async () => answer);
+  const first = await service.start(f.target, "old-run"); f.updates.length = 0;
+  let entered!: () => void, release!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; }), barrier = new Promise<void>(resolve => { release = resolve; });
+  const original = f.store.assertOwnership.bind(f.store); let pauseNext = true;
+  f.store.assertOwnership = async () => { if (pauseNext) { pauseNext = false; entered(); await barrier; } await original(); };
+  const reading = service.read(f.target);
+  try {
+    await ready;
+    const next = await service.start(f.target, "new-run");
+    release(); const old = await reading;
+    assert.equal(old?.id, first.id);
+    assert.equal(f.updates.at(-1)?.id, next.id);
+    assert.ok(f.updates.every(update => update?.id === next.id));
+  } finally { release(); await reading; }
 });

@@ -136,12 +136,14 @@ export function reviewPrompt(source: ReviewSource, facts: ChapterReview["facts"]
 export class ChapterReviewService {
   private readonly live = new Map<string, { requestId: string; control: AbortController; work: Promise<ChapterReview> }>();
   private closing = false;
+  private readonly generations = new Map<string, number>();
   constructor(private readonly deps: {
     withWorld<T>(worldId: string, work: (store: WorldStore) => Promise<T>): Promise<T>;
     runner(store: WorldStore): ReviewTaskRunner;
     publish(target: ChapterReviewTarget, review: ChapterReview | null, error?: string): void;
   }) {}
   async read(target: ChapterReviewTarget, requestId?: string) {
+    const key = chapterReviewKey(target), generation = this.generations.get(key) ?? 0;
     return this.deps.withWorld(target.worldId, async store => {
       let review = await readChapterReview(store, target, requestId ? requestIdentity(requestId) : undefined);
       if (review?.status === "running" && !this.live.has(chapterReviewKey(target))) {
@@ -158,7 +160,9 @@ export class ChapterReviewService {
         });
       }
       if (review) review = await refreshChapterReview(store, review);
-      this.deps.publish(target, review);
+      // An old read or archived request must not replace a newer run in the chapter panel.
+      const latest = requestId ? await readChapterReview(store, target) : review;
+      if (generation === (this.generations.get(key) ?? 0) && latest?.id === review?.id) this.deps.publish(target, review);
       return review;
     });
   }
@@ -171,6 +175,7 @@ export class ChapterReviewService {
     if (active) return active.requestId === requestId ? active.work : Promise.reject(new Error("A review is already running for this chapter."));
     if (this.live.size >= 3) return Promise.reject(new Error("Three chapter reviews are already running. Wait or stop one first."));
     const control = new AbortController();
+    this.generations.set(key, (this.generations.get(key) ?? 0) + 1);
     // Defer execution until the reservation exists, including when a host supplies a synchronous seam.
     const work = Promise.resolve().then(() => this.deps.withWorld(target.worldId, store => serializeFileMutation(`${store.dir}/${pathOf(target)}`, () => this.run(store, target, requestId, control.signal))))
       .catch(error => { this.deps.publish(target, null, error instanceof Error ? error.message : "Review failed."); throw error; })
@@ -211,7 +216,7 @@ export class ChapterReviewService {
         await saveChapterReview(store, existing, false);
       }
       const result = await refreshChapterReview(store, existing, signal);
-      this.deps.publish(target, result);
+      if ((await readChapterReview(store, target))?.id === result.id) this.deps.publish(target, result);
       return result;
     }
     signal.throwIfAborted();
