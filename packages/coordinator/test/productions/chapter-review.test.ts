@@ -220,6 +220,7 @@ it("failed evidence checking keeps source-linked candidates and reports partial 
   const review = await service.start(f.target, "failed-audit");
   assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2);
   assert.equal(review.tasks.find(t => t.specialist === "verification")?.state, "failed");
+  assert.equal(review.tasks.find(t => t.specialist === "consolidation")?.state, "unavailable");
   await service.start(f.target, "failed-audit"); assert.equal(audits, 1);
 });
 it("malformed consolidation cannot hide findings or lose original task provenance", async () => {

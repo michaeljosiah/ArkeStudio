@@ -268,6 +268,10 @@ export class ChapterReviewService {
             task.detail = inspected?.state === "complete" ? "No visual candidates to check." : "Visual inspection did not complete.";
             await persist(); continue;
           }
+          if (consolidation && tasks.some(t => t.specialist === "verification" && t.state !== "complete")) {
+            task.state = "unavailable"; task.detail = "Evidence checking is incomplete; individual candidates are retained without consolidation.";
+            await persist(); continue;
+          }
           if (consolidation && review.findings.length < 2) {
             task.state = "complete"; task.detail = "Fewer than two findings; no duplicates to consolidate.";
             await persist(); continue;
