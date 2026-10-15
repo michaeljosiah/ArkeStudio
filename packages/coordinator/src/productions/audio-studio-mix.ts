@@ -74,7 +74,7 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   const folder = await audioStudioCache(dir, "mix"), id = ulid();
   const rawPath = join(folder, `${id}.f32`), wavPath = join(folder, `${id}.wav`);
   const decoder = options.ffmpeg?.identity ? await options.ffmpeg.identity(signal) : "native-or-injected";
-  const hash = createHash("sha256").update(JSON.stringify({ renderer: 2, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
+  const hash = createHash("sha256").update(JSON.stringify({ renderer: 3, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
   const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
   const receiptFile = `.cache/audio-studio/mix/${hash}.json`;
   const releaseCached = holdAudioStudioCache(dir, file);
