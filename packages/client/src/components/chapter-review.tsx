@@ -43,8 +43,8 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
       {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}
       <p>{review.rejectedFindings} invalid citations or rejected interpretations. Exact citations establish source linkage, not correctness.</p>
     </details>
-    {!!review.assessments?.some(a => a.verdict === "rejected") && <details><summary>Rejected interpretations</summary>
-      {review.assessments.filter(a => a.verdict === "rejected").map(a => { const original = review.candidates?.find(c => c.id === a.findingId); return <div key={a.findingId}><strong>{a.subject} · {original?.taskId}</strong><blockquote>{original?.quote}</blockquote><p>{original?.observation}</p><p>{a.rationale}</p></div>; })}
+    {!!review.assessments?.some(a => (a.effectiveVerdict ?? a.verdict) === "rejected") && <details><summary>Rejected interpretations</summary>
+      {review.assessments.filter(a => (a.effectiveVerdict ?? a.verdict) === "rejected").map(a => { const original = review.candidates?.find(c => c.id === a.findingId); return <div key={a.findingId}><strong>{a.subject} · {original?.taskId}</strong><blockquote>{original?.quote}</blockquote><p>{original?.observation}</p><p>{a.rationale}</p></div>; })}
     </details>}
     {finding ? <>
       <div className="fy-chreview__controls"><Button disabled={index <= 0} onClick={() => { setSelectedId(review.findings[index - 1]!.id); }}>Previous</Button>
@@ -57,11 +57,12 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
           <figcaption>{block}</figcaption></figure> : null; })}</div></div>
       {finding.imageBlocks.length > 0 && !review.assessments?.some(a => a.findingId === finding.id) && <p>Source-linked candidate. Separate evidence check has not completed for this finding.</p>}
       {review.assessments?.some(a => a.findingId === finding.id) && <details><summary>Evidence check</summary>
-        {review.assessments.filter(a => a.findingId === finding.id).map(a => <p key={a.findingId}><strong>{a.verdict} · {a.subject}</strong><br />{a.rationale}</p>)}
+        {review.assessments.filter(a => a.findingId === finding.id).map(a => <p key={a.findingId}><strong>{a.effectiveVerdict ?? a.verdict} · {a.subject}</strong><br />{a.rationale}{a.effectiveVerdict && a.effectiveVerdict !== a.verdict && <><br />Original model verdict: {a.verdict}; adjusted for visibility and evidence.</>}</p>)}
       </details>}
       {review.groups?.filter(g => g.representativeId === finding.id).map(group => <details key={group.representativeId}><summary>{group.memberIds.length} consolidated findings</summary>
-        <p>{group.rationale}</p>{group.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id); return original && <div key={id}><strong>{original.taskId} · {original.imageBlocks.join(", ")}</strong><blockquote>{original.quote}</blockquote><p>{original.observation}</p><p>{original.correction}</p>{review.assessments?.filter(a => a.findingId === id).map(a => <p key={a.findingId}><strong>{a.verdict} · {a.subject}</strong><br />{a.rationale}</p>)}</div>; })}
+        <p>{group.rationale}</p>{group.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id); return original && <div key={id}><strong>{original.taskId} · {original.imageBlocks.join(", ")}</strong><blockquote>{original.quote}</blockquote><p>{original.observation}</p><p>{original.correction}</p>{review.assessments?.filter(a => a.findingId === id).map(a => <p key={a.findingId}><strong>{a.effectiveVerdict ?? a.verdict} · {a.subject}</strong><br />{a.rationale}{a.effectiveVerdict && a.effectiveVerdict !== a.verdict && <><br />Original model verdict: {a.verdict}; adjusted for visibility and evidence.</>}</p>)}</div>; })}
       </details>)}
+      {review.conflicts?.filter(c => c.memberIds.includes(finding.id)).map((conflict, i) => <details key={i}><summary>Conflicting interpretations — kept uncertain</summary><p>{conflict.rationale}</p>{conflict.memberIds.map(id => { const original = review.candidates?.find(c => c.id === id), assessment = review.assessments?.find(a => a.findingId === id); return <div key={id}><strong>{original?.taskId} · {assessment?.effectiveVerdict ?? assessment?.verdict}</strong><p>{original?.observation}</p><p>{assessment?.rationale}</p></div>; })}</details>)}
       {finding.decisionNote && <p><strong>Your note:</strong> {finding.decisionNote}</p>}
       <label>Decision note<textarea value={note} maxLength={1000} onChange={e => setDraftNote({ findingId: finding.id, text: e.target.value })} /></label>
       <div className="fy-chreview__controls">

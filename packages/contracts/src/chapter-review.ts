@@ -22,15 +22,23 @@ export const ReviewFactSchema = z.object({ quote: z.string().min(1).max(1200),
 export const ReviewAssessmentSchema = z.object({
   findingId: z.string().uuid(), verdict: z.enum(["supported", "uncertain", "rejected"]),
   subject: z.string().min(1).max(300), rationale: z.string().min(1).max(1600),
+  // Optional for saved v1/v2 reports. New evidence checks must supply both fields.
+  visibility: z.enum(["visible", "occluded", "out-of-frame", "ambiguous"]).optional(),
+  basis: z.enum(["observed-contradiction", "reader-confusion", "unobservable", "no-defect"]).optional(),
+  effectiveVerdict: z.enum(["supported", "uncertain", "rejected"]).optional(),
 }).strict();
 export const ReviewGroupSchema = z.object({
   representativeId: z.string().uuid(), memberIds: z.array(z.string().uuid()).min(2).max(60),
   rationale: z.string().min(1).max(1000),
 }).strict();
+export const ReviewConflictSchema = z.object({
+  memberIds: z.array(z.string().uuid()).min(2).max(60), rationale: z.string().min(1).max(1000),
+}).strict();
 export const ReviewAnswerSchema = z.object({
   facts: z.array(ReviewFactSchema).max(40), findings: z.array(ReviewFindingDraftSchema).max(20),
   assessments: z.array(ReviewAssessmentSchema).max(20).optional(),
   groups: z.array(ReviewGroupSchema).max(200).optional(),
+  conflicts: z.array(ReviewConflictSchema).max(200).optional(),
 }).strict();
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(), hash: z.string(),
@@ -57,6 +65,7 @@ export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   // Persist combined exact/semantic provenance for up to 500 candidates.
   // Model replies retain their tighter 200-group / 60-member bounds above.
   groups: z.array(ReviewGroupSchema.extend({ memberIds: z.array(z.string().uuid()).min(2).max(500) })).max(250).optional(),
+  conflicts: z.array(ReviewConflictSchema).max(200).optional(),
   checks: z.array(z.string().max(1000)).max(150), rejectedFindings: z.number().int().nonnegative(),
   stale: z.boolean().default(false), staleReasons: z.array(z.string()).default([]),
   audioListened: z.literal(false),
@@ -68,7 +77,7 @@ export type ReviewTask = z.infer<typeof ReviewTaskSchema>;
 export function verifiedReviewAnswer(body: string, answer: ReviewAnswer, suppliedImages: readonly string[]) {
   // These model tasks receive neither audio nor compiled voice requests. Narration stays in
   // the deterministic record audit; a different category cannot evade visual citations.
-  const findings = answer.findings.filter(f => body.includes(f.quote) && f.category !== "narration" &&
+  const findings = answer.findings.filter(f => !reviewHasNoCorrection(f.correction) && body.includes(f.quote) && f.category !== "narration" &&
     f.imageBlocks.every(id => suppliedImages.includes(id)) &&
     ((suppliedImages.length === 0 && f.category !== "image") || f.imageBlocks.length > 0));
   const facts = answer.facts.filter(f => body.includes(f.quote));
@@ -105,7 +114,9 @@ export function validateReviewAssessments(candidates: readonly z.infer<typeof Re
   const assessments = answer.assessments;
   if (!assessments || assessments.length !== candidates.length || new Set(assessments.map(a => a.findingId)).size !== candidates.length ||
     assessments.some(a => !candidates.some(c => c.id === a.findingId))) throw new Error("Evidence check did not assess every candidate exactly once.");
-  return assessments;
+  if (assessments.some(a => !a.visibility || !a.basis)) throw new Error("Evidence check omitted visibility or basis.");
+  // Preserve the model verdict; runtime policy cannot turn admitted non-observation into support.
+  return assessments.map(a => ({ ...a, effectiveVerdict: effectiveReviewVerdict(a) }));
 }
 
 /** Models propose semantic groups; the coordinator preserves originals and refuses unsafe membership. */
@@ -126,4 +137,35 @@ export function validateReviewGroups(findings: ChapterReview["findings"], answer
     }
   }
   return answer.groups;
+}
+
+/** Only explicit no-change responses are filtered; substantive suggestions remain reviewable. */
+export function reviewHasNoCorrection(correction: string): boolean {
+  return /^(?:no (?:change|changes|correction|corrections)(?: (?:is|are))? (?:needed|required)|none|n\/a)[.!\s]*$/i.test(correction.trim());
+}
+
+export function effectiveReviewVerdict(a: z.infer<typeof ReviewAssessmentSchema>): "supported" | "uncertain" | "rejected" {
+  if (a.verdict === "rejected" || a.basis === "no-defect") return "rejected";
+  if (a.verdict === "uncertain" || a.visibility !== "visible" || !a.basis || a.basis === "unobservable") return "uncertain";
+  return "supported";
+}
+
+/** Semantic matches are advisory, but conflicts may only lower certainty, never revive a rejection. */
+export function validateReviewConflicts(candidates: NonNullable<ChapterReview["candidates"]>, assessments: NonNullable<ChapterReview["assessments"]>, answer: ReviewAnswer) {
+  if (!answer.conflicts) throw new Error("Consolidation did not reconcile conflicting assessments.");
+  const used = new Set<string>();
+  for (const conflict of answer.conflicts) {
+    const first = candidates.find(c => c.id === conflict.memberIds[0]);
+    if (!first || !first.imageBlocks.length) throw new Error("Unknown visual conflict member.");
+    const verdicts = new Set<string>();
+    for (const id of conflict.memberIds) {
+      const member = candidates.find(c => c.id === id), assessment = assessments.find(a => a.findingId === id);
+      if (!member || !assessment || used.has(id) || member.category !== first.category ||
+        JSON.stringify([...member.imageBlocks].sort()) !== JSON.stringify([...first.imageBlocks].sort()))
+        throw new Error("Invalid, overlapping or incompatible conflict group.");
+      used.add(id); verdicts.add(assessment.effectiveVerdict ?? assessment.verdict);
+    }
+    if (verdicts.size < 2 || !verdicts.has("supported")) throw new Error("Conflict must include support and a contrary assessment.");
+  }
+  return answer.conflicts;
 }

@@ -82,3 +82,19 @@ it("keeps selection by identity when verification removes an earlier candidate",
   assert.match(container.textContent ?? "", /Second candidate/);
   assert.doesNotMatch(container.textContent ?? "", /Third candidate/);
 });
+
+it("shows conservative verdict changes and both sides of a conflict", async () => {
+  const value = structuredClone(review); value.stale = true;
+  const original = value.findings[0]!; original.certainty = "cannot-assess";
+  const other = { ...original, id: "77777777-7777-4777-a777-777777777777", taskId: "visual-2" };
+  value.candidates = [original, other];
+  value.assessments = [{ findingId: original.id, taskId: "verify-1", verdict: "supported", effectiveVerdict: "uncertain", visibility: "occluded", basis: "unobservable", subject: "Hidden support", rationale: "Trousers conceal it." },
+    { findingId: other.id, taskId: "verify-2", verdict: "rejected", subject: "Hidden support", rationale: "No visible defect." }];
+  value.conflicts = [{ memberIds: [original.id, other.id], rationale: "Conflicting interpretations of the same support." }];
+  const container = dom.document.createElement("div"); dom.document.body.append(container); root = createRoot(container as unknown as HTMLElement);
+  await act(async () => root!.render(<ChapterReviewReport review={value} slug="world" onDecision={() => {}} />));
+  assert.match(container.textContent ?? "", /Original model verdict: supported/);
+  assert.match(container.textContent ?? "", /Conflicting interpretations/);
+  assert.match(container.textContent ?? "", /Trousers conceal it/);
+  assert.match(container.textContent ?? "", /No visible defect/);
+});

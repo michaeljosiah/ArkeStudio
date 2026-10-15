@@ -35,3 +35,22 @@ Changing prose, selected image bytes, audiobook records or character narration m
 Run contracts `test/chapter-review.test.ts`, coordinator `test/productions/chapter-review.test.ts` and `test/harness/review-task.test.ts`, and client `test/chapter-review.test.tsx` and `test/chapter-review-evidence.test.ts` from their package roots with `node --import tsx --test <file>`. Also run action registry/parity, shipped skill and audiobook picture-brief tests, then the standard lint, typecheck, build and test gates.
 
 The tests use fixtures and fake model responses. They verify data boundaries and recovery, not the accuracy of a live model's visual judgment. A useful evaluation set includes a backwards tablet, a valid shared over-the-shoulder view, a deliberately impossible environment, an off-camera teammate, changing injury state and a recurring prop that changes appearance.
+
+## Visibility and disagreement (issue #1787)
+
+Version 3 review skills require an explicit visibility and evidence-basis assessment for each
+visual candidate. The coordinator retains the original model verdict, but a hidden, cropped,
+ambiguous or unobservable discrepancy cannot be effective support. A no-defect assessment
+rejects the candidate. Legacy reports remain readable. Explicit standalone no-change corrections
+are filtered before verification; substantive correction text is not filtered by that rule.
+
+The final text-only stage receives all original candidates and assessments, including rejected
+ones, without human decision notes. It identifies contrary verdicts about the same image set,
+subject and proposition before proposing duplicates. Valid conflict groups can only lower
+retained findings to cannot-assess; rejected originals are never restored. Both rationales stay
+inspectable in the report. Unknown, overlapping or incompatible groups fail before mutating the
+results. Semantic equivalence remains a model judgment, not a mechanically proven fact.
+
+Regression fixtures cover a hidden brace, opaque nested packaging, no-change findings, missing
+visibility fields, contrary verdicts, rejected-original preservation and conflict display. Live
+reviews remain necessary to assess actual visual accuracy.

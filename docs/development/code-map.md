@@ -721,3 +721,5 @@ saved shot intent, orchestrates separate visual evidence checks and a bounded te
 consolidation task, retaining raw candidates and reasons. Version 2 review skills distinguish
 subject attribution from quote membership. `components/chapter-review.tsx` exposes rejected
 interpretations and every consolidated source. See the chapter-review guide for limits.
+
+Chapter review v3: contracts `effectiveReviewVerdict` enforces visibility limits and `validateReviewConflicts` bounds conservative reconciliation. The coordinator retains original verdicts and conflict members; the report exposes both reasons without restoring rejected claims (issue #1787).

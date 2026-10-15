@@ -59,8 +59,8 @@ export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-rev
  * by model id, because two routes of one family answer the same conventions.
  */
 export const SKILLS: readonly Skill[] = [
-  { id: "chapter-script-review", version: 2, family: "chapter-review", purpose: "chapter-script-review", bodyPath: "chapter-script-review.md" },
-  { id: "chapter-visual-review", version: 2, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
+  { id: "chapter-script-review", version: 3, family: "chapter-review", purpose: "chapter-script-review", bodyPath: "chapter-script-review.md" },
+  { id: "chapter-visual-review", version: 3, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
   {
     id: "seedance-scene-drafting",
     // v3: framing, keep-outs and cuts-on-a-shared-shape, once those fields began reaching the
