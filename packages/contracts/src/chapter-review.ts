@@ -54,7 +54,9 @@ export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
     decision: ChapterReviewDecisionSchema, decisionNote: z.string().max(1000).optional() }).strict()).max(500),
   candidates: z.array(ReviewCandidateSchema).max(500).optional(),
   assessments: z.array(ReviewAssessmentSchema.extend({ taskId: z.string() })).max(500).optional(),
-  groups: z.array(ReviewGroupSchema).max(200).optional(),
+  // Persist combined exact/semantic provenance for up to 500 candidates.
+  // Model replies retain their tighter 200-group / 60-member bounds above.
+  groups: z.array(ReviewGroupSchema.extend({ memberIds: z.array(z.string().uuid()).min(2).max(500) })).max(250).optional(),
   checks: z.array(z.string().max(1000)).max(150), rejectedFindings: z.number().int().nonnegative(),
   stale: z.boolean().default(false), staleReasons: z.array(z.string()).default([]),
   audioListened: z.literal(false),

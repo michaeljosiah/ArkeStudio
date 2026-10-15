@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, type ChapterReview } from "../src/chapter-review.js";
+import { ReviewAnswerSchema, ChapterReviewSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
@@ -70,4 +70,17 @@ it("normalizes omitted image IDs for prose without allowing uncited visual claim
   assert.deepEqual(answer.findings[0]!.imageBlocks, []);
   assert.equal(verifiedReviewAnswer(draft.quote, answer, []).findings.length, 1);
   assert.equal(verifiedReviewAnswer(draft.quote, answer, ["p1.0"]).findings.length, 0);
+});
+
+it("persists combined exact and semantic provenance beyond the model response limits", () => {
+  const id = (n: number) => `00000000-0000-4000-a000-${String(n).padStart(12, "0")}`;
+  const groups = Array.from({ length: 201 }, (_, i) => ({ representativeId: id(i * 2), memberIds: [id(i * 2), id(i * 2 + 1)], rationale: "Same finding" }));
+  const stored = ChapterReviewSchema.shape.groups;
+  assert.equal(stored.safeParse(groups).success, true);
+  assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], groups }).success, false);
+  const expanded = [{ ...groups[0]!, memberIds: Array.from({ length: 79 }, (_, i) => id(i)) }];
+  assert.equal(stored.safeParse(expanded).success, true, "expanding exact script duplicates can exceed 60 members");
+  assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], groups: expanded }).success, false);
+  assert.equal(stored.safeParse(Array.from({ length: 251 }, () => groups[0])).success, false);
+  assert.equal(stored.safeParse([{ ...groups[0]!, memberIds: Array.from({ length: 501 }, (_, i) => id(i)) }]).success, false);
 });
