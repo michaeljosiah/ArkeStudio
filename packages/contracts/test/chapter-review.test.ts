@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, type ChapterReview } from "../src/chapter-review.js";
+import { ReviewAnswerSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, type ChapterReview } from "../src/chapter-review.js";
 
 it("requires exact prose and supplied images while preserving uncertainty", () => {
   const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
@@ -28,5 +28,16 @@ it("only identical findings share a human decision or deduplication identity", (
   for (const changed of [{ category: "continuity" as const }, { certainty: "contradiction" as const }, { quote: "He left." },
     { imageBlocks: ["p1.0"] }, { observation: "Movement impossible" }, { impact: "Contradicts the next scene" }, { correction: "Change the next scene" }]) {
     assert.equal(sameReviewFinding(finding, { ...finding, ...changed }), false);
+  }
+});
+
+it("binds carried decisions to the captured prose, context and image versions", () => {
+  const previous = { sourceHash: "source-B", contextHash: "directions-1", images: [{ block: "p0.0", file: "view.png", hash: "pixels-1", textHash: "text-1" }] };
+  const captured = { ...structuredClone(previous), sourceHash: "source-A" };
+  assert.equal(sameChapterReviewSource(previous, captured), false, "restoring live B cannot make captured A match a decided B");
+  assert.equal(sameChapterReviewSource(previous, structuredClone(previous)), true);
+  assert.equal(sameChapterReviewSource(previous, { ...previous, contextHash: "directions-2" }), false);
+  for (const image of [{ ...previous.images[0]!, hash: "pixels-2" }, { ...previous.images[0]!, textHash: "text-2" }]) {
+    assert.equal(sameChapterReviewSource(previous, { ...previous, images: [image] }), false);
   }
 });

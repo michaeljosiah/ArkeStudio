@@ -74,3 +74,9 @@ export function sameReviewFinding(a: z.infer<typeof ReviewFindingDraftSchema>, b
     a.observation === b.observation && a.impact === b.impact && a.correction === b.correction &&
     a.imageBlocks.length === b.imageBlocks.length && a.imageBlocks.every((id, index) => id === b.imageBlocks[index]);
 }
+
+/** Compare the pinned source versions, never a fresh read that may describe a different edit. */
+export function sameChapterReviewSource(a: Pick<ChapterReview, "sourceHash" | "contextHash" | "images">,
+  b: Pick<ChapterReview, "sourceHash" | "contextHash" | "images">): boolean {
+  return a.sourceHash === b.sourceHash && a.contextHash === b.contextHash && JSON.stringify(a.images) === JSON.stringify(b.images);
+}

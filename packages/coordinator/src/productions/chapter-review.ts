@@ -2,7 +2,7 @@ import { z } from "zod";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding,
+import { audiobookHeading, audiobookBlocks, audiobookBlockOptions, audiobookTextHash, ChapterReviewSchema, ChapterReviewTargetSchema, chapterReviewKey, verifiedReviewAnswer, sameReviewFinding, sameChapterReviewSource,
   type ChapterReview, type ChapterReviewTarget, type ReviewAnswer, type ReviewTask } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
@@ -217,7 +217,7 @@ export class ChapterReviewService {
     signal.throwIfAborted();
     const source = await captureReviewSource(store, target, signal), runner = this.deps.runner(store);
     const prior = await readChapterReview(store, target);
-    const sameSource = prior && !(await refreshChapterReview(store, prior, signal)).stale;
+    const sameSource = prior && sameChapterReviewSource(prior, { sourceHash: source.chapter.hash, contextHash: source.contextHash, images: source.images });
     const tasks: ReviewTask[] = [{ id: "script", specialist: "script", state: "pending", images: [], skill: "chapter-script-review@v1" }];
     const available = source.images.filter(i => !i.error);
     for (let at = 0; at < available.length; at += 3) {
