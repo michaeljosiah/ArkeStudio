@@ -63,3 +63,11 @@ it("consolidates paraphrases only with valid disjoint compatible membership", ()
     assert.throws(() => validateReviewGroups([findings[0]!, { ...findings[1]!, ...change }], { facts: [], findings: [], groups: [group] }), /incompatible/);
   }
 });
+
+it("normalizes omitted image IDs for prose without allowing uncited visual claims", () => {
+  const { imageBlocks: _images, ...withoutImages } = draft;
+  const answer = ReviewAnswerSchema.parse({ facts: [], findings: [{ ...withoutImages, category: "clarity" }] });
+  assert.deepEqual(answer.findings[0]!.imageBlocks, []);
+  assert.equal(verifiedReviewAnswer(draft.quote, answer, []).findings.length, 1);
+  assert.equal(verifiedReviewAnswer(draft.quote, answer, ["p1.0"]).findings.length, 0);
+});

@@ -13,7 +13,7 @@ export const ReviewFindingDraftSchema = z.object({
   category: z.enum(["clarity", "continuity", "image", "narration"]),
   certainty: ReviewCertaintySchema,
   quote: z.string().min(1).max(1200),
-  imageBlocks: z.array(z.string().max(100)).max(5),
+  imageBlocks: z.array(z.string().max(100)).max(5).default([]),
   observation: z.string().min(1).max(1600), impact: z.string().min(1).max(1000),
   correction: z.string().min(1).max(1600),
 }).strict();
