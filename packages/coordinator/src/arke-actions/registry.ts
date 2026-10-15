@@ -1,3 +1,4 @@
+import { WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { ProductionAudioStudioProposeModelActionSchema, WorldChatAudioStudioProposalActionSchema, ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema,
   ProductionTransitionsProposeModelActionSchema, WorldChatTransitionProposalActionSchema, ProductionEffectsProposeModelActionSchema, WorldChatEffectProposalActionSchema } from "@arke-studio/contracts";
@@ -200,6 +201,10 @@ const COMPLETE_TIMELINE_READ = AVAILABLE;
  * honest answer is that it is read-only, global, or reserved for the person at the controls.
  */
 const CLIENT_COMMAND_METADATA = {
+  "chapter-review-start": action("production", "command", "production-store", "external-network-action", ["chapters"]),
+  "chapter-review-read": readOnly("Reads retained chapter review findings."),
+  "chapter-review-cancel": humanOnly("Stopping specialist work belongs to the person."),
+  "chapter-review-decide": humanOnly("Accepting intentional ambiguity or dismissing a finding belongs to the person."),
   hello: readOnly("Transport handshake handled before coordinator dispatch."),
   "open-world": readOnly("Opens an existing world for reading; it does not alter that world."),
   "create-world": globalOnly("World creation happens before there is an open-world scope for Arke."),
@@ -784,6 +789,7 @@ const COMMAND_MODEL_PATHS = {
   "restore-scene": ["production-scene-restore"],
   "delete-scene": ["production-scene-delete"],
   "scene-command": ["production-scene-command"],
+  "chapter-review-start": ["chapter-review"],
   "create-chapter": ["production-chapter"],
   "save-chapter": ["production-chapter"],
   "edit-chapter-plan": ["production-chapter"],
@@ -1163,6 +1169,9 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-production-episode-order",
     schema: WorldChatProductionEpisodeOrderActionSchema,
     ...action("production", "command", "production-store", "authored-change", ["episodes"]),
+  },
+  "world-chat-chapter-review": { kind: "world-chat-chapter-review", schema: WorldChatChapterReviewActionSchema,
+    ...action("production", "command", "production-store", "external-network-action", ["chapters"]),
   },
   "world-chat-production-chapter-order": {
     kind: "world-chat-production-chapter-order",

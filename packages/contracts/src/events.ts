@@ -1,3 +1,4 @@
+import { ChapterReviewSchema } from "./chapter-review.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
@@ -120,6 +121,7 @@ export const QueueCommandSchema = z.enum([
   "read-bible-section",
   "read-prose",
   "read-prose-page",
+  "chapter-review-start", "chapter-review-read", "chapter-review-cancel", "chapter-review-decide",
   "read-audiobook-chapter",
   "read-audiobook-book",
   "generate-world-image",
@@ -321,6 +323,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * the book, and the editor holds what it read here — `version` for the foot, `hash` for the
    * save's base — until the next snapshot says the record moved.
    */
+  z.object({ type: z.literal("chapter-review.updated"), at: z.string(), worldId: z.string(), productionId: z.string(), chapterId: z.string(),
+    review: ChapterReviewSchema.nullable(), error: z.string().optional() }).strict(),
   z
     .object({
       ...base,

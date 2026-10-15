@@ -1,3 +1,4 @@
+import { ChapterReviewDecisionSchema } from "./chapter-review.js";
 import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
 import { BrowserMediaFilesSchema } from "./browser-media-import.js";
@@ -2248,6 +2249,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Open a chapter: the body and its version, fetched on demand and answered by
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
+  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-read"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-decide"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema,
+    reviewId: z.string().uuid(), findingId: z.string().uuid(), decision: ChapterReviewDecisionSchema, note: z.string().max(1000).optional() }).strict(),
   z
     .object({
       kind: z.literal("open-chapter"),

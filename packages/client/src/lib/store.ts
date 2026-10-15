@@ -744,6 +744,19 @@ const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
 type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
 const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
+export type ChapterReviewUpdate = Extract<DomainEvent, { type: "chapter-review.updated" }>;
+const chapterReviewListeners = new Set<(value: ChapterReviewUpdate) => void>();
+export function subscribeChapterReview(listener: (value: ChapterReviewUpdate) => void): () => void {
+  chapterReviewListeners.add(listener); return () => { chapterReviewListeners.delete(listener); };
+}
+export function requestChapterReview(kind: "chapter-review-start" | "chapter-review-read" | "chapter-review-cancel",
+  worldId: string, productionId: string, chapterId: string): boolean {
+  return send({ kind, worldId, productionId, chapterId, requestId: ulid() });
+}
+export function decideChapterReview(worldId: string, productionId: string, chapterId: string, reviewId: string,
+  findingId: string, decision: "open" | "intentional" | "dismissed", note?: string): boolean {
+  return send({ kind: "chapter-review-decide", worldId, productionId, chapterId, reviewId, findingId, decision, ...(note ? { note } : {}), requestId: ulid() });
+}
 export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void {
   stageConstructionListeners.add(listener); return () => { stageConstructionListeners.delete(listener); };
 }
@@ -1729,6 +1742,9 @@ function handleFrame(json: string): void {
     if (event.type === "chapter.create-result") {
       for (const listener of chapterCreateListeners) listener(event);
       issuedChapterCreates.delete(event.requestId);
+    }
+    if (event.type === "chapter-review.updated") {
+      for (const listener of chapterReviewListeners) listener(event);
     }
     if (event.type === "chapter.open-result") {
       for (const listener of chapterOpenListeners) listener(event);

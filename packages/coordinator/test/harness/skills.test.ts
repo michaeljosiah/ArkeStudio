@@ -36,3 +36,15 @@ it("fails missing or empty registered files, reloads only for the next construct
   assert.equal((await loadSkillBodies(input,directory))["seedance-scene-drafting"],"Next text");
   assert.deepEqual(await loadSkillBodies({skillFamily:"unknown"},directory),{});
 });
+
+
+it("injects review rubrics into read-only agent prompts without enabling native delegation", async () => {
+  const bodies = await loadSkillBodies({ skillFamily: "chapter-review" });
+  for (const agent of ["chapter-script-reviewer", "chapter-visual-reviewer"]) {
+    const skill = sessionSkillForAgent(agent, { skillFamily: "chapter-review", skillBodies: bodies })!;
+    const prompt = agentPromptFor({ brief: "Review", needsProposal: false, readOnly: true, skill });
+    assert.match(prompt, /<AUTHORING_SKILL/);
+    assert.ok(prompt.includes(skill.body));
+    assert.match(prompt, /cannot do/);
+  }
+});

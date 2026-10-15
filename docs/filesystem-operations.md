@@ -244,3 +244,7 @@ Verified against coordinator, provider and desktop code on 2026-08-27.
 The shared local audio foundation and the #255/#111 consumer boundaries are documented in the
 integration notes `architecture/character-audio-foundation.md` in the private document set (a
 sibling repository), not in this repository.
+
+## Chapter review sidecars
+
+A chapter review creates owned atomic checkpoints at `productions/<production>/.reviews/chapters/<chapter>/<review-id>.json` and `latest.json`. These derived files include the reviewed prose, source hashes, model task receipts, findings and human decisions. They never alter manuscript or media files. Request identity prevents automatic replay of paid inference; recovery marks interrupted tasks and leaves retry to an explicit new review. See [chapter review](development/chapter-review.md) for limits and coverage.

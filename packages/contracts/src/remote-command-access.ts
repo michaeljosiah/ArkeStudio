@@ -36,6 +36,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",
   "publish-story": "studio", "list-story-publications": "studio",
   // studio
+  "chapter-review-start": "studio", "chapter-review-read": "studio", "chapter-review-cancel": "studio", "chapter-review-decide": "studio",
   "decide-audio-studio-proposal": "studio",
   "read-audio-studio": "studio", "edit-audio-studio": "studio", "read-audio-studio-source": "studio",
   "preview-audio-studio": "studio", "stop-audio-studio-preview": "studio",
@@ -167,6 +168,7 @@ export function isRemoteHostCommand(message: ClientMessage): boolean {
 
 /** Conversation decisions resolve these prepared kinds from the durable card, never from the browser. */
 export const REMOTE_PREPARED_ACTION_ACCESS = {
+  "world-chat-chapter-review": "studio",
   "world-chat-prop-authoring": "studio", "world-chat-prop-reference": "studio",
   "world-chat-proposal": "studio", "world-chat-bible-edit": "studio",
   "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio", "world-chat-audio-studio-proposal": "studio", "world-chat-effect-proposal": "studio", "world-chat-transition-proposal": "studio", "world-chat-picture-proposal": "studio",

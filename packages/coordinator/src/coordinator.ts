@@ -1,3 +1,6 @@
+import { chapterReviewSummary } from "@arke-studio/contracts";
+import { ChapterReviewService } from "./productions/chapter-review.js";
+import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
@@ -1652,8 +1655,30 @@ export class Coordinator {
     return source.kind === "cloned" ? source.voice.name : undefined;
   }
 
-  /** The room `Direct this chapter` reads in (R-51): the book's narrator, the manifest, what can speak, and the narrator's description. */
-  /** Where the writing service keeps its scratch: beside the app's own, or the change log. */
+  /** Review work retains its owning world independently of UI selection. */
+  private chapterReviewService?: ChapterReviewService;
+  private chapterReviews(): ChapterReviewService {
+    return this.chapterReviewService ??= new ChapterReviewService({
+      withWorld: (worldId, work) => {
+        if (!this.opts.provider.withBackgroundWorldStore) throw new Error("Background chapter review is unavailable on this host.");
+        return this.opts.provider.withBackgroundWorldStore(worldId, work);
+      },
+      runner: store => {
+        const adapter = this.opts.adapter;
+        if (!adapter?.readiness().ready) throw new Error("The configured writing harness is unavailable.");
+        return makeReviewTaskRunner({ adapter, beforeDispatch: () => store.assertOwnership(), sessionInput: this.sessionInput, scratch: this.extractScratch(),
+          ...(this.opts.imageRenditionMaker ? { maker: this.opts.imageRenditionMaker } : {}),
+          cloudAllowed: async provider => {
+            const settings = this.appSettings ? await this.appSettings.load() : null;
+            return store.getBundle().meta.cloudImageInspection !== false && settings?.imageInspection.cloud === true && settings.imageInspection.providers[provider] !== false;
+          },
+        });
+      },
+      publish: (target, review, error) => this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review, ...(error ? { error } : {}) }),
+    });
+  }
+
+  /** Where the writing service keeps scratch: beside the app's own, or the change log. */
   private extractScratch(): string {
     return this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`;
   }
@@ -10357,6 +10382,23 @@ export class Coordinator {
         // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
         answer({ disposition: "created", chapterId });
+        return;
+      }
+      case "chapter-review-start":
+      case "chapter-review-read":
+      case "chapter-review-cancel":
+      case "chapter-review-decide": {
+        const target = { worldId: msg.worldId, productionId: msg.productionId, chapterId: msg.chapterId };
+        try {
+          if (this.stopping) return;
+          const reviews = this.chapterReviews();
+          if (msg.kind === "chapter-review-start") await reviews.start(target, msg.requestId);
+          else if (msg.kind === "chapter-review-read") await reviews.read(target);
+          else if (msg.kind === "chapter-review-cancel") reviews.cancel(target);
+          else await reviews.decide(target, msg.reviewId, msg.findingId, msg.decision, msg.note);
+        } catch (error) {
+          this.emit({ type: "chapter-review.updated", at: new Date().toISOString(), ...target, review: null, error: describeCoordinatorError(error) });
+        }
         return;
       }
       case "open-chapter": {
@@ -20836,6 +20878,16 @@ export class Coordinator {
       },
     }, quotePorts);
     return {
+      reconcileChapterReview: async (productionId, chapterId, requestId) => {
+        const review = await this.chapterReviews().read({ worldId: store.worldId, productionId, chapterId }, requestId);
+        return review && review.status !== "running" ? { id: review.id, summary: chapterReviewSummary(review) } : null;
+      },
+      reviewChapter: async (productionId, chapterId, requestId) => {
+        const target = { worldId: store.worldId, productionId, chapterId };
+        const review = await this.chapterReviews().start(target, requestId);
+        if (!review) throw new Error("Chapter review did not produce a durable result.");
+        return { id: review.id, summary: chapterReviewSummary(review) };
+      },
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,
       audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
@@ -21537,6 +21589,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      await this.chapterReviewService?.stop();
       await audioStudioStopped;
       await this.effectAnalysis.stop();
       const setupStopped = this.setup?.dispose();

@@ -78,10 +78,12 @@ export interface SessionConfigInput {
 }
 
 /**
- * Which roster agents take which skill. An agent that answers rather than authors takes none:
- * a skill shapes what is drafted, and there is nothing drafted here to shape (R-17).
+ * Which roster agents receive versioned task guidance. Review roles receive their own
+ * evidence rubric; ordinary question-answering roles still use their roster brief alone.
  */
 const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
+  "chapter-script-reviewer": "chapter-script-review",
+  "chapter-visual-reviewer": "chapter-visual-review",
   "scene-writer": "scene-drafting",
   "art-director": "storyboard",
 };

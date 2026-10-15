@@ -1,3 +1,4 @@
+import { WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
 import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
@@ -355,6 +356,8 @@ export interface WorldChatActionTurn {
 }
 
 export interface WorldChatActionAdapterDeps {
+  readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
+  readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
   readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
   readonly audioStudioChanged?: (productionId: string, chapterId: string) => Promise<void>;
   readonly effectDependencies?: EditorEffectDependencies;
@@ -513,6 +516,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
+  "chapter-review": ["chapters"],
   "production-chapter-order": ["chapters"],
   "production-scene-order": ["scenes"],
   "production-scene-delete": ["scenes"],
@@ -744,6 +748,7 @@ function productionActionTargets(
         : []),
     ];
     case "production-episode-order": return [{ requirement: "episodes", target: action.productionId }];
+    case "chapter-review": return [{ requirement: "chapters", target: action.productionId }];
     case "production-chapter-order": return [{ requirement: "chapters", target: action.productionId }];
     case "production-scene-order": return [{ requirement: "scenes", target: action.productionId }];
     case "production-scene-delete":
@@ -955,6 +960,7 @@ function preparedWorldPayload(
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
     case "production-scene": return WorldChatProductionSceneActionSchema.parse({ kind: "world-chat-production-scene", ...common });
     case "production-episode-order": return WorldChatProductionEpisodeOrderActionSchema.parse({ kind: "world-chat-production-episode-order", ...common });
+    case "chapter-review": return WorldChatChapterReviewActionSchema.parse({ kind: "world-chat-chapter-review", ...common });
     case "production-chapter-order": return WorldChatProductionChapterOrderActionSchema.parse({ kind: "world-chat-production-chapter-order", ...common });
     case "production-scene-order": return WorldChatProductionSceneOrderActionSchema.parse({ kind: "world-chat-production-scene-order", ...common });
     case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
@@ -1318,6 +1324,7 @@ function worldActionTargets(
         : []),
     ];
     case "production-episode-order": return action.orderedIds.map((id) => ({ kind: "episode", id, label: id }));
+    case "chapter-review": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
     case "production-chapter-order": return action.orderedIds.map((id) => ({ kind: "chapter", id, label: id }));
     case "production-scene-order": return action.orderedIds.map((id) => ({ kind: "scene", id, label: id }));
     case "production-scene-delete":
@@ -2830,6 +2837,15 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-chapter-review": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const chapter = bundle.productions.find(p => p.meta.id === payload.action.productionId)?.chapters.find(c => c.id === payload.action.chapterId && !c.retired);
+      if (!chapter) throw new Error("The chapter is no longer available.");
+      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script and visual specialists. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
+        affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
+        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+      break;
+    }
     case "world-chat-production-episode-order":
     case "world-chat-production-chapter-order":
     case "world-chat-production-scene-order": {
@@ -4008,6 +4024,13 @@ async function executeSharedResource(
     case "world-chat-production-episode-order":
       await reorderEpisodes(store, payload.action.productionId, payload.action.orderedIds, options);
       return { status: "completed", receipt: { kind: "production-order", id: payload.action.productionId, summary: "The episodes were reordered." } };
+    case "world-chat-chapter-review": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (!deps.reviewChapter) throw new Error("Chapter review is unavailable on this host.");
+      const result = await deps.reviewChapter(payload.action.productionId, payload.action.chapterId, action.actionId);
+      return { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } };
+    }
     case "world-chat-production-chapter-order": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
@@ -4858,6 +4881,13 @@ export function worldChatActionAdapters(
       },
       deny: (action) => abandon(action.actionId),
       reconcile: async (action) => {
+        if (action.actionKind === "world-chat-chapter-review") {
+          const prepared = WorldChatChapterReviewActionSchema.safeParse(await readPreparation(store, "world", action));
+          if (!prepared.success) return null;
+          const payload = prepared.data;
+          const result = await deps.reconcileChapterReview?.(payload.action.productionId, payload.action.chapterId, action.actionId);
+          return result ? { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } } : null;
+        }
         if (["world-chat-production-timeline-operation", "world-chat-production-timeline-transcribe"].includes(action.actionKind) && action.status !== "pending") {
           const committed = await committedAction(store, action.actionId);
           if (committed) {
@@ -5116,6 +5146,7 @@ export function worldChatActionAdapters(
     "world-chat-production-metadata",
     "world-chat-production-model",
     "world-chat-production-episode-order",
+    "world-chat-chapter-review",
     "world-chat-production-chapter-order",
     "world-chat-production-scene-order",
     "world-chat-production-scene-delete",

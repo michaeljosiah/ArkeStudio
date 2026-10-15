@@ -3077,3 +3077,21 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     await assert.rejects(productionTimelineBody(w.store,offline as Parameters<typeof productionTimelineBody>[1],{},newId("act")),/unavailable/);
   });
 });
+
+
+describe("chapter review delegation", () => {
+  it("starts the coordinator review only after approval and reuses the action identity", async () => {
+    const calls: string[][] = [];
+    const deps: WorldChatActionAdapterDeps = { reviewChapter: async (...args) => { calls.push(args); return { id: "review-result", summary: "Review completed with one advisory finding." }; } };
+    const w = await setup({ kind: "world" }, deps);
+    const receipts = [currentReceipt(w.store, "chapters", "the-ledger-of-nights")];
+    const one = turn(w.conversationId, w.entryContext, { actions: [ModelWorldChatActionSchema.parse({ kind: "chapter-review", productionId: "the-ledger-of-nights", chapterId: "neap", checkReceiptIds: receipts.map(r => r.id) })], receipts });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, deps);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find(c => c.actionId === prepared[0]!.intent.actionId)!;
+    assert.equal(calls.length, 0);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.deepEqual(calls, [["the-ledger-of-nights", "neap", card.actionId]]);
+    await decide(w.lifecycle, w.log, card); assert.equal(calls.length, 1);
+  });
+});
