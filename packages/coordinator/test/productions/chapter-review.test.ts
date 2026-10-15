@@ -250,3 +250,46 @@ it("consolidation receives verified subjects but never private human decision no
   assert.match(prompt, /Patient in the blue fleece/); assert.match(prompt, /not the doctor/);
   assert.doesNotMatch(prompt, /Private annotation|decisionNote|dismissed/);
 });
+
+it("keeps exact script duplicates folded when image verification fails", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "verification") throw new Error("Audit unavailable");
+    return input.specialist === "script" ? { ...answer, findings: [answer.findings[0]!, answer.findings[0]!] } : { facts: [], findings: [f.visual] };
+  }).start(f.target, "partial-script-duplicates");
+  assert.equal(review.status, "partial"); assert.equal(review.findings.length, 2);
+  assert.equal(review.candidates?.length, 3); assert.equal(review.groups?.[0]?.memberIds.length, 2);
+});
+it("preserves exact script duplicate provenance after semantic consolidation", async () => {
+  const f = await visualFixture();
+  const review = await f.service(async input => {
+    if (input.phase === "consolidation") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], groups: [{ representativeId: saved.findings[0]!.id, memberIds: saved.findings.map(f => f.id), rationale: "Same concern expressed differently" }] };
+    }
+    if (input.specialist === "visual") return { facts: [], findings: [] };
+    return { ...answer, findings: [answer.findings[0]!, answer.findings[0]!, { ...answer.findings[0]!, observation: "Paraphrased concern" }] };
+  }).start(f.target, "combined-script-duplicates");
+  assert.equal(review.status, "complete"); assert.equal(review.findings.length, 1);
+  assert.equal(review.candidates?.length, 3); assert.equal(review.groups?.length, 1);
+  assert.equal(review.groups?.[0]?.memberIds.length, 3);
+});
+it("carries a decision only when the final uncertainty-normalized finding is unchanged", async () => {
+  const f = await visualFixture(); let changed = false;
+  const service = f.service(async input => {
+    if (input.phase === "verification") {
+      const saved = (await readChapterReview(f.store, f.target))!;
+      return { facts: [], findings: [], assessments: saved.candidates!.map(c => ({ findingId: c.id, verdict: "uncertain" as const, subject: "Hand", rationale: "Cropped from view" })) };
+    }
+    if (input.specialist === "script") return { facts: [], findings: [] };
+    return { facts: [], findings: [{ ...f.visual, ...(changed ? { correction: "A different correction" } : {}) }] };
+  });
+  const first = await service.start(f.target, "uncertain-first");
+  await service.decide(f.target, first.id, first.findings[0]!.id, "intentional", "Framing is intentional");
+  const next = await service.start(f.target, "uncertain-again");
+  assert.equal(next.findings[0]?.certainty, "cannot-assess");
+  assert.equal(next.findings[0]?.decision, "intentional"); assert.equal(next.findings[0]?.decisionNote, "Framing is intentional");
+  changed = true;
+  const last = await service.start(f.target, "uncertain-changed");
+  assert.equal(last.findings[0]?.decision, "open"); assert.equal(last.findings[0]?.decisionNote, undefined);
+});

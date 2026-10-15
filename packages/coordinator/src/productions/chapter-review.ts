@@ -293,13 +293,22 @@ export class ChapterReviewService {
                 review.rejectedFindings++;
               } else if (assessment.verdict === "uncertain") {
                 finding.certainty = "cannot-assess";
-                finding.decision = "open"; delete finding.decisionNote;
+                const previous = sameSource ? prior.findings.find(f => sameReviewFinding(f, finding)) : undefined;
+                finding.decision = previous?.decision ?? "open";
+                delete finding.decisionNote;
+                if (previous?.decisionNote) finding.decisionNote = previous.decisionNote;
               }
             }
             task.detail = `${assessments.length} candidate interpretations checked; originals and reasons retained. Model judgment remains advisory.`;
           } else if (consolidation) {
             const groups = validateReviewGroups(review.findings, answer);
-            review.groups = groups;
+            // Fold exact script duplicates into any semantic group that absorbs their representative.
+            const exact = review.groups!;
+            const grouped = new Set(groups.flatMap(g => g.memberIds));
+            review.groups = [
+              ...exact.filter(g => !grouped.has(g.representativeId)),
+              ...groups.map(g => ({ ...g, memberIds: [...new Set(g.memberIds.flatMap(id => exact.find(e => e.representativeId === id)?.memberIds ?? [id]))] })),
+            ];
             const hidden = new Set(groups.flatMap(g => g.memberIds.filter(id => id !== g.representativeId)));
             review.findings = review.findings.filter(f => !hidden.has(f.id));
             // A consolidated recommendation has new supporting interpretations; don't inherit
@@ -315,7 +324,7 @@ export class ChapterReviewService {
             for (const finding of linked.findings) {
               const candidate = { ...finding, id: randomUUID(), taskId: task.id, offset: source.chapter.body.indexOf(finding.quote) };
               review.candidates!.push(candidate);
-              const identical = !available.length ? review.findings.find(f => sameReviewFinding(f, finding)) : undefined;
+              const identical = task.specialist === "script" ? review.findings.find(f => sameReviewFinding(f, finding)) : undefined;
               if (identical) {
                 const group = review.groups!.find(g => g.representativeId === identical.id);
                 if (group) group.memberIds.push(candidate.id);
