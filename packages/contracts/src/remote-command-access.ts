@@ -36,6 +36,9 @@ export const REMOTE_COMMAND_ACCESS = {
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",
   "publish-story": "studio", "list-story-publications": "studio",
   // studio
+  "decide-audio-studio-proposal": "studio",
+  "read-audio-studio": "studio", "edit-audio-studio": "studio", "read-audio-studio-source": "studio",
+  "preview-audio-studio": "studio", "stop-audio-studio-preview": "studio",
   "catalogue-voice-preview": "studio", "stop-catalogue-voice-preview": "studio",
   "production-setup": "studio", "save-production-narrative": "studio", "stage-construct": "studio",
   "stage-inspection": "studio", "stage-construct-cancel": "studio", "stage-review-discard": "studio", "hello": "studio",
@@ -166,7 +169,7 @@ export function isRemoteHostCommand(message: ClientMessage): boolean {
 export const REMOTE_PREPARED_ACTION_ACCESS = {
   "world-chat-prop-authoring": "studio", "world-chat-prop-reference": "studio",
   "world-chat-proposal": "studio", "world-chat-bible-edit": "studio",
-  "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio", "world-chat-effect-proposal": "studio", "world-chat-transition-proposal": "studio", "world-chat-picture-proposal": "studio",
+  "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio", "world-chat-audio-studio-proposal": "studio", "world-chat-effect-proposal": "studio", "world-chat-transition-proposal": "studio", "world-chat-picture-proposal": "studio",
   "world-chat-world-metadata": "studio", "world-chat-canon": "studio",
   "world-chat-canon-retire": "studio", "world-chat-canon-restore": "studio",
   "world-chat-sheet": "studio", "world-chat-sheet-retire": "studio",

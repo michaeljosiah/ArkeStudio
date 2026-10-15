@@ -135,6 +135,65 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true) {
   return { plan, takes };
 }
 describe("publication narration identity", () => {
+  it("checks source catalogue scope even when a saved source has no artifactId", async () => {
+    const h = await setup(); await narrate(h);
+    const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");
+    const opened = await openAudioStudio(h.store, h.productionId, h.chapter.id), clip = opened.state.clips[0]!;
+    const { artifactId: _id, ...source } = clip.source!;
+    await editAudioStudio(h.store, h.productionId, h.chapter.id, opened.base, { kind: "commands", label: "Pin source bytes", commands: [{ kind: "replace-source", id: clip.id, source }] });
+    const path = join(h.dir, `${source.file}.json`), original = await readFile(path, "utf8"), sidecar = JSON.parse(original);
+    const settings = { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] };
+    assert.deepEqual((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems, []);
+    for (const changed of [{ ...sidecar, retiredAt: new Date().toISOString() }, { ...sidecar, production: "another-story" }, { ...sidecar, hash: "sha256:" + "0".repeat(12) }]) {
+      await writeFile(path, JSON.stringify(changed));
+      const review = await h.service.review(h.store, h.productionId, settings);
+      assert.ok(review.chapters[0]!.audioProblems.some(problem => problem.includes("no longer available")));
+    }
+    await rename(path, path + ".removed");
+    assert.ok((await h.service.review(h.store, h.productionId, settings)).chapters[0]!.audioProblems.some(problem => problem.includes("no longer available")));
+  });
+  it("captures the arranged stereo mix, retries from frozen sources, and refuses a later arrangement change", async () => {
+    const h = await setup(); await narrate(h);
+    const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");
+    const { renderAudioStudioMix } = await import("../../src/productions/audio-studio-mix.js");
+    const { readStereoWav } = await import("../../src/audio/stereo-wav.js");
+    const opened = await openAudioStudio(h.store, h.productionId, h.chapter.id);
+    const first = opened.state.clips[0]!;
+    await editAudioStudio(h.store, h.productionId, h.chapter.id, opened.base, { kind: "commands", label: "Pan narration", commands: [{ kind: "set-clip", id: first.id, changes: { pan: -.5 } }] });
+    const arranged = await openAudioStudio(h.store, h.productionId, h.chapter.id);
+    const mix = await renderAudioStudioMix(h.dir, arranged.state, arranged.script, { final: true });
+    const expected = await readFile(join(h.dir, mix.file));
+    let fail = true, duration = 0;
+    const service = new StoryPublicationService(h.root, {
+      ffmpeg: { slateFont: "", run: async args => {
+        const list = args[args.indexOf("-i") + 1]!, work = list.slice(0, -"chapters.txt".length);
+        const actual = await readFile(join(work, "chapter-0.wav"));
+        assert.deepEqual(actual, expected, "publication uses exactly the Listen PCM and master");
+        const pcm = readStereoWav(actual); assert.equal(pcm.channels, 2); assert.equal(pcm.rate, 48000); assert.notDeepEqual(pcm.left, pcm.right);
+        duration = pcm.left.length / pcm.rate;
+        assert.equal(args[args.indexOf("-ac") + 1], "2");
+        if (fail) throw new Error("Encoder interrupted");
+        await writeFile(args.at(-1)!, "arranged audiobook");
+      } }, probe: { durationSec: async () => duration, info: async () => ({ durationSec: duration, hasAudio: true }) },
+    });
+    const settings = { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] };
+    const review = await service.review(h.store, h.productionId, settings);
+    assert.deepEqual(review.blockers, []); assert.deepEqual(review.chapters[0]!.audioProblems, []);
+    const failed = await service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.match(failed.error!, /Encoder interrupted/);
+    await assert.rejects(stat(join(h.root, failed.id, "inputs/.cache/audio-studio/mix")), { code: "ENOENT" });
+    await assert.rejects(stat(join(h.root, failed.id, "render")), { code: "ENOENT" });
+    const frozen = JSON.parse(await readFile(join(h.root, failed.id, "inputs.json"), "utf8"));
+    assert.equal(frozen.mixes[0].studio.revision, arranged.saved!.revision);
+    assert.equal(frozen.mixes[0].mix, undefined);
+    await editAudioStudio(h.store, h.productionId, h.chapter.id, arranged.base, { kind: "commands", label: "Change level", commands: [{ kind: "set-clip", id: first.id, changes: { gainDb: -6 } }] });
+    fail = false;
+    const preview = await service.retry(failed.id, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    await assert.rejects(stat(join(h.root, preview.id, "inputs/.cache/audio-studio/mix")), { code: "ENOENT" });
+    await assert.rejects(stat(join(h.root, preview.id, "render")), { code: "ENOENT" });
+    await assert.rejects(service.create(h.store, h.productionId, preview.id), /source changed/);
+  });
   it("flags only the recording whose spoken text changed, and undo restores its exact dependency", async () => {
     const h = await setup();
     await narrate(h);
@@ -228,11 +287,14 @@ describe("publication narration identity", () => {
 });
 
 
-it("writes a real AAC M4B with ordered chapters, author and cover", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, async () => {
+it("writes a real stereo AAC M4B from mixed arranged and legacy chapters, with author and cover", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, async () => {
   const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
   const exec = promisify(execFile);
   const probe = async (path: string) => JSON.parse((await exec(process.env.ARKE_FFPROBE ?? "ffprobe", ["-v", "error", "-show_streams", "-show_chapters", "-show_format", "-of", "json", path], { windowsHide: true, timeout: 30000 })).stdout);
   const h = await setup(); await narrate(h);
+  const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");
+  const first = await openAudioStudio(h.store, h.productionId, h.chapter.id);
+  await editAudioStudio(h.store, h.productionId, h.chapter.id, first.base, { kind: "commands", label: "Arrange first chapter", commands: [{ kind: "set-clip", id: first.state.clips[0]!.id, changes: { pan: -.5 } }] });
   const second = h.store.getBundle().productions.find(row => row.meta.id === h.productionId)!.chapters.find(row => row.id !== h.chapter.id)!;
   const opened = await openChapter(h.store, h.productionId, second.id);
   await new ProseAuthoringService(h.store).save(h.productionId, second.file, "A second chapter, with *emphasis*.\n\n***\n\nThe ending.", { baseHash: opened.hash });
@@ -250,6 +312,8 @@ it("writes a real AAC M4B with ordered chapters, author and cover", { skip: proc
   const audio = await service.previewMedia(preview.id, "story.m4b"); assert.ok(audio);
   const info = await probe(audio.path);
   assert.equal(info.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio").codec_name, "aac");
+  assert.equal(info.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio").channels, 2);
+  assert.equal(info.streams.find((stream: { codec_type: string }) => stream.codec_type === "audio").sample_rate, "48000");
   assert.equal(info.chapters.length, 2);
   assert.deepEqual(info.chapters.map((chapter: { tags: { title: string } }) => chapter.tags.title), review.chapters.map(chapter => chapter.title), "input selection never changes manuscript order");
   assert.equal(info.format.tags.title, settings.title);

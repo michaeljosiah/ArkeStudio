@@ -43,6 +43,7 @@ import type { SessionInput } from "../harness/session-files.js";
 import type { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
 
 export interface ConversationRunDependencies {
+  audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
   adapter: RunDeps["adapter"];
   sessionInput: SessionInput;
   scratchRoot: string;
@@ -107,6 +108,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getJobs: () => deps.jobs(),
     getBuildItems: () => deps.buildItems?.() ?? [],
     getExports: () => deps.exports(),
+    ...(deps.audioStudio ? { getAudioStudio: deps.audioStudio } : {}),
     getChapterBody: async (productionId, chapterFile) => {
       try {
         const raw = await readFile(

@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
-import { bookHasTakes, playerChapters } from "../src/components/audiobook-player.js";
+import { bookHasTakes, listenLeads, playerChapters } from "../src/components/audiobook-player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { claimRead } from "../src/lib/reply-reads.js";
@@ -127,6 +127,15 @@ async function answer(m: Mounted, plan: AudiobookListening): Promise<void> {
 }
 
 describe("Listen (turn 186)", () => {
+  it("offers Listen for imported arrangements with no legacy takes", () => {
+    const rows = chapters(0), chapter = rows[0]!;
+    chapter.audiobook = { ...stamp(0), arranged: true };
+    assert.equal(bookHasTakes({ chapters: rows }), true);
+    assert.equal(listenLeads({ chapters: rows }, chapter.id), true);
+    chapter.retired = true;
+    assert.equal(bookHasTakes({ chapters: rows }), false);
+    assert.equal(listenLeads({ chapters: rows }, chapter.id), false);
+  });
   it("waits for one made block anywhere in the book", async () => {
     assert.equal(bookHasTakes({ chapters: chapters(0) }), false);
     assert.equal(bookHasTakes({ chapters: chapters(2) }), true);

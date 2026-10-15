@@ -65,7 +65,8 @@ export class WorldReferenceError extends Error {
 
 /** Inspection codecs accept more formats than generation references, but share containment,
  * stable handles and bounded allocation. The caller must first authorize the catalogue id. */
-export async function readContainedMediaBytes(worldDir: string, portable: string, signal?: AbortSignal): Promise<Uint8Array> {
+export async function readContainedMediaBytes(worldDir: string, portable: string, signal?: AbortSignal, maxBytes = MAX_IMAGE_BYTES): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_TOTAL_BYTES) throw new WorldReferenceError("invalid media byte limit");
   signal?.throwIfAborted();
   const root = await realpath(toExtendedLength(worldDir));
   const { resolved, validatedFile } = await walkContained(root, portable, "media reference");
@@ -73,7 +74,7 @@ export async function readContainedMediaBytes(worldDir: string, portable: string
   try {
     const before = await handle.stat();
     if (!before.isFile() || !validatedFile || before.dev !== validatedFile.dev || before.ino !== validatedFile.ino ||
-      before.size <= 0 || before.size > MAX_IMAGE_BYTES) throw new WorldReferenceError("media reference changed or exceeds its byte limit");
+      before.size <= 0 || before.size > maxBytes) throw new WorldReferenceError("media reference changed or exceeds its byte limit");
     return await readStableBytes(handle, before, signal);
   } finally { await handle.close(); }
 }

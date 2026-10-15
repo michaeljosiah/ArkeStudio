@@ -504,13 +504,14 @@ export function SecondsField({ label, value, min, max, disabled, onCommit, testI
  * under, who set it, Reset and Play from here. Under Performed a grouped request's inside is the
  * reader's (R-85), and says so where a field would be.
  */
-export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked, revision }: {
+export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refused, locked, revision, playDisabled = false }: {
   bar: TimedBar | null;
   row: TimingRowLike | null;
   timing: ChapterTiming;
   rows: readonly TimingRowLike[];
   onTiming: (key: string, input: BlockTimingInput) => void;
   onPlayFrom: (seconds: number) => void;
+  playDisabled?: boolean;
   refused: string | null;
   locked: boolean;
   /** Moves with every answer to a timing write, so a refused value is put back. */
@@ -574,7 +575,7 @@ export function TimingSide({ bar, row, timing, rows, onTiming, onPlayFrom, refus
       {refused !== null && <p className="fy-mono fy-ch__who-where--warn" data-testid="timing-refused">{refused}</p>}
       <div className="fy-tm__actions">
         <Button variant="ghost" disabled={locked} onClick={() => onTiming(key, resetOf(bar))} data-testid="timing-reset">Reset</Button>
-        <Button variant="secondary" onClick={() => onPlayFrom(bar.at)} data-testid="timing-play-here">Play from here</Button>
+        <Button variant="secondary" disabled={playDisabled} onClick={() => onPlayFrom(bar.at)} data-testid="timing-play-here">Play from here</Button>
       </div>
     </section>
   );
@@ -805,7 +806,7 @@ export function BlockTimingPanel({ bar, timing, slug, onTiming, onPlayWindow, lo
         <span className="fy-ch__panelpush" />
         {onOpenTiming !== undefined && (
           <Button variant="outline" onClick={onOpenTiming} data-testid="block-open-timing">
-            Open in Timing
+            Open in Audio Studio
           </Button>
         )}
       </div>

@@ -69,6 +69,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
   readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
   readonly getVoiceCatalogue?: () => Promise<readonly VoiceCandidate[]>;
@@ -746,7 +747,21 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const section = args["section"];
-        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats") throw new TargetReadError("section must be plan, ending or beats");
+        if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio") throw new TargetReadError("section must be plan, ending, beats or audio-studio");
+        if (section === "audio-studio") {
+          if (!chapter || !this.deps.getAudioStudio) throw new TargetReadError("Audio Studio is unavailable for this chapter");
+          const studio = await this.deps.getAudioStudio(productionId, chapter.file);
+          readTarget = target("chapters", `${productionId}:${chapter.id}:audio-studio`);
+          cursorFence = fence({ base: studio.base, proposals: studio.proposals, unavailable: studio.unavailable });
+          rows = [{ key: "metadata", value: { chapterId: chapter.id, base: studio.base, revision: studio.revision, sampleRate: 48000, manuscriptHash: studio.state.manuscriptHash, master: studio.state.master } },
+            ...studio.state.tracks.map(track => ({ key: `track:${track.id}`, value: track })),
+            ...studio.state.clips.map(clip => ({ key: `clip:${clip.id}`, value: clip })),
+            ...studio.state.passages.map(passage => ({ key: `passage:${passage.id}`, value: { ...passage, text: studio.passages.find(entry => entry.key === passage.key)?.text } })),
+            ...studio.state.omissions.map(omission => ({ key: `omission:${omission.id}`, value: omission })),
+            ...(studio.proposals ?? []).flatMap(proposal => [{ key: `proposal:${proposal.id}`, value: { id: proposal.id, status: proposal.status, resultRevision: proposal.resultRevision, versions: proposal.versions.map(({ commands, ...version }) => ({ ...version, commandCount: commands.length })) } }, ...proposal.versions.flatMap(version => version.commands.map((command, index) => ({ key: `proposal:${proposal.id}:${padded(version.number)}:${padded(index)}`, value: command })))])];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         if (section === "plan") {
           readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
           rows = chapter ? [{ key: "plan", value: chapter }] : [];

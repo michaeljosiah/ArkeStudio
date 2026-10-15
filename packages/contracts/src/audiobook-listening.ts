@@ -97,6 +97,7 @@ export const ListeningChapterSchema = z
      * its clock for Text and the pictures.
      */
     mix: z.object({ file: z.string().min(1), seconds: z.number().min(0) }).strict().optional(),
+    audioStudio: z.object({ revision: z.number().int().positive(), issues: z.array(z.string()), omissions: z.array(z.string()) }).strict().optional(),
   })
   .strict();
 export type ListeningChapter = z.infer<typeof ListeningChapterSchema>;

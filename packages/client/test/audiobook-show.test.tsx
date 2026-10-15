@@ -245,7 +245,7 @@ describe("the hero (199a, 199b, rule 4)", () => {
   it("the ⋯ holds Reading with its reading and warning word, and Narrator; a world with no art adds Make a cover", async () => {
     await mount(inkbound(91, { art: false }));
     await press(q('[data-testid="audiobook-more"]'));
-    assert.deepEqual(all('[role="menu"] [role="menuitem"]').map((item) => item.textContent), ["ReadingCast2 no voice", "NarratorLow tide", "Make a cover"]);
+    assert.deepEqual(all('[role="menu"] [role="menuitem"]').map((item) => item.textContent), ["Audio Studio", "ReadingCast2 no voice", "NarratorLow tide", "Make a cover"]);
     assert.equal(q('[data-testid="audiobook-hero"]')!.getAttribute("data-art"), "false", "the hero on the overlay colour alone");
     await press(q('[data-testid="menu-narrator"]'));
     assert.ok(dom.document.querySelector('[data-testid="narrator-dialog"]'), "Narrator opens 165c");

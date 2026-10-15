@@ -475,6 +475,8 @@ export const EDITOR_EFFECT_PROPOSALS_SCHEMA_VERSION = 75;
 /** SPEC-054: exact-pair transitions and their durable protected history. */
 export const EDITOR_TRANSITIONS_SCHEMA_VERSION = 76;
 export const EDITOR_APPEARANCE_SCHEMA_VERSION = 77;
+/** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
+export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
 /** Fence strict sidecar fields atomically with the bytes that introduce them. */
 function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {

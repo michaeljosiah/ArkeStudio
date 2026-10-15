@@ -1,4 +1,4 @@
-import { ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
+import { ProductionAudioStudioProposeModelActionSchema, WorldChatAudioStudioProposalActionSchema, ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema,
   ProductionTransitionsProposeModelActionSchema, WorldChatTransitionProposalActionSchema, ProductionEffectsProposeModelActionSchema, WorldChatEffectProposalActionSchema } from "@arke-studio/contracts";
 import { WorldChatBenchKeepActionSchema, WorldChatBenchSelectActionSchema, WorldChatBenchDiscardActionSchema } from "@arke-studio/contracts";
@@ -603,6 +603,12 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-bed": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "set-audiobook-sound": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "render-audiobook-mix": readOnly(QUERY),
+  "read-audio-studio": readOnly(QUERY),
+  "read-audio-studio-source": readOnly(QUERY),
+  "preview-audio-studio": readOnly(QUERY),
+  "stop-audio-studio-preview": readOnly(QUERY),
+  "decide-audio-studio-proposal": humanOnly("Only the authenticated editor can keep or apply a reviewed Audio Studio proposal."),
+  "edit-audio-studio": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // Propose timing (turn 187b): read off the chapter, nothing spent; its acceptance is a command on the record.
   "propose-audiobook-timing": readOnly(QUERY),
   "accept-audiobook-timing": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
@@ -915,6 +921,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   },
   "world-chat-transition-proposal": { kind: "world-chat-transition-proposal", schema: WorldChatTransitionProposalActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "world-chat-picture-proposal": { kind: "world-chat-picture-proposal", schema: WorldChatPictureProposalActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
+  "world-chat-audio-studio-proposal": { kind: "world-chat-audio-studio-proposal", schema: WorldChatAudioStudioProposalActionSchema, ...action("production", "command", "voice", "authored-change", ["chapters"]) },
   "world-chat-effect-proposal": {
     kind: "world-chat-effect-proposal", schema: WorldChatEffectProposalActionSchema,
     ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]),
@@ -1325,6 +1332,7 @@ export interface ArkeBlockedAuthoritySeam {
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
   "production-transitions-propose": { kind: "production-transitions-propose", schema: ProductionTransitionsProposeModelActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "production-pictures-propose": { kind: "production-pictures-propose", schema: ProductionPicturesProposeModelActionSchema, ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
+  "production-audio-studio-propose": { kind: "production-audio-studio-propose", schema: ProductionAudioStudioProposeModelActionSchema, ...action("production", "command", "voice", "authored-change", ["chapters"]) },
   "production-effects-propose": { kind: "production-effects-propose", schema: ProductionEffectsProposeModelActionSchema,
     ...action("production", "command", "timeline", "authored-change", ["timeline", "editor-requests"]) },
   "production-timeline-operation": { kind: "production-timeline-operation", schema: ProductionTimelineModelActionSchema,
@@ -1527,7 +1535,7 @@ export function modelActionFields(schema: z.ZodTypeAny): readonly ModelActionFie
 
 /** The prepared-action descriptor behind one model action kind, keyed as the model sends it. */
 export function worldChatActionDescriptor(modelKind: string) {
-  const key = modelKind === "production-pictures-propose" ? "world-chat-picture-proposal" : modelKind === "production-transitions-propose" ? "world-chat-transition-proposal" : modelKind === "production-audio-edit" ? "world-chat-editor-request" : modelKind === "production-effects-propose" ? "world-chat-effect-proposal" : `world-chat-${modelKind}`;
+  const key = modelKind === "production-audio-studio-propose" ? "world-chat-audio-studio-proposal" : modelKind === "production-pictures-propose" ? "world-chat-picture-proposal" : modelKind === "production-transitions-propose" ? "world-chat-transition-proposal" : modelKind === "production-audio-edit" ? "world-chat-editor-request" : modelKind === "production-effects-propose" ? "world-chat-effect-proposal" : `world-chat-${modelKind}`;
   return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, key)
     ? WORLD_CHAT_ACTION_REGISTRY[key as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
     : undefined;

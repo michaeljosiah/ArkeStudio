@@ -2059,12 +2059,16 @@ describe("one narrator performs the cast, and a narrator for the book (turn 155g
         assert.equal(made.kind, "ready");
         const block = made.prepared.speaking[0]!;
         assert.equal(block.refusal, undefined);
-        assert.equal(block.parts.join(" "), normalizeSpeechText(block.text), "the paragraph, read as one block (design turn 190)");
-        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, block.direction?.perPart[index]?.instructions)));
-        assert.ok(block.direction?.perPart.every(part => part.instructions?.startsWith(note)));
+        // Styled Gemini turns retain separators inside each request; their words remain exact.
+        assert.equal(normalizeSpeechText(block.parts.join(" ")), normalizeSpeechText(block.text), "the paragraph's words survive the request split");
+        const instructions = block.parts.map((_, index) => block.styledParts?.[index]?.map(turn => turn.instructions ?? "").join(" ") ?? block.direction?.perPart[index]?.instructions);
+        assert.ok(block.parts.every((part, index) => speechInputFits(part, model.limits, instructions[index])));
+        const turns = block.styledParts!.flat(), performed = turns.filter(turn => turn.instructions?.startsWith(note));
+        assert.equal(normalizeSpeechText(performed.map(turn => turn.text).join(" ")), normalizeSpeechText(block.block.rows!.filter(row => row.sheet === "maren-kest").map(row => row.text).join(" ")), "the character's note belongs only to her words");
+        assert.ok(turns.filter(turn => !performed.includes(turn)).every(turn => turn.instructions?.startsWith("Natural narration.")));
         if (directed) {
           assert.ok(block.parts.length > 1);
-          assert.ok(block.direction?.perPart.every(part => part.instructions?.includes("Read calmly")));
+          assert.ok(instructions.every(instruction => instruction?.includes("Read calmly")));
           const token = chapterPriceToken(WORLD_ID, LEDGER, "neap", made.prepared.plan.chapter, made.prepared.misses);
           model.cadence!.deliveryMappings.measured!.instruction = "Read softly and evenly, at a steady pace.";
           const changed = await prepareChapter(store, LEDGER, "neap", room, () => "2026-09-27T12:00:00Z", ["p0.0"]);

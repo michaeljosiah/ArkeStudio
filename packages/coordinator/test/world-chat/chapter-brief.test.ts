@@ -87,5 +87,5 @@ it("reads a chapter's named beats with where each begins", async () => {
   assert.deepEqual(page.items[0]!.beats, [{ name: "The bell", whose: "Maren", paragraph: 2, opens: "Maren rang the bell." }, {}]);
   const none = (await read(plain!.id, "beats")).result as { items: Array<{ beats: unknown[] }> };
   assert.deepEqual(none.items[0]!.beats, []);
-  await assert.rejects(read(grouped!.id, "cast"), /plan, ending or beats/);
+  await assert.rejects(read(grouped!.id, "cast"), /plan, ending, beats or audio-studio/);
 });

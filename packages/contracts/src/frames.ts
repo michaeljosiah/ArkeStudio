@@ -19,6 +19,7 @@ import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiob
 import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
+import { AudioArrangementEditSchema } from "./audio-arrangement-schema.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -110,6 +111,14 @@ export const EditorImportSchema = z.object({
   ]),
 }).strict();
 export type EditorImport = z.infer<typeof EditorImportSchema>;
+
+export const AudioStudioImportSchema = z.object({
+  productionId: SlugSchema, chapterFile: z.string().min(1).max(1000), base: z.string().regex(/^[a-f0-9]{64}$/),
+  destination: z.union([z.literal("library"), z.object({
+    trackId: z.string().min(1).max(160).nullable(), at: z.number().int().min(0).max(4_147_200_000),
+  }).strict()]),
+}).strict();
+export type AudioStudioImport = z.infer<typeof AudioStudioImportSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
   ProductionSetupCommandSchema,
@@ -2865,6 +2874,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     browserFiles: BrowserMediaFilesSchema.optional(),
     production: SlugSchema.nullable().optional(),
     editor: EditorImportSchema.optional(),
+    audioStudio: AudioStudioImportSchema.optional(),
   }).strict(),
   /**
    * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
@@ -3601,6 +3611,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("read-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("decide-audio-studio-proposal"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, id: z.string().min(1).max(160), version: z.number().int().min(1), decision: z.enum(["keep", "apply"]) }).strict(),
+  z.object({ kind: z.literal("edit-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema }).strict(),
+  z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000), expectedHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), waveform: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("preview-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema,
+    base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema.optional(), solo: z.array(z.string().min(1).max(160)).max(128).optional(),
+    window: z.object({ from: z.number().int().nonnegative(), to: z.number().int().positive() }).strict().optional() }).strict(),
+  z.object({ kind: z.literal("stop-audio-studio-preview"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /**
    * A reaction, a bed or a sound at a block set, changed (by its key) or taken away (null) —
    * design turn 187, SPEC-047 R-83, R-84. A new one takes the next free key. Answered as

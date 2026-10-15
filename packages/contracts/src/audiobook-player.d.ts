@@ -33,6 +33,8 @@ export interface AudiobookPlayerChapter {
   audio?: AudiobookPlayerAudio[];
   blocks: AudiobookPlayerBlock[];
   gaps: ReadonlyArray<{ at: number; from: number; to: number }>;
+  /** Named arrangement repairs and acknowledged omissions, visible during draft listening. */
+  audioNotes?: readonly string[];
   pictures: ReadonlyArray<{
     at: number;
     src: string;
