@@ -334,6 +334,76 @@
 .ch227 .two{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:40px}
 .ch227 .ov .cont{margin-bottom:12px}
 
+/* ===== Revision 3 · the cast as the world overview's cards; faces carry no colour rings. ===== */
+.ch227 .ccards{display:flex;gap:18px;padding:6px 0 4px}
+.ch227 .pol{width:168px;flex:none;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:8px 8px 12px;text-align:left;transform:rotate(var(--r,0deg))}
+.ch227 .pol:nth-child(odd){--r:-1.2deg}.ch227 .pol:nth-child(even){--r:1deg}
+.ch227 .pol.sel{transform:translateY(-8px);box-shadow:var(--shadow-xl)}
+.ch227 .pol .ph{position:relative;height:180px;border-radius:6px;background-size:cover;background-position:50% 18%}
+.ch227 .pol .badge{position:absolute;left:8px;bottom:8px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--media-overlay-bg) 60%,transparent);color:var(--media-overlay-fg)}
+.ch227 .pol .badge svg{width:13px;height:13px}
+.ch227 .pol b{display:flex;align-items:center;gap:6px;margin:10px 3px 0;font:var(--type-ui);font-weight:var(--weight-semibold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch227 .pol small{display:block;margin:2px 3px 0;font:var(--type-meta);color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch227 .vdot{width:7px;height:7px;border-radius:50%;background:var(--v);flex:none}
+.ch227 .ccards .addc{width:168px;flex:none;border:1px dashed var(--border);border-radius:12px;display:grid;place-items:center;align-self:stretch;color:var(--muted-foreground);font:var(--type-ui)}
+.ch227.phone .ccards{padding:6px 20px 14px;gap:12px;overflow:hidden}
+.ch227.phone .pol{width:124px}.ch227.phone .pol .ph{height:136px}
+/* No rings: a face is a picture; the speaker colour is a dot beside the name, if anywhere. */
+.ch227 .vcard .big,.ch227 .hc .hd img,.ch227 .menu .it img,.ch227 .brief .faces img,.ch227 .brief .faces .nar,.ch227 .sheet .hd img,.ch227 .pcast img,.ch227 .pcast .nar,.ch227 .face{box-shadow:none}
+.ch227 .step.need{border-color:var(--border)}
+.ch227 .step.need .k i{background:color-mix(in srgb,var(--warning) 22%,var(--muted))}
+
+/* ===== Revision 3 · working with Arke in the manuscript. ===== */
+/* The selection menu: format at the left, Arke at the right; Arke opens its panel under it. */
+.ch227 .stool{position:absolute;z-index:7;display:flex;align-items:center;gap:2px;height:40px;padding:4px;border-radius:12px;background:var(--popover);border:1px solid var(--border);box-shadow:0 12px 32px rgba(0,0,0,.4)}
+.ch227 .stool button{height:30px;min-width:30px;padding:0 8px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font:var(--type-ui)}
+.ch227 .stool button.on{background:var(--muted)}
+.ch227 .stool .sep{height:18px;margin:0 4px}
+.ch227 .amenu{position:absolute;z-index:7;width:320px;padding:6px;border-radius:var(--radius-lg);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.45);display:flex;flex-direction:column}
+.ch227 .amenu .ask{display:flex;align-items:center;gap:8px;height:40px;margin-bottom:6px;padding:0 6px 0 12px;border-radius:9px;border:1px solid var(--border);background:var(--background);font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .amenu .ask .gap{flex:1}
+.ch227 .amenu .ask kbd{font:var(--type-meta);padding:2px 6px;border-radius:5px;border:1px solid var(--border)}
+.ch227 .amenu .it{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:7px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ch227 .amenu .it.on{background:var(--muted)}
+.ch227 .amenu .it .gap{flex:1}
+.ch227 .amenu .it small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .amenu .it svg{width:14px;height:14px;color:var(--muted-foreground)}
+.ch227 .amenu .rule{height:1px;background:var(--border);margin:5px 4px}
+.ch227 .amenu.subm{width:220px}
+
+/* Review notes: the chapter review's findings beside the words they quote. */
+.ch227 .anch{background:color-mix(in srgb,var(--foreground) 12%,transparent);border-radius:3px;box-shadow:inset 0 -1.5px 0 color-mix(in srgb,var(--foreground) 45%,transparent)}
+.ch227 .anch.on{background:color-mix(in srgb,var(--warning) 22%,transparent);box-shadow:inset 0 -1.5px 0 var(--warning)}
+.ch227 sup.fn{font:var(--type-meta);font-weight:var(--weight-semibold);margin-left:2px;color:var(--muted-foreground)}
+.ch227 .rnotes{position:absolute;z-index:4;right:16px;top:0;width:280px;display:flex;flex-direction:column;gap:10px}
+.ch227 .rhead{display:flex;align-items:center;gap:8px;margin:18px 0 6px;font:var(--type-ui);font-weight:var(--weight-semibold)}
+.ch227 .rhead small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.ch227 .rhead .gap{flex:1}
+.ch227 .rnote{position:absolute;left:0;right:0;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--card);display:flex;flex-direction:column;gap:6px}
+.ch227 .rnote.on{box-shadow:0 12px 32px rgba(0,0,0,.35);border-color:color-mix(in srgb,var(--foreground) 22%,var(--border))}
+.ch227 .rnote .k{display:flex;align-items:center;gap:8px;font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .rnote .k b{font:var(--type-meta);font-weight:var(--weight-semibold);color:var(--foreground)}
+.ch227 .rnote p{margin:0;font:var(--type-ui);font-weight:var(--weight-regular);line-height:1.45}
+.ch227 .rnote .acts2{display:flex;gap:6px;margin-top:4px}
+.ch227 .rnote .acts2 button{height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--border);font:var(--type-label)}
+.ch227 .rnote .acts2 button.pri{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.ch227 .rnote.min{padding:10px 14px}
+.ch227 .rnote.min p{color:var(--muted-foreground)}
+
+/* Continue: Arke's words after the caret, grey until kept. */
+.ch227 .ghost-p{color:color-mix(in srgb,var(--foreground) 42%,transparent)}
+.ch227 .heldbar .nav3{display:inline-flex;align-items:center;gap:2px;font:var(--type-label);color:var(--muted-foreground)}
+.ch227 .heldbar .nav3 button{width:26px;height:26px;display:grid;place-items:center;border-radius:6px}
+.ch227 .heldbar .nav3 svg{width:12px;height:12px}
+.ch227 .heldbar kbd{font:var(--type-meta);padding:1px 5px;border-radius:4px;border:1px solid var(--border);margin-left:4px;opacity:.8}
+
+/* The dock about a passage: the passage is the conversation's subject; the answer waits in the page. */
+.ch227 .subj{margin:12px 12px 0;padding:10px 12px;border-radius:10px;background:var(--muted);font:var(--type-ui);font-weight:var(--weight-regular);display:flex;flex-direction:column;gap:4px}
+.ch227 .subj small{font:var(--type-meta);color:var(--muted-foreground)}
+.ch227 .dock .ai .rcpt{margin-top:8px;width:max-content;display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--border);font:var(--type-label)}
+.ch227 .dock .chips2{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px}
+.ch227 .dock .chips2 span{height:28px;display:inline-flex;align-items:center;padding:0 10px;border-radius:var(--radius-pill);border:1px solid var(--border);font:var(--type-label)}
+
 /* Phone writing: a slim bar, the page, the format bar that rides above the keyboard. */
 .ch227.phone .pcol{display:flex;flex-direction:column;height:100%;overflow:hidden}
 .ch227.phone .pbar{flex:none;display:flex;align-items:center;gap:6px;height:56px;padding:0 8px;border-bottom:1px solid var(--border)}

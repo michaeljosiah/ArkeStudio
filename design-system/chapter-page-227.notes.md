@@ -1,6 +1,37 @@
-# The chapter — a writing room and a Chapter view · turn 227
+# The chapter — a writing room, working with Arke, and a Chapter view · turn 227
 
-Status: **revision 2, drawn for review, 15 October 2026.** Nothing is built.
+Status: **revision 3, drawn for review, 15 October 2026.** Nothing is built.
+
+## Revision 3
+
+The owner approved revision 2's Manuscript. They asked for two changes:
+- the Chapter view's cast as the world overview's cards, with less use of colour borders
+- the AI-assisted editing menu, and what collaborating with Arke in the manuscript looks like
+
+**Cast.** It now uses the `.fy-polaroid` card: picture, name, one line. No face or card anywhere
+carries a colour ring. Speaker colour survives only as the underline on linked names.
+
+**Working with Arke.** This builds on what exists today:
+- the passage menu (`passage-actions.ts`), which hands each request to the dock
+- the passage-revision proposal, which waits in the page with keep/refuse per edit
+- the chapter review's quoted findings and their stored offsets
+
+| Frame | What |
+|---|---|
+| 227p | Selection: a format bar with Ask Arke. Its menu has an ask field, then Tighten, Expand, Simplify, Make it vivid and Change tone ›. Check against style and Critique reply rather than edit. Last is Open in Arke. |
+| 227q | Change tone's second level |
+| 227e | Up to three versions of an edit (1 of 3), then Accept N of M |
+| 227r | Review findings beside the words they quote: Fix, Intentional, Dismiss |
+| 227s | Continue: grey text after the caret; Keep (Tab), Discard, 1 of 3 |
+| 227t | The dock about a passage: the passage quoted; the reply points to the edit waiting in the page |
+
+**New behaviour:**
+- the menu's own ask field (today it only fills the dock)
+- versions of an edit
+- Continue from the caret
+- review notes drawn at their offsets
+
+**Retired.** The unused `SelectionTray` and bible-helper path.
 
 ## Why revision 2
 
