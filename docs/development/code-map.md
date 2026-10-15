@@ -1,17 +1,21 @@
 # Code map
 
-Audio Studio (approved turn 226, first implementation slice): client
+Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
-`EditorSheetSlot` and `useCutLayout` around the existing chapter script and `TimingView`.
-`chapter-workspace.tsx` retains timing/sound writes, selection, mix playback and chapter export;
+`EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
+connects acknowledged state, source replacement review, import, audition and chapter export;
+`audio-studio-timeline.tsx` shares the video pointer engine through `lib/audio-studio-gesture.ts`.
+`audio-studio-library.tsx`, `audio-studio-inspector.tsx` and `audio-studio-repairs.tsx` own their panels.
 `production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
 Remembered Timing views canonicalise to Audio Studio without changing world data.
 `audiobook.tsx` adds the book menu entry. Contracts `audio-arrangement*.ts` own sample-domain
 placement, migration and durable history. Coordinator `productions/audio-studio.ts` owns read,
 source and revision-checked edit commands through the audiobook record lane; `audio-studio-mix.ts`
 streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`. `audio-studio-listening.ts`
-maps the same plan to Listen, captions and web/video exports. UI controls and private publication
-capture remain in progress. See [implementation scope](audio-studio.md), SPEC-047 R-185–R-194.
+maps the same plan to Listen, captions and web/video exports. `audio-studio-preview.ts` drains
+cancelled auditions; `audio-studio-import.ts` files before revision-checked placement. Private
+publication `story-review.ts` captures exact arrangements and sources, and `story.ts` renders
+them through the same mixer. See [implementation scope](audio-studio.md), SPEC-047 R-185–R-194.
 
 Shared conversation media evidence: contracts `src/agent-media.ts` owns source/interval,
 coverage and signal measurements. Coordinator `src/world-chat/media-inspection.ts` resolves

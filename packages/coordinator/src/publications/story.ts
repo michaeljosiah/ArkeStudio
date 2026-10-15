@@ -7,6 +7,8 @@ import { manuscriptDocument, StoryEditionSchema, StoryPublicationSettingsSchema,
   type ChapterMix, type ManuscriptDocument, type StoryEdition, type StoryPublicationSettings,
   type StoryStyleFinding } from "@arke-studio/contracts";
 import { writeSpeechWav } from "../audio/speech-wav.js";
+import { resampleStereo, writeStereoWav } from "../audio/stereo-wav.js";
+import { renderAudioStudioMix } from "../productions/audio-studio-mix.js";
 import type { MediaProbe } from "../media/probe.js";
 import { mixSamples, MIX_RATE } from "../productions/audiobook-mix.js";
 import { writeEpub } from "../productions/manuscript.js";
@@ -15,14 +17,14 @@ import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
 import type { WorldStore } from "../world/store.js";
 import { capturePublicationInputs } from "./capture.js";
 import { checkedPublicationPath, readPublicationFile, requirePublicationDigest } from "./files.js";
-import { applyStoryStyleChange, readStoryPublication, STORY_COMPILER, storyDigest } from "./story-review.js";
+import { applyStoryStyleChange, readStoryPublication, STORY_COMPILER, storyDigest, type StoryAudioStudio } from "./story-review.js";
 
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
 const Stored = z.object({ edition: StoryEditionSchema, inputHash: Hash.optional() }).strict();
 const Draft = z.object({ settings: StoryPublicationSettingsSchema, kept: z.array(Hash) }).strict();
 interface FrozenStory {
   document: ManuscriptDocument;
-  mixes: Array<{ title: string; mix: ChapterMix }>;
+  mixes: Array<{ title: string; mix?: ChapterMix; studio?: StoryAudioStudio }>;
   media: Array<{ file: string; sha256: string; byteLength: number }>;
   cover: { file: string; mediaType: "image/png" | "image/jpeg" } | null;
   compiler: typeof STORY_COMPILER;
@@ -226,7 +228,9 @@ export class StoryPublicationService {
         }
         const pathOf = (file: string) => { const path = paths.get(file); if (!path) throw new Error("An audio input was not captured."); return path; };
         const frozen: FrozenStory = { compiler: STORY_COMPILER, encoder: settings.outputs.includes("m4b") ? await this.options.ffmpeg?.identity?.(signal) ?? "injected-runner" : null, document: manuscriptDocument({ title: settings.title, worldName: "", chapters: snapshot!.chapters }),
-          mixes: snapshot!.chapters.flatMap(chapter => chapter.mix ? [{ title: chapter.title, mix: { ...chapter.mix,
+          mixes: snapshot!.chapters.flatMap((chapter): FrozenStory["mixes"] => settings.outputs.includes("m4b") && chapter.studio ? [{ title: chapter.title, studio: { ...chapter.studio, state: { ...chapter.studio.state,
+            clips: chapter.studio.state.clips.map(clip => ({ ...clip, source: clip.source ? { ...clip.source, file: pathOf(clip.source.file) } : null })),
+          } } }] : chapter.mix ? [{ title: chapter.title, mix: { ...chapter.mix,
             voices: chapter.mix.voices.map(voice => ({ ...voice, segments: voice.segments.map(segment => ({ ...segment, file: pathOf(segment.file) })) })),
             beds: chapter.mix.beds.map(bed => ({ ...bed, file: pathOf(bed.file) })),
             sounds: chapter.mix.sounds.map(sound => ({ ...sound, file: pathOf(sound.file) })),
@@ -279,13 +283,23 @@ export class StoryPublicationService {
         await mkdir(work, { recursive: true });
         try {
           const tracks: string[] = [], boundaries: Array<{ title: string; start: number; end: number }> = [];
+          const stereo = frozen.mixes.some(chapter => chapter.studio !== undefined);
           let time = 0;
           for (const [index, chapter] of frozen.mixes.entries()) {
             await phase("Rendering chapter " + (index + 1) + " of " + frozen.mixes.length);
-            const pcm = await mixSamples(inputRoot, chapter.mix, { ffmpeg: this.options.ffmpeg, signal });
             const file = "chapter-" + index + ".wav";
-            await atomicWriteFile(join(work, file), writeSpeechWav(pcm)); tracks.push(file);
-            const duration = pcm.samples.length / MIX_RATE;
+            let duration: number;
+            if (chapter.studio) {
+              const rendered = await renderAudioStudioMix(inputRoot, chapter.studio.state, chapter.studio.script, { ffmpeg: this.options.ffmpeg, signal, final: true });
+              await copyFile(await checkedPublicationPath(inputRoot, rendered.file), join(work, file));
+              duration = rendered.seconds;
+            } else {
+              if (!chapter.mix) throw new Error("The captured chapter has no audio plan.");
+              const pcm = await mixSamples(inputRoot, chapter.mix, { ffmpeg: this.options.ffmpeg, signal });
+              await atomicWriteFile(join(work, file), stereo ? writeStereoWav(resampleStereo({ rate: MIX_RATE, channels: 1, left: pcm.samples, right: pcm.samples }, 48000)) : writeSpeechWav(pcm));
+              duration = pcm.samples.length / MIX_RATE;
+            }
+            tracks.push(file);
             boundaries.push({ title: chapter.title, start: time, end: time + duration }); time += duration;
           }
           if (!tracks.length) throw new Error("No complete narration was captured.");
@@ -296,7 +310,7 @@ export class StoryPublicationService {
           const coverArgs = frozen.cover ? ["-i", join(inputRoot, frozen.cover.file)] : [];
           const coverMap = frozen.cover ? ["-map", "2:v:0", "-c:v", frozen.cover.mediaType === "image/png" ? "png" : "mjpeg", "-disposition:v:0", "attached_pic"] : ["-vn"];
           await this.options.ffmpeg.run(["-y", "-f", "concat", "-safe", "1", "-i", join(work, "chapters.txt"), "-i", join(work, "metadata.txt"), ...coverArgs,
-            "-map", "0:a:0", ...coverMap, "-map_metadata", "1", "-map_chapters", "1", "-metadata", "album=" + edition.settings.title, "-metadata", "language=" + edition.settings.language, "-metadata", "description=" + edition.settings.description, "-metadata", "comment=" + edition.settings.label, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-f", "mp4", candidate], () => {}, signal);
+            "-map", "0:a:0", ...coverMap, "-map_metadata", "1", "-map_chapters", "1", "-metadata", "album=" + edition.settings.title, "-metadata", "language=" + edition.settings.language, "-metadata", "description=" + edition.settings.description, "-metadata", "comment=" + edition.settings.label, "-c:a", "aac", "-b:a", "192k", ...(stereo ? ["-ac", "2", "-ar", "48000"] : []), "-movflags", "+faststart", "-f", "mp4", candidate], () => {}, signal);
           const info = await this.options.probe.info(candidate, { signal });
           if (!info?.hasAudio || !Number.isFinite(info.durationSec) || Math.abs(info.durationSec - time) > 0.2) throw new Error("The audiobook did not pass its duration and audio checks.");
           const handle = await open(candidate, "r+"); try { await handle.sync(); } finally { await handle.close(); }

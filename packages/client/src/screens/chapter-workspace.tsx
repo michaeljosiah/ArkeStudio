@@ -1,4 +1,4 @@
-import { ChapterAudioStudio } from "./chapter-audio-studio.js";
+import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -67,7 +67,7 @@ import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
 import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
-import { BlockTimingPanel, TimingProposalCard, TimingSide, TimingView, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
+import { BlockTimingPanel, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
 import { dismissPlayback, playClip } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -1194,9 +1194,6 @@ export function ChapterWorkspace({
     requestAnimationFrame(() => viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]')?.focus({ preventScroll: true }));
   };
   const [blockSelection, setBlockSelection] = useState<import("./chapter-audiobook.js").BlockSelection | null>(null);
-  // The Timing view's playhead (turn 187a), on the view's clock; a new chapter starts at its head.
-  const [playhead, setPlayhead] = useState(0);
-  useEffect(() => setPlayhead(0), [chapter.id]);
   const chapterCentre = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const node = chapterCentre.current;
@@ -1810,8 +1807,6 @@ export function ChapterWorkspace({
   };
   const selectedBar = audiobook.timing.bars.find((bar) => bar.key === audiobook.selected) ?? null;
   const selectedTimingRow = audiobook.rows.find((row) => row.block.key === audiobook.selected) ?? null;
-  const mixAt = audiobook.mixPlayer.playing ? audiobook.mixPlayer.at : null;
-  const shownPlayhead = mixAt !== null ? betweenClocks(audiobook.mixed, audiobook.timing, mixAt) : playhead;
   const selectedGroup = (() => {
     const held = audiobookRecord.record === "unreadable" ? null : audiobookRecord.record;
     const take = held?.takes[audiobook.selected ?? ""];
@@ -1939,35 +1934,12 @@ export function ChapterWorkspace({
   const barArke = phone && foldedAudiobook ? arkePress : null;
   return (
     <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
-      {view === "timing" && <ChapterAudioStudio key={chapter.id} book={production.meta.title} title={chapter.title}
-        rows={audiobook.rows} timing={shownTiming} selected={audiobook.selected} onSelect={audiobook.setSelected}
-        playhead={shownPlayhead} onPlayhead={setPlayhead}
-        reviewing={timingProposal.proposal !== null} playing={audiobook.mixPlayer.playing} pending={audiobook.mixPlayer.pending}
-        canPlay={connection === "open" && audiobook.mixed.bars.length > 0}
-        onPlay={at => audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at))}
-        onStop={() => { audiobook.mixPlayer.cancel(); dismissPlayback(); }}
+      {view === "timing" && <AudioStudioWorkspace key={`${worldId}/${prodId}/${chapter.id}`} book={production.meta.title} title={chapter.title}
+        worldId={worldId} productionId={prodId} chapterId={chapter.id} chapterFile={chapter.file} slug={worldSlug}
+        connection={connection} stamp={audiobook.lastRecord?.seq} rows={audiobook.rows} timing={shownTiming}
+        passage={audiobook.selected} onPassage={audiobook.setSelected}
         onBack={() => chooseView("audiobook")} onExport={openChapterExport} exportDisabled={connection !== "open" || record === null}
-        problem={openFailure ?? (record === null ? "Opening…" : audiobook.mixPlayer.refused)}
-        timeline={<TimingView
-                    timing={shownTiming}
-                    lanes={timingLanes(audiobook.rows)}
-                    rows={audiobook.rows}
-                    selected={audiobook.selected}
-                    onSelect={audiobook.setSelected}
-                    onTiming={onTiming}
-                    playhead={shownPlayhead}
-                    onPlayhead={setPlayhead}
-                    reactionLabels={Object.fromEntries(Object.entries(proposalView.record?.reactions ?? {}).map(([key, reaction]) => [key, reaction.sound ?? reaction.words ?? key]))}
-                    proposed={proposalView.proposed}
-                    // A proposal held is looked at, not edited around: accepted or discarded first.
-                    locked={timingLocked || timingProposal.proposal !== null}
-                  />}
-        inspector={<><TimingSide bar={selectedBar} row={selectedTimingRow} timing={audiobook.timing} rows={audiobook.rows}
-          onTiming={onTiming} playDisabled={connection !== "open" || audiobook.mixed.bars.length === 0 || timingProposal.proposal !== null}
-          onPlayFrom={at => { if (connection !== "open" || audiobook.mixed.bars.length === 0 || timingProposal.proposal !== null) return; setPlayhead(at); audiobook.mixPlayer.play(betweenClocks(audiobook.timing, audiobook.mixed, at)); }}
-          refused={audiobook.lastRecord?.refused ?? null} locked={timingLocked || timingProposal.proposal !== null} revision={audiobook.lastRecord?.seq} />{soundsPanel}</>}
-        proposal={timingProposal.proposal !== null && <TimingProposalCard proposal={timingProposal.proposal} onAccept={timingProposal.accept} onDiscard={timingProposal.discard} refused={timingProposal.refused} locked={timingLocked} />}
-        propose={<div className="fy-audio-studio__propose"><Button disabled={timingLocked || timingProposal.pending || timingProposal.proposal !== null} onClick={timingProposal.propose} data-testid="timing-propose">{timingProposal.pending ? "Proposing…" : "Propose timing"}</Button>{timingProposal.refused && <p role="status">{timingProposal.refused}</p>}</div>}
+        propose={<div className="fy-audio-studio__propose"><p>Discuss the arrangement with Arke. Review proposed changes before applying them.</p></div>}
         conversation={<ProductionConversation worldId={worldId} productionId={prodId} entry={{ kind: "production", productionId: prodId }} subject={dockSubject}
           dock={{ title: "Arke", subject: chapter.title, conversationFirst: true, subjectPrefix: dockPrefix, about: chapterLabel }} placeholder={"Ask about " + chapterLabel} emptyLine={"No conversation about " + chapterLabel + " yet."} />}
       />}

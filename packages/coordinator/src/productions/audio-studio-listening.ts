@@ -3,12 +3,12 @@ import { audioSeconds, audiobookTextHash, listeningChapter, validateAcousticWord
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { AudiobookPlan } from "./audiobook.js";
-import { audioStudioScript } from "./audio-studio.js";
+import { audioStudioScript, audioStudioSourceProblems } from "./audio-studio.js";
 import { renderAudioStudioMix } from "./audio-studio-mix.js";
 
 /** A migrated chapter never falls back to a newly selected take or the old timing fields. */
 export async function audioStudioListening(store: WorldStore, plan: AudiobookPlan, input: {
-  chapterId: string; title: string; order: number; cover: string | null;
+  productionId: string; chapterId: string; title: string; order: number; cover: string | null;
   pictures: Record<string, AudiobookPicture>; usable: (file: string) => boolean;
   ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean;
 }): Promise<ListeningChapter> {
@@ -16,10 +16,11 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
   const arrangement = record?.arrangement;
   if (!arrangement) throw new Error("The chapter has no saved audio arrangement");
   const state = arrangement.current;
-  const rendered = await renderAudioStudioMix(store.dir, state, audioStudioScript(plan), { ...input, signal: input.signal ? AbortSignal.any([store.closingSignal, input.signal]) : store.closingSignal });
+  const unavailable = await audioStudioSourceProblems(store, input.productionId, state);
+  const rendered = await renderAudioStudioMix(store.dir, state, audioStudioScript(plan), { ...input, unavailable, signal: input.signal ? AbortSignal.any([store.closingSignal, input.signal]) : store.closingSignal });
   const badSources = new Set(rendered.plan.issues.filter(issue => issue.kind === "source").map(issue => issue.id));
-  const performances = rendered.plan.clips.filter(entry => entry.clip.role === "speech" && entry.clip.source && !badSources.has(entry.clip.id));
-  const spans = rendered.plan.passages.filter(passage => passage.samples > 0 && performances.some(entry => entry.clip.passageId === passage.id));
+  const performances = rendered.plan.clips.filter(entry => entry.clip.role === "speech" && entry.clip.source && !entry.muted && !badSources.has(entry.clip.id));
+  const spans = rendered.plan.passages.filter(passage => passage.samples > 0 && performances.some(entry => entry.clip.passageId === passage.id && !entry.clip.repeated));
   const chapter = listeningChapter({ ...input,
     blocks: plan.blocks.map(({ block }) => {
       const span = spans.find(passage => passage.key === block.key);
@@ -33,13 +34,25 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
   chapter.seconds = rendered.seconds; chapter.mix = { file: rendered.file, seconds: rendered.seconds };
   chapter.state = rendered.issues.length ? "part" : "read";
   chapter.audioStudio = { revision: arrangement.revision, issues: rendered.issues.map(issue => issue.message), omissions: state.omissions.filter(entry => entry.acknowledged).map(entry => entry.label) };
+  const repeated = new Map<string, typeof performances[number]>();
+  for (const entry of performances.filter(entry => entry.clip.repeated)) {
+    const passage = rendered.plan.passages.find(passage => passage.id === entry.clip.passageId);
+    const block = plan.blocks.find(row => row.block.key === passage?.key)?.block;
+    if (!block) continue;
+    const key = `${block.key}:repeat:${entry.clip.id}`;
+    const copy = listeningChapter({ ...input, blocks: [{ key, text: block.text, take: { file: entry.clip.source!.file, seconds: audioSeconds(entry.samples), grouped: true } }],
+      timed: { bars: [{ key, at: audioSeconds(entry.at), seconds: audioSeconds(entry.samples) }], seconds: rendered.seconds, mix: { file: rendered.file, seconds: rendered.seconds } } }).blocks[0];
+    if (copy) { chapter.blocks.push(copy); repeated.set(key, entry); }
+  }
   // Retain exact sample positions for captions; the legacy helper deliberately rounds to milliseconds.
   for (const block of chapter.blocks) {
-    const span = spans.find(passage => passage.key === block.key)!;
+    const repeat = repeated.get(block.key);
+    const span = repeat ? { id: repeat.clip.passageId!, at: repeat.at, samples: repeat.samples } : spans.find(passage => passage.key === block.key)!;
     const shift = audioSeconds(span.at) - block.at; block.at += shift; block.seconds = audioSeconds(span.samples);
     for (const sentence of block.sentences) sentence.at += shift;
-    const entries = performances.filter(entry => entry.clip.passageId === span.id);
-    const text = plan.blocks.find(entry => entry.block.key === block.key)!.block.text;
+    const entries = repeat ? [repeat] : performances.filter(entry => entry.clip.passageId === span.id && !entry.clip.repeated);
+    const textKey = repeat ? rendered.plan.passages.find(passage => passage.id === repeat.clip.passageId)!.key : block.key;
+    const text = plan.blocks.find(entry => entry.block.key === textKey)!.block.text;
     const words = [];
     let reason: string | undefined;
     for (const entry of entries) {
@@ -53,5 +66,6 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
     if (reason || !words.length) block.wordTimingReason = reason ?? "word timing not prepared";
     else block.words = words.sort((a, b) => a.startSec - b.startSec);
   }
+  chapter.blocks.sort((a, b) => a.at - b.at);
   return chapter;
 }

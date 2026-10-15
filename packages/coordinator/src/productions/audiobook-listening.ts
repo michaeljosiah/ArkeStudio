@@ -164,7 +164,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
     const usable = await usablePictures(store, pictures);
     if (record?.arrangement) {
       try {
-        const chapter = await audioStudioListening(store, plan, { chapterId: summary.id, order: summary.order, title: summary.title, cover, pictures, usable: file => usable.has(file),
+        const chapter = await audioStudioListening(store, plan, { productionId, chapterId: summary.id, order: summary.order, title: summary.title, cover, pictures, usable: file => usable.has(file),
           ...(options.ffmpeg ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), final: options.finalAudio === true });
         await checkAudiobookMotion(store, chapter); chapters.push(chapter);
       } catch (error) {

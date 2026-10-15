@@ -1581,6 +1581,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       productionId: SlugSchema,
       chapterId: SlugSchema,
       mix: z.object({ file: z.string().min(1), seconds: z.number().min(0), from: z.number().min(0) }).strict().nullable(),
+      issues: z.array(z.string()).optional(),
       refused: z.string().min(1).optional(),
     })
     .strict(),

@@ -605,6 +605,8 @@ const CLIENT_COMMAND_METADATA = {
   "render-audiobook-mix": readOnly(QUERY),
   "read-audio-studio": readOnly(QUERY),
   "read-audio-studio-source": readOnly(QUERY),
+  "preview-audio-studio": readOnly(QUERY),
+  "stop-audio-studio-preview": readOnly(QUERY),
   "edit-audio-studio": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   // Propose timing (turn 187b): read off the chapter, nothing spent; its acceptance is a command on the record.
   "propose-audiobook-timing": readOnly(QUERY),

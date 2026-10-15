@@ -8,7 +8,7 @@ import { readStereoWav, writeStereoWav } from "../../src/audio/stereo-wav.js";
 import { integratedLoudness } from "../../src/audio/speech-wav.js";
 import { StereoLoudness } from "../../src/audio/stereo-loudness.js";
 import { readAudioStudioSource } from "../../src/productions/audio-studio-source.js";
-import { mixAudioStudioChunk, renderAudioStudioMix } from "../../src/productions/audio-studio-mix.js";
+import { audioStudioMixWindow, mixAudioStudioChunk, renderAudioStudioMix } from "../../src/productions/audio-studio-mix.js";
 
 const script = { hash: "script", passages: [] };
 function state(): AudioArrangementState { return { manuscriptHash: "script", passages: [], tracks: [{ id: "fx", name: "Effects", gainDb: 0, muted: false }], clips: [], omissions: [], master: { targetLufs: -18, ceilingDb: -1.5 } }; }
@@ -22,6 +22,24 @@ async function fixture() {
   return { dir, arranged, pcm, source };
 }
 describe("Audio Studio canonical stereo rendering", () => {
+  it("reuses only a verified mix cache and rebuilds damaged cached output", async () => {
+    const { dir, arranged } = await fixture();
+    const first = await renderAudioStudioMix(dir, arranged, script), expected = await readFile(join(dir, first.file));
+    const cached = await renderAudioStudioMix(dir, arranged, script);
+    assert.equal(cached.file, first.file); assert.equal(cached.gainDb, first.gainDb);
+    await writeFile(join(dir, first.file), "broken cache");
+    const restored = await renderAudioStudioMix(dir, arranged, script);
+    assert.deepEqual(await readFile(join(dir, restored.file)), expected);
+  });
+  it("crops loop auditions on sample boundaries without applying the master again", async () => {
+    const { dir, arranged } = await fixture();
+    const mix = await renderAudioStudioMix(dir, arranged, script);
+    const window = await audioStudioMixWindow(dir, mix, 12001, 36007, new AbortController().signal);
+    const full = readStereoWav(await readFile(join(dir, mix.file))), cropped = readStereoWav(await readFile(join(dir, window.file)));
+    assert.equal(window.from, 12001 / 48000); assert.equal(window.seconds, 24006 / 48000);
+    assert.deepEqual(cropped.left, full.left.subarray(12001, 36007)); assert.deepEqual(cropped.right, full.right.subarray(12001, 36007));
+    await assert.rejects(audioStudioMixWindow(dir, mix, 0, 48001, new AbortController().signal), /within the chapter/);
+  });
   it("streaming stereo loudness matches the mono reference plus channel energy across chunk boundaries", () => {
     const samples = Float32Array.from({ length: 123456 }, (_, i) => 0.1 * Math.sin(2 * Math.PI * 1000 * i / 48000));
     const meter = new StereoLoudness();

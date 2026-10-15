@@ -13,7 +13,7 @@ import type { TimingRowLike } from "./chapter-timing.js";
  */
 export function ChapterAudioStudio({ book, title, rows, timing, selected, onSelect, playhead, onPlayhead,
   timeline, inspector, conversation, proposal, propose, reviewing, playing, pending, canPlay,
-  onPlay, onStop, onBack, onExport, exportDisabled, problem,
+  onPlay, onStop, onBack, onExport, exportDisabled, problem, library: suppliedLibrary, audioClock, showInspector = false,
 }: {
   book: string; title: string; rows: readonly TimingRowLike[]; timing: ChapterTiming;
   selected: string | null; onSelect: (key: string) => void; playhead: number; onPlayhead: (seconds: number) => void;
@@ -21,13 +21,16 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
   reviewing: boolean; playing: boolean; pending: boolean; canPlay: boolean;
   onPlay: (seconds: number) => void; onStop: () => void; onBack: () => void; onExport: () => void;
   exportDisabled: boolean; problem: string | null;
+  library?: ReactNode; showInspector?: boolean;
+  audioClock?: { seconds: number; passages: readonly { key: string; at: number; seconds: number; made: boolean }[] };
 }) {
   const { phone, compact } = useCutLayout();
   const [panel, setPanel] = useState<"inspector" | "arke">("inspector");
   const [detailsOpen, setDetailsOpen] = useState(false), [arkeOpen, setArkeOpen] = useState(false), [libraryOpen, setLibraryOpen] = useState(false);
   const [search, setSearch] = useState(""), [follow, setFollow] = useState(true);
   const script = useRef<HTMLDivElement>(null);
-  const sounding = playing ? timing.bars.find(bar => bar.kind === "block" && bar.made && bar.at <= playhead && playhead < bar.at + bar.seconds)?.key : null;
+  const clock = audioClock ?? { seconds: timing.seconds, passages: timing.bars.filter(bar => bar.kind === "block") };
+  const sounding = playing ? clock.passages.find(bar => bar.made && bar.at <= playhead && playhead < bar.at + bar.seconds)?.key : null;
   useEffect(() => {
     if (!follow || !sounding) return;
     const row = [...(script.current?.querySelectorAll<HTMLElement>("[data-passage]") ?? [])].find(node => node.dataset.passage === sounding);
@@ -36,7 +39,7 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
   const inspect = () => { setPanel("inspector"); setDetailsOpen(true); setLibraryOpen(false); setArkeOpen(false); };
   const select = (key: string) => { onSelect(key); setPanel("inspector"); };
   const arke = () => { setPanel("arke"); setArkeOpen(true); setLibraryOpen(false); setDetailsOpen(false); };
-  const library = <div className="fy-audio-library">
+  const library = suppliedLibrary ?? <div className="fy-audio-library">
     <header className="fy-artpanel__head"><b>Library</b></header>
     <div className="fy-audio-library__tabs"><b>Media</b></div>
     <label className="fy-audio-library__search"><span className="fy-sr-only">Search chapter audio</span><input aria-label="Search chapter audio" placeholder="Find a take or sound…" value={search} onChange={event => setSearch(event.target.value)} /></label>
@@ -57,7 +60,7 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
       {phone && <header className="fy-cut-back"><button type="button" aria-label="Back to Audiobook" onClick={onBack}><ChevronLeft size={20} /></button><div><span>{book}</span><b>Audio Studio · {title}</b></div><Button onClick={onExport} disabled={exportDisabled || reviewing}><Download size={16} />Export</Button></header>}
       <header className="fy-cuthead">
         <Button size="sm" variant="ghost" onClick={onBack}><ChevronLeft size={12} />Audiobook</Button>
-        <div className="fy-cuthead__title"><h1>Audio Studio</h1><span className="fy-cuthead__meta">{title} · {formatTimingSeconds(timing.seconds)}</span></div>
+        <div className="fy-cuthead__title"><h1>Audio Studio</h1><span className="fy-cuthead__meta">{title} · {formatTimingSeconds(clock.seconds)}</span></div>
         <span className="fy-h1row__push" />
         <Button size="sm" disabled={!canPlay || pending || reviewing} onClick={() => onPlay(0)}><Play size={12} />Listen from top</Button>
         <Button size="sm" variant="primary" disabled={exportDisabled || reviewing} onClick={onExport}><Download size={12} />Export…</Button>
@@ -68,19 +71,19 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
         <section className="fy-audio-script" aria-label="Chapter script">
           <header><b>Script</b><span>{title}</span><Button size="sm" variant="ghost" aria-pressed={follow} onClick={() => setFollow(value => !value)}>Follow playhead</Button></header>
           <div className="fy-audio-script__passages" ref={script}>
-            {rows.map(row => <button type="button" key={row.block.key} data-passage={row.block.key} aria-pressed={selected === row.block.key} data-sounding={sounding === row.block.key || undefined} onClick={() => { select(row.block.key); if (!playing && !pending) onPlayhead(timing.bars.find(bar => bar.key === row.block.key)?.at ?? 0); }}><span>{row.mark}</span><span>{row.block.text}{!timing.bars.find(bar => bar.key === row.block.key)?.made && <small>Not read</small>}</span></button>)}
+            {rows.map(row => <button type="button" key={row.block.key} data-passage={row.block.key} aria-pressed={selected === row.block.key} data-sounding={sounding === row.block.key || undefined} onClick={() => { select(row.block.key); if (!playing && !pending) onPlayhead(clock.passages.find(bar => bar.key === row.block.key)?.at ?? 0); }}><span>{row.mark}</span><span>{row.block.text}{!clock.passages.find(bar => bar.key === row.block.key)?.made && <small>Not read</small>}</span></button>)}
             {!rows.length && <p>No script passages yet.</p>}
           </div>
-          {!compact && <footer>{play}<span className="fy-mono">{formatTimingSeconds(playhead)} / {formatTimingSeconds(timing.seconds)}</span></footer>}
+          {!compact && <footer>{play}<span className="fy-mono">{formatTimingSeconds(playhead)} / {formatTimingSeconds(clock.seconds)}</span></footer>}
         </section>
       </div>
-      {compact && <div className="fy-cut-clock">{play}<span className="fy-mono">{formatTimingSeconds(playhead)} / {formatTimingSeconds(timing.seconds)}</span></div>}
+      {compact && <div className="fy-cut-clock">{play}<span className="fy-mono">{formatTimingSeconds(playhead)} / {formatTimingSeconds(clock.seconds)}</span></div>}
       <div className="fy-audio-studio__timeline">{timeline}</div>
     </main>
     <aside className="fy-cutside" aria-label="Editor details">
       <div className="fy-cutside__head"><EditorPanelTabs value={panel} onChange={setPanel} /></div>
       <EditorSheetSlot sheet={phone} open={detailsOpen} title="Details" onClose={() => setDetailsOpen(false)} className="fy-cut-trim-sheet" footer={<><span>Chapter audio · seconds</span><Button variant="primary" onClick={() => setDetailsOpen(false)}>Done</Button></>}>
-        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && panel !== "inspector"}>{reviewing && <p className="fy-audio-studio__propose">Current timing · review the proposed changes above.</p>}{selected === null ? <p className="fy-audio-studio__propose">Select a passage or clip to inspect its timing and sounds.</p> : inspector}</div>
+        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-inspector-tab"} hidden={!compact && panel !== "inspector"}>{reviewing && <p className="fy-audio-studio__propose">Current timing · review the proposed changes above.</p>}{selected === null && !showInspector ? <p className="fy-audio-studio__propose">Select a passage or clip to inspect its timing and sounds.</p> : inspector}</div>
       </EditorSheetSlot>
       <EditorSheetSlot sheet={compact} open={arkeOpen} title="Arke" onClose={() => setArkeOpen(false)}>
         <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel" role={compact ? undefined : "tabpanel"} aria-labelledby={compact ? undefined : "cut-arke-tab"} hidden={!compact && panel !== "arke"}>{propose}{conversation}</div>

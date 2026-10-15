@@ -13,6 +13,8 @@ import { planAudiobook, readAudiobook, updateAudiobook } from "../../src/product
 import { audiobookListening } from "../../src/productions/audiobook-listening.js";
 import { exportAudiobookPlayer } from "../../src/productions/audiobook-export.js";
 import type { WorldStore } from "../../src/world/store.js";
+import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
 
 const PRODUCTION = "the-ledger-of-nights", CHAPTER = "01-neap";
 const addTrack: AudioArrangementEdit = { kind: "commands", label: "Add sound effects track", commands: [{ kind: "add-track", track: { id: "fx", name: "Sound effects", gainDb: -6, muted: false } }] };
@@ -23,6 +25,23 @@ async function fixture(run: (store: WorldStore, worldDir: string) => Promise<voi
   try { await run(provider.openStore!()!, worldDir); } finally { await provider.close(); }
 }
 describe("Audio Studio durable authority", () => {
+  it("files imports before placement and keeps stale and partly failed imports recoverable", () => fixture(async (store, dir) => {
+    const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    const file = join(dir, "import-studio.wav"), pcm = new Float32Array(4800).fill(.1);
+    await writeFile(file, writeStereoWav({ rate: 48000, channels: 2, left: pcm, right: pcm }));
+    await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
+    const failures = await importAudioStudioMedia(store, [null, file], { productionId: PRODUCTION, chapterFile: CHAPTER, base: opened.base, destination: { trackId: "fx", at: 12001 } }, { abandoned: () => false });
+    assert.equal(failures.length, 2); assert.match(failures.find(entry => entry.index === 1)!.reason, /Saved to Library; placement was not applied/);
+    const filed = store.getBundle().artifacts.find(artifact => artifact.kind === "audio" && artifact.production === PRODUCTION && artifact.file.includes("import-studio"));
+    assert.ok(filed, "stale placement leaves the file in the production Library");
+    const refreshed = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    assert.equal(refreshed.state.clips.length, opened.state.clips.length);
+    const recovered = await importAudioStudioMedia(store, [file], { productionId: PRODUCTION, chapterFile: CHAPTER, base: refreshed.base, destination: { trackId: "fx", at: 12001 } }, { abandoned: () => false });
+    assert.deepEqual(recovered, []);
+    const placed = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    assert.deepEqual(placed.state.clips.at(-1)?.placement, { kind: "fixed", at: 12001 });
+    assert.equal(placed.state.clips.at(-1)?.source?.samples, 4800);
+  }));
   it("derives without writing, migrates with one undoable edit, and preserves recovery across reopen", () => fixture(async store => {
     const before = await readAudiobook(store, PRODUCTION, CHAPTER);
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
@@ -75,8 +94,11 @@ describe("Audio Studio durable authority", () => {
   }));
   it("Listen and the exported player use the arrangement despite absent legacy takes, and changed sources block delivery", () => fixture(async (store, dir) => {
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
-    const file = "artifacts/studio-narration.wav", samples = Float32Array.from({ length: 4800 }, (_, i) => 0.1 * Math.sin(i / 13));
+    let file = "artifacts/studio-narration.wav";
+    const samples = Float32Array.from({ length: 4800 }, (_, i) => 0.1 * Math.sin(i / 13));
     await writeFile(join(dir, file), writeStereoWav({ rate: 48000, channels: 2, left: samples, right: samples }));
+    const filed = await fileArtifact(store, { sourcePath: join(dir, file), production: PRODUCTION });
+    assert.ok(filed.outcome === "filed" || filed.outcome === "deduplicated"); file = `artifacts/${filed.artifact.file}`;
     const { source } = await readAudioStudioSource(dir, file);
     const state = opened.state;
     state.clips = state.passages.map((passage, i) => ({ ...newAudioClip(`voice-${i}`, state.tracks[0]!.id, source, source.samples),
@@ -92,6 +114,13 @@ describe("Audio Studio durable authority", () => {
     const exported = await exportAudiobookPlayer(store, PRODUCTION, { scope, clock: () => "2026-10-15T12:00:00.000Z" });
     assert.equal(exported.ok, true);
     if (exported.ok) assert.deepEqual(await readFile(join(dir, exported.dir, "media", `chapter-${String(chapter.order).padStart(2, "0")}.wav`)), await readFile(join(dir, chapter.mix!.file)));
+    const repeatAt = state.passages.length * 4800 + 12001;
+    const held = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    await editAudioStudio(store, PRODUCTION, CHAPTER, held.base, { kind: "commands", label: "Repeat first passage", commands: [{ kind: "duplicate-clip", id: "voice-0", nextId: "repeated-voice", at: repeatAt }] });
+    const repeated = await audiobookListening(store, PRODUCTION, { scope });
+    const last = repeated.chapters[0]!.blocks.at(-1)!;
+    assert.equal(last.at, repeatAt / 48000); assert.match(last.key, /repeat:repeated-voice/);
+    assert.equal(repeated.chapters[0]!.mix!.seconds, (repeatAt + 4800) / 48000);
     await writeFile(join(dir, file), "replaced source");
     const draft = await audiobookListening(store, PRODUCTION, { scope });
     assert.equal(draft.chapters[0]?.state, "part");

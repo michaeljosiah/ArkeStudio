@@ -442,21 +442,15 @@ describe("the third view (turn 187a)", () => {
     const params = new URLSearchParams(q(m, "[data-testid=studio-location]")!.textContent!);
     assert.equal(params.get("view"), "audio-studio", "canonical route also selects the editor chrome");
     assert.equal(params.get("block"), "p1.0", "canonicalising preserves the requested passage");
-    assert.ok(q(m, "[data-testid=timing-view]"));
-    assert.equal(all(m, "[data-testid=timing-bar]").length, 3, "the title and the two paragraphs, not read yet");
-    assert.ok(all(m, "[data-testid=timing-bar]").every((bar) => bar.className.includes("fy-tm__bar--unread")));
+    assert.ok(sent.some(message => message.kind === "read-audio-studio"), "the editor requests the authoritative arrangement");
+    assert.equal(all(m, "[data-passage]").length, 3, "the title and the two unread paragraphs stay visible");
+    assert.ok(all(m, "[data-passage]").every(bar => bar.textContent!.includes("Not read")));
     assert.ok(q(m, ".fy-ch__manuscript[hidden]"), "the editor stays mounted underneath, hidden");
-    assert.equal(sent.some(message => ["set-audiobook-timing", "read-audiobook-chapter", "render-audiobook-mix", "set-audiobook-bed", "set-audiobook-sound"].includes(message.kind)), false);
+    assert.equal(sent.some(message => ["set-audiobook-timing", "read-audiobook-chapter", "render-audiobook-mix", "preview-audio-studio", "edit-audio-studio", "set-audiobook-bed", "set-audiobook-sound"].includes(message.kind)), false);
     if (view === "audio-studio") {
       await act(async () => q(m, '[data-passage="p1.0"]')!.click());
-      assert.equal((q(m, '[data-testid=timing-play-here]') as HTMLButtonElement).disabled, true, "unread audio cannot be played from the Inspector");
-      const start = q(m, '[data-testid=timing-start]') as HTMLInputElement;
-      start.value = "0.5";
-      await act(async () => start.dispatchEvent(new dom.Event("focusout", { bubbles: true }) as unknown as Event));
-      const writes = sent.filter(message => message.kind === "set-audiobook-timing");
-      assert.equal(writes.length, 1, "an explicit Inspector edit uses the existing chapter write");
-      assert.equal(writes[0]!.block, "p1.0");
-      assert.deepEqual(writes[0]!.timing, { start: 0.5 });
+      assert.equal((q(m, 'button[aria-label="Play"]') as HTMLButtonElement).disabled, true, "unread audio cannot be played");
+      assert.equal(sent.some(message => message.kind === "edit-audio-studio"), false, "passage selection does not author an arrangement");
     }
   });
 });

@@ -19,6 +19,13 @@ function state(): AudioArrangementState {
 const change = (held: AudioArrangementState, commands: AudioArrangementCommand[]) => editAudioArrangement(initialAudioArrangement(held, "{}"), { kind: "commands", label: "Edit", commands });
 
 describe("Audio Studio sample clock and source review (SPEC-047 R-187..R-194)", () => {
+  it("requires explicit omission acknowledgement for muted speech but not solo audition", () => {
+    const current = state(); current.tracks[0]!.muted = true;
+    assert.equal(resolveAudioArrangement(current, script).issues.filter(issue => issue.kind === "passage").length, 2);
+    const acknowledged = change(current, current.passages.map(passage => ({ kind: "omit-passage", id: passage.id, label: passage.key, acknowledged: true }))).current;
+    assert.deepEqual(resolveAudioArrangement(acknowledged, script).issues, []);
+    assert.deepEqual(resolveAudioArrangement(state(), script).issues, []);
+  });
   it("moves linked material after a longer take while keeping fixed cues stationary", () => {
     const current = state(), snapshot = JSON.stringify(current);
     const diff = audioReplacementDiff(current, script, "first", source("longer", 7));

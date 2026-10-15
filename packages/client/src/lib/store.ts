@@ -5329,6 +5329,7 @@ export function retireArtifact(worldId: string, artifactId: string): void {
 export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[], production?: string,
+  audioStudio?: Extract<ClientMessage, { kind: "upload-artifacts" }>["audioStudio"],
 ): { requestId: string | null; reason?: string } {
   if (isRemoteSession()) return { requestId: null, reason: "Import media on the desktop app." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
@@ -5339,7 +5340,7 @@ export function importEditorMedia(
   const requestId = queueRequest("upload-artifacts");
   // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
   // have to carry the same scope or one entrance on a page would file somewhere the other did not.
-  const scope = production !== undefined ? { production } : {};
+  const scope = { ...(production !== undefined ? { production } : {}), ...(audioStudio ? { audioStudio } : {}) };
   if (browserImport) {
     const currentBridge = bridge;
     let worldChanged = false;
@@ -5784,6 +5785,11 @@ export function readAudioStudioSource(worldId: string, productionId: string, cha
   const requestId = ulid();
   return send({ kind: "read-audio-studio-source", worldId, productionId, chapterFile, file, requestId }) ? requestId : null;
 }
+export function previewAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, options: { edit?: import("@arke-studio/contracts").AudioArrangementEdit; solo?: string[]; window?: { from: number; to: number } } = {}): string | null {
+  const requestId = ulid();
+  return send({ kind: "preview-audio-studio", worldId, productionId, chapterFile, base, ...options, requestId }) ? requestId : null;
+}
+export function stopAudioStudioPreview(worldId: string, requestId: string): void { send({ kind: "stop-audio-studio-preview", worldId, requestId }); }
 
 /** A reaction under a block set, changed by its key, or taken away with null (design turn 187, R-83). */
 export function setAudiobookReaction(worldId: string, productionId: string, chapterFile: string, key: string | null, reaction: import("@arke-studio/contracts").ReactionInput | null): string | null {

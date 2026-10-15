@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   clearQueue,
   dismissPlayback,
+  dismissClip,
   emitForTest,
   enqueueClip,
   jumpQueue,
@@ -18,6 +19,7 @@ function fakeAudio() {
   const calls: string[] = [];
   const element = {
     playbackRate: 1,
+    loop: false,
     src: "",
     currentTime: 0,
     duration: NaN,
@@ -39,6 +41,16 @@ function fakeAudio() {
 const clip = (id: string, url: string) => ({ id, url, title: id });
 
 describe("audio playback controller", () => {
+  it("loops an Audio Studio excerpt without carrying loop state to the next clip or dismissing its owner", async () => {
+    const { element } = fakeAudio(); setAudioFactoryForTest(() => element as never);
+    await playClip({ ...clip("studio", "excerpt.wav"), loop: true });
+    assert.equal(element.loop, true);
+    await playClip(clip("other", "other.wav"));
+    assert.equal(element.loop, false);
+    dismissClip("studio"); assert.equal(playbackSnapshot().clip?.id, "other");
+    dismissClip("other"); assert.equal(playbackSnapshot().clip, null);
+    setAudioFactoryForTest(null);
+  });
   it("auditions only the reviewed physical range and bounds keyboard seeking", async () => {
     const { element } = fakeAudio();
     setAudioFactoryForTest(() => element as never);

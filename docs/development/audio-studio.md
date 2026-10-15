@@ -1,69 +1,75 @@
 # Audio Studio implementation
 
 The approved [turn 226](../../design-system/Arke%20Studio.dc.html#t226) is the target design.
-This first slice implements its chapter entry and editor shell, under SPEC-047 R-185.
+SPEC-047 R-185–R-194 defines the implementation contract; PR #1780 is still in progress.
 
-From the Audiobook page menu, Audio Studio opens the listening chapter (or the first chapter).
-The chapter's third view is now Audio Studio. Old Timing links and remembered Timing views
-resolve to the same editor; other query parameters, including selected passages, are retained.
-Opening this view neither generates audio nor writes an arrangement.
+## Chapter workspace
 
-The studio uses the existing production rail and Cut layout, with Library on the left,
-script above the chapter timeline, and shared Inspector / Arke tabs on the right. It reuses
-the editor's compact layout and sheets. The manuscript remains mounted while hidden so a
-pending draft and its autosave survive a view change.
+Audiobook opens Audio Studio for the listening chapter, or the first chapter. The chapter's
+third view uses `view=audio-studio`; old Timing links retain the chapter and selected passage.
+The existing production rail, wordmark, Cut layout, Inspector / Arke tabs and compact sheets
+surround the script in the preview slot. The manuscript remains mounted while hidden so its
+pending draft and autosave survive view changes.
 
-The script and Library select existing chapter blocks. Library lists current chosen takes,
-beds and sounds; unread passages stay visible in the script and timeline. Inspector edits
-use existing acknowledged timing, reaction, bed and sound commands. Arke retains the existing
-production conversation and timing proposal card. An unaccepted proposal disables timing and
-sound edits, playback and export; the user can still stop a pending or playing mix.
+`audio-studio-workspace.tsx` connects authoritative snapshots to the Library, timeline,
+Inspector and repair controls. The timeline reuses video tool icons and `startClipGesture`,
+with an adapter measuring audio samples rather than video frames. Typed fields provide
+placement and source-window edits without dragging. Clip roles are independent of track names.
+Track mute is persisted and labelled “in mix”; solo is transient audition state. Muted passage
+performances require explicit omission acknowledgement before final delivery.
 
-Playback uses the existing chapter mixer and its mapping between estimated script time and
-made-audio time. Export opens the existing chapter export sheet. This slice does not change
-mix fidelity, source resolution, publication semantics or the video editor's frame clock.
+Library imports use the existing desktop/browser filing pipeline. Filing precedes placement:
+a stale chapter base leaves imported media available in Library and refuses the obsolete edit.
+Sources are prepared against current catalogue scope, exact bytes and recording clearance.
+Source replacement opens Current/Suggested with timing differences and trim-reset disclosure.
+Apply commits one command batch; Keep Current writes no arrangement.
 
-## Arrangement and rendering foundation
+## Persistence and rendering
 
-The coordinator now exposes read, source preparation and revision-checked edit commands for
-the next editor slice. A chapter can own a versioned 48 kHz stereo arrangement with exact
+The chapter record owns a versioned 48 kHz stereo arrangement with integer sample positions,
 source hashes, conservative passage bindings and twenty durable undo steps. Opening a legacy
-chapter derives its arrangement without writing. Its first edit saves the arrangement and
-legacy recovery record together; schema floor 83 prevents older builds discarding it.
+chapter derives the arrangement without writing. Its first edit atomically includes migration,
+legacy recovery data and the command; schema floor 83 fences older builds. Stale bases,
+unreadable records and ownership loss refuse writes.
 
-The native renderer preserves stereo channels and streams the chapter through a single master
-gain. The pure sample plan owns placement, fades, loops and speech ducking. Source changes
-produce named draft repairs and block final rendering. Saved arrangements feed chapter mixing,
-Listen, web-player export and video export; exact-source word timings follow their clip windows.
-The editor controls and private publication capture are still being connected. Existing UI
-controls remain the initial shell above and cannot write legacy timing after migration.
+The renderer streams the summed stereo mix through one master gain. The shared sample plan
+owns placement, source windows, fades, looping seams, pan and speech ducking. Missing sources,
+unresolved passages and unacknowledged omissions remain named draft issues and block final
+rendering. Reused mix caches are verified against their digest; source bytes are checked even
+when a rendered cache exists. Audition uses the single existing audio player with a physically
+cropped sample-aligned excerpt, including looping, and request-scoped render cancellation.
 
-Focused tests are `packages/contracts/test/audio-arrangement.test.ts` and coordinator
-`test/productions/audio-studio.test.ts` / `audio-studio-mix.test.ts`. They cover stale edits,
-atomic migration, durable undo, source replacement, stereo preservation and exact sample clocks.
+Saved arrangements feed Listen, web-player and story video exports. Exact-source acoustic
+word timings are transformed through their source windows; unsupported overlaps remain
+explicitly unavailable for word captions. Private publication captures the exact arrangement,
+revision, source bytes and compiler identity. Retry renders those frozen inputs. Mixed books
+convert legacy mono chapters to the arranged book's 48 kHz stereo format without remastering
+the arranged chapters. Create still revalidates the source against the preview.
 
-## Remaining slices
+## Work remaining before release
 
-1. Route the existing chapter timing controls through the new arrangement once migrated.
-2. Connect shared editor gestures to that authority: free clip placement, trims, fixed-time
-   and passage-linked cues, track controls, import, and persisted Undo/Redo.
-3. Add Current/Suggested replacement review for longer takes, stale-base guards, and explicit
-   downstream cue decisions. The existing timing proposal card is not this new review model.
-4. Use one arrangement plan for preview, listening and export, including stereo fidelity,
-   music loops, tails, mastering and publication readiness.
-
-SPEC-047 R-186–R-190 records these target requirements. They are not implemented by this slice.
+Legacy timing controls must route through the saved arrangement after migration; their current
+guard prevents a second writable authority. Arke arrangement proposals, persistent review
+decisions and selection context are still being integrated. Remaining acceptance work includes
+repair edge cases, waveform presentation, crossfades, complete browser interactions, video
+regressions and the final cross-platform code gate. These are release requirements, not deferred
+features. Editable automation lanes, stems and word-level attachment remain later design scope.
 
 ## Validation
 
-From `packages/client`:
+Contracts: `test/audio-arrangement.test.ts` covers sample placement, conservative binding,
+replacement ripple, fixed cues, protection, durable history and explicit omissions.
+Coordinator: `test/productions/audio-studio.test.ts`, `audio-studio-mix.test.ts` and
+`test/publications/story.test.ts` cover persistence, stale imports, source changes, stereo,
+sample-aligned windows, frozen retry and parity between Listen and publication PCM.
+Set `ARKE_STORY_CODEC_SMOKE=1` for real FFmpeg AAC publication with mixed arranged/legacy chapters.
+
+From `packages/client`, run the edit preparation, player ownership and entry tests:
 
 ```text
-node --import tsx --test test/chapter-timing.test.tsx test/chapter-workspace.test.tsx test/chapter-audiobook.test.tsx test/audiobook-door.test.tsx test/audiobook-show.test.tsx test/cut-layout.test.tsx
+node --import tsx --test test/audio-studio-edit.test.ts test/audio.test.ts test/chapter-timing.test.tsx
 ```
 
-Coverage includes route aliases and remembered views, no authoring on opening, shared
-selection, retained Inspector drafts, playback/review gating, book entry and compact panel
-navigation. Run the repository lint, typecheck, build and tests for the complete gate.
-Inspect the actual application at desktop, Fold and phone sizes; design fixture checks alone
-do not verify application layout or real audio playback.
+Run the broader chapter, Audiobook and Cut suites, then the repository lint, typecheck, build
+and test gates. Inspect the actual React screen at desktop, Fold, phone, 320 px and enlarged
+text; design fixture checks alone do not verify application layout.

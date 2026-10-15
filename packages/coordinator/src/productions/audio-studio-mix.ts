@@ -6,8 +6,10 @@ import { AUDIO_STUDIO_RATE, AudioArrangementRefusal, audioClipGain, resolveAudio
   type AudioArrangementState, type AudioScript, type AudioSource, type ResolvedAudioClip } from "@arke-studio/contracts";
 import { stereoWavFrames, stereoWavHeader, type StereoPcm } from "../audio/stereo-wav.js";
 import { StereoLoudness } from "../audio/stereo-loudness.js";
-import { renameWithRetry } from "../world/atomic.js";
+import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
+import { readPublicationFile } from "../publications/files.js";
 import { readContainedMediaBytes } from "../world/reference-files.js";
+import { containedWorldFilePath } from "../world/contained-file.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { AUDIO_STUDIO_SOURCE_BYTES, audioStudioCache, readAudioStudioSource } from "./audio-studio-source.js";
 
@@ -46,10 +48,10 @@ async function verifySource(dir: string, source: AudioSource, signal: AbortSigna
   if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) throw new AudioArrangementRefusal(`${source.label}: audio changed; review its replacement`);
 }
 /** A two-pass streamed mix: one master gain, retained tails, and no whole-chapter allocation. */
-export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean; solo?: string[] } = {}) {
+export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { ffmpeg?: FfmpegRunner; signal?: AbortSignal; final?: boolean; solo?: string[]; unavailable?: ReadonlyMap<string, string> } = {}) {
   const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
-  const unavailable = new Set<string>();
+  const unavailable = new Set<string>(options.unavailable?.keys());
   const files = new Map<string, AudioSource>();
   for (const clip of state.clips) if (clip.source) {
     const prior = files.get(clip.source.file);
@@ -58,6 +60,10 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   }
   for (const source of files.values()) try { await verifySource(dir, source, signal); } catch (error) { if (signal.aborted) throw error; unavailable.add(source.file); }
   const plan = resolveAudioArrangement(state, script, unavailable);
+  for (const issue of plan.issues) if (issue.kind === "source") {
+    const file = state.clips.find(clip => clip.id === issue.id)?.source?.file;
+    if (file && options.unavailable?.has(file)) issue.message = options.unavailable.get(file)!;
+  }
   if (options.final && plan.issues.length) throw new AudioArrangementRefusal(`Audio Studio needs attention: ${plan.issues.map(issue => issue.message).join("; ")}`);
   if (plan.samples === 0) throw new AudioArrangementRefusal("There is no arranged audio to play yet");
   const header = stereoWavHeader(plan.samples);
@@ -65,8 +71,21 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   const speech = playable.filter(entry => entry.clip.role === "speech").map(entry => ({ at: entry.at, samples: entry.samples }));
   const folder = await audioStudioCache(dir, "mix"), id = ulid();
   const rawPath = join(folder, `${id}.f32`), wavPath = join(folder, `${id}.wav`);
-  const hash = createHash("sha256").update(JSON.stringify({ renderer: 1, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
+  const decoder = options.ffmpeg?.identity ? await options.ffmpeg.identity(signal) : "native-or-injected";
+  const hash = createHash("sha256").update(JSON.stringify({ renderer: 1, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
   const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
+  const receiptFile = `.cache/audio-studio/mix/${hash}.json`;
+  try {
+    const bytes = await readContainedMediaBytes(dir, receiptFile, signal, 4096);
+    const receipt = JSON.parse(Buffer.from(bytes).toString("utf8")) as { sha256?: string; gainDb?: number; lufs?: number | null };
+    if (/^[a-f0-9]{64}$/.test(receipt.sha256 ?? "") && Number.isFinite(receipt.gainDb) && (receipt.lufs === null || Number.isFinite(receipt.lufs))) {
+      const measured = await readPublicationFile(dir, file, 4 * 1024 ** 3, signal);
+      if (measured.sha256 === receipt.sha256 && measured.byteLength === header.length + plan.samples * 4) {
+        signal.throwIfAborted();
+        return { file, seconds: plan.samples / AUDIO_STUDIO_RATE, from: 0, issues: plan.issues, plan, gainDb: receipt.gainDb!, lufs: receipt.lufs! };
+      }
+    }
+  } catch (error) { if (signal.aborted) throw error; /* Missing or damaged derived cache is rebuilt. */ }
   const raw = await open(rawPath, "wx+");
   let output: Awaited<ReturnType<typeof open>> | undefined;
   const cache = new Map<string, StereoPcm>(); let cacheBytes = 0;
@@ -112,9 +131,36 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     // Even cached/long-playing sources must still be the reviewed bytes at publication time.
     for (const source of files.values()) if (!unavailable.has(source.file)) await verifySource(dir, source, signal);
     signal.throwIfAborted(); await renameWithRetry(wavPath, finalPath);
+    const digest = await readPublicationFile(dir, file, 4 * 1024 ** 3, signal);
+    await atomicWriteFile(await containedWorldFilePath(dir, receiptFile, true, "audio render receipt"), JSON.stringify({ sha256: digest.sha256, gainDb, lufs: measured.lufs }));
     return { file, seconds: plan.samples / AUDIO_STUDIO_RATE, from: 0, issues: plan.issues, plan, gainDb, lufs: measured.lufs };
   } finally {
     await output?.close().catch(() => {}); await raw.close();
     await Promise.all([rawPath, wavPath].map(path => rm(path, { force: true }).catch(() => {})));
   }
+}
+
+/** Crop the already mastered PCM on sample boundaries; range audition never masters again. */
+export async function audioStudioMixWindow(dir: string, mix: { file: string; seconds: number }, from: number, to: number, signal: AbortSignal) {
+  const total = Math.round(mix.seconds * AUDIO_STUDIO_RATE);
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > total) throw new AudioArrangementRefusal("Choose a loop range within the chapter");
+  if (from === 0 && to === total) return { ...mix, from: 0 };
+  const folder = await audioStudioCache(dir, "mix"), key = createHash("sha256").update(`${mix.file}/${from}/${to}`).digest("hex");
+  const target = join(folder, `${key}.wav`), temp = join(folder, `${ulid()}.wav`);
+  const source = await open(await containedWorldFilePath(dir, mix.file, false, "audio audition"), "r");
+  let output: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    output = await open(temp, "wx"); await output.writeFile(stereoWavHeader(to - from));
+    const buffer = Buffer.alloc(CHUNK * 4);
+    let cursor = from * 4, remaining = (to - from) * 4;
+    while (remaining > 0) {
+      signal.throwIfAborted();
+      const length = Math.min(buffer.length, remaining), result = await source.read(buffer, 0, length, 44 + cursor);
+      if (!result.bytesRead) throw new Error("The mastered audio is truncated");
+      await output.writeFile(buffer.subarray(0, result.bytesRead)); cursor += result.bytesRead; remaining -= result.bytesRead;
+    }
+    await output.sync(); await output.close(); output = undefined;
+    signal.throwIfAborted(); await renameWithRetry(temp, target);
+    return { file: `.cache/audio-studio/mix/${key}.wav`, seconds: (to - from) / AUDIO_STUDIO_RATE, from: from / AUDIO_STUDIO_RATE };
+  } finally { await source.close(); await output?.close().catch(() => {}); await rm(temp, { force: true }).catch(() => {}); }
 }

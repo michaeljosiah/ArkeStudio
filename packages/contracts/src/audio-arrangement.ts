@@ -117,6 +117,7 @@ export function resolveAudioArrangement(state: AudioArrangementState, script: Au
   for (const clip of state.clips) resolve(clip.id);
   for (const current of script.passages) if (![...bindings.values()].some(bound => bound.key === current.key)) issue("passage", current.key, "This new or changed passage needs an arranged performance");
   const entries = [...resolved.values()].filter((entry): entry is ResolvedAudioClip => entry !== null);
+  for (const entry of entries) if (entry.muted && entry.clip.role === "speech" && !entry.clip.repeated && entry.clip.passageId && !omitted.includes(entry.clip.passageId)) issue("passage", entry.clip.passageId, `${entry.clip.label}: the performance is muted; unmute it or acknowledge its omission before delivery`);
   return { sampleRate: AUDIO_STUDIO_RATE, channels: 2, samples: Math.max(0, ...entries.map(entry => entry.at + entry.samples)), clips: entries,
     passages: order.flatMap(id => { const value = spans.get(id); return value ? [{ id, key: bindings.get(id)!.key, ...value }] : []; }), issues, omitted };
 }

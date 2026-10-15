@@ -22,6 +22,8 @@ export interface Clip {
   sub?: string;
   /** Physical source coordinates for an explicitly reviewed excerpt. */
   range?: { inSec: number; outSec: number };
+  /** Loop a physically cropped, sample-aligned audition file through the same app player. */
+  loop?: boolean;
 }
 
 export interface PlaybackState {
@@ -36,7 +38,7 @@ export interface PlaybackState {
 type AudioLike = Pick<
   HTMLAudioElement,
   "src" | "currentTime" | "duration" | "play" | "pause" | "load" | "removeAttribute" | "addEventListener" | "removeEventListener"
-> & { playbackRate?: number };
+> & { playbackRate?: number; loop?: boolean };
 
 const IDLE: PlaybackState = { clip: null, status: "idle", currentTime: 0, duration: 0, error: null };
 
@@ -122,6 +124,7 @@ export async function playClip(clip: Clip, playlistOwned = false): Promise<void>
   const generation = ++playGeneration;
   const element = ensureAudio();
   element.playbackRate = playlistOwned ? playlist?.rate ?? 1 : 1;
+  element.loop = clip.loop === true;
   if (state.clip?.url !== clip.url || JSON.stringify(state.clip?.range) !== JSON.stringify(clip.range)) {
     element.pause();
     element.currentTime = 0;
@@ -238,6 +241,10 @@ export function seekTo(seconds: number): void {
 }
 
 /** Stop, detach the source and take the dock down. */
+export function dismissClip(expectedClipId: string): void {
+  if (state.clip?.id === expectedClipId) dismissPlayback();
+}
+
 export function dismissPlayback(): void {
   playlist = null;
   playGeneration += 1;
