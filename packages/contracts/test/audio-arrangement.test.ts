@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { AudioArrangementSchema, AUDIO_STUDIO_HISTORY, type AudioArrangementCommand, type AudioArrangementState, type AudioSource } from "../src/audio-arrangement-schema.js";
-import { audioClipGain, audioReplacementDiff, audioSamples, bindAudioPassages, editAudioArrangement, initialAudioArrangement, newAudioClip, resolveAudioArrangement, validateAudioArrangement } from "../src/audio-arrangement.js";
+import { audioCrossfade, audioClipGain, audioReplacementDiff, audioSamples, bindAudioPassages, editAudioArrangement, initialAudioArrangement, newAudioClip, resolveAudioArrangement, validateAudioArrangement } from "../src/audio-arrangement.js";
 import { migrateAudioArrangement } from "../src/audio-arrangement-migration.js";
 import { audiobookTimingHash, timeChapter } from "../src/audiobook-timing.js";
 
@@ -19,6 +19,25 @@ function state(): AudioArrangementState {
 const change = (held: AudioArrangementState, commands: AudioArrangementCommand[]) => editAudioArrangement(initialAudioArrangement(held, "{}"), { kind: "commands", label: "Edit", commands });
 
 describe("Audio Studio sample clock and source review (SPEC-047 R-187..R-194)", () => {
+  it("crossfades exact windows with linked placement and one undo entry", () => {
+    const current = state();
+    const commands = audioCrossfade(current, script, "first", "second", audioSamples(.5));
+    const saved = change(current, commands), plan = resolveAudioArrangement(saved.current, script);
+    assert.equal(plan.clips.find(entry => entry.clip.id === "second")?.at, audioSamples(4.5));
+    assert.deepEqual(saved.current.clips[1]!.placement, { kind: "sequence", offset: -audioSamples(.5) });
+    assert.equal(saved.current.clips[0]!.sourceOut, current.clips[0]!.sourceOut);
+    assert.equal(saved.current.clips[1]!.sourceIn, current.clips[1]!.sourceIn);
+    assert.equal(saved.undo.length, 1);
+    assert.deepEqual(editAudioArrangement(saved, { kind: "undo" }).current, current);
+    assert.throws(() => audioCrossfade(current, script, "first", "second", audioSamples(3)), /shorter/);
+    current.clips[1]!.protected = true;
+    assert.throws(() => audioCrossfade(current, script, "first", "second", audioSamples(.5)), /protection/);
+  });
+  it("removing a repeated performance does not omit the original passage", () => {
+    const repeated = change(state(), [{ kind: "duplicate-clip", id: "first", nextId: "repeat", at: audioSamples(20) }]).current;
+    const removed = change(repeated, [{ kind: "remove-clip", id: "repeat" }]).current;
+    assert.deepEqual(removed.omissions, []); assert.deepEqual(resolveAudioArrangement(removed, script).issues, []);
+  });
   it("requires explicit omission acknowledgement for muted speech but not solo audition", () => {
     const current = state(); current.tracks[0]!.muted = true;
     assert.equal(resolveAudioArrangement(current, script).issues.filter(issue => issue.kind === "passage").length, 2);
@@ -105,6 +124,16 @@ describe("durable arrangement edits", () => {
     assert.equal(JSON.stringify(current), before);
   });
 
+  it("splits a range bed at a linked boundary while retaining its original ending", () => {
+    const current = state(), bed = { ...newAudioClip("bed", "sounds", source("bed", 2), audioSamples(2)), loop: true,
+      placement: { kind: "range" as const, from: { passageId: "one", edge: "start" as const, offset: 0 }, to: { passageId: "two", edge: "end" as const, offset: 0 } } };
+    current.clips.push(bed);
+    const split = change(current, [{ kind: "split-clip", id: "bed", nextId: "bed-tail", at: audioSamples(3) }]);
+    const plan = resolveAudioArrangement(split.current, script), left = plan.clips.find(entry => entry.clip.id === "bed")!, right = plan.clips.find(entry => entry.clip.id === "bed-tail")!;
+    assert.equal(left.samples, audioSamples(3)); assert.equal(right.at, audioSamples(3)); assert.equal(right.samples, audioSamples(5));
+    assert.equal(right.clip.loopOffset, audioSamples(3)); assert.deepEqual(right.clip.source, left.clip.source);
+    assert.deepEqual(right.clip.placement.kind === "range" && right.clip.placement.to, bed.placement.to);
+  });
   it("splits at an exact sample without losing source or passage identity", () => {
     const split = change(state(), [{ kind: "split-clip", id: "first", nextId: "first-right", at: 12001 }]);
     const plan = resolveAudioArrangement(split.current, script), left = plan.clips.find(entry => entry.clip.id === "first")!, right = plan.clips.find(entry => entry.clip.id === "first-right")!;
@@ -131,6 +160,13 @@ describe("durable arrangement edits", () => {
     assert.deepEqual(editAudioArrangement(editAudioArrangement(acknowledged, { kind: "undo" }), { kind: "undo" }).current, state());
   });
 
+  it("clears an omission only after the author has restored an audible primary performance", () => {
+    const current = state(), original = current.clips[0]!;
+    const removed = change(current, [{ kind: "remove-clip", id: original.id }]).current;
+    assert.throws(() => change(removed, [{ kind: "clear-omission", id: original.id }]), /audible performance/);
+    const restored = change(removed, [{ kind: "add-clip", clip: original }, { kind: "clear-omission", id: original.id }]).current;
+    assert.deepEqual(restored.omissions, []); assert.deepEqual(resolveAudioArrangement(restored, script).issues, []);
+  });
   it("requires a distinct protection release and retains the rest of the clip", () => {
     const held = change(state(), [{ kind: "protect-clip", id: "first", protected: true }]);
     assert.throws(() => editAudioArrangement(held, { kind: "commands", label: "Move", commands: [{ kind: "set-clip", id: "first", changes: { gainDb: -3 } }] }), /protection/);

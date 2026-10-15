@@ -19,6 +19,13 @@ describe("Audio Studio edit preparation", () => {
     assert.deepEqual(snapshot, original); assert.equal(review.base, snapshot.base); assert.equal(review.trimsReset, true);
     assert.equal(review.current.samples, audioSamples(2)); assert.equal(review.suggested.samples, audioSamples(5));
   });
+  it("attaches cues to the selected passage while preserving their playhead offset", () => {
+    const snapshot = fixture(), source = snapshot.state.clips[0]!.source!;
+    const commands = audioStudioAddition(snapshot, source, { at: 12001, anchorKey: "p0.0" });
+    const command = commands.at(-1)!;
+    assert.equal(command.kind, "add-clip");
+    if (command.kind === "add-clip") { assert.equal(command.clip.role, "sfx"); assert.deepEqual(command.clip.placement, { kind: "passage", anchor: { passageId: "passage", edge: "start", offset: 12001 } }); }
+  });
   it("keeps dropped effects fixed and explicitly attaches a selected performance", () => {
     const snapshot = fixture(), source = snapshot.state.clips[0]!.source!;
     const drop = audioStudioAddition(snapshot, source, { at: 12001, trackId: "voice" });

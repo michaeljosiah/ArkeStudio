@@ -1,4 +1,5 @@
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
+import { AudioStudioPassagePanel } from "./audio-studio-passage-panel.js";
 import { Composer } from "../components/composer.js";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
@@ -1843,7 +1844,8 @@ export function ChapterWorkspace({
   );
   // The block panel's Timing tab (design turn 194g): its timing, then its reactions and bed, then
   // Play with neighbours and Open in Timing — the Timing view, on the same block.
-  const timingPanel = (
+  const timingPanel = timedRecord?.arrangement ? <AudioStudioPassagePanel key={`${worldId}/${prodId}/${chapter.id}`} worldId={worldId} productionId={prodId} chapterId={chapter.id} chapterFile={chapter.file}
+    connection={connection} stamp={audiobook.lastRecord?.seq} passageKey={audiobook.selected} locked={timingLocked} onOpen={() => chooseView("timing")} /> : (
     <BlockTimingPanel
       bar={selectedBar}
       timing={audiobook.timing}
@@ -1940,8 +1942,8 @@ export function ChapterWorkspace({
         passage={audiobook.selected} onPassage={audiobook.setSelected}
         onBack={() => chooseView("audiobook")} onExport={openChapterExport} exportDisabled={connection !== "open" || record === null}
         propose={<div className="fy-audio-studio__propose"><p>Discuss the arrangement with Arke. Review proposed changes before applying them.</p></div>}
-        conversation={<ProductionConversation worldId={worldId} productionId={prodId} entry={{ kind: "production", productionId: prodId }} subject={dockSubject}
-          dock={{ title: "Arke", subject: chapter.title, conversationFirst: true, subjectPrefix: dockPrefix, about: chapterLabel }} placeholder={"Ask about " + chapterLabel} emptyLine={"No conversation about " + chapterLabel + " yet."} />}
+        conversation={context => <ProductionConversation worldId={worldId} productionId={prodId} entry={{ kind: "production", productionId: prodId }} subject={dockSubject}
+          dock={{ title: "Arke", subject: chapter.title, conversationFirst: true, subjectPrefix: `${context} ${dockPrefix}`, about: chapterLabel }} placeholder={"Ask about " + chapterLabel} emptyLine={"No conversation about " + chapterLabel + " yet."} />}
       />}
       <main className="fy-sw__centre" ref={chapterCentre} hidden={view === "timing"}>
         {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so

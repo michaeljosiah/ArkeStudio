@@ -1,13 +1,8 @@
-import type { AudioArrangementCommand, AudioPlacement, ResolvedAudioClip } from "@arke-studio/contracts";
+export { shiftAudioPlacement } from "@arke-studio/contracts";
+import { shiftAudioPlacement, type AudioArrangementCommand, type ResolvedAudioClip } from "@arke-studio/contracts";
 import type { PictureGesture } from "./picture-edit.js";
 
 /** The shared pointer engine measures integer units; Audio Studio supplies samples, never fps. */
-export function shiftAudioPlacement(placement: AudioPlacement, delta: number): AudioPlacement {
-  if (placement.kind === "fixed") return { ...placement, at: placement.at + delta };
-  if (placement.kind === "sequence") return { ...placement, offset: placement.offset + delta };
-  if (placement.kind === "passage") return { ...placement, anchor: { ...placement.anchor, offset: placement.anchor.offset + delta } };
-  return { ...placement, from: { ...placement.from, offset: placement.from.offset + delta }, to: { ...placement.to, offset: placement.to.offset + delta } };
-}
 export function audioGestureCommand(entry: ResolvedAudioClip, gesture: PictureGesture, delta: number): AudioArrangementCommand | null {
   if (!Number.isSafeInteger(delta) || !delta || entry.clip.protected) return null;
   const clip = entry.clip;
@@ -15,6 +10,11 @@ export function audioGestureCommand(entry: ResolvedAudioClip, gesture: PictureGe
   if (clip.placement.kind === "range") {
     const edge = gesture === "trim-start" ? "from" : "to";
     return { kind: "set-clip", id: clip.id, changes: { placement: { ...clip.placement, [edge]: { ...clip.placement[edge], offset: clip.placement[edge].offset + delta } } } };
+  }
+  if (clip.loop) {
+    if (gesture === "trim-end") return { kind: "set-clip", id: clip.id, changes: { loopDuration: Math.max(1, entry.samples + delta), fadeIn: Math.min(clip.fadeIn, Math.max(1, entry.samples + delta)), fadeOut: Math.min(clip.fadeOut, Math.max(0, entry.samples + delta - clip.fadeIn)) } };
+    const amount = Math.max(-(clip.loopOffset ?? 0), -entry.at, Math.min(entry.samples - 1, delta)), duration = entry.samples - amount;
+    return { kind: "set-clip", id: clip.id, changes: { loopOffset: (clip.loopOffset ?? 0) + amount, loopDuration: duration, placement: shiftAudioPlacement(clip.placement, amount), fadeIn: Math.min(clip.fadeIn, duration), fadeOut: Math.min(clip.fadeOut, Math.max(0, duration - clip.fadeIn)) } };
   }
   if (gesture === "trim-start") {
     const amount = Math.max(-clip.sourceIn, -entry.at, Math.min(clip.sourceOut - clip.sourceIn - 1, delta));

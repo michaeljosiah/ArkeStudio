@@ -3612,8 +3612,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("read-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("decide-audio-studio-proposal"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, id: z.string().min(1).max(160), version: z.number().int().min(1), decision: z.enum(["keep", "apply"]) }).strict(),
   z.object({ kind: z.literal("edit-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema }).strict(),
-  z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000) }).strict(),
+  z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000), expectedHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), waveform: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("preview-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema,
     base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema.optional(), solo: z.array(z.string().min(1).max(160)).max(128).optional(),
     window: z.object({ from: z.number().int().nonnegative(), to: z.number().int().positive() }).strict().optional() }).strict(),

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ChapterAudiobookSchema, initialAudioArrangement, newAudioClip, DEFAULT_NARRATOR, type AudioArrangementEdit } from "@arke-studio/contracts";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
-import { openAudioStudio, editAudioStudio } from "../../src/productions/audio-studio.js";
+import { openAudioStudio, editAudioStudio, stageAudioStudioProposal, decideAudioStudioProposal, audioStudioSnapshot } from "../../src/productions/audio-studio.js";
 import { readAudioStudioSource } from "../../src/productions/audio-studio-source.js";
 import { readStereoWav, resampleStereo, writeStereoWav } from "../../src/audio/stereo-wav.js";
 import { AUDIO_STUDIO_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -25,6 +25,42 @@ async function fixture(run: (store: WorldStore, worldDir: string) => Promise<voi
   try { await run(provider.openStore!()!, worldDir); } finally { await provider.close(); }
 }
 describe("Audio Studio durable authority", () => {
+  it("stages without migrating, keeps decisions across revisions, and applies an exact version with one Undo", () => fixture(async store => {
+    assert.equal(addTrack.kind, "commands"); if (addTrack.kind !== "commands") return;
+    const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    const input = { base: opened.base, summary: "Add effects", commands: addTrack.commands };
+    const family = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-1", input);
+    const staged = await audioStudioSnapshot(store, PRODUCTION, CHAPTER);
+    assert.equal(staged.revision, 0); assert.deepEqual(staged.state, opened.state);
+    assert.equal(staged.base, family.versions[0]!.base);
+    await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, family.id, 1, "keep");
+    const kept = await audioStudioSnapshot(store, PRODUCTION, CHAPTER);
+    assert.equal(kept.base, staged.base); assert.equal(kept.proposals?.[0]?.status, "kept");
+    await assert.rejects(stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-2", { ...input, base: kept.base, family: { id: family.id, version: 1 } }), /Keep Current/);
+    await assert.rejects(decideAudioStudioProposal(store, PRODUCTION, CHAPTER, family.id, 1, "apply"), /already decided/);
+    const fresh = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-3", { ...input, base: kept.base });
+    const revised = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-4", { ...input, base: kept.base, summary: "Effects lane", family: { id: fresh.id, version: 1 } });
+    assert.equal(revised.versions.length, 2);
+    await assert.rejects(decideAudioStudioProposal(store, PRODUCTION, CHAPTER, fresh.id, 1, "apply"), /changed/);
+    const applied = await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, fresh.id, 2, "apply");
+    assert.equal(applied.arrangement?.undo.length, 1); assert.equal(applied.arrangement?.current.tracks.at(-1)?.id, "fx");
+    assert.equal(applied.audioStudioProposals?.at(-1)?.status, "applied");
+    const current = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    const undone = await editAudioStudio(store, PRODUCTION, CHAPTER, current.base, { kind: "undo" });
+    assert.deepEqual(undone.arrangement?.current, opened.state);
+    assert.equal(undone.audioStudioProposals?.at(-1)?.status, "applied", "Undo does not reopen a decided proposal");
+  }));
+  it("refuses stale proposal application and model protection or omission acknowledgements", () => fixture(async store => {
+    if (addTrack.kind !== "commands") return;
+    const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    const staged = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-1", { base: opened.base, summary: "Effects", commands: addTrack.commands });
+    const current = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    await editAudioStudio(store, PRODUCTION, CHAPTER, current.base, { kind: "commands", label: "Master", commands: [{ kind: "set-master", master: { targetLufs: -20, ceilingDb: -1 } }] });
+    await assert.rejects(decideAudioStudioProposal(store, PRODUCTION, CHAPTER, staged.id, 1, "apply"), /changed since/);
+    const fresh = await openAudioStudio(store, PRODUCTION, CHAPTER);
+    await assert.rejects(stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "release", { base: fresh.base, summary: "Release", commands: [{ kind: "protect-clip", id: "voice", protected: false }] }), /cannot release/);
+    await assert.rejects(stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "omit", { base: fresh.base, summary: "Omit", commands: [{ kind: "omit-passage", id: fresh.state.passages[0]!.id, label: "Missing", acknowledged: true }] }), /cannot release/);
+  }));
   it("files imports before placement and keeps stale and partly failed imports recoverable", () => fixture(async (store, dir) => {
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
     const file = join(dir, "import-studio.wav"), pcm = new Float32Array(4800).fill(.1);
@@ -130,6 +166,18 @@ describe("Audio Studio durable authority", () => {
 });
 
 describe("Audio Studio source decoding", () => {
+  it("decodes a real imported MP3 into the canonical stereo clock", { skip: process.env.ARKE_STORY_CODEC_SMOKE !== "1" }, () => fixture(async (_store, dir) => {
+    const { execFile } = await import("node:child_process"), { promisify } = await import("node:util");
+    const exec = promisify(execFile), input = join(dir, "artifacts", "import.wav"), file = "artifacts/import.mp3";
+    const left = Float32Array.from({ length: 11025 }, (_, i) => Math.sin(i * 2 * Math.PI * 440 / 44100) * .1);
+    const right = Float32Array.from({ length: 11025 }, (_, i) => Math.sin(i * 2 * Math.PI * 880 / 44100) * .4);
+    await writeFile(input, writeStereoWav({ rate: 44100, channels: 2, left, right }));
+    await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", ["-y", "-i", input, "-c:a", "libmp3lame", "-b:a", "192k", join(dir, file)], { windowsHide: true, timeout: 30000 });
+    const decoded = await readAudioStudioSource(dir, file, { ffmpeg: { slateFont: "", run: async (args, _progress, signal) => { await exec(process.env.ARKE_FFMPEG ?? "ffmpeg", args, { signal, windowsHide: true, timeout: 30000 }); } } });
+    assert.equal(decoded.source.samples, 12000); assert.equal(decoded.pcm.rate, 48000); assert.equal(decoded.pcm.channels, 2);
+    const energy = (samples: Float32Array) => samples.reduce((total, sample) => total + sample * sample, 0);
+    assert.ok(energy(decoded.pcm.right) > energy(decoded.pcm.left) * 10, "independent stereo channels survive import");
+  }));
   it("preserves independent stereo channels and canonical sample counts", () => {
     const left = Float32Array.from([0.25, 0.5, -0.25, -0.5]), right = Float32Array.from([-0.5, -0.25, 0.5, 0.25]);
     const wav = writeStereoWav({ rate: 24000, channels: 2, left, right });

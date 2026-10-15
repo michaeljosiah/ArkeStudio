@@ -22,6 +22,9 @@ export const AudioSourceSchema = z.object({
   artifactId: z.string().min(1).max(160).optional(),
 }).strict();
 export type AudioSource = z.infer<typeof AudioSourceSchema>;
+export const AudioWaveformSchema = z.object({ hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), samples: Sample,
+  left: z.array(z.number().min(0).max(1)).max(2048), right: z.array(z.number().min(0).max(1)).max(2048) }).strict();
+export type AudioWaveform = z.infer<typeof AudioWaveformSchema>;
 export const AudioArrangementRoleSchema = z.enum(["speech", "music", "ambience", "sfx"]);
 export const AudioArrangementTrackSchema = z.object({ id: Id, name: z.string().trim().min(1).max(120), gainDb: Gain, muted: z.boolean() }).strict();
 export type AudioArrangementTrack = z.infer<typeof AudioArrangementTrackSchema>;
@@ -39,6 +42,7 @@ export const AudioClipSchema = z.object({
   sourceIn: Sample, sourceOut: Sample, placement: AudioPlacementSchema,
   gainDb: Gain, pan: z.number().min(-1).max(1), fadeIn: Sample, fadeOut: Sample,
   loop: z.boolean(), loopFade: Sample, duckDb: z.number().min(0).max(30),
+  loopOffset: Sample.optional(), loopDuration: Sample.nullable().optional(),
   protected: z.boolean(), repeated: z.boolean(),
 }).strict();
 export type AudioClip = z.infer<typeof AudioClipSchema>;
@@ -76,6 +80,7 @@ export const AudioArrangementCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("add-passage"), passage: AudioPassageSchema }).strict(),
   z.object({ kind: z.literal("omit-passage"), id: Id, label: z.string().max(200), acknowledged: z.boolean() }).strict(),
   z.object({ kind: z.literal("acknowledge-omission"), id: Id, acknowledged: z.boolean() }).strict(),
+  z.object({ kind: z.literal("clear-omission"), id: Id }).strict(),
   z.object({ kind: z.literal("set-master"), master: AudioArrangementStateSchema.shape.master }).strict(),
 ]);
 export type AudioArrangementCommand = z.infer<typeof AudioArrangementCommandSchema>;
@@ -86,7 +91,26 @@ export const AudioArrangementEditSchema = z.discriminatedUnion("kind", [
 ]);
 export type AudioArrangementEdit = z.infer<typeof AudioArrangementEditSchema>;
 
+/** Proposals never own an arrangement; they retain the exact batch offered for human review. */
+export const AudioStudioProposalInputSchema = z.object({
+  base: z.string().regex(/^[a-f0-9]{64}$/), summary: z.string().trim().min(1).max(200),
+  commands: z.array(AudioArrangementCommandSchema).min(1).max(100),
+  family: z.object({ id: Id, version: z.number().int().min(1) }).strict().optional(),
+}).strict();
+export type AudioStudioProposalInput = z.infer<typeof AudioStudioProposalInputSchema>;
+export const AudioStudioProposalSchema = z.object({
+  id: Id, status: z.enum(["pending", "kept", "applied"]),
+  versions: z.array(z.object({
+    actionId: Id, number: z.number().int().min(1), base: z.string().regex(/^[a-f0-9]{64}$/),
+    summary: z.string().min(1).max(200), commands: z.array(AudioArrangementCommandSchema).min(1).max(100),
+  }).strict()).min(1).max(20),
+  resultRevision: z.number().int().min(1).optional(),
+}).strict();
+export type AudioStudioProposal = z.infer<typeof AudioStudioProposalSchema>;
+
 export const AudioStudioSnapshotSchema = z.object({
+  proposals: z.array(AudioStudioProposalSchema).max(100).optional(),
+  unavailable: z.array(z.object({ file: z.string(), message: z.string() }).strict()).optional(),
   base: z.string().regex(/^[a-f0-9]{64}$/), revision: z.number().int().min(0),
   undo: z.string().nullable(), redo: z.string().nullable(), state: AudioArrangementStateSchema,
   script: z.object({ hash: z.string(), passages: z.array(z.object({ key: z.string(), textHash: z.string() }).strict()) }).strict(),

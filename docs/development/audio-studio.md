@@ -15,6 +15,10 @@ pending draft and autosave survive view changes.
 Inspector and repair controls. The timeline reuses video tool icons and `startClipGesture`,
 with an adapter measuring audio samples rather than video frames. Typed fields provide
 placement and source-window edits without dragging. Clip roles are independent of track names.
+Cues added beside a selected passage retain that passage anchor and their playhead offset.
+Crossfade overlaps consecutive clips without changing their source windows or attachment modes.
+Looped beds retain sample phase across splits, including passage ranges. Source waveforms use
+bounded stereo peak data from the exact pinned decode, loaded sequentially for visible clips.
 Track mute is persisted and labelled “in mix”; solo is transient audition state. Muted passage
 performances require explicit omission acknowledgement before final delivery.
 
@@ -22,7 +26,10 @@ Library imports use the existing desktop/browser filing pipeline. Filing precede
 a stale chapter base leaves imported media available in Library and refuses the obsolete edit.
 Sources are prepared against current catalogue scope, exact bytes and recording clearance.
 Source replacement opens Current/Suggested with timing differences and trim-reset disclosure.
-Apply commits one command batch; Keep Current writes no arrangement.
+Apply commits one command batch; Keep Current writes no arrangement. The comparison names
+fixed cues and track/master/omission changes and can display either version on the timeline.
+The Audiobook Timing tab uses the same Inspector and commands after migration. Old timing
+messages remain refused rather than creating a second writable authority.
 
 ## Persistence and rendering
 
@@ -46,14 +53,26 @@ revision, source bytes and compiler identity. Retry renders those frozen inputs.
 convert legacy mono chapters to the arranged book's 48 kHz stereo format without remastering
 the arranged chapters. Create still revalidates the source against the preview.
 
+## Arke review
+
+The production conversation carries chapter, passage, clip, track and arrangement revision/base
+context. `get_chapter` with `section: "audio-studio"` provides paged exact sources, tracks, clips,
+passages and prior decisions. `production-audio-studio-propose` requires that complete read and
+stages a bounded versioned command batch in the chapter record. Generic chat approval cannot
+apply it. Audio Studio compares Current/Suggested and applies the exact latest version through
+the same revision-fenced reducer, atomically recording the decision with one Undo entry.
+
+Keep Current closes the proposal family durably; later revisions cannot reopen it. Undo of an
+applied arrangement does not reopen its proposal either. Arke cannot release clip protection,
+acknowledge omissions or declare a passage restored. Those decisions remain explicit editor
+controls. Staging and declining do not migrate or change audio, and do not invalidate the audio
+base. Proposal metadata is kept outside the arrangement undo history.
+
 ## Work remaining before release
 
-Legacy timing controls must route through the saved arrangement after migration; their current
-guard prevents a second writable authority. Arke arrangement proposals, persistent review
-decisions and selection context are still being integrated. Remaining acceptance work includes
-repair edge cases, waveform presentation, crossfades, complete browser interactions, video
-regressions and the final cross-platform code gate. These are release requirements, not deferred
-features. Editable automation lanes, stems and word-level attachment remain later design scope.
+Full browser interaction and real playback acceptance, video regressions and the final
+cross-platform code gate are still being completed for PR #1780. Editable automation lanes,
+stems and word-level attachment remain later design scope.
 
 ## Validation
 
@@ -61,7 +80,10 @@ Contracts: `test/audio-arrangement.test.ts` covers sample placement, conservativ
 replacement ripple, fixed cues, protection, durable history and explicit omissions.
 Coordinator: `test/productions/audio-studio.test.ts`, `audio-studio-mix.test.ts` and
 `test/publications/story.test.ts` cover persistence, stale imports, source changes, stereo,
-sample-aligned windows, frozen retry and parity between Listen and publication PCM.
+sample-aligned windows, phase-preserving loop splits, frozen retry and parity between Listen
+and publication PCM. `test/world-chat/audio-studio-proposals.test.ts` verifies section-scoped
+read receipts and the human-only apply boundary; `test/audio/waveform.test.ts` verifies stereo
+peaks and transient retention.
 Set `ARKE_STORY_CODEC_SMOKE=1` for real FFmpeg AAC publication with mixed arranged/legacy chapters.
 
 From `packages/client`, run the edit preparation, player ownership and entry tests:

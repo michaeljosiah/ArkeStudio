@@ -17,7 +17,7 @@ import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
-import { AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
+import { AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
@@ -1586,7 +1586,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ ...base, type: z.literal("audio-studio.state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema,
-    studio: AudioStudioSnapshotSchema.nullable(), source: AudioSourceSchema.nullable(), refused: z.string().optional() }).strict(),
+    studio: AudioStudioSnapshotSchema.nullable(), source: AudioSourceSchema.nullable(), waveform: AudioWaveformSchema.optional(), refused: z.string().optional() }).strict(),
   /**
    * The book read as one run (SPEC-047 R-16..R-18): started under the run's request (a cloned
    * voice's consent is asked under it), priced once for every chapter's cloud blocks, a chapter

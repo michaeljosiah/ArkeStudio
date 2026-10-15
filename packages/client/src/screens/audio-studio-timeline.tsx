@@ -1,3 +1,5 @@
+import { AudioStudioWaveform } from "./audio-studio-waveform.js";
+import type { WaveformRequest } from "../lib/audio-studio-waveform.js";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { audioSamples, audioSeconds, formatTimingSeconds, ulid, type AudioArrangementCommand, type AudioArrangementState, type ResolvedAudioArrangement, type ResolvedAudioClip } from "@arke-studio/contracts";
 import { AudioPlus, Copy, Hand, Minus, Plus, Pointer, RotateCcw, RotateCw, Scissors, Snap, SplitMark, Trash, Waveform } from "../components/icons.js";
@@ -9,8 +11,9 @@ import { audioGestureCommand } from "../lib/audio-studio-gesture.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "./editor-audio.js";
 
 export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSelect, onTrack, at, onSeek, disabled,
-  undo, redo, onHistory, onEdit, solo, onSolo, onDrop, onFiles,
+  undo, redo, onHistory, onEdit, solo, onSolo, onDrop, onFiles, waveform,
 }: {
+  waveform?: WaveformRequest;
   state: AudioArrangementState; plan: ResolvedAudioArrangement; selected: string | null; selectedTrack: string | null;
   onSelect: (id: string) => void; onTrack: (id: string) => void; at: number; onSeek: (samples: number) => void; disabled: boolean;
   undo: string | null; redo: string | null; onHistory: (kind: "undo" | "redo") => void;
@@ -24,9 +27,9 @@ export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSe
   const span = Math.max(audioSamples(10), plan.samples + audioSamples(2)), percent = (samples: number) => `${samples / span * 100}%`;
   const picked = plan.clips.find(entry => entry.clip.id === selected);
   const canEdit = !disabled && picked !== undefined && !picked.clip.protected;
-  const canSplit = canEdit && !picked.clip.loop && picked.clip.placement.kind !== "range" && at > picked.at && at < picked.at + picked.samples;
+  const canSplit = canEdit && at > picked.at && at < picked.at + picked.samples;
   const split = (entry: ResolvedAudioClip, point: number) => {
-    if (disabled || entry.clip.protected || entry.clip.loop || entry.clip.placement.kind === "range" || point <= entry.at || point >= entry.at + entry.samples) return;
+    if (disabled || entry.clip.protected || point <= entry.at || point >= entry.at + entry.samples) return;
     onEdit("Split clip", [{ kind: "split-clip", id: entry.clip.id, nextId: ulid(), at: point - entry.at }]);
   };
   const editSelected = (kind: "split" | "duplicate" | "remove") => {
@@ -88,6 +91,7 @@ export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSe
             const delta = gesture?.clipId === entry.clip.id ? gesture.deltaFrames : 0;
             const start = entry.at + (gesture?.gesture !== "trim-end" ? delta : 0), length = entry.samples + (gesture?.gesture === "trim-end" ? delta : gesture?.gesture === "trim-start" ? -delta : 0);
             return <button type="button" key={entry.clip.id} data-clip={entry.clip.id} className={cx("fy-typedclip", "fy-typedclip--audio", selected === entry.clip.id && "fy-typedclip--selected")} aria-pressed={selected === entry.clip.id} aria-label={`${entry.clip.label}, ${formatTimingSeconds(audioSeconds(entry.at))}, ${entry.clip.role}`} style={{ left: percent(start), width: `${Math.max(length / span * 100, 0.6)}%` }} onPointerDown={begin(entry, "move")} onClick={event => { onSelect(entry.clip.id); if (tool === "blade") split(entry, point(event.currentTarget.parentElement!, event.clientX)); }}>
+              {waveform && <AudioStudioWaveform entry={entry} request={waveform} />}
               <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(entry, "trim-start")} aria-hidden="true"><i /></span><span className="fy-typedclip__name">{entry.clip.label}</span><span className="fy-typedclip__gain">{entry.clip.protected ? "Protected · " : ""}{entry.clip.role}{entry.clip.gainDb ? ` · ${entry.clip.gainDb} dB` : ""}</span><span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(entry, "trim-end")} aria-hidden="true"><i /></span>
             </button>;
           })}

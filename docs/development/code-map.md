@@ -6,11 +6,15 @@ Audio Studio (approved turn 226): client
 connects acknowledged state, source replacement review, import, audition and chapter export;
 `audio-studio-timeline.tsx` shares the video pointer engine through `lib/audio-studio-gesture.ts`.
 `audio-studio-library.tsx`, `audio-studio-inspector.tsx` and `audio-studio-repairs.tsx` own their panels.
+`audio-studio-passage-panel.tsx` routes the existing Audiobook Timing tab to this authority.
+`audio-studio-waveform.tsx` and `lib/audio-studio-waveform.ts` load bounded exact-source stereo peaks.
 `production-shell.tsx` selects editor chrome for `view=audio-studio` and old `view=timing` links.
 Remembered Timing views canonicalise to Audio Studio without changing world data.
 `audiobook.tsx` adds the book menu entry. Contracts `audio-arrangement*.ts` own sample-domain
 placement, migration and durable history. Coordinator `productions/audio-studio.ts` owns read,
-source and revision-checked edit commands through the audiobook record lane; `audio-studio-mix.ts`
+source, proposal decisions and revision-checked edit commands through the audiobook record lane;
+`world-chat/audio-studio-proposals.ts` stages reviewed command families through the native
+conversation lifecycle, using the `get_chapter` audio-studio read section. `audio-studio-mix.ts`
 streams stereo renders using `audio/stereo-wav.ts` and `stereo-loudness.ts`. `audio-studio-listening.ts`
 maps the same plan to Listen, captions and web/video exports. `audio-studio-preview.ts` drains
 cancelled auditions; `audio-studio-import.ts` files before revision-checked placement. Private

@@ -5781,9 +5781,13 @@ export function editAudioStudio(worldId: string, productionId: string, chapterFi
   const requestId = ulid();
   return send({ kind: "edit-audio-studio", worldId, productionId, chapterFile, base, edit, requestId }) ? requestId : null;
 }
-export function readAudioStudioSource(worldId: string, productionId: string, chapterFile: string, file: string): string | null {
+export function decideAudioStudioProposal(worldId: string, productionId: string, chapterFile: string, id: string, version: number, decision: "keep" | "apply"): string | null {
   const requestId = ulid();
-  return send({ kind: "read-audio-studio-source", worldId, productionId, chapterFile, file, requestId }) ? requestId : null;
+  return send({ kind: "decide-audio-studio-proposal", worldId, productionId, chapterFile, id, version, decision, requestId }) ? requestId : null;
+}
+export function readAudioStudioSource(worldId: string, productionId: string, chapterFile: string, file: string, waveform?: boolean, expectedHash?: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-studio-source", worldId, productionId, chapterFile, file, requestId, ...(waveform !== undefined ? { waveform } : {}), ...(expectedHash ? { expectedHash } : {}) }) ? requestId : null;
 }
 export function previewAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, options: { edit?: import("@arke-studio/contracts").AudioArrangementEdit; solo?: string[]; window?: { from: number; to: number } } = {}): string | null {
   const requestId = ulid();

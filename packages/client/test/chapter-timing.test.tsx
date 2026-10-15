@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import {
+  initialAudioArrangement, newAudioClip,
   audiobookTextHash,
   timeChapter,
   type ArtifactSidecar,
@@ -22,6 +23,7 @@ import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, Timi
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { playerChapters } from "../src/components/audiobook-player.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
+import { AudioStudioPassagePanel } from "../src/screens/audio-studio-passage-panel.js";
 import { ChapterAudioStudio } from "../src/screens/chapter-audio-studio.js";
 import { __clearChapterViewsForTest, rememberChapterView } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -506,3 +508,26 @@ describe("Audio Studio composes the existing editor around chapter timing", () =
   });
 });
 
+
+
+describe("saved arrangement in the Audiobook Timing tab", () => {
+  it("routes protection and timing controls to the canonical arrangement command with its reviewed base", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() { return () => {}; }, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as ArkeBridge);
+    __setStateForTest(FIXTURE_STATE, { connection: "open" });
+    const clip = { ...newAudioClip("voice", "narrator", null, 48000), role: "speech" as const, passageId: "passage", placement: { kind: "sequence" as const, offset: 0 } };
+    const arrangement = initialAudioArrangement({ manuscriptHash: "script", passages: [{ id: "passage", key: "p0.0", textHash: "text" }], tracks: [{ id: "narrator", name: "Narrator", gainDb: 0, muted: false }], clips: [clip], omissions: [], master: { targetLufs: -18, ceilingDb: -1.5 } }, "{}");
+    const mounted = await render(<AudioStudioPassagePanel worldId={FIXTURE_WORLD_ID} productionId="saltlight" chapterId="chapter" chapterFile="01-chapter" connection="open" stamp={0} passageKey="p0.0" locked={false} onOpen={() => {}} />);
+    const read = sent.find(message => message.kind === "read-audio-studio")!;
+    assert.equal(read.kind, "read-audio-studio"); if (read.kind !== "read-audio-studio") return;
+    await act(async () => __applyEventForTest({ type: "audio-studio.state", at: AT, worldId: FIXTURE_WORLD_ID, productionId: "saltlight", chapterId: "chapter", requestId: read.requestId, source: null,
+      studio: { base: "a".repeat(64), revision: 1, undo: null, redo: null, state: arrangement.current, script: { hash: "script", passages: [{ key: "p0.0", textHash: "text" }] }, passages: [{ key: "p0.0", text: "A line." }], library: [] } }));
+    assert.ok(q(mounted, '[aria-label="Gap / overlap (s)"]'));
+    const protect = all(mounted, "button").find(button => button.textContent === "Protect clip")!;
+    await act(async () => protect.click());
+    const edit = sent.find(message => message.kind === "edit-audio-studio");
+    assert.ok(edit?.kind === "edit-audio-studio"); assert.equal(edit.base, "a".repeat(64));
+    assert.deepEqual(edit.edit, { kind: "commands", label: "Protect clip", commands: [{ kind: "protect-clip", id: "voice", protected: true }] });
+    assert.equal(sent.some(message => message.kind === "set-audiobook-timing"), false);
+  });
+});

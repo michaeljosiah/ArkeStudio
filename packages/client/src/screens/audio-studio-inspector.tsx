@@ -56,7 +56,7 @@ function ClipInspector({ clip, snapshot, disabled, onEdit, onReplace }: { clip: 
         <h3>Mix</h3><NumberField label="Clip level (dB)" value={draft.gainDb} min={-96} max={24} step={0.1} onChange={value => change("gainDb", value)} /><NumberField label="Pan (−1 left, +1 right)" value={draft.pan} min={-1} max={1} step={0.05} onChange={value => change("pan", value)} />
         {seconds("Fade in (s)", draft.fadeIn, value => change("fadeIn", value), 0)}{seconds("Fade out (s)", draft.fadeOut, value => change("fadeOut", value), 0)}
         <label className="fy-audio-inspector__check"><input type="checkbox" checked={draft.loop} onChange={event => change("loop", event.target.checked)} />Loop source window</label>
-        {draft.loop && seconds("Loop crossfade (s)", draft.loopFade, value => change("loopFade", value), 0)}
+        {draft.loop && <>{seconds("Loop crossfade (s)", draft.loopFade, value => change("loopFade", value), 0)}{seconds("Loop offset (s)", draft.loopOffset ?? 0, value => change("loopOffset", value), 0)}{mode.kind !== "range" && seconds("Loop duration (s)", draft.loopDuration ?? draft.sourceOut - draft.sourceIn, value => change("loopDuration", value), 0)}</>}
         <NumberField label="Duck under speech (dB)" value={draft.duckDb} min={0} max={30} step={0.5} onChange={value => change("duckDb", value)} />
         {dirty && base !== snapshot.base && <p role="status">The arrangement changed while you edited. Reset these fields before applying.</p>}
         <div className="fy-audio-inspector__actions"><Button type="submit" variant="primary" disabled={!dirty || base !== snapshot.base}>Apply changes</Button><Button type="button" variant="ghost" disabled={!dirty} onClick={reset}>Reset fields</Button></div>

@@ -146,7 +146,7 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
  * chapter's paid takes again.
  */
 export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook, beforeWrite?: () => Promise<void>): Promise<void> {
-  if (untimed.arrangement !== undefined) await store.ensureSchemaVersion(AUDIO_STUDIO_SCHEMA_VERSION, "audio-studio");
+  if (untimed.arrangement !== undefined || untimed.audioStudioProposals !== undefined) await store.ensureSchemaVersion(AUDIO_STUDIO_SCHEMA_VERSION, "audio-studio");
   // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
   // only when it holds something, and the world raised before the first record carrying any.
   const { timing, reactions, beds, sounds, ownLooks, seams, beats, ...bare } = untimed;

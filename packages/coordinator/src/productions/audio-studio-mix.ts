@@ -18,6 +18,7 @@ const CHUNK = AUDIO_STUDIO_RATE;
 function sourceSample(channel: Float32Array, entry: ResolvedAudioClip, local: number): number {
   const clip = entry.clip, length = clip.sourceOut - clip.sourceIn;
   if (!clip.loop) return channel[clip.sourceIn + local] ?? 0;
+  local += clip.loopOffset ?? 0;
   const seam = clip.loopFade;
   if (!seam) return channel[clip.sourceIn + local % length] ?? 0;
   const period = length - seam;

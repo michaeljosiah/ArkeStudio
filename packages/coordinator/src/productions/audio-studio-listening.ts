@@ -3,7 +3,7 @@ import { audioSeconds, audiobookTextHash, listeningChapter, validateAcousticWord
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { AudiobookPlan } from "./audiobook.js";
-import { audioStudioScript, audioStudioSourceProblems } from "./audio-studio.js";
+import { audioStudioScript, audioStudioSourceProblems, openAudioStudio } from "./audio-studio.js";
 import { renderAudioStudioMix } from "./audio-studio-mix.js";
 
 /** A migrated chapter never falls back to a newly selected take or the old timing fields. */
@@ -15,9 +15,14 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
   const record = plan.record === "unreadable" ? null : plan.record;
   const arrangement = record?.arrangement;
   if (!arrangement) throw new Error("The chapter has no saved audio arrangement");
+  const opened = await openAudioStudio(store, input.productionId, input.chapterId, input);
+  if (JSON.stringify(opened.saved) !== JSON.stringify(arrangement) || opened.script.hash !== plan.chapter.hash) throw new Error("The chapter changed while preparing Listen; open it again");
   const state = arrangement.current;
   const unavailable = await audioStudioSourceProblems(store, input.productionId, state);
   const rendered = await renderAudioStudioMix(store.dir, state, audioStudioScript(plan), { ...input, unavailable, signal: input.signal ? AbortSignal.any([store.closingSignal, input.signal]) : store.closingSignal });
+  const fresh = await openAudioStudio(store, input.productionId, input.chapterId, input);
+  const currentAvailability = await audioStudioSourceProblems(store, input.productionId, state);
+  if (fresh.base !== opened.base || JSON.stringify([...currentAvailability]) !== JSON.stringify([...unavailable])) throw new Error("The chapter or source clearance changed during rendering; open Listen again");
   const badSources = new Set(rendered.plan.issues.filter(issue => issue.kind === "source").map(issue => issue.id));
   const performances = rendered.plan.clips.filter(entry => entry.clip.role === "speech" && entry.clip.source && !entry.muted && !badSources.has(entry.clip.id));
   const spans = rendered.plan.passages.filter(passage => passage.samples > 0 && performances.some(entry => entry.clip.passageId === passage.id && !entry.clip.repeated));
@@ -59,7 +64,7 @@ export async function audioStudioListening(store: WorldStore, plan: AudiobookPla
       const timing = Object.values(record!.wordTiming ?? {}).find(value => value.audioHash === entry.clip.source!.hash && value.textHash === audiobookTextHash(text));
       if (!timing || !validateAcousticWords(text, { text, seconds: timing.seconds, engine: timing.engine, words: timing.words }).ok) { reason = "word timing not prepared for this exact arranged take"; break; }
       if (entry.clip.loop || performances.some(other => other.clip.id !== entry.clip.id && other.at < entry.at + entry.samples && other.at + other.samples > entry.at)) { reason = "overlapping or looped voices need a caption lane"; break; }
-      const from = audioSeconds(entry.clip.sourceIn), to = audioSeconds(entry.clip.sourceOut), at = audioSeconds(entry.at);
+      const from = audioSeconds(entry.clip.sourceIn), to = Math.min(audioSeconds(entry.clip.sourceOut), from + audioSeconds(entry.samples)), at = audioSeconds(entry.at);
       for (const word of timing.words) if (word.endSec > from && word.startSec < to) words.push({ ...word,
         startSec: at + Math.max(from, word.startSec) - from, endSec: at + Math.min(to, word.endSec) - from });
     }

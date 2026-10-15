@@ -107,3 +107,6 @@
 .fy-audio-review { padding:12px; border:1px solid var(--border); border-radius:var(--radius-md); max-height:260px; overflow:auto; font:var(--type-ui); }
 .fy-audio-review header { display:flex; gap:12px; flex-wrap:wrap; }
 .fy-audio-review ul { margin:8px 0; padding-left:20px; }
+
+.fy-audio-waveform { position: absolute; inset: 18px 4px 4px; width: calc(100% - 8px); height: calc(100% - 22px); opacity: .3; pointer-events: none; }
+.fy-audio-waveform path { fill: none; stroke: currentColor; stroke-width: .55; vector-effect: non-scaling-stroke; }

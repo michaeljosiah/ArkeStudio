@@ -1,10 +1,33 @@
 import { textDigest } from "./subtitles.js";
 import { AUDIO_STUDIO_HISTORY, AUDIO_STUDIO_MAX_SAMPLES, AUDIO_STUDIO_RATE, AudioArrangementEditSchema, AudioArrangementStateSchema,
-  type AudioArrangement, type AudioArrangementCommand, type AudioArrangementEdit, type AudioArrangementState, type AudioClip, type AudioSource } from "./audio-arrangement-schema.js";
+  type AudioArrangement, type AudioArrangementCommand, type AudioArrangementEdit, type AudioArrangementState, type AudioClip, type AudioSource, type AudioPlacement } from "./audio-arrangement-schema.js";
 
 export class AudioArrangementRefusal extends Error {}
 export const audioSamples = (seconds: number): number => Math.round(seconds * AUDIO_STUDIO_RATE);
 export const audioSeconds = (samples: number): number => samples / AUDIO_STUDIO_RATE;
+export function shiftAudioPlacement(placement: AudioPlacement, delta: number): AudioPlacement {
+  if (placement.kind === "fixed") return { ...placement, at: placement.at + delta };
+  if (placement.kind === "sequence") return { ...placement, offset: placement.offset + delta };
+  if (placement.kind === "passage") return { ...placement, anchor: { ...placement.anchor, offset: placement.anchor.offset + delta } };
+  return { ...placement, from: { ...placement.from, offset: placement.from.offset + delta }, to: { ...placement.to, offset: placement.to.offset + delta } };
+}
+
+/** Crossfades overlap two exact windows, preserving their existing attachment modes. */
+export function audioCrossfade(state: AudioArrangementState, script: AudioScript, leftId: string, rightId: string, samples: number): AudioArrangementCommand[] {
+  const plan = resolveAudioArrangement(state, script), left = plan.clips.find(entry => entry.clip.id === leftId), right = plan.clips.find(entry => entry.clip.id === rightId);
+  if (!left || !right || left.clip.trackId !== right.clip.trackId || right.at <= left.at) throw new AudioArrangementRefusal("Select consecutive clips on one track");
+  if (plan.clips.some(entry => entry.clip.trackId === left.clip.trackId && entry.at > left.at && entry.at < right.at)) throw new AudioArrangementRefusal("Crossfade consecutive clips on the track");
+  if (left.clip.protected || right.clip.protected) throw new AudioArrangementRefusal("Release protection on both clips before crossfading");
+  if (!Number.isSafeInteger(samples) || samples <= 0 || samples >= left.samples || samples >= right.samples || left.clip.fadeIn + samples > left.samples || right.clip.fadeOut + samples > right.samples) throw new AudioArrangementRefusal("Choose an overlap shorter than both clips and their existing fades");
+  const commands: AudioArrangementCommand[] = [
+    { kind: "set-clip", id: leftId, changes: { fadeOut: samples } },
+    { kind: "set-clip", id: rightId, changes: { fadeIn: samples, placement: shiftAudioPlacement(right.clip.placement, left.at + left.samples - samples - right.at) } },
+  ];
+  const next = resolveAudioArrangement(editedState(state, commands), script);
+  const afterLeft = next.clips.find(entry => entry.clip.id === leftId), afterRight = next.clips.find(entry => entry.clip.id === rightId);
+  if (!afterLeft || !afterRight || afterLeft.at + afterLeft.samples - afterRight.at !== samples || next.issues.some(issue => issue.kind === "cycle" || issue.kind === "range")) throw new AudioArrangementRefusal("These attachments cannot form that overlap; adjust their attachment first");
+  return commands;
+}
 export interface AudioScript { hash: string; passages: readonly { key: string; textHash: string }[] }
 export interface AudioArrangementIssue { kind: "passage" | "source" | "cycle" | "omission" | "range"; id: string; message: string }
 export interface ResolvedAudioClip { clip: AudioClip; at: number; samples: number; gainDb: number; muted: boolean }
@@ -85,7 +108,7 @@ export function resolveAudioArrangement(state: AudioArrangementState, script: Au
     if (resolved.has(id)) return resolved.get(id)!;
     const clip = clips.get(id);
     if (!clip || !enter(`clip:${id}`)) return null;
-    let at: number | null = null, samples = clip.sourceOut - clip.sourceIn;
+    let at: number | null = null, samples = clip.loopDuration ?? clip.sourceOut - clip.sourceIn;
     const placement = clip.placement;
     if (placement.kind === "fixed") at = placement.at;
     else if (placement.kind === "sequence") {
@@ -138,7 +161,9 @@ export function validateAudioArrangement(input: AudioArrangementState): AudioArr
     if (clip.placement.kind === "sequence" && (clip.passageId === undefined || clip.role !== "speech")) throw new AudioArrangementRefusal("Only a passage performance can follow the reading sequence");
     if (clip.sourceOut <= clip.sourceIn || clip.source !== null && clip.sourceOut > clip.source.samples) throw new AudioArrangementRefusal("The trim is outside this exact source");
     const duration = clip.sourceOut - clip.sourceIn;
-    if (clip.fadeIn + clip.fadeOut > duration && clip.placement.kind !== "range") throw new AudioArrangementRefusal("The fades exceed the clip length");
+    if (clip.fadeIn + clip.fadeOut > (clip.loopDuration ?? duration) && clip.placement.kind !== "range") throw new AudioArrangementRefusal("The fades exceed the clip length");
+    if (!clip.loop && (clip.loopDuration != null || (clip.loopOffset ?? 0) > 0) || clip.placement.kind === "range" && clip.loopDuration != null) throw new AudioArrangementRefusal("Only a loop outside a passage range has a separate duration");
+    if (clip.loopDuration === 0) throw new AudioArrangementRefusal("A loop must have a positive duration");
     if (clip.loopFade * 2 > duration) throw new AudioArrangementRefusal("The loop seam exceeds half the source window");
   }
   if (state.omissions.some(entry => !passageIds.has(entry.passageId))) throw new AudioArrangementRefusal("The omitted passage no longer exists");
@@ -169,23 +194,33 @@ function editedState(input: AudioArrangementState, commands: readonly AudioArran
         if (state.clips.some(clip => clip.trackId === command.id)) throw new AudioArrangementRefusal("Move or remove the track's clips first");
         state.tracks = state.tracks.filter(track => track.id !== command.id); break;
       case "add-clip": state.clips.push(structuredClone(command.clip)); break;
-      case "set-clip": Object.assign(clipFor(command.id), structuredClone(command.changes)); break;
+      case "set-clip": {
+        const clip = clipFor(command.id); Object.assign(clip, structuredClone(command.changes));
+        if (!clip.loop) { delete clip.loopDuration; delete clip.loopOffset; }
+        if (clip.placement.kind === "range") delete clip.loopDuration;
+        break;
+      }
       case "protect-clip": clipFor(command.id, true).protected = command.protected; break;
       case "remove-clip": {
         const clip = clipFor(command.id);
-        if (clip.role === "speech" && clip.passageId !== undefined) state.omissions.push({ id: clip.id, passageId: clip.passageId, label: clip.label, acknowledged: false });
+        if (clip.role === "speech" && !clip.repeated && clip.passageId !== undefined) state.omissions.push({ id: clip.id, passageId: clip.passageId, label: clip.label, acknowledged: false });
         state.clips = state.clips.filter(entry => entry.id !== command.id); break;
       }
       case "split-clip": {
         const clip = clipFor(command.id);
-        if (clip.loop || clip.placement.kind === "range") throw new AudioArrangementRefusal("Set a fixed source window before splitting a loop or range");
-        const length = clip.sourceOut - clip.sourceIn;
+        const length = clip.placement.kind === "range" ? resolveAudioArrangement(state, { hash: state.manuscriptHash, passages: state.passages }).clips.find(entry => entry.clip.id === clip.id)?.samples ?? 0
+          : clip.loopDuration ?? clip.sourceOut - clip.sourceIn;
         if (command.at <= 0 || command.at >= length) throw new AudioArrangementRefusal("Split inside the clip");
-        const next = structuredClone(clip); next.id = command.nextId; next.sourceIn += command.at; next.fadeIn = 0;
-        if (next.placement.kind === "fixed") next.placement.at += command.at;
-        else if (next.placement.kind === "sequence") next.placement.offset += command.at;
-        else if (next.placement.kind === "passage") next.placement.anchor.offset += command.at;
-        clip.sourceOut = clip.sourceIn + command.at; clip.fadeOut = 0;
+        const next = structuredClone(clip); next.id = command.nextId; next.fadeIn = 0;
+        if (clip.placement.kind === "range" && next.placement.kind === "range") {
+          const cut = { ...clip.placement.from, offset: clip.placement.from.offset + command.at };
+          clip.placement.to = cut; next.placement.from = { ...cut };
+        } else next.placement = shiftAudioPlacement(next.placement, command.at);
+        if (clip.loop) {
+          next.loopOffset = (clip.loopOffset ?? 0) + command.at;
+          if (clip.placement.kind !== "range") { clip.loopDuration = command.at; next.loopDuration = length - command.at; }
+        } else { next.sourceIn += command.at; clip.sourceOut = clip.sourceIn + command.at; clip.loopFade = Math.min(clip.loopFade, Math.floor(command.at / 2)); next.loopFade = Math.min(next.loopFade, Math.floor((next.sourceOut - next.sourceIn) / 2)); }
+        clip.fadeOut = 0;
         clip.fadeIn = Math.min(clip.fadeIn, command.at); next.fadeOut = Math.min(next.fadeOut, length - command.at);
         state.clips.push(next); break;
       }
@@ -214,6 +249,12 @@ function editedState(input: AudioArrangementState, commands: readonly AudioArran
         const omission = state.omissions.find(entry => entry.id === command.id);
         if (!omission) throw new AudioArrangementRefusal("That omission no longer exists");
         omission.acknowledged = command.acknowledged; break;
+      }
+      case "clear-omission": {
+        const omission = state.omissions.find(entry => entry.id === command.id);
+        if (!omission) throw new AudioArrangementRefusal("That omission no longer exists");
+        if (!state.clips.some(clip => clip.passageId === omission.passageId && clip.role === "speech" && !clip.repeated && clip.source && !state.tracks.find(track => track.id === clip.trackId)?.muted)) throw new AudioArrangementRefusal("Arrange an audible performance before marking this passage restored");
+        state.omissions = state.omissions.filter(entry => entry.id !== command.id); break;
       }
       case "set-master": state.master = structuredClone(command.master); break;
     }

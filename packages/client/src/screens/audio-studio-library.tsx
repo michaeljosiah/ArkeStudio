@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { audioSamples, type AudioArrangementCommand, type AudioStudioSnapshot } from "@arke-studio/contracts";
+import { audioCrossfade, resolveAudioArrangement, audioSamples, type AudioArrangementCommand, type AudioStudioSnapshot } from "@arke-studio/contracts";
 import { Button, Input } from "../components/ui.js";
 import { Speaker } from "../components/icons.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "./editor-audio.js";
@@ -11,6 +11,10 @@ export function AudioStudioLibrary({ snapshot, selected, disabled, replacing, on
 }) {
   const [tab, setTab] = useState("Media"), [search, setSearch] = useState("");
   const clip = snapshot.state.clips.find(entry => entry.id === selected);
+  const next = clip ? resolveAudioArrangement(snapshot.state, snapshot.script).clips.filter(entry => entry.clip.trackId === clip.trackId).sort((a, b) => a.at - b.at) : [];
+  const right = next[next.findIndex(entry => entry.clip.id === clip?.id) + 1];
+  let crossfade: AudioArrangementCommand[] = [], crossfadeProblem = "Select two consecutive clips";
+  if (clip && right) { try { crossfade = audioCrossfade(snapshot.state, snapshot.script, clip.id, right.clip.id, audioSamples(.5)); } catch (error) { crossfadeProblem = error instanceof Error ? error.message : String(error); } }
   const effect = (label: string, changes: Extract<AudioArrangementCommand, { kind: "set-clip" }>["changes"]) => { if (clip) onEdit(label, [{ kind: "set-clip", id: clip.id, changes }]); };
   return <div className="fy-audio-library"><header className="fy-artpanel__head"><b>Library</b><Button size="sm" disabled={disabled} onClick={onImport}>Import</Button></header>
     <div className="fy-audio-library__tabs" role="tablist" aria-label="Library content">{["Media", "Effects", "Transitions"].map(value => <button type="button" key={value} role="tab" aria-selected={tab === value} onClick={() => setTab(value)}>{value}</button>)}</div>
@@ -22,7 +26,7 @@ export function AudioStudioLibrary({ snapshot, selected, disabled, replacing, on
     {tab !== "Media" && <div className="fy-audio-library__items"><p>{clip ? `Apply to ${clip.label}` : "Select a clip to apply an effect."}</p>
       <fieldset disabled={disabled || !clip || clip.protected} className="fy-audio-library__presets">
         {tab === "Effects" ? <><Button onClick={() => effect("Duck under speech", { duckDb: 12 })}>Duck under speech · −12 dB</Button><Button onClick={() => effect("Remove speech ducking", { duckDb: 0 })}>Remove ducking</Button><Button onClick={() => effect("Centre audio", { pan: 0 })}>Centre pan</Button><Button onClick={() => effect("Loop source", { loop: true, loopFade: Math.min(audioSamples(.02), Math.floor((clip!.sourceOut - clip!.sourceIn) / 2)) })}>Loop with smooth seam</Button></>
-          : <><Button onClick={() => effect("Fade in", { fadeIn: Math.min(audioSamples(.5), clip!.sourceOut - clip!.sourceIn - clip!.fadeOut) })}>Fade in · 0.5 s</Button><Button onClick={() => effect("Fade out", { fadeOut: Math.min(audioSamples(.5), clip!.sourceOut - clip!.sourceIn - clip!.fadeIn) })}>Fade out · 0.5 s</Button><Button onClick={() => effect("Remove fades", { fadeIn: 0, fadeOut: 0 })}>Remove fades</Button></>}
+          : <><Button onClick={() => effect("Fade in", { fadeIn: Math.min(audioSamples(.5), clip!.sourceOut - clip!.sourceIn - clip!.fadeOut) })}>Fade in · 0.5 s</Button><Button onClick={() => effect("Fade out", { fadeOut: Math.min(audioSamples(.5), clip!.sourceOut - clip!.sourceIn - clip!.fadeIn) })}>Fade out · 0.5 s</Button><Button onClick={() => effect("Remove fades", { fadeIn: 0, fadeOut: 0 })}>Remove fades</Button><Button disabled={!crossfade.length} title={crossfade.length ? `Overlap with ${right?.clip.label}` : crossfadeProblem} onClick={() => onEdit("Crossfade clips", crossfade)}>Crossfade with next · 0.5 s</Button></>}
       </fieldset><p>Adjust exact values in the Inspector. Changes can be undone.</p></div>}
   </div>;
 }

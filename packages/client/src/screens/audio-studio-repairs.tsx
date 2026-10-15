@@ -28,6 +28,8 @@ export function AudioStudioRepairs({ snapshot, plan, disabled, onSelect, onRevie
         }}>Review omission</Button>}
       </div>;
     })}
-    {snapshot.state.omissions.filter(entry => entry.acknowledged).map(entry => <p key={entry.id}>{entry.label} · omission acknowledged</p>)}
+    {snapshot.state.omissions.map(entry => <div key={entry.id}><p>{entry.label} · {entry.acknowledged ? "omission acknowledged" : "omission needs review"}</p>
+      {plan.clips.some(clip => clip.clip.passageId === entry.passageId && clip.clip.role === "speech" && !clip.clip.repeated && clip.clip.source && !clip.muted) && <Button size="sm" disabled={disabled} onClick={() => onReview("Confirm restored performance", [{ kind: "clear-omission", id: entry.id }])}>Review restored passage</Button>}
+    </div>)}
   </details>;
 }

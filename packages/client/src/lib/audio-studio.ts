@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AudioArrangementEdit, AudioSource, AudioStudioSnapshot } from "@arke-studio/contracts";
-import { editAudioStudio, previewAudioStudio, readAudioStudio, readAudioStudioSource, stopAudioStudioPreview, subscribeAudioStudio, subscribeAudiobookMix } from "./store.js";
+import type { AudioArrangementEdit, AudioWaveform, AudioSource, AudioStudioSnapshot } from "@arke-studio/contracts";
+import { decideAudioStudioProposal, editAudioStudio, previewAudioStudio, readAudioStudio, readAudioStudioSource, stopAudioStudioPreview, subscribeAudioStudio, subscribeAudiobookMix } from "./store.js";
 import { dismissClip, dismissPlayback, playClip, usePlayback } from "./audio.js";
 import { claimRead, releaseRead } from "./reply-reads.js";
 import { mediaUrl } from "./media.js";
@@ -11,7 +11,7 @@ export function useAudioStudio(input: { worldId: string; productionId: string; c
   const [snapshot, setSnapshot] = useState<AudioStudioSnapshot | null>(null);
   const [pending, setPending] = useState(false), [problem, setProblem] = useState<string | null>(null);
   const request = useRef<{ id: string; edit: boolean } | null>(null);
-  const sources = useRef(new Map<string, (source: AudioSource | null, problem?: string) => void>());
+  const sources = useRef(new Map<string, (source: AudioSource | null, problem?: string, waveform?: AudioWaveform) => void>());
   const clear = useCallback(() => {
     request.current = null; setPending(false);
     for (const callback of sources.current.values()) callback(null, "The connection closed; choose the source again");
@@ -20,7 +20,7 @@ export function useAudioStudio(input: { worldId: string; productionId: string; c
   useEffect(() => subscribeAudioStudio(answer => {
     if (answer.worldId !== worldId || answer.productionId !== productionId) return;
     const callback = sources.current.get(answer.requestId);
-    if (callback) { sources.current.delete(answer.requestId); callback(answer.source, answer.refused); return; }
+    if (callback) { sources.current.delete(answer.requestId); callback(answer.source, answer.refused, answer.waveform); return; }
     if (answer.requestId !== request.current?.id) return;
     request.current = null; setPending(false); setProblem(answer.refused ?? null);
     if (answer.studio) setSnapshot(answer.studio);
@@ -39,13 +39,19 @@ export function useAudioStudio(input: { worldId: string; productionId: string; c
     if (!id) return false;
     request.current = { id, edit: true }; setPending(true); setProblem(null); return true;
   }, [snapshot, worldId, productionId, chapterFile, connection]);
-  const source = useCallback((file: string, callback: (source: AudioSource | null, problem?: string) => void) => {
+  const decide = useCallback((id: string, version: number, decision: "keep" | "apply"): boolean => {
+    if (connection !== "open" || request.current) return false;
+    const requestId = decideAudioStudioProposal(worldId, productionId, chapterFile, id, version, decision);
+    if (!requestId) return false;
+    request.current = { id: requestId, edit: true }; setPending(true); setProblem(null); return true;
+  }, [worldId, productionId, chapterFile, connection]);
+  const source = useCallback((file: string, callback: (source: AudioSource | null, problem?: string, waveform?: AudioWaveform) => void, waveform?: boolean, expectedHash?: string) => {
     if (connection !== "open") { callback(null, "Reconnect to prepare this source"); return; }
-    const id = readAudioStudioSource(worldId, productionId, chapterFile, file);
+    const id = readAudioStudioSource(worldId, productionId, chapterFile, file, waveform, expectedHash);
     if (!id) { callback(null, "The request could not be sent"); return; }
     sources.current.set(id, callback);
   }, [worldId, productionId, chapterFile, connection]);
-  return { snapshot, pending, problem, setProblem, refresh, edit, source };
+  return { snapshot, pending, problem, setProblem, refresh, edit, source, decide };
 }
 
 /** Audition consumes a physical sample-aligned excerpt through the existing single audio player. */

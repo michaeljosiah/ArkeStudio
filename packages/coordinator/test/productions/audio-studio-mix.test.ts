@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newAudioClip, resolveAudioArrangement, type AudioArrangementState } from "@arke-studio/contracts";
+import { initialAudioArrangement, editAudioArrangement, newAudioClip, resolveAudioArrangement, type AudioArrangementState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { readStereoWav, writeStereoWav } from "../../src/audio/stereo-wav.js";
 import { integratedLoudness } from "../../src/audio/speech-wav.js";
@@ -22,6 +22,17 @@ async function fixture() {
   return { dir, arranged, pcm, source };
 }
 describe("Audio Studio canonical stereo rendering", () => {
+  it("splits looped source windows without resetting phase or altering the audible samples", async () => {
+    const { arranged, pcm, source } = await fixture();
+    const clip = arranged.clips[0]!; clip.loop = true; clip.loopFade = 1200; clip.loopDuration = 130007;
+    const before = mixAudioStudioChunk(resolveAudioArrangement(arranged, script).clips, new Map([[source.file, pcm]]), 0, 130007, []);
+    const split = editAudioArrangement(initialAudioArrangement(arranged, "{}"), { kind: "commands", label: "Split bed", commands: [{ kind: "split-clip", id: clip.id, nextId: "tail", at: 47001 }] });
+    const plan = resolveAudioArrangement(split.current, script);
+    assert.equal(plan.samples, 130007); assert.equal(plan.clips[1]!.clip.loopOffset, 47001);
+    const after = mixAudioStudioChunk(plan.clips, new Map([[source.file, pcm]]), 0, 130007, []);
+    assert.deepEqual(after, before);
+    assert.deepEqual(editAudioArrangement(split, { kind: "undo" }).current, arranged);
+  });
   it("reuses only a verified mix cache and rebuilds damaged cached output", async () => {
     const { dir, arranged } = await fixture();
     const first = await renderAudioStudioMix(dir, arranged, script), expected = await readFile(join(dir, first.file));

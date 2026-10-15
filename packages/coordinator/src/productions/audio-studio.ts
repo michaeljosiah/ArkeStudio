@@ -3,6 +3,7 @@ import {
   AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, editAudioArrangement,
   initialAudioArrangement, migrateAudioArrangement, resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
+  AudioStudioProposalInputSchema, type AudioStudioProposalInput, type AudioStudioProposal,
   type AudioSource, type AudioStudioSnapshot, type ChapterAudiobook,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -22,7 +23,9 @@ export function audioStudioScript(plan: AudiobookPlan): AudioScript {
 }
 /** Includes the record and the cast/book-derived passage structure, not merely a revision number. */
 function baseOf(plan: AudiobookPlan): string {
-  return digest({ chapter: plan.chapter.hash, record: plan.record, book: plan.book, blocks: plan.blocks.map(({ block }) => block) });
+  // Staging or declining a suggestion cannot invalidate its own reviewed audio base.
+  const record = plan.record && plan.record !== "unreadable" ? { ...plan.record, audioStudioProposals: undefined } : plan.record;
+  return digest({ chapter: plan.chapter.hash, record, book: plan.book, blocks: plan.blocks.map(({ block }) => block) });
 }
 async function currentPlan(store: WorldStore, productionId: string, chapterId: string): Promise<AudiobookPlan> {
   const plan = await planAudiobook(store, productionId, chapterId, { narrator: DEFAULT_NARRATOR });
@@ -37,18 +40,26 @@ export function audioStudioLibrary(store: WorldStore, productionId: string) {
     (artifact.generation?.source !== "audiobook" || artifact.generation.productionId === productionId));
 }
 /** Current catalogue scope and recorded-performance clearance remain live after placement. */
-export async function audioStudioSourceProblems(store: WorldStore, productionId: string, state: { clips: readonly { source: AudioSource | null; label: string }[] }): Promise<Map<string, string>> {
+export async function audioStudioSourceProblems(store: WorldStore, productionId: string, state: { clips: readonly { source: AudioSource | null; label: string }[] }, verifyBytes = false): Promise<Map<string, string>> {
   const problems = new Map<string, string>(), library = audioStudioLibrary(store, productionId);
+  const checked = new Set<string>();
   const rights = await readAudioRights(store);
   for (const clip of state.clips) if (clip.source) {
     const source = clip.source, artifact = library.find(entry => `artifacts/${entry.file}` === source.file);
     if (!artifact || source.artifactId && artifact.id !== source.artifactId || !source.hash.startsWith(artifact.hash)) { problems.set(source.file, `${clip.label}: the reviewed source is no longer available in this production`); continue; }
     const generation = artifact.generation;
     if (generation?.source === "audiobook" && generation.recording && !effectiveAudioRights(rights, generation.recording.preparedHash, "recorded-take").some(event => event.id === generation.recording!.acknowledgementId)) problems.set(source.file, `${clip.label}: recording clearance needs review`);
+    if (verifyBytes && !checked.has(source.file)) {
+      checked.add(source.file);
+      try {
+        const bytes = await readContainedMediaBytes(store.dir, source.file, store.closingSignal, AUDIO_STUDIO_SOURCE_BYTES);
+        if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) problems.set(source.file, `${clip.label}: the source changed; review a replacement`);
+      } catch { store.closingSignal.throwIfAborted(); problems.set(source.file, `${clip.label}: the audio file is unavailable on this machine`); }
+    }
   }
   return problems;
 }
-export async function audioStudioSource(store: WorldStore, productionId: string, file: string, options: Options & { expectedHash?: string } = {}): Promise<AudioSource> {
+export async function audioStudioMedia(store: WorldStore, productionId: string, file: string, options: Options & { expectedHash?: string } = {}) {
   options = { ...options, ...scopedOptions(store, options) };
   const artifact = audioStudioLibrary(store, productionId).find(entry => `artifacts/${entry.file}` === file);
   if (!artifact) throw new AudioArrangementRefusal("Choose an available audio asset from this production's library");
@@ -57,9 +68,12 @@ export async function audioStudioSource(store: WorldStore, productionId: string,
     const recording = generation.recording;
     if (!effectiveAudioRights(await readAudioRights(store), recording.preparedHash, "recorded-take").some(event => event.id === recording.acknowledgementId)) throw new AudioArrangementRefusal("This recorded performance needs its clearance reviewed before placement");
   }
-  const { source } = await readAudioStudioSource(store.dir, file, options);
+  const { source, pcm } = await readAudioStudioSource(store.dir, file, options);
   if (!source.hash.startsWith(artifact.hash)) throw new AudioArrangementRefusal("The library file changed since it was filed; import the replacement as a new asset");
-  return { ...source, artifactId: artifact.id };
+  return { source: { ...source, artifactId: artifact.id }, pcm };
+}
+export async function audioStudioSource(store: WorldStore, productionId: string, file: string, options: Options & { expectedHash?: string } = {}): Promise<AudioSource> {
+  return (await audioStudioMedia(store, productionId, file, options)).source;
 }
 async function derivedState(store: WorldStore, productionId: string, plan: AudiobookPlan, options: Options): Promise<AudioArrangementState> {
   const timing = chapterTiming(store, plan, "skip");
@@ -76,6 +90,7 @@ export async function openAudioStudio(store: WorldStore, productionId: string, c
   const state = saved ? validateAudioArrangement(saved.current) : await derivedState(store, productionId, plan, options);
   const script = audioStudioScript(plan);
   return { base: baseOf(plan), saved: saved ?? null, state, script,
+    proposals: plan.record && plan.record !== "unreadable" ? plan.record.audioStudioProposals ?? [] : [],
     passages: plan.blocks.map(({ block }) => ({ key: block.key, text: block.text })),
     resolved: resolveAudioArrangement(state, script) };
 }
@@ -87,7 +102,8 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
     ...(artifact.generation?.source === "audiobook" ? { block: artifact.generation.block, textHash: artifact.generation.textHash } : {}),
   }));
   return { base: opened.base, revision: opened.saved?.revision ?? 0, undo: opened.saved?.undo.at(-1)?.label ?? null,
-    redo: opened.saved?.redo.at(-1)?.label ?? null, state: opened.state, script: { hash: opened.script.hash, passages: [...opened.script.passages] }, passages: opened.passages, library };
+    redo: opened.saved?.redo.at(-1)?.label ?? null, state: opened.state, script: { hash: opened.script.hash, passages: [...opened.script.passages] }, passages: opened.passages, library, proposals: opened.proposals,
+    unavailable: [...await audioStudioSourceProblems(store, productionId, opened.state, true)].map(([file, message]) => ({ file, message })) };
 }
 
 async function validateEditSources(store: WorldStore, productionId: string, script: AudioScript, edit: AudioArrangementEdit, options: Options): Promise<Map<string, AudioSource>> {
@@ -111,12 +127,17 @@ export async function prepareAudioStudioPreview(store: WorldStore, productionId:
   const current = opened.saved ?? initialAudioArrangement(opened.state, "{}");
   const next = edit ? editAudioArrangement(current, edit) : current;
   if (edit) await validateEditSources(store, productionId, opened.script, edit, options);
-  return { state: next.current, script: opened.script, unavailable: await audioStudioSourceProblems(store, productionId, next.current),
-    verify: async () => { if (baseOf(await currentPlan(store, productionId, chapterId)) !== base) throw new AudioArrangementRefusal("The chapter changed during audition; refresh and listen again"); } };
+  const unavailable = await audioStudioSourceProblems(store, productionId, next.current);
+  return { state: next.current, script: opened.script, unavailable,
+    verify: async () => {
+      if (baseOf(await currentPlan(store, productionId, chapterId)) !== base) throw new AudioArrangementRefusal("The chapter changed during audition; refresh and listen again");
+      const current = await audioStudioSourceProblems(store, productionId, next.current);
+      if (JSON.stringify([...current]) !== JSON.stringify([...unavailable])) throw new AudioArrangementRefusal("Source availability changed during audition; listen again");
+    } };
 }
 
 /** A client/Arke edit is one transaction through the same chapter lane as generated takes. */
-export async function editAudioStudio(store: WorldStore, productionId: string, chapterId: string, base: string, edit: AudioArrangementEdit, options: Options = {}): Promise<ChapterAudiobook> {
+export async function editAudioStudio(store: WorldStore, productionId: string, chapterId: string, base: string, edit: AudioArrangementEdit, options: Options & { proposal?: { id: string; version: number } } = {}): Promise<ChapterAudiobook> {
   options = scopedOptions(store, options);
   const opened = await currentPlan(store, productionId, chapterId);
   if (baseOf(opened) !== base) throw new AudioArrangementRefusal("The chapter changed since this review; refresh Audio Studio and review the edit again");
@@ -139,11 +160,60 @@ export async function editAudioStudio(store: WorldStore, productionId: string, c
     if (baseOf(plan) !== base) throw new AudioArrangementRefusal("The chapter changed since this review; refresh Audio Studio and review the edit again");
     expected = baseOf(plan);
     const held: AudioArrangement = current.arrangement ?? initialAudioArrangement(await derivedState(store, productionId, plan, options), JSON.stringify(current));
+    const proposal = options.proposal ? current.audioStudioProposals?.find(entry => entry.id === options.proposal!.id) : undefined;
+    if (options.proposal) {
+      const offered = proposal?.versions.at(-1);
+      if (!proposal || proposal.status !== "pending" || offered?.number !== options.proposal.version || offered.base !== base ||
+        edit.kind !== "commands" || JSON.stringify(edit.commands) !== JSON.stringify(offered.commands) || edit.label !== offered.summary) {
+        throw new AudioArrangementRefusal("This proposal changed or was already decided; refresh its review");
+      }
+    }
     const next = editAudioArrangement(held, edit);
     if (next === held) return null;
     changedSources = await validateEditSources(store, productionId, audioStudioScript(plan), edit, options);
-    return { ...current, arrangement: next, updatedAt: store.now() };
+    return { ...current, arrangement: next, updatedAt: store.now(), ...(proposal ? {
+      audioStudioProposals: current.audioStudioProposals!.map(entry => entry.id === proposal.id ? { ...entry, status: "applied" as const, resultRevision: next.revision } : entry),
+    } : {}) };
   }, { requireReadable: true, beforeWrite: verify });
+}
+
+export async function stageAudioStudioProposal(store: WorldStore, productionId: string, chapterId: string, actionId: string, input: AudioStudioProposalInput, options: Options = {}): Promise<AudioStudioProposal> {
+  const proposal = AudioStudioProposalInputSchema.parse(input), plan = await currentPlan(store, productionId, chapterId);
+  let staged: AudioStudioProposal | undefined;
+  // Release of protection and deliberate omission are human decisions, never model claims.
+  if (proposal.commands.some(command => command.kind === "protect-clip" || command.kind === "acknowledge-omission" || command.kind === "clear-omission" || command.kind === "omit-passage" && command.acknowledged)) throw new AudioArrangementRefusal("Arke cannot release protection or acknowledge omitted speech");
+  await updateAudiobook(store, productionId, plan.chapter, async current => {
+    const families = current.audioStudioProposals ?? [];
+    const existing = families.find(entry => entry.versions.some(version => version.actionId === actionId));
+    if (existing) { staged = existing; return null; }
+    const fresh = await openAudioStudio(store, productionId, chapterId, options);
+    if (fresh.base !== proposal.base) throw new AudioArrangementRefusal("The arrangement changed; read Audio Studio again before proposing");
+    const family = proposal.family ? families.find(entry => entry.id === proposal.family!.id) : undefined;
+    if (proposal.family && (!family || family.status !== "pending" || family.versions.at(-1)?.number !== proposal.family.version)) throw new AudioArrangementRefusal("This proposal was revised or decided. Keep Current remains in force");
+    if (family && family.versions.length >= 20 || !family && families.length >= 100) throw new AudioArrangementRefusal("This chapter has reached its proposal history limit");
+    const edit: AudioArrangementEdit = { kind: "commands", label: proposal.summary, commands: proposal.commands };
+    editAudioArrangement(fresh.saved ?? initialAudioArrangement(fresh.state, "{}"), edit);
+    await validateEditSources(store, productionId, fresh.script, edit, scopedOptions(store, options));
+    const version = { actionId, number: (family?.versions.at(-1)?.number ?? 0) + 1, base: baseOf({ ...plan, record: current }), summary: proposal.summary, commands: proposal.commands };
+    staged = { id: family?.id ?? actionId, status: "pending", versions: [...(family?.versions ?? []), version] };
+    return { ...current, audioStudioProposals: family ? families.map(entry => entry.id === family.id ? staged! : entry) : [...families, staged] };
+  }, { requireReadable: true, beforeWrite: async () => {
+    if (baseOf(await currentPlan(store, productionId, chapterId)) !== proposal.base) throw new AudioArrangementRefusal("The arrangement changed while preparing the proposal");
+  } });
+  return staged!;
+}
+
+export async function decideAudioStudioProposal(store: WorldStore, productionId: string, chapterId: string, id: string, version: number, decision: "keep" | "apply", options: Options = {}): Promise<ChapterAudiobook> {
+  const plan = await currentPlan(store, productionId, chapterId);
+  const record = plan.record && plan.record !== "unreadable" ? plan.record : null;
+  const family = record?.audioStudioProposals?.find(entry => entry.id === id), offered = family?.versions.at(-1);
+  if (!family || family.status !== "pending" || !offered || offered.number !== version) throw new AudioArrangementRefusal("This proposal changed or was already decided; refresh its review");
+  if (decision === "apply") return editAudioStudio(store, productionId, chapterId, offered.base, { kind: "commands", label: offered.summary, commands: offered.commands }, { ...options, proposal: { id, version } });
+  return updateAudiobook(store, productionId, plan.chapter, current => {
+    const latest = current.audioStudioProposals?.find(entry => entry.id === id);
+    if (latest?.status !== "pending" || latest.versions.at(-1)?.number !== version) throw new AudioArrangementRefusal("This proposal changed; refresh its review");
+    return { ...current, audioStudioProposals: current.audioStudioProposals!.map(entry => entry.id === id ? { ...entry, status: "kept" as const } : entry) };
+  }, { requireReadable: true });
 }
 
 /** Used by export/publication captures to prove which authored arrangement they consumed. */

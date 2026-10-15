@@ -353,8 +353,8 @@ import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRid
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
-import { audioStudioScript, audioStudioSnapshot, audioStudioSource, audioStudioSourceProblems, editAudioStudio } from "./productions/audio-studio.js";
-import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
+import { audioWaveform } from "./audio/waveform.js";
+import { audioStudioMedia, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
@@ -15877,6 +15877,7 @@ export class Coordinator {
         return;
       }
       case "read-audio-studio":
+      case "decide-audio-studio-proposal":
       case "edit-audio-studio":
       case "read-audio-studio-source": {
         const store = this.opts.provider.openStore?.();
@@ -15886,11 +15887,12 @@ export class Coordinator {
         try {
           const options = this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {};
           if (msg.kind === "read-audio-studio-source") {
-            const source = await audioStudioSource(store, msg.productionId, msg.file, options);
-            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source });
+            const media = await audioStudioMedia(store, msg.productionId, msg.file, { ...options, ...(msg.expectedHash ? { expectedHash: msg.expectedHash } : {}) });
+            this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: media.source, ...(msg.waveform ? { waveform: audioWaveform(media.source.hash, media.pcm) } : {}) });
           } else {
-            if (msg.kind === "edit-audio-studio") {
-              const record = await editAudioStudio(store, msg.productionId, chapter.id, msg.base, msg.edit, options);
+            if (msg.kind === "edit-audio-studio" || msg.kind === "decide-audio-studio-proposal") {
+              const record = msg.kind === "edit-audio-studio" ? await editAudioStudio(store, msg.productionId, chapter.id, msg.base, msg.edit, options)
+                : await decideAudioStudioProposal(store, msg.productionId, chapter.id, msg.id, msg.version, msg.decision, options);
               this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
               this.refreshIfStillOpen(store);
             }
@@ -15996,9 +15998,10 @@ export class Coordinator {
           const { narrator } = await this.audiobookNarrator(store, this.voiceService, msg.productionId);
           const plan = await planAudiobook(store, msg.productionId, chapter.id, { narrator });
           if (plan.record !== "unreadable" && plan.record?.arrangement) {
-            const unavailable = await audioStudioSourceProblems(store, msg.productionId, plan.record.arrangement.current);
-            const rendered = await renderAudioStudioMix(store.dir, plan.record.arrangement.current, audioStudioScript(plan), { ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}), signal: store.closingSignal, unavailable });
-            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: { file: rendered.file, seconds: rendered.seconds, from: 0 } });
+            const opened = await openAudioStudio(store, msg.productionId, chapter.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
+            const rendered = await this.audioStudioPreviews.render(store, { productionId: msg.productionId, chapterFile: chapter.file, requestId: msg.requestId, base: opened.base,
+              ...(msg.window ? { window: { from: Math.round(msg.window.from * 48000), to: Math.min(opened.resolved.samples, Math.round(msg.window.to * 48000)) } } : {}) }, this.opts.ffmpeg);
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
             return;
           }
           const mix = chapterMix(chapterTiming(store, plan, "skip"));
@@ -20835,6 +20838,14 @@ export class Coordinator {
     return {
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,
+      audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
+      audioStudioChanged: async (productionId, chapterId) => {
+        const chapter = store.getBundle().productions.find(entry => entry.meta.id === productionId)?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
+        if (!chapter) return;
+        const record = await readAudiobook(store, productionId, chapter.file);
+        if (this.opts.provider.openStore?.() !== store || !record || record === "unreadable") return;
+        this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: store.worldId, productionId, chapterId: chapter.id, record });
+      },
       benchGenerationQuotes: benchQuotes,
       benchControls: new BenchChatControls(store, {
         bench: sessionId => this.benchFor(store.worldId, sessionId),
@@ -21092,6 +21103,7 @@ export class Coordinator {
     if (existing) return existing;
 
     const runner = new WorldChatRunner(conversationRunDependencies(store, {
+      audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
       adapter: this.opts.adapter ?? null,
