@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { containedWorldFilePath } from "../world/contained-file.js";
 import {
   compilePasses,
   normalizeAspect,
@@ -873,6 +874,9 @@ export async function openChapter(
  * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
  * as a null the read schema would refuse.
  */
+/** The picture formats the world's media route serves (FsWorldProvider.MEDIA_TYPES). */
+const CHAPTER_PICTURE_TYPE = /\.(png|jpe?g|webp|gif)$/i;
+
 export async function editChapterPlan(
   store: WorldStore,
   productionId: string,
@@ -883,9 +887,24 @@ export async function editChapterPlan(
     pov?: string | null;
     when?: string | null;
     implies?: ChapterImplies | null;
+    goal?: number | null;
+    picture?: string | null;
   },
 ): Promise<void> {
   const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  // A chosen chapter picture (SPEC-056 R-49) is a world-owned image that exists now, in a format
+  // the world's media route serves. It resolves through the same symlink-aware check as every
+  // other world file: a link out of an imported world would be saved and then refused by the
+  // media route, leaving a hero that can never load (codex on PR 1795).
+  if (typeof changes.picture === "string" && changes.picture.trim() !== "") {
+    const picture = changes.picture.trim();
+    if (!CHAPTER_PICTURE_TYPE.test(picture)) throw new Error(`${picture} is not a picture in this world`);
+    await containedWorldFilePath(store.dir, picture, false, "chapter-picture").catch((error: unknown) => {
+      const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+      throw new Error(missing ? `${picture} is not in this world` : `${picture} is not a picture in this world`);
+    });
+    changes = { ...changes, picture };
+  }
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = MarkdownFile.parse(live);
   const next: Record<string, unknown> = { ...doc.data };
