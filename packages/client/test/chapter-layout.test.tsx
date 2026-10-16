@@ -53,27 +53,29 @@ it('source selections are detected by selectionchange without mouseup on touch',
  await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.ok(find('.fy-passage-ask'),'moving focus into the ask retains its subject');
  await click(find('[aria-label="Close passage"]'));assert.equal(find('.fy-passage-ask'),null);
 });
-it('Notes and Arke are sheets and resizing keeps the manuscript draft',async()=>{
+it('Notes is a sheet, Arke is the app\'s Chat, and resizing keeps the manuscript draft (turn 227)',async()=>{
  await mount('p/ledger/story/chapters/neap');await openChapter();const area=find('.fy-ch__source'),draftText=CHAPTER_BODY+'\n\nMy unsaved sentence. <br>';
  await act(async()=>props(area).onChange!({target:{value:draftText}} as never));await click(find('[aria-label="Notes"]'));assert.ok(find('.fy-chapter-notes-sheet[open]'));
  await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal((find('.fy-ch__source') as HTMLTextAreaElement).value,draftText);
- await click(find('.fy-chapter-notes-sheet [aria-label="Close"]'));await click(find('[aria-label="Open Arke"]'));assert.ok(find('.fy-season-arke-sheet[open]'));
- // At 984 the open dock is the hinge half beside the live page, not a drawer over it (turn 202).
- assert.ok(find('.fy-season-arke-sheet[data-modeless]'),'shown without a modal');assert.equal(document.documentElement.dataset.arkeHalf,'open');
- assert.equal(find('[aria-label="Open Arke"]'),null,'the rail goes while the half is open');assert.ok(find('.fy-prodrail--folded'),'and the rail folds to its marks');
- await click(find('[aria-label="Close Arke"]'));assert.equal(find('.fy-season-arke-sheet[open]'),null);assert.equal(document.documentElement.dataset.arkeHalf,undefined);assert.ok(find('[aria-label="Open Arke"]'));
+ await click(find('.fy-chapter-notes-sheet [aria-label="Close"]'));
+ // The page draws no Arke of its own (SPEC-056 R-3): no rail to pin it back, no dock sheet, no half.
+ assert.equal(find('[aria-label="Open Arke"]'),null,'no page-owned rail');assert.equal(find('.fy-season-arke-sheet'),null,'no page-owned dock');
+ await click(find('[data-global-chat-trigger]'));assert.ok(find('.fy-global-chat[open]'),'the titlebar opens the app\'s Chat');
+ assert.match(find('.fy-global-chat').textContent!,/Builder Chat/);
+ await click(find('[aria-label="Close Chat"]'));assert.equal(find('.fy-global-chat[open]'),null);
+ assert.equal((find('.fy-ch__source') as HTMLTextAreaElement).value,draftText,'and the draft is still the author\'s');
 });
-it('with the half open a selected passage is adopted explicitly into global Chat (224)',async()=>{
- await mount('p/ledger/story/chapters/neap',984);await openChapter();await click(find('[aria-label="Open Arke"]'));
+it('with Chat open a selected passage is adopted explicitly into global Chat (224, 227)',async()=>{
+ await mount('p/ledger/story/chapters/neap',984);await openChapter();await click(find('[data-global-chat-trigger]'));assert.ok(find('.fy-global-chat[open]'));
  const area=find('.fy-ch__source') as HTMLTextAreaElement;Object.defineProperty(document,'activeElement',{value:area,configurable:true});area.selectionStart=0;area.selectionEnd=31;
  await act(async()=>document.dispatchEvent(new Event('selectionchange')));
- assert.equal(find('.fy-passage-ask'),null);await click(find('[data-global-chat-trigger]'));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/);
+ assert.equal(find('.fy-passage-ask'),null,'with the thread beside the page, no ask bar is drawn over the selection');
+ const use=[...document.querySelectorAll<HTMLElement>('.fy-global-chat button')].find(b=>b.textContent==='Use this page');
+ if(use)await click(use);
+ assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/);
  const field=find('.fy-global-chat .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
- await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/,'moving into the dock’s field keeps the passage');
- await click(find('[aria-label="Close Chat"]'));
- await click(find('[aria-label="Close Arke"]'));assert.equal(find('.fy-global-chat[open]'),null,'the retained passage chat is closed');
- await act(async()=>{width=700;for(const listener of listeners)listener();});await click(find('[aria-label="Open Arke"]'));
- assert.ok(find('.fy-season-arke-sheet[open]'));assert.equal(find('.fy-season-arke-sheet[data-modeless]'),null,'below 840 the drawer stays');assert.equal(document.documentElement.dataset.arkeHalf,undefined);
+ await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/,'moving into the Chat’s field keeps the passage');
+ await click(find('[aria-label="Close Chat"]'));assert.equal(find('.fy-global-chat[open]'),null,'the retained passage chat is closed');
 });
 it('a compact waiting passage has an attended decision without opening Arke',async()=>{
  await mount('p/ledger/story/chapters/neap',390,'waiting');await openChapter();assert.ok(find('.fy-passage-decision'));assert.equal(find('.fy-season-arke-sheet[open]'),null);
@@ -114,11 +116,14 @@ it('the phone audiobook door holds no count, price or eyebrow until the door lan
  assert.match(find('[data-testid="audiobook-line"]').textContent!,/^Audiobook · \d+ chapters?$/);
  assert.equal(find('.fy-abdoor-held'),null,'"0 blocks · price unavailable" is not held at the foot while the door opens');
 });
-it('a compact read-only chapter with no time set draws no empty When pill',async()=>{
+it('a compact chapter keeps its time in the Brief and draws no empty mark (turn 227)',async()=>{
  await mount('p/ledger/story/chapters/neap',820,'normal',false,false);await openChapter();
- const marks=()=>[...document.querySelectorAll<HTMLElement>('[aria-label="Chapter state"] .fy-ch__mark')];
- assert.ok(marks().some(m=>m.textContent==='1820 · March'),'a set time stays');
+ // Above a phone the writing room has no chips row; the plan is the Brief's, a sheet below 1100.
+ await click(find('[aria-label="Brief"]'));assert.ok(find('.fy-chapter-notes-sheet[open]'));
+ const plan=()=>find('.fy-ch__plan').textContent!;
+ assert.match(plan(),/1820 · March/,'a set time stays');
  const fresh=chapterLayoutFixture();delete fresh.world!.productions[0]!.chapters[0]!.when;
  await act(async()=>__setStateForTest(fresh));
- assert.equal(marks().some(m=>m.textContent===''),false,'no empty mark stands in for an unset time');
+ assert.equal(find('[aria-label="Chapter state"]'),null,'no chips row, so no empty pill');
+ assert.ok(find('.fy-ch__plan [role="textbox"], .fy-ch__plan textarea, .fy-ch__plan input'),'an unset time is a field to type in, not an empty mark');
 });

@@ -59,6 +59,12 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
       title = kind === "stage" ? "Stage Chat" : kind === "takes" ? "Takes Chat" : "Shot Chat";
       label += ` / Shot ${shot.number}`;
     } else if (scene) { entry = { kind: "scene", productionId: production.meta.id, sceneId: scene.id }; label += ` / Scene ${scene.number}`; }
+    else if (route[4] === "story" && route[5] === "chapters" && route[6]) {
+      // A chapter's conversation is the production's own thread (turn 126); the Chat names the
+      // chapter it is open beside (SPEC-056 R-42).
+      const chapter = production.chapters.find(c => c.id === route[6] || c.file === route[6]);
+      if (chapter) label += " / " + chapter.title;
+    }
     else if (route[4] === "episodes" && route[5]) {
       const episode = production.episodes.find(e => e.id === route[5]);
       if (episode) { entry = { kind: "episode", productionId: production.meta.id, episodeId: episode.id }; label += ` / Episode ${episode.order}`; }

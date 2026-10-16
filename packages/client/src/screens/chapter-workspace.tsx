@@ -7,7 +7,7 @@ import { PageSheet } from "../components/page-sheet.js";
 import { AudiobookExportSheet } from "../components/audiobook-export.js";
 import { ResponsiveSheet } from "../components/responsive-sheet.js";
 import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
-import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
@@ -46,6 +46,8 @@ import {
   voiceDisplayLabel,
   mainPhotoFor,
   CHAPTER_PLAN_LIMITS,
+  chapterGoal,
+  storyProgressDay,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -55,6 +57,8 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
+import { BriefFields, DocHead, GoalRing, WritingBar } from "./chapter-room.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -278,6 +282,8 @@ const PAGE_READ_BLOCK_CAP = 1000;
 export function firstPrompt(live: string, synopsis: string | undefined): string {
   return live.trim() === "" && synopsis !== undefined && synopsis.trim() !== "" ? "Draft from the synopsis" : "Draft the rest";
 }
+
+const noSubscribe = () => () => {};
 
 export function ChapterScreen() {
   const { worldId, prodId, chapterId } = useParams();
@@ -1181,6 +1187,10 @@ export function ChapterWorkspace({
   const half = useMediaQuery(ARKE_HALF_QUERY);
   const coarse = useMediaQuery("(pointer: coarse)");
   const [notesOpen, setNotesOpen] = useState(false);
+  // Brief (SPEC-056 R-10): docked open by default at 2000 and wider, a press away below that.
+  const briefWide = useMediaQuery("(min-width: 2000px)");
+  const [briefChoice, setBriefChoice] = useState<boolean | null>(null);
+  const brief = briefChoice ?? briefWide;
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   const [blockSheet, setBlockSheet] = useState(compact);
   // The toolbar's compact form follows the room it has, not the window (design turn 203, issue
@@ -1364,6 +1374,14 @@ export function ChapterWorkspace({
   const activeChapters = production.chapters.filter((c) => !c.retired);
   const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength, activeChapters.length);
+  // The chapter's goal and where it came from (SPEC-056 D-2), derived on every read.
+  const goal = chapterGoal(chapter, production.story?.targetLength, activeChapters);
+  // The chapters either side, in order, for the writing bar's arrows (R-7).
+  const at = activeChapters.findIndex((c) => c.id === chapter.id);
+  const previousChapter = at > 0 ? activeChapters[at - 1]! : null;
+  const nextChapter = at >= 0 && at < activeChapters.length - 1 ? activeChapters[at + 1]! : null;
+  const progressDays = production.progress && !("unreadable" in production.progress) ? production.progress.days : null;
+  const wordsToday = progressDays?.[storyProgressDay(new Date())] ?? 0;
   // The versions a snapshot exists for, newest first — read off the open answer, never counted
   // down from the number, so no Restore is offered that would silently fail.
   const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
@@ -1377,16 +1395,30 @@ export function ChapterWorkspace({
    */
   const [dockByView, setDockByView] = useState(rememberedDocks);
   const [compactDock, setCompactDock] = useState(false);
-  const dock = compact ? compactDock : dockByView[view];
+  /*
+   * The app's Chat (turn 227, SPEC-056 R-3/R-42) is opened from the titlebar and holds the chapter's
+   * conversation; the page keeps its thread mounted out of sight to supply the subject and asks,
+   * and draws no column of its own. Rendered without the app's provider (the screen on its own),
+   * the dock stays as it was.
+   */
+  const globalChat = useGlobalChat();
+  const dock = globalChat ? false : compact ? compactDock : dockByView[view];
   const setDock = useCallback((open: boolean) => {
+    if (globalChat) {
+      if (open) globalChat.open();
+      return;
+    }
     if (compact) {
       setCompactDock(open);
       return;
     }
     setDockByView((held) => ({ ...held, [view]: open }));
     rememberDock(view, open);
-  }, [compact, view]);
+  }, [compact, view, globalChat]);
   useHoldArkeHalf(half && dock);
+  const chatOpen = useSyncExternalStore(globalChat?.subscribe ?? noSubscribe, () => globalChat?.getSnapshot().open ?? false, () => false);
+  // With the thread beside the page a selection is its subject there, so no ask bar is drawn over it.
+  const chatBeside = globalChat ? chatOpen : half && dock;
   const [passageLine, setPassageLine] = useState("");
   /*
    * The plan (turn 127): typed where it reads and saved in place, one write for every field.
@@ -1782,7 +1814,7 @@ export function ChapterWorkspace({
       ? `Not saved · ${saveRefusal}`
       : saving
         ? "Saving…"
-        : `Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`;
+        : `Saved · v${record?.version ?? chapter.version}${wordsToday > 0 ? ` · +${wordsToday.toLocaleString()} today` : ""}`;
 
   // Timing (design turn 187): one write a change, answered as the record; the same values from
   // the Timing view and from the block panel.
@@ -1935,8 +1967,125 @@ export function ChapterWorkspace({
     </button>
   ) : null;
   const barArke = phone && foldedAudiobook ? arkePress : null;
+  // The writing room (design turn 227, SPEC-056 §1.6): the Manuscript above a phone's width is one
+  // bar over the page, the chapter's number and title the top of the document.
+  const room = view === "manuscript" && !phone;
+  const viewNav = (
+    <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
+      <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
+        Manuscript
+      </button>
+      <button type="button" className={cx("fy-seg__item", view === "audiobook" && "fy-seg__item--active")} onClick={() => chooseView("audiobook")}>
+        Audiobook
+      </button>
+      <button type="button" className={cx("fy-seg__item", view === "timing" && "fy-seg__item--active")} onClick={() => chooseView("timing")}>
+        Audio Studio
+      </button>
+    </nav>
+  );
+  const readControl = view !== "manuscript" || paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
+    <PageReadControl read={readVoiced} label="Voiced" />
+  ) : pageRead.reading ? (
+    <PageReadControl read={read} label="Read the chapter" />
+  ) : (
+    <ReadPress read={read} voiced={voicesRecord !== null ? readVoiced : null} />
+  );
+  const dockConversation = (
+        <ProductionConversation
+          key={`dock:${say?.seq ?? 0}`}
+          worldId={worldId}
+          productionId={prodId}
+          entry={{ kind: "production", productionId: prodId }}
+          {...(say === null ? {} : { openWith: say.line })}
+          // The selection travels beside the words as well as inside them (codex on turn 128):
+          // the coordinator holds a revision that comes back to this chapter, this paragraph
+          // and these words, whatever the model retold.
+          subject={dockSubject}
+          dock={{
+            title: dockTitle,
+            subject: `${chapter.title} · ${production.meta.title}`,
+            conversationFirst: true,
+            onPutAway: () => setDock(false),
+            ...(ask !== null ? { ask } : {}),
+            onAsk: setAsk,
+            // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
+            // from; a chapter with prose is continued. While a passage is selected the prompts
+            // are a revision's (turn 128), and the passage is the subject.
+            // Holding against the style is a reply and nothing else: the send says so, and the
+            // coordinator refuses any action the turn comes back with.
+            // Under a derived chapter the prompts are questions the record can answer (turn 129);
+            // under a stale one, the press that reads again and a question the prose answers.
+            // In the Audiobook view the prompts are the reading's (turn 146, SPEC-047 R-31):
+            // the direction, again once one stands, and two questions the blocks answer.
+            // A question is asked for its answer and nothing else (issue 1295): sent as an open
+            // ask, a 12B model answered "What does this chapter draw on?" with an invented action,
+            // and the whole reply was rejected twice.
+            prompts: view === "audiobook"
+              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, question("Who reads this chapter?"), question("Which blocks are stale?")]
+              : passage !== null
+              // Held against the style only when there is one (codex on PR 1232), as the menu does.
+              ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
+              : voicesRecord !== null && voicesStale
+                ? [toCastCount > 0 ? { label: `Cast ${toCastCount} paragraph${toCastCount === 1 ? "" : "s"}`, press: () => castLinesPress("changed") } : { label: "Cast again", press: () => castLinesPress() }, question("Who speaks in this chapter?")]
+                : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
+                  ? [question("Who speaks in this chapter?"), question(`Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`)]
+              : continuityRecord !== null && continuityStale
+                ? [{ label: "Derive again", press: derive }, question("Who is in this chapter?")]
+                : continuityRecord !== null && placedFirst !== undefined
+                  ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
+                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
+            // The thread is the production's own (no new entry context, turn 126): the chapter
+            // the dock names has to be in the words themselves or the studio never hears it.
+            subjectPrefix: dockPrefix,
+            about: chapterLabel,
+            // A line a menu press started is about the passage it was pressed on, and the dock
+            // says that one, not whatever is selected now (codex on PR 1232).
+            ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
+          }}
+          openingNote="opening…"
+          emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
+          placeholder={`Ask about ${chapterLabel}`}
+          {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
+            ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
+            : stagedDraft === undefined && view === "audiobook" && illustration.run !== undefined
+            ? {
+                side: (
+                  <IllustrationStatus
+                    run={illustration.run}
+                    onReview={illustrationSheet.show}
+                    onStop={illustration.stop}
+                    onDiscard={illustration.discard}
+                  />
+                ),
+              }
+            : stagedDraft === undefined || compact && passageChange !== null
+            ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
+            : {
+                side: (
+                  <StagedDecision
+                    worldId={worldId}
+                    subject={chapterLabel}
+                    staged={stagedDraft.staged}
+                    {...(accept !== undefined ? { accept } : {})}
+                    items={[
+                      passageChange !== null
+                        ? {
+                            label: `${chapterLabel} · passage`,
+                            meta: `${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`,
+                          }
+                        : {
+                            label: `${chapterLabel} · draft`,
+                            meta: stagedDraft.body !== null ? `${countWords(stagedDraft.body).toLocaleString()} words` : "draft",
+                          },
+                    ]}
+                  />
+                ),
+              })}
+        />
+  );
+  const reviewControl = <ChapterReviewControl worldId={worldId} productionId={prodId} chapterId={chapter.id} slug={worldSlug} held={locked || saving || draft !== null || stagedDraft !== undefined || saveRefusal !== null} />;
   return (
-    <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view}>
+    <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view} data-chat={globalChat ? "global" : undefined} data-room={room ? "true" : undefined}>
       {view === "timing" && <AudioStudioWorkspace key={`${worldId}/${prodId}/${chapter.id}`} book={production.meta.title} title={chapter.title}
         worldId={worldId} productionId={prodId} chapterId={chapter.id} chapterFile={chapter.file} slug={worldSlug}
         connection={connection} stamp={audiobook.lastRecord?.seq} rows={audiobook.rows} timing={shownTiming}
@@ -1950,8 +2099,22 @@ export function ChapterWorkspace({
         {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so
             the bar stays put when the switch below it changes view (the master draws Audiobook). */}
         {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
+        {room ? (
+          <WritingBar
+            brief={compact ? notesOpen : brief}
+            onBrief={() => (compact ? setNotesOpen((open) => !open) : setBriefChoice(!brief))}
+            previous={previousChapter === null ? null : { id: previousChapter.id, title: previousChapter.title }}
+            next={nextChapter === null ? null : { id: nextChapter.id, title: nextChapter.title }}
+            onChapter={(id) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(id)}`)}
+            views={viewNav}
+            goal={<GoalRing words={words} goal={goal.words} source={goal.source} />}
+          >
+            {readControl}
+            {reviewControl}
+          </WritingBar>
+        ) : (
         <header className="fy-sw__head">
-          <ChapterReviewControl worldId={worldId} productionId={prodId} chapterId={chapter.id} slug={worldSlug} held={locked || saving || draft !== null || stagedDraft !== undefined || saveRefusal !== null} />
+          {reviewControl}
           {/* The page head is the Manuscript's (design turn 194, rule 2): the label, the title, the
               synopsis and the marks are set there. Audiobook and Timing open on their toolbar, and
               the chapter's title is the app bar's last crumb. */}
@@ -1971,13 +2134,7 @@ export function ChapterWorkspace({
               {/* One outline press reads the chapter (126a); a cast chapter's voiced read is its
                   menu, not a second button beside it (design turn 192). While either reads, its
                   own controls stand in the press's place. */}
-              {view !== "manuscript" || paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
-                <PageReadControl read={readVoiced} label="Voiced" />
-              ) : pageRead.reading ? (
-                <PageReadControl read={read} label="Read the chapter" />
-              ) : (
-                <ReadPress read={read} voiced={voicesRecord !== null ? readVoiced : null} />
-              )}
+              {readControl}
             </div>
           </div>
           {/* The synopsis, typed where it reads (turn 127), the way the scene's is. */}
@@ -2058,17 +2215,7 @@ export function ChapterWorkspace({
               is the whole head, one line (design turn 194, rule 1): the reading, Notes, the speaker
               filter, then Direct and illustrate, the priced read, Listen and the Arke press. */}
           <div className="fy-ch__viewline" ref={viewLine} data-narrow={view === "audiobook" && narrowToolbar ? "true" : undefined}>
-            <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
-              <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
-                Manuscript
-              </button>
-              <button type="button" className={cx("fy-seg__item", view === "audiobook" && "fy-seg__item--active")} onClick={() => chooseView("audiobook")}>
-                Audiobook
-              </button>
-              <button type="button" className={cx("fy-seg__item", view === "timing" && "fy-seg__item--active")} onClick={() => chooseView("timing")}>
-                Audio Studio
-              </button>
-            </nav>
+            {viewNav}
             {compact && <div className="fy-ch__compact-actions">{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label={<><Play size={18} /><span className="fy-sr-only">Read the chapter</span></>} />}{view === "manuscript" && paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && <PageReadControl read={readVoiced} label={phone ? <><Speaker size={18} /><span className="fy-sr-only">Read voiced chapter</span></> : "Voiced"} />}{/* In Audiobook, Notes is the reading's book and chapter note (194, rule 5); the rail's sheet is the Manuscript's. */}{view !== "audiobook" && <button type="button" className="ui-btn ui-btn--secondary" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={18} />{phone ? <span className="fy-sr-only">Notes</span> : "Notes"}</button>}</div>}
             {view === "audiobook" && (
               <>
@@ -2107,8 +2254,9 @@ export function ChapterWorkspace({
             )}
           </div>
         </header>
+        )}
 
-        <div className={cx("fy-ch__body", view !== "manuscript" && "fy-ch__body--audiobook")}>
+        <div className={cx("fy-ch__body", view !== "manuscript" && "fy-ch__body--audiobook")} data-brief={room ? (brief ? "open" : "closed") : undefined}>
           {view === "audiobook" && (
             <div className="fy-ch__manuscript" data-testid="audiobook-column" ref={audiobookColumn}>
               {audiobook.sounding !== null && (
@@ -2168,6 +2316,7 @@ export function ChapterWorkspace({
             </div>
           )}
           <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"}>
+            {room && <DocHead order={chapter.order} title={chapter.title} locked={locked} onTitle={(title) => plan({ title })} />}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
@@ -2348,7 +2497,7 @@ export function ChapterWorkspace({
             )}
             {/* With the half open the dock's composer is where a passage is asked about (202): the
                  selection is its subject, said over the composer, and its prompts are the passage's. */}
-            {selection !== null && !locked && coarse && !(half && dock) && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {selection !== null && !locked && coarse && !chatBeside && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />
@@ -2430,6 +2579,13 @@ export function ChapterWorkspace({
           )}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
+            {view === "manuscript" && !compact && (
+              <BriefFields synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
+                characters={characters} locked={locked} onPlan={(changes) => plan(changes)} />
+            )}
+            {view === "manuscript" && stale && (
+              <p className="fy-ch__moved">overview moved · v{chapter.draftedAgainst} → v{production.story?.version}</p>
+            )}
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">The book</h2>
               <p className="fy-bible__empty fy-mono">
@@ -2774,7 +2930,7 @@ export function ChapterWorkspace({
               <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>
               <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} maxLength={CHAPTER_PLAN_LIMITS.synopsis} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
               <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
-              <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} maxLength={CHAPTER_PLAN_LIMITS.when} onCommit={when => plan({ when: when || null })} />}</label>
+              {locked && !chapter.when ? null : <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} maxLength={CHAPTER_PLAN_LIMITS.when} onCommit={when => plan({ when: when || null })} />}</label>}
             </section>}
           </aside>
           </ResponsiveSheet>
@@ -2854,100 +3010,16 @@ export function ChapterWorkspace({
 
       {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
       {compact && view !== "timing" && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span><StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept } : {})} /></HeldBar>}
-      {view !== "timing" && <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
-        <ProductionConversation
-          key={`dock:${say?.seq ?? 0}`}
-          worldId={worldId}
-          productionId={prodId}
-          entry={{ kind: "production", productionId: prodId }}
-          {...(say === null ? {} : { openWith: say.line })}
-          // The selection travels beside the words as well as inside them (codex on turn 128):
-          // the coordinator holds a revision that comes back to this chapter, this paragraph
-          // and these words, whatever the model retold.
-          subject={dockSubject}
-          dock={{
-            title: dockTitle,
-            subject: `${chapter.title} · ${production.meta.title}`,
-            conversationFirst: true,
-            onPutAway: () => setDock(false),
-            ...(ask !== null ? { ask } : {}),
-            onAsk: setAsk,
-            // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
-            // from; a chapter with prose is continued. While a passage is selected the prompts
-            // are a revision's (turn 128), and the passage is the subject.
-            // Holding against the style is a reply and nothing else: the send says so, and the
-            // coordinator refuses any action the turn comes back with.
-            // Under a derived chapter the prompts are questions the record can answer (turn 129);
-            // under a stale one, the press that reads again and a question the prose answers.
-            // In the Audiobook view the prompts are the reading's (turn 146, SPEC-047 R-31):
-            // the direction, again once one stands, and two questions the blocks answer.
-            // A question is asked for its answer and nothing else (issue 1295): sent as an open
-            // ask, a 12B model answered "What does this chapter draw on?" with an invented action,
-            // and the whole reply was rejected twice.
-            prompts: view === "audiobook"
-              ? [{ label: directionStands ? "Direct again" : "Direct this chapter", press: audiobook.directPress }, question("Who reads this chapter?"), question("Which blocks are stale?")]
-              : passage !== null
-              // Held against the style only when there is one (codex on PR 1232), as the menu does.
-              ? [TIGHTEN.line, { label: (style !== null ? HOLD_TO_STYLE : passageAction("critique")!).line, replyOnly: true }]
-              : voicesRecord !== null && voicesStale
-                ? [toCastCount > 0 ? { label: `Cast ${toCastCount} paragraph${toCastCount === 1 ? "" : "s"}`, press: () => castLinesPress("changed") } : { label: "Cast again", press: () => castLinesPress() }, question("Who speaks in this chapter?")]
-                : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
-                  ? [question("Who speaks in this chapter?"), question(`Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`)]
-              : continuityRecord !== null && continuityStale
-                ? [{ label: "Derive again", press: derive }, question("Who is in this chapter?")]
-                : continuityRecord !== null && placedFirst !== undefined
-                  ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
-                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
-            // The thread is the production's own (no new entry context, turn 126): the chapter
-            // the dock names has to be in the words themselves or the studio never hears it.
-            subjectPrefix: dockPrefix,
-            about: chapterLabel,
-            // A line a menu press started is about the passage it was pressed on, and the dock
-            // says that one, not whatever is selected now (codex on PR 1232).
-            ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
-          }}
-          openingNote="opening…"
-          emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
-          placeholder={`Ask about ${chapterLabel}`}
-          {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
-            ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
-            : stagedDraft === undefined && view === "audiobook" && illustration.run !== undefined
-            ? {
-                side: (
-                  <IllustrationStatus
-                    run={illustration.run}
-                    onReview={illustrationSheet.show}
-                    onStop={illustration.stop}
-                    onDiscard={illustration.discard}
-                  />
-                ),
-              }
-            : stagedDraft === undefined || compact && passageChange !== null
-            ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
-            : {
-                side: (
-                  <StagedDecision
-                    worldId={worldId}
-                    subject={chapterLabel}
-                    staged={stagedDraft.staged}
-                    {...(accept !== undefined ? { accept } : {})}
-                    items={[
-                      passageChange !== null
-                        ? {
-                            label: `${chapterLabel} · passage`,
-                            meta: `${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`,
-                          }
-                        : {
-                            label: `${chapterLabel} · draft`,
-                            meta: stagedDraft.body !== null ? `${countWords(stagedDraft.body).toLocaleString()} words` : "draft",
-                          },
-                    ]}
-                  />
-                ),
-              })}
-        />
-      </ResponsiveSheet>}
-      {view !== "timing" && ((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
+      {view !== "timing" && (globalChat ? (
+        // The app's Chat shows this thread (SPEC-056 R-42); mounted here, unseen, it carries the
+        // chapter's subject, prompts and asks the way Bench's does.
+        <div hidden>{dockConversation}</div>
+      ) : (
+        <ResponsiveSheet sheet={compact || !dock} open={compact && dock} modeless={half} title={dockTitle} onClose={() => setDock(false)} className="fy-season-arke-sheet">
+          {dockConversation}
+        </ResponsiveSheet>
+      ))}
+      {view !== "timing" && !globalChat && ((compact && !foldedAudiobook && !(half && dock)) || (!dock && !toolbarDock)) && (
         <button type="button" className={phone ? "fy-season-arke" : "fy-sw__rail fy-season-arke-rail"} aria-label="Open Arke" title="Pin the assistant back" onClick={() => setDock(true)}>
           {compact ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}
           <span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span>

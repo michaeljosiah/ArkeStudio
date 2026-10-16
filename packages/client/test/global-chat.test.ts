@@ -102,6 +102,17 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.close(); owner.open(); assert.equal(owner.getSnapshot().selected?.conversationId, CHAT_ID);
     owner.close(); owner.setCurrent(cut); owner.open(); assert.equal(owner.getSnapshot().selected?.entry.kind, "cut");
   });
+  it("a chapter's Chat is the production's own thread, named for the chapter it is open beside (SPEC-056 R-42)", () => {
+    const withChapter = structuredClone(state);
+    const prod = withChapter.world!.productions.find(p => p.meta.id === "saltlight")!;
+    prod.chapters = [{ id: "neap", file: "01-neap", order: 1, title: "Neap", status: "drafted", version: 1 }];
+    for (const route of ["neap", "01-neap"]) {
+      const surface = chatSurfaceForPage(withChapter, `${root}/p/saltlight/story/chapters/${route}`)!;
+      assert.deepEqual(surface.entry, { kind: "production", productionId: "saltlight" });
+      assert.equal(surface.key, production.key, "the same thread as the production's");
+      assert.match(surface.label, / \/ Neap$/, "the Chat names the chapter");
+    }
+  });
   it("a workspace registration supplies the exact selection without rebinding an open chat", () => {
     const owner = new GlobalChatController(); owner.setCurrent(cut); owner.open(production);
     const selection: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
