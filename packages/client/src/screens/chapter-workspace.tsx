@@ -138,7 +138,8 @@ import {
 const AUTOSAVE_MS = 1200;
 
 /** What an empty chapter says. */
-const PLACEHOLDER = "Start here. It saves as you go.";
+// A placeholder labels; it does not explain (turn 137, SPEC-056 R-53).
+const PLACEHOLDER = "Start writing";
 /** Draws on's Add, started in the thread for the author to finish (design turn 192). */
 const DRAWS_ON_LINE = "This chapter draws on ";
 
@@ -1431,6 +1432,24 @@ export function ChapterWorkspace({
   const [say, setSay] = useState<{ line: string; seq: number } | null>(null);
   const implies = chapter.implies ?? [];
   const stale = overviewMoved(chapter, production.story);
+  // An opened chapter with no words: the plan sits at the top of its page (R-32); a just-made one
+  // opens with its title selected so typing replaces `Untitled`.
+  const emptyChapter = record !== null && (record.body ?? "").trim() === "" && stagedDraft === undefined;
+  const freshChapter = emptyChapter && chapter.title === "Untitled" && (record?.version ?? chapter.version) === 1;
+  // New character… (D-4): character creation, then back here with the name; the point of view is
+  // chosen when that character's sheet arrives (below).
+  const newCharacter = () => navigate(`/w/${encodeURIComponent(worldId)}/cast/new?then=${encodeURIComponent(`/w/${worldId}/p/${prodId}/story/chapters/${chapter.id}`)}`);
+  // Back from New character… with the name typed there (D-4): once a character by that name is in
+  // the world, it is this chapter's point of view, and the address forgets the name.
+  const povName = searchParams.get("pov-name");
+  useEffect(() => {
+    if (povName === null) return;
+    const wanted = povName.trim().toLowerCase();
+    const sheet = world.sheets.find((candidate) => candidate.type === "character" && !candidate.retired && candidate.name.trim().toLowerCase() === wanted);
+    if (sheet === undefined) return;
+    if (chapter.pov !== sheet.id) editChapterPlan(worldId, prodId, chapter.file, { pov: sheet.id });
+    setSearchParams((params) => { const next = new URLSearchParams(params); next.delete("pov-name"); return next; }, { replace: true });
+  }, [povName, world.sheets, chapter.pov, chapter.file, worldId, prodId, setSearchParams]);
   const characters = world.sheets.filter(
     (sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId),
   );
@@ -2422,7 +2441,10 @@ export function ChapterWorkspace({
                 ? [{ label: "Derive again", press: derive }, question("Who is in this chapter?")]
                 : continuityRecord !== null && placedFirst !== undefined
                   ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
-                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
+                  : live.trim() === ""
+                    // A chapter with no words starts from its plan, its opening, or the plan itself (SPEC-056 R-34).
+                    ? [...(chapter.synopsis?.trim() ? ["Draft from the synopsis"] : []), "Draft the opening", "Plan the beats"]
+                    : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
@@ -2432,7 +2454,7 @@ export function ChapterWorkspace({
             ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
           }}
           openingNote="opening…"
-          emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
+          emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}
           placeholder={`Ask about ${chapterLabel}`}
           {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
             ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
@@ -2794,7 +2816,14 @@ export function ChapterWorkspace({
             </div>
           )}
           <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"}>
-            {room && <DocHead order={chapter.order} title={chapter.title} locked={locked} onTitle={(title) => plan({ title })} />}
+            {room && (
+              <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
+                {emptyChapter && (
+                  <BriefFields page synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
+                    characters={characters} locked={locked} onPlan={(changes) => plan(changes)} onNewCharacter={newCharacter} />
+                )}
+              </DocHead>
+            )}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
@@ -3057,9 +3086,9 @@ export function ChapterWorkspace({
           )}
           <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
-            {view === "manuscript" && !compact && (
+            {view === "manuscript" && !compact && !emptyChapter && (
               <BriefFields synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
-                characters={characters} locked={locked} onPlan={(changes) => plan(changes)} />
+                characters={characters} locked={locked} onPlan={(changes) => plan(changes)} onNewCharacter={newCharacter} />
             )}
             {view === "manuscript" && stale && (
               <p className="fy-ch__moved">overview moved · v{chapter.draftedAgainst} → v{production.story?.version}</p>

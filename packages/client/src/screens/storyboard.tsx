@@ -308,14 +308,21 @@ export function SceneTitle({
   title,
   locked = false,
   label = "Scene title",
+  startEditing = false,
   onCommit,
 }: {
   title: string;
   locked?: boolean;
   label?: string;
+  /** Open already editing, the words selected, so typing replaces them (a new chapter's `Untitled`). */
+  startEditing?: boolean;
   onCommit: (title: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing && !locked);
+  // A title that becomes new after the first render (its chapter's body arrived) opens then.
+  useEffect(() => {
+    if (startEditing && !locked) setEditing(true);
+  }, [startEditing, locked]);
   // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
   // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
   const settled = useRef(false);

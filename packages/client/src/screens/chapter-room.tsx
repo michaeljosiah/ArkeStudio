@@ -75,16 +75,20 @@ export function WritingBar({
 }
 
 /** The top of the document (R-8): the chapter's number, then its title, edited where it reads. */
-export function DocHead({ order, title, locked, onTitle }: { order: number; title: string; locked: boolean; onTitle: (title: string) => void }) {
+export function DocHead({ order, title, locked, fresh = false, onTitle, children }: { order: number; title: string; locked: boolean; fresh?: boolean; onTitle: (title: string) => void; children?: ReactNode }) {
   return (
     <div className="fy-ch__dochead">
       <p className="fy-ch__kick">Chapter {order}</p>
       <h1 className="fy-ch__doctitle">
-        <SceneTitle title={title} locked={locked} onCommit={onTitle} />
+        <SceneTitle title={title} label="Chapter title" locked={locked} startEditing={fresh} onCommit={onTitle} />
       </h1>
+      {children}
     </div>
   );
 }
+
+/** The point of view's picker value that opens character creation rather than choosing (D-4). */
+export const NEW_CHARACTER = "__new-character__";
 
 /**
  * The plan in the Brief (R-10): synopsis, point of view, when and goal, each saved in place through
@@ -99,6 +103,8 @@ export function BriefFields({
   characters,
   locked,
   onPlan,
+  onNewCharacter,
+  page = false,
 }: {
   synopsis: string | undefined;
   pov: string | undefined;
@@ -108,9 +114,13 @@ export function BriefFields({
   characters: readonly { id: string; name: string }[];
   locked: boolean;
   onPlan: (changes: { synopsis?: string | null; pov?: string | null; when?: string | null; goal?: number | null }) => void;
+  /** New character… (D-4): opens character creation and comes back to choose it. */
+  onNewCharacter?: () => void;
+  /** At the top of a new chapter's page (R-32) rather than in the Brief. */
+  page?: boolean;
 }) {
   return (
-    <section className="fy-bible__panel fy-ch__brief" data-testid="chapter-brief">
+    <section className={page ? "fy-ch__props" : "fy-bible__panel fy-ch__brief"} data-testid={page ? "chapter-props" : "chapter-brief"}>
       {locked && !synopsis ? null : <label className="fy-ch__brief-field">
         <span>Synopsis</span>
         {locked ? (
@@ -128,13 +138,27 @@ export function BriefFields({
       </label>}
       <label className="fy-ch__brief-field">
         <span>Point of view</span>
-        <select className="fy-ch__pick" aria-label="Point of view" value={pov ?? ""} disabled={locked} onChange={(e) => onPlan({ pov: e.target.value === "" ? null : e.target.value })}>
+        <select
+          className="fy-ch__pick"
+          aria-label="Point of view"
+          value={pov ?? ""}
+          disabled={locked}
+          onChange={(e) => {
+            // Controlled, the picker returns to the chosen point of view on its own.
+            if (e.target.value === NEW_CHARACTER) {
+              onNewCharacter?.();
+              return;
+            }
+            onPlan({ pov: e.target.value === "" ? null : e.target.value });
+          }}
+        >
           <option value="">No point of view</option>
           {characters.map((sheet) => (
             <option key={sheet.id} value={sheet.id}>
               {sheet.name}
             </option>
           ))}
+          {onNewCharacter !== undefined && <option value={NEW_CHARACTER}>New character…</option>}
         </select>
       </label>
       {locked && !when ? null : <label className="fy-ch__brief-field">

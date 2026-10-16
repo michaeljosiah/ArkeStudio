@@ -269,6 +269,20 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
   });
 
+  it("a new chapter takes the point of view of the chapter before it (SPEC-056 D-3)", async () => {
+    const { dir, store } = await open();
+    await editChapterPlan(store, LEDGER, "01-neap", { pov: "maren-kest" });
+    const chapters = await chaptersOf(dir, LEDGER);
+    const last = [...chapters].filter((c) => !c.retired).sort((a, b) => b.order - a.order)[0]!;
+    if (last.id !== "neap") await editChapterPlan(store, LEDGER, last.file, { pov: "maren-kest" });
+    const made = await createChapter(store, LEDGER, { title: "Untitled", order: 99 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === made)!.pov, "maren-kest");
+    // A point of view the world no longer holds as a character is not carried.
+    await editChapterPlan(store, LEDGER, made + "", { pov: null });
+    const again = await createChapter(store, LEDGER, { title: "Untitled", order: 100 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === again)!.pov, undefined, "nothing before it to carry");
+  });
+
   it("a chapter's goal and picture save with the plan, ride on the summary and keep the version (SPEC-056 R-49/R-50)", async () => {
     const { dir, store } = await open();
     const before = await openChapter(store, LEDGER, "neap");

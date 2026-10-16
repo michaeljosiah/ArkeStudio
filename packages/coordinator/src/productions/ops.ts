@@ -729,11 +729,17 @@ export async function createChapter(
   // too; the files are not. A legacy production ranked 10, 20 would take a new chapter at 3 and
   // sort it first, so the rank written is at least one past the highest persisted (codex, PR 879).
   const order = Math.max(input.order, (await highestChapterRank(store, productionId, existing.map((c) => c.file))) + 1);
+  // A new chapter takes the point of view of the chapter before it (SPEC-056 D-3), when that is a
+  // character the world still holds: most books stay with one viewpoint for a run of chapters.
+  const sheets = store.getBundle().sheets;
+  const previous = existing.filter((c) => !c.retired && c.order < order).sort((a, b) => b.order - a.order)[0];
+  const pov = previous?.pov !== undefined && sheets.some((sheet) => sheet.id === previous.pov && sheet.type === "character" && !sheet.retired) ? previous.pov : undefined;
   const doc = MarkdownFile.create(
     {
       id: slug,
       title: input.title,
       order,
+      ...(pov !== undefined ? { pov } : {}),
       status: "planned",
       version: 1,
       created: store.now().slice(0, 10),
