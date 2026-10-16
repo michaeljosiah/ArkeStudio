@@ -14,7 +14,6 @@ import {
   type AskCandidate,
   type AskResult,
   type BenchParams,
-  type BibleHelperKind,
   type Capability,
   type ModelChoices,
   type ChangeRecord,
@@ -951,19 +950,6 @@ export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void
   return () => lyricsDraftedListeners.delete(listener);
 }
 
-export type BibleHelperAnswered = Extract<DomainEvent, { type: "bible.helper-answered" }>;
-const bibleHelperListeners = new Set<(answer: BibleHelperAnswered) => void>();
-/**
- * Pushed rather than folded, like the other one-shot helpers.
- *
- * Results are the session's, not the world's: they live in the Bible screen for as long as it is
- * open and are gone on reload, because a rail restored full of options against a document that has
- * moved on would be offering edits nobody could still read the reason for.
- */
-export function subscribeBibleHelper(listener: (answer: BibleHelperAnswered) => void): () => void {
-  bibleHelperListeners.add(listener);
-  return () => bibleHelperListeners.delete(listener);
-}
 
 export function subscribeFiledBatch(listener: (batch: FiledBatch) => void): () => void {
   filedBatchListeners.add(listener);
@@ -1873,9 +1859,6 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
-    }
-    if (event.type === "bible.helper-answered") {
-      for (const listener of bibleHelperListeners) listener(event);
     }
     if (event.type === "artifact.filed-batch") {
       for (const listener of filedBatchListeners) listener(event);
@@ -4949,21 +4932,6 @@ export function restoreBible(worldId: string, version: number): void {
   send({ kind: "restore-bible", worldId, version });
 }
 
-/**
- * Run a helper against a passage (design turn 90). Returns the requestId to match the answer by,
- * or null when the socket is down — the tray needs to know that now, not by waiting forever.
- *
- * Nothing here writes to the document. The answer arrives as an event and lands in the rail.
- */
-export function runBibleHelper(input: {
-  worldId: string;
-  helper: BibleHelperKind;
-  selection: string;
-}): string | null {
-  const requestId = ulid();
-  const sent = send({ kind: "bible-helper-run", requestId, ...input });
-  return sent ? requestId : null;
-}
 
 /**
  * `New chapter` (turn 126): returns the requestId `chapter.create-result` will carry, or null

@@ -145,7 +145,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "bench-open-subject": "studio", "bench-rebuild-subject": "studio", "bench-new-session": "studio",
   "bench-close": "studio", "bench-set-title": "studio", "bench-compose": "studio",
   "bench-add-reference": "studio", "bench-remove-reference": "studio", "bench-enhance-brief": "studio",
-  "bible-helper-run": "studio", "bench-draft-lyrics": "studio", "bench-preset-save": "studio",
+  "bench-draft-lyrics": "studio", "bench-preset-save": "studio",
   "bench-preset-delete": "studio", "bench-dispatch": "studio", "bench-rerun": "studio",
   "bench-keep": "studio", "bench-accept": "studio", "bench-discard": "studio",
   "bench-clear-view": "studio", "bench-take-files": "studio", "bench-delete": "studio", "bench-upscale": "studio", "bench-select-take": "studio", "stage-artifact-reference": "studio",

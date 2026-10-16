@@ -36,7 +36,6 @@ import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
-import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
@@ -4015,28 +4014,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The style rides along because a draft written blind to the arrangement is a draft written
    * for a different song, but it is optional: a style is not required to describe a subject.
    */
-  /**
-   * A helper run against a passage of the bible (design turn 90).
-   *
-   * Answered by `bible.helper-answered` under this requestId. The answer opens nothing and
-   * changes nothing — it lands in the rail beside the editor, and only Replace moves it into the
-   * document. The bible has no accept step and gains none here: what stands in for one is the
-   * version and Earlier versions, which is why this may be a plain one-shot rather than a
-   * proposal.
-   *
-   * Only the passage travels. The document itself is read from the store on the other side, so a
-   * long bible is not carried up the socket on every press.
-   */
-  z
-    .object({
-      kind: z.literal("bible-helper-run"),
-      worldId: UlidSchema,
-      requestId: UlidSchema,
-      helper: BibleHelperKindSchema,
-      /** The passage the author highlighted, verbatim. */
-      selection: z.string().min(1).max(BIBLE_HELPER_BOUNDS.selection),
-    })
-    .strict(),
 
   z
     .object({
