@@ -7,6 +7,7 @@ import { markdownExtensions } from "./extensions.js";
 import { LinkedNames, linkedNamesKey, nameMatcher, type LinkedName, type NameMatcher } from "./linked-names.js";
 import { MentionMenu } from "./mention-menu.js";
 import { filterMentions, insertMention, readMentionState, type Mention, type MentionMenuState } from "./mentions.js";
+import { currentMatch, findKey, WritingAids, type FindState } from "./writing-aids.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
 import { documentMarkdown, serializeMarkdown } from "./round-trip.js";
 import { SlashMenu } from "./slash-menu.js";
@@ -71,6 +72,40 @@ interface RichMarkdownEditorProps {
   onName?: (hit: { ids: string[]; text: string; rect: DOMRect } | null) => void;
   /** What `@` offers (R-18). Absent, `@` is only a character. */
   mentions?: readonly Mention[];
+  /**
+   * The writing room's aids (SPEC-056 R-7, R-12): the caret's paragraph marked for Focus, and
+   * Find. Read once, at mount, as the names are.
+   */
+  writingAids?: boolean;
+  /** Find's query and which match is current; null when Find is closed. */
+  find?: FindState | null;
+  /** How many matches the query has, and which is current (-1 for none). */
+  onFind?: (count: number, current: number) => void;
+  /** Where the caret is on screen after it moves or the text changes, for Focus to hold it (R-12). */
+  onCaret?: (caret: { top: number; bottom: number }) => void;
+}
+
+/**
+ * Bring a document position to the middle of whatever scrolls the editor: the match itself, not
+ * the paragraph around it, which can be taller than the window (codex on PR 1801).
+ */
+function centreOn(editor: Editor, pos: number): void {
+  let at: { top: number; bottom: number };
+  try {
+    at = editor.view.coordsAtPos(pos);
+  } catch {
+    return;
+  }
+  let scroller: HTMLElement | null = editor.view.dom.parentElement;
+  while (scroller !== null) {
+    const overflow = getComputedStyle(scroller).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && scroller.scrollHeight > scroller.clientHeight) break;
+    scroller = scroller.parentElement;
+  }
+  const box = scroller?.getBoundingClientRect() ?? { top: 0, height: window.innerHeight };
+  const delta = (at.top + at.bottom) / 2 - (box.top + box.height / 2);
+  if (scroller !== null) scroller.scrollBy?.({ top: delta });
+  else window.scrollBy?.({ top: delta });
 }
 
 /** How long the pointer rests on a name before its card opens (R-17). */
@@ -87,6 +122,10 @@ export function RichMarkdownEditor({
   linkedNames,
   onName,
   mentions,
+  writingAids,
+  find = null,
+  onFind,
+  onCaret,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -148,6 +187,18 @@ export function RichMarkdownEditor({
   const matcherRef = useRef<NameMatcher | null>(matcher);
   matcherRef.current = matcher;
   const withNames = useRef(linkedNames !== undefined).current;
+  const withAids = useRef(writingAids === true).current;
+  const onCaretRef = useRef(onCaret);
+  onCaretRef.current = onCaret;
+  const reportCaret = useCallback((instance: Editor) => {
+    if (!onCaretRef.current || instance.isDestroyed) return;
+    try {
+      const at = instance.view.coordsAtPos(instance.state.selection.head);
+      onCaretRef.current({ top: at.top, bottom: at.bottom });
+    } catch {
+      // A document mid-replacement has no coordinates to give; the next move reports.
+    }
+  }, []);
 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /*
@@ -210,8 +261,12 @@ export function RichMarkdownEditor({
    * benefit. Later documents arrive by adoption, below.
    */
   const extensions = useMemo(
-    () => [...markdownExtensions({ placeholder }), ...(withNames ? [LinkedNames.configure({ getMatcher: () => matcherRef.current })] : [])],
-    [placeholder, withNames],
+    () => [
+      ...markdownExtensions({ placeholder }),
+      ...(withNames ? [LinkedNames.configure({ getMatcher: () => matcherRef.current })] : []),
+      ...(withAids ? [WritingAids] : []),
+    ],
+    [placeholder, withNames, withAids],
   );
   const mountContent = useRef(value).current;
   const editorProps = useMemo(
@@ -307,6 +362,9 @@ export function RichMarkdownEditor({
     },
     onUpdate: ({ editor: instance }) => {
       syncMenu(instance);
+      reportCaret(instance);
+      const found = withAids ? findKey.getState(instance.state) : undefined;
+      if (found?.find) onFindRef.current?.(found.matches.length, currentMatch(found.find, found.matches.length));
       if (!ready.current) return;
       // Before the debounce rather than inside it, so the document the commit sees is already one
       // that can be written down, and the transaction this may dispatch settles first.
@@ -319,6 +377,7 @@ export function RichMarkdownEditor({
     },
     onSelectionUpdate: ({ editor: instance }) => {
       syncMenu(instance);
+      reportCaret(instance);
       const { from, to, empty, $from } = instance.state.selection;
       if (empty) {
         onSelectRef.current?.(null, null);
@@ -381,6 +440,26 @@ export function RichMarkdownEditor({
         .run();
     }
   }, [editor, value]);
+
+  /*
+   * Find (R-7): the query and the current match go to the plugin, the count comes back, and the
+   * current match is scrolled to the middle. The selection is left alone — selecting a match would
+   * make it the passage the page asks about.
+   */
+  const onFindRef = useRef(onFind);
+  onFindRef.current = onFind;
+  const findKeyText = find === null ? null : `${find.query}\u0000${find.index}`;
+  useEffect(() => {
+    if (!editor || !withAids || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta(findKey, find).setMeta("addToHistory", false));
+    const own = findKey.getState(editor.state);
+    const count = own?.matches.length ?? 0;
+    const here = find === null ? -1 : currentMatch(find, count);
+    onFindRef.current?.(count, here);
+    const match = here >= 0 ? own?.matches[here] : undefined;
+    if (match !== undefined) centreOn(editor, match.from);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, withAids, findKeyText]);
 
   // New names (a sheet arrived, one was renamed): the chapter is read again for them.
   useEffect(() => {

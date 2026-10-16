@@ -31,3 +31,33 @@ export function rememberDock(view: ChapterView, open: boolean): void {
     // Not kept: the next visit opens the view as its default has it.
   }
 }
+
+/*
+ * Whether a book's names are linked in its chapters (SPEC-056 D-5): on unless turned off from ⋯,
+ * kept on this device per book as a list of the books turned off. Display only, like the dock.
+ */
+const NAMES_OFF_KEY = "arke.chapter.linked-names-off";
+
+function booksWithNamesOff(): Set<string> {
+  try {
+    const raw = JSON.parse(window.localStorage?.getItem(NAMES_OFF_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function namesRemembered(book: string): boolean {
+  return !booksWithNamesOff().has(book);
+}
+
+export function rememberNames(book: string, on: boolean): void {
+  const off = booksWithNamesOff();
+  if (on) off.delete(book);
+  else off.add(book);
+  try {
+    window.localStorage?.setItem(NAMES_OFF_KEY, JSON.stringify([...off]));
+  } catch {
+    // Not kept: the next visit links the names, as the default has it.
+  }
+}

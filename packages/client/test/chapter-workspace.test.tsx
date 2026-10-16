@@ -2755,3 +2755,50 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
     assert.equal(card.getAttribute("aria-label"), "Adeyemi Akinola, Ade Pier");
   });
 });
+
+describe("Focus and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
+  const key = (init: { key: string; ctrlKey?: boolean; shiftKey?: boolean }) => {
+    const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+    Object.assign(event, { metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, ...init });
+    return event;
+  };
+
+  it("after the goal, Focus and then ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const bar = q(m, '[role="toolbar"][aria-label="Writing"]')!;
+    const tail = [...bar.children].slice(-3).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
+    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-more"], "the goal, Focus, then ⋯ (R-7)");
+    const root = () => q(m, '[data-testid="chapter-workspace"]')!;
+    const titlebar = dom.document.createElement("div");
+    titlebar.className = "fy-titlebar";
+    dom.document.body.append(titlebar);
+    await act(async () => (q(m, '[data-testid="chapter-focus"]') as HTMLButtonElement).click());
+    assert.equal(root().getAttribute("data-focus"), "true");
+    assert.ok(q(m, '[data-testid="chapter-focus-foot"]'), "the goal's track at the foot");
+    assert.equal(titlebar.hasAttribute("inert"), true, "the chrome under the page is out of reach");
+    await act(async () => { dom.document.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), null, "Esc leaves");
+    assert.equal(titlebar.hasAttribute("inert"), false);
+    await act(async () => { dom.document.dispatchEvent(key({ key: "F", ctrlKey: true, shiftKey: true }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), "true", "Ctrl+Shift+F enters (D-7)");
+    await act(async () => { dom.document.dispatchEvent(key({ key: "F", ctrlKey: true, shiftKey: true }) as unknown as Event); });
+    assert.equal(root().getAttribute("data-focus"), null, "and leaves");
+    titlebar.remove();
+  });
+
+  it("⋯ turns linked names off for the page and lists the shortcuts", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    const items = () => [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent);
+    assert.deepEqual(items(), ["Linked namesOn", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"], "this chapter can only be source: Find is the rich editor's");
+    assert.equal(q(m, '[data-testid="chapter-more-find"]')!.getAttribute("aria-disabled"), "true");
+    await act(async () => (q(m, '[data-testid="chapter-more-names"]') as HTMLButtonElement).click());
+    assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-names"), "off");
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    const shortcuts = [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => item.textContent === "Shortcuts") as HTMLButtonElement;
+    await act(async () => shortcuts.click());
+    assert.deepEqual(items(), ["FocusCtrl+Shift+F", "Leave FocusEsc", "FindCtrl+F", "Insert a name@", "Blocks/"]);
+  });
+});

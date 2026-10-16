@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { CHAPTER_GOAL_LIMITS, CHAPTER_PLAN_LIMITS, type ChapterGoalSource } from "@arke-studio/contracts";
-import { ChevronLeft, ChevronRight, PanelLeft } from "../components/icons.js";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PanelLeft, Search, X } from "../components/icons.js";
 import { cx } from "../components/ui.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 
@@ -41,6 +41,7 @@ export function WritingBar({
   next,
   onChapter,
   views,
+  lead,
   goal,
   children,
 }: {
@@ -50,7 +51,10 @@ export function WritingBar({
   next: { title: string; id: string } | null;
   onChapter: (id: string) => void;
   views: ReactNode;
+  /** What stands before the goal: the chapter's read. */
+  lead?: ReactNode;
   goal: ReactNode;
+  /** After the goal, in R-7's order: Focus, then ⋯. */
   children?: ReactNode;
 }) {
   return (
@@ -68,6 +72,7 @@ export function WritingBar({
       </span>
       {views}
       <span className="fy-ch__wbar-gap" />
+      {lead}
       {goal}
       {children}
     </div>
@@ -223,5 +228,62 @@ export function GoalField({ goal, goalSource, locked, onPlan }: {
         if (value !== goal) onPlan({ goal: value });
       }}
     />
+  );
+}
+
+/**
+ * Find (R-7, from ⋯ or Ctrl+F): a line under the bar with the query, `n of m`, and the way between
+ * matches. Enter steps on, Shift+Enter back, Esc closes. The matches are the editor's to draw.
+ */
+export function FindBar({ query, count, current, opened, onQuery, onStep, onClose }: {
+  query: string;
+  count: number;
+  current: number;
+  /** Counts each time Find is asked for, so Ctrl+F on an open bar brings the field back. */
+  opened: number;
+  onQuery: (query: string) => void;
+  onStep: (delta: 1 | -1) => void;
+  onClose: () => void;
+}) {
+  const field = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, [opened]);
+  return (
+    <div className="fy-ch__find" role="search" aria-label="Find in chapter" data-testid="chapter-find">
+      <Search size={14} />
+      <input
+        ref={field}
+        type="search"
+        className="fy-ch__find-input"
+        aria-label="Find"
+        placeholder="Find"
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onStep(e.shiftKey ? -1 : 1);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+      />
+      <span className="fy-ch__find-count fy-mono" aria-live="polite">
+        {query.trim() === "" ? "" : count === 0 ? "No matches" : `${current + 1} of ${count}`}
+      </span>
+      <button type="button" className="fy-ch__wbtn" aria-label="Previous match" disabled={count === 0} onClick={() => onStep(-1)}>
+        <ChevronUp size={14} />
+      </button>
+      <button type="button" className="fy-ch__wbtn" aria-label="Next match" disabled={count === 0} onClick={() => onStep(1)}>
+        <ChevronDown size={14} />
+      </button>
+      <button type="button" className="fy-ch__wbtn" aria-label="Close find" onClick={onClose}>
+        <X size={14} />
+      </button>
+    </div>
   );
 }
