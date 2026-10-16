@@ -3007,6 +3007,9 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     assert.match(asked?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Revise this\. Another version, different from the one shown\.$/);
     assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
     assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /asking…/);
+    const keep = [...(q(m, '[data-testid="page-held-bar"]')?.querySelectorAll("button") ?? [])].at(-1) as HTMLButtonElement;
+    assert.equal(keep.disabled, true, "nothing is kept while another version is being written (codex on PR 1807)");
+    assert.equal(keep.textContent, "Asking…");
     const THIRD = { ...SECOND, proposal: { ...SECOND.proposal, id: "pr_01J8H0000000000000000000Q3", created: "2026-09-06T12:10:00Z" } } as StagedProposal;
     await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD], proposals: [...styled.world!.proposals, THIRD] }, worldChat: workspace } as ClientState, { connection: "open" }));
     assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /3 of 3/, "the answer to the ask is the third version");

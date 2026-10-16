@@ -325,6 +325,11 @@ onWorldChange(() => {
   heldAsks.clear();
   heldKeeps.clear();
   heldAccepts.clear();
+  // Keyed by the chapter's path alone, so a copied world would inherit them (codex on PR 1807).
+  lastRewrites.clear();
+  askTags.clear();
+  awaitedAsks.clear();
+  chosenVersions.clear();
 });
 // The answer to a held ask is kept with it (codex on PR 1232): the store remembers only recent
 // answers, and a chapter left for long enough would come back to one it no longer has.
@@ -3552,7 +3557,7 @@ export function ChapterWorkspace({
                     discardOtherVersions();
                     accept.onAccept();
                   },
-                  ...(accept?.blocked !== undefined ? { blocked: accept.blocked } : pending ? { blocked: "Accepting…" } : {}),
+                  ...(accept?.blocked !== undefined ? { blocked: accept.blocked } : pending ? { blocked: "Accepting…" } : versionWanted ? { blocked: "Asking…" } : {}),
                 }}
               />
             ) : (
@@ -3768,7 +3773,7 @@ export function ChapterWorkspace({
             disabled={versionControls.asking || (versionControls.at === versionControls.count - 1 && versionControls.count >= versionControls.max)} onClick={versionControls.onNext}><ChevronRight size={14} /></button>
           {versionControls.note !== undefined && <span className="fy-pageheld__note">{versionControls.note}</span>}
         </span>
-      )}<StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept: "onAccept" in accept ? { ...accept, onAccept: (signature?: string) => { discardOtherVersions(); accept.onAccept(signature); } } : accept } : {})} /></HeldBar>}
+      )}<StagedDecision worldId={worldId} subject={chapterLabel} staged={stagedDraft.staged} {...(accept !== undefined ? { accept: versionWanted && accept.blocked === undefined ? { ...accept, blocked: "Asking…" } : "onAccept" in accept ? { ...accept, onAccept: (signature?: string) => { discardOtherVersions(); accept.onAccept(signature); } } : accept } : {})} /></HeldBar>}
       {view !== "timing" && (globalChat ? (
         // The app's Chat shows this thread (SPEC-056 R-42); mounted here, unseen, it carries the
         // chapter's subject, prompts and asks the way Bench's does.
