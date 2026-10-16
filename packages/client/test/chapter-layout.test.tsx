@@ -72,9 +72,9 @@ it('with Chat open a selected passage is adopted explicitly into global Chat (22
  assert.equal(find('.fy-passage-ask'),null,'with the thread beside the page, no ask bar is drawn over the selection');
  const use=[...document.querySelectorAll<HTMLElement>('.fy-global-chat button')].find(b=>b.textContent==='Use this page');
  if(use)await click(use);
- assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/);
+ assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/Chapter \d+ · paragraph \d+/);
  const field=find('.fy-global-chat .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
- await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/about this passage/,'moving into the Chat’s field keeps the passage');
+ await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/Chapter \d+ · paragraph \d+/,'moving into the Chat’s field keeps the passage');
  await click(find('[aria-label="Close Chat"]'));assert.equal(find('.fy-global-chat[open]'),null,'the retained passage chat is closed');
 });
 it('a compact waiting passage has an attended decision without opening Arke',async()=>{

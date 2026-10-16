@@ -335,3 +335,28 @@
 @container page (max-width: 760px) { .fy-margin--face { display: none; } }
 /* Focus is the page alone (R-12). */
 [data-focus="true"] .fy-margin { display: none; }
+
+/* The selection bar (R-22, 227p): format at the left, Ask Arke at the right, above the words. */
+.fy-selbar-wrap { position: absolute; z-index: 7; }
+.fy-selbar { display: flex; align-items: center; gap: 2px; height: 40px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }
+.fy-selbar__btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: 500 13px var(--font-sans); cursor: pointer; }
+.fy-selbar__btn:hover, .fy-selbar__btn:focus-visible, .fy-selbar__btn--on { background: var(--muted); }
+.fy-selbar__sep { width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
+/* Ask Arke in the bar is the bar's own press, not the old pill beside the words. */
+.fy-selbar .fy-ch__ask.fy-selbar__ask { height: 30px; padding: 0 10px; border: 0; border-radius: 7px; box-shadow: none; background: transparent; font: 500 13px var(--font-sans); gap: 6px; }
+.fy-selbar .fy-ch__ask.fy-selbar__ask:hover:not(:disabled), .fy-selbar .fy-ch__ask.fy-selbar__ask[aria-expanded="true"] { background: var(--muted); }
+
+/* The Ask Arke menu (R-23, 227q): the author's own words first, then the asks, under the words. */
+.fy-askm { position: absolute; z-index: 8; left: 0; display: flex; flex-direction: column; width: 320px; max-width: calc(100vw - 32px); padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }
+.fy-askm--end { left: auto; right: 0; }
+.fy-askm__field { height: 40px; margin: 0 0 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--background); color: var(--foreground); font: 400 13px var(--font-sans); outline: none; }
+.fy-askm__field:focus { border-color: var(--ring, var(--foreground)); }
+.fy-askm__item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: 400 13px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-askm__item:hover, .fy-askm__item:focus-visible, .fy-askm__item--on { background: var(--muted); outline: none; }
+.fy-askm__item svg { color: var(--muted-foreground); }
+.fy-askm__reply { font: 400 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-askm__rule { height: 1px; margin: 5px 4px; border: 0; background: var(--border); }
+.fy-askm__tone { position: relative; }
+.fy-askm__sub { top: -6px; left: calc(100% + 8px); width: 220px; }
+.fy-askm__sub--end { left: auto; right: calc(100% + 8px); }
+.fy-askm__sub .fy-askm__field { margin: 6px 0 0; }

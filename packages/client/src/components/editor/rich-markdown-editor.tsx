@@ -86,6 +86,8 @@ interface RichMarkdownEditorProps {
   onCaret?: (caret: { top: number; bottom: number }) => void;
   /** Speaker faces and passage pictures beside their paragraphs (R-14); empty when both are off. */
   margins?: readonly MarginItem[];
+  /** The live editor, for a selection bar that formats in place (R-22); null once it is gone. */
+  onEditor?: (editor: Editor | null) => void;
 }
 
 /**
@@ -130,6 +132,7 @@ export function RichMarkdownEditor({
   onFind,
   onCaret,
   margins,
+  onEditor,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -470,6 +473,14 @@ export function RichMarkdownEditor({
     if (match !== undefined) centreOn(editor, match.from);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, withAids, findKeyText]);
+
+  const onEditorRef = useRef(onEditor);
+  onEditorRef.current = onEditor;
+  useEffect(() => {
+    if (!editor) return;
+    onEditorRef.current?.(editor);
+    return () => onEditorRef.current?.(null);
+  }, [editor]);
 
   // The margins are the screen's to choose; the editor only places them.
   const marginsText = JSON.stringify(margins ?? []);

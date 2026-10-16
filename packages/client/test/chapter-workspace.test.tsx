@@ -563,7 +563,7 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /Ask Arke · /, "one word is not a passage, and no reason is written");
     await keyup(area, 0, 24);
     assert.match(text(m), /Ask Arke · 4 words/, "the press beside the selection counts it");
-    assert.match(text(m), /about this passage · 4 words/, "the dock says what the subject is");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock says what the subject is");
     assert.match(text(m), /Tighten this/, "the prompts are a revision's");
     assert.doesNotMatch(text(m), /Draft the rest/);
 
@@ -629,7 +629,7 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
-    assert.deepEqual(labels, ["Tighten", "Expand", "Simplify", "Make it vivid", "Change tone…", "Check against style", "Critique", "Ask something else…"]);
+    assert.deepEqual(labels, ["Tighten", "Expand", "Simplify", "Make it vivid", "Change tone", "Check against styleReply", "CritiqueReply", "Open in Arke"], "the field first, then the asks (R-23)");
 
     const item = (label: string) => [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === label) as HTMLElement;
     await act(async () => {
@@ -653,7 +653,7 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     await act(async () => {
-      item("Critique").click();
+      item("CritiqueReply").click();
     });
     const critique = sends().find((message) => message.text.includes("What works here"));
     assert.equal(critique?.replyOnly, true, "a critique is a reply and nothing else");
@@ -665,11 +665,11 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     await act(async () => {
-      item("Change tone…").click();
+      item("Open in Arke").click();
     });
     assert.equal(sends().length, before, "nothing is said for a line the author finishes");
     const composer = q(m, ".fy-arke .fy-cx__editor");
-    assert.equal(composer?.textContent, "Make this ");
+    assert.equal(composer?.textContent, "", "the composer waits for the author's words");
   });
 
   it("a second press waits for the first ask, which is opening the thread, and nothing lands in the composer (codex on PR 1232)", async () => {
@@ -800,10 +800,10 @@ describe("the craft loop (turn 128)", () => {
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
     await keyup(area, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     // The author moves the selection away, then finishes the line and sends it.
     await keyup(area, 3, 3);
-    assert.match(text(m), /about this passage · 4 words/, "the dock still says which passage the line is about (codex on PR 1232)");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock still says which passage the line is about (codex on PR 1232)");
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder";
     await act(async () => {
@@ -862,12 +862,12 @@ describe("the craft loop (turn 128)", () => {
     const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
     await keyup(area, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
     await keyup(area, 3, 3);
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
-    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "Make this ", "the line is back in the composer");
-    assert.match(text(m), /about this passage · 4 words/, "still about the passage it was pressed on");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "", "the composer is back, waiting for the author's words");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "still about the passage it was pressed on");
   });
 
   it("an ask whose answer was lost is not called not sent on the thread's word (codex on PR 1232)", async () => {
@@ -992,7 +992,7 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder";
     await act(async () => {
@@ -1071,7 +1071,7 @@ describe("the craft loop (turn 128)", () => {
     });
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
     await act(async () => (q(m, "button.fy-sw__rail") as HTMLElement).click());
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "half a thought", "put away at once, the dock still comes back with them");
@@ -1097,7 +1097,8 @@ describe("the craft loop (turn 128)", () => {
         pill.dispatchEvent(event);
       });
       assert.ok(m.container.querySelector("[role=menuitem]"), "the menu is open");
-      assert.equal(focused.at(-1), "Tighten", "and the caret is on its first ask");
+      assert.equal(focused.at(-1), "", "and the caret is in its field, the first stop (R-23)");
+      assert.equal((m.container.querySelector(".fy-askm__field") as HTMLInputElement | null)?.getAttribute("aria-label"), "Ask Arke about this");
     } finally {
       Object.assign(dom.HTMLElement.prototype, { focus: was });
     }
@@ -1121,7 +1122,7 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(pill.disabled, true, "a second press would replace the first before its answer");
     assert.match(pill.textContent ?? "", /asking…/);
     await keyup(area, 3, 3);
-    assert.match(text(m), /about this passage · 4 words/, "the dock names the passage the ask is about, not what is selected now");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the dock names the passage the ask is about, not what is selected now");
   });
 
   it("an ask waiting survives moving to another chapter and back (codex on PR 1232)", async () => {
@@ -1317,7 +1318,7 @@ describe("the craft loop (turn 128)", () => {
     const tone = async () => {
       await keyup(area, 0, 24);
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     };
     await tone();
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
@@ -1376,7 +1377,7 @@ describe("the craft loop (turn 128)", () => {
     });
     try {
       await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+      await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
       const editorFocused = () => focused.filter((name) => name.includes("fy-cx__editor")).length;
       assert.equal(editorFocused(), 0, "a locked box takes no focus");
       await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, runStatus: null } } as ClientState));
@@ -1410,7 +1411,7 @@ describe("the craft loop (turn 128)", () => {
       Object.assign(dom.document.body, { appendChild: append });
     }
     assert.equal(mirrors.at(-1)?.style.width, "685px", "the copy wraps at the box's text width, not its CSS width");
-    const press = q(m, ".fy-ch__ask-wrap") as HTMLElement;
+    const press = q(m, ".fy-selbar-wrap") as HTMLElement;
     assert.match(press.getAttribute("style") ?? "", /left:\s*728px/, "beyond the source box, clear of unselected words on the same line");
     assert.match(press.getAttribute("style") ?? "", /top:\s*8px/);
   });
@@ -1564,7 +1565,7 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     const composer = q(m, ".fy-arke .fy-cx__editor")!;
     composer.textContent = "Make this colder and slower";
     await act(async () => {
@@ -1585,7 +1586,7 @@ describe("the craft loop (turn 128)", () => {
     });
     await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "My own question about the tide");
   });
 
@@ -1597,7 +1598,7 @@ describe("the craft loop (turn 128)", () => {
     let focused = 0;
     Object.assign(composer, { focus: () => { focused++; } });
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
-    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Ask something else…") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
     assert.equal(focused, 1, "the author is handed the box, not left with a menu that closed on nothing");
   });
 
@@ -1609,8 +1610,8 @@ describe("the craft loop (turn 128)", () => {
       (q(m, "button.fy-ch__ask") as HTMLElement).click();
     });
     const labels = [...m.container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent);
-    assert.equal(labels.includes("Check against style"), false);
-    assert.equal(labels.includes("Critique"), true);
+    assert.equal(labels.includes("Check against styleReply"), false);
+    assert.equal(labels.includes("CritiqueReply"), true);
   });
 
   it("a passage waiting stands in place with the rest untouched; the band, the chip, the foot and the card say the span", async () => {
@@ -2830,5 +2831,75 @@ describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
     const restored = m.sent.findLast((message) => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
     assert.equal(restored.version, 3);
     assert.equal(q(m, '[data-testid="chapter-compare"]'), null, "and writing resumes");
+  });
+});
+
+describe("the selection bar and Ask Arke (design turn 227p–q, SPEC-056 R-22, R-23, R-28)", () => {
+  const keyup = async (area: HTMLTextAreaElement, start: number, end: number) => {
+    Object.assign(area, { selectionStart: start, selectionEnd: end });
+    await act(async () => {
+      area.dispatchEvent(new dom.Event("mouseup", { bubbles: true }));
+    });
+  };
+  const workspace = {
+    conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+    runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+  };
+  const opened = async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    return { m, area: q(m, "textarea.fy-ch__source") as HTMLTextAreaElement };
+  };
+  const sends = (m: Mounted) => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string }>;
+
+  it("any selection shows the bar; one that is not a passage keeps Ask Arke, disabled, with the rule as its tooltip", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 5);
+    const bar = q(m, '[data-testid="selection-bar"]');
+    assert.ok(bar, "the bar is over the selection");
+    assert.equal(bar!.querySelector('[aria-label="Bold"]'), null, "the Markdown source has no marks to set");
+    const ask = q(m, "button.fy-ch__ask") as HTMLButtonElement;
+    assert.equal(ask.disabled, true);
+    assert.equal(ask.getAttribute("title"), "Select at least three words", "the rule in one clause, not a line under it");
+    assert.equal(ask.textContent, "Ask Arke");
+  });
+
+  it("the field sends the author's own words as a passage ask", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    const field = q(m, ".fy-askm__field") as HTMLInputElement;
+    const props = (field as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onKeyDown: (event: { key: string; preventDefault: () => void }) => void }>)[
+      Object.keys(field).find((key) => key.startsWith("__reactProps$"))!
+    ]!;
+    await act(async () => props.onChange({ target: { value: "Make her colder" } }));
+    const after = (q(m, ".fy-askm__field") as unknown as Record<string, typeof props>)[Object.keys(q(m, ".fy-askm__field")!).find((key) => key.startsWith("__reactProps$"))!]!;
+    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {} }));
+    assert.match(sends(m).at(-1)?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Make her colder$/);
+    assert.equal(q(m, "[role=menu]"), null, "an ask closes the menu");
+  });
+
+  it("Change tone opens its tones, each a rewrite at about the same length", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    const tone = [...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Change tone") as HTMLElement;
+    await act(async () => tone.click());
+    const tones = [...m.container.querySelectorAll('[aria-label="Change tone"] [role=menuitem]')].map((b) => b.textContent);
+    assert.deepEqual(tones, ["Tenser", "Warmer", "Drier", "More playful"]);
+    assert.ok(q(m, '[aria-label="Another tone"]'), "and a field for another");
+    await act(async () => ([...m.container.querySelectorAll('[aria-label="Change tone"] [role=menuitem]')].find((b) => b.textContent === "Warmer") as HTMLElement).click());
+    assert.match(sends(m).at(-1)?.text ?? "", /Make this warmer, at about the same length$/);
+  });
+
+  it("Open in Arke makes the passage Chat's subject, by chapter and paragraph, with the composer waiting", async () => {
+    const { m, area } = await opened();
+    await keyup(area, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Open in Arke") as HTMLElement).click());
+    assert.equal(sends(m).length, 0, "nothing is said until the author says it");
+    assert.match(text(m), /Chapter 2 · paragraph 1/, "the scope above the composer (R-28)");
+    assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "");
   });
 });
