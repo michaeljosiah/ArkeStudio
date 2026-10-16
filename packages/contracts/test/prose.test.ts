@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProseReadSourceSchema, changedSpan, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
+import { ProseReadSourceSchema, changedSpan, chapterGoal, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
 import { occurrencesOf, pinnedLines, pinTarget, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
@@ -102,6 +102,29 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: "What this chapter is for.", pov: null } }).success);
     assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: {} }).success, false, "a plan edit changes something");
     assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: long } }).success, false, "a synopsis is at most 600 characters");
+    // The chapter's own goal and picture (SPEC-056 R-50): a whole number of words in range; null clears.
+    assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 4500, picture: "assets/booth.png" } }).success);
+    assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { goal: null, picture: null } }).success);
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 99 } }).success, false, "a goal is at least 100 words");
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 50_001 } }).success, false, "a goal is at most 50,000 words");
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 3000.5 } }).success, false, "a goal is whole words");
+  });
+
+  it("a chapter's goal resolves chapter, story, median, default — in that order (SPEC-056 D-2)", () => {
+    const drafted = [{ words: 4000 }, { words: 4400 }, { words: 5000 }];
+    assert.deepEqual(chapterGoal({ goal: 4500 }, "3k words per chapter", drafted), { words: 4500, source: "chapter" });
+    assert.deepEqual(chapterGoal({}, "3,000 words per chapter", drafted), { words: 3000, source: "story" });
+    assert.deepEqual(chapterGoal({}, "Each of 6 chapters is 3,250 words", drafted), { words: 3250, source: "story" });
+    assert.deepEqual(chapterGoal({}, "24 chapters, 80,000 words", drafted), { words: 3300, source: "story" }, "a total over a stated count, to the hundred");
+    assert.deepEqual(chapterGoal({}, "80,000 words", drafted), { words: 4400, source: "median" }, "a total with no count says nothing per chapter");
+    assert.deepEqual(chapterGoal({}, undefined, drafted), { words: 4400, source: "median" });
+    assert.deepEqual(chapterGoal({}, undefined, [{ words: 4000 }, { words: 4400 }, { words: 5000 }, { words: 6000 }]), { words: 4700, source: "median" }, "an even count takes the mean of the middle two");
+    // Fewer than three chapters of 500 words, retired ones and drafts too short to count say nothing.
+    assert.deepEqual(chapterGoal({}, undefined, [{ words: 4000 }, { words: 4400 }, { words: 300 }, { words: 9000, retired: true }]), { words: 3000, source: "default" });
+    assert.deepEqual(chapterGoal({}, undefined, []), { words: 3000, source: "default" });
+    // A stored goal outside the writer's range is ignored rather than shown.
+    assert.deepEqual(chapterGoal({ goal: 20 }, undefined, []), { words: 3000, source: "default" });
+    assert.deepEqual(chapterGoal({ goal: 3000.5 }, undefined, []), { words: 3000, source: "default" });
   });
 
   it("the target band draws only when the target says how many words", () => {

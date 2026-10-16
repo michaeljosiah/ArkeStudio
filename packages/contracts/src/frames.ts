@@ -55,7 +55,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
-import { ProseReadSourceSchema } from "./prose.js";
+import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
 import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -2302,6 +2302,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
           pov: SlugSchema.nullable().optional(),
           when: z.string().trim().max(CHAPTER_PLAN_LIMITS.when).nullable().optional(),
           implies: ChapterImpliesWriteSchema.nullable().optional(),
+          // The chapter's own goal and chosen picture (SPEC-056 R-50): a whole number of words in
+          // range, and a world-relative image file the coordinator checks exists. null clears.
+          goal: z.number().int().min(CHAPTER_GOAL_LIMITS.min).max(CHAPTER_GOAL_LIMITS.max).nullable().optional(),
+          picture: z.string().trim().min(1).max(400).nullable().optional(),
         })
         .strict()
         .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),

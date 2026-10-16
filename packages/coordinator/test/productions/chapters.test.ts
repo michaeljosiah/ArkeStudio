@@ -269,6 +269,27 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
   });
 
+  it("a chapter's goal and picture save with the plan, ride on the summary and keep the version (SPEC-056 R-49/R-50)", async () => {
+    const { dir, store } = await open();
+    const before = await openChapter(store, LEDGER, "neap");
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: 4500, picture: "world-art.png" });
+    const set = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(set.goal, 4500);
+    assert.equal(set.picture, "world-art.png");
+    assert.equal(set.version, before.version, "a goal or a picture cuts no version");
+
+    // A picture must be an image the world holds now, never a path out of it.
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "missing.png" }), /not in this world/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "../outside.png" }), /not a picture/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "changes.jsonl" }), /not a picture/);
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!.picture, "world-art.png", "a refused picture writes nothing");
+
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: null, picture: null });
+    const cleared = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(cleared.goal, undefined);
+    assert.equal(cleared.picture, undefined);
+  });
+
   it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {
     const { dir, store } = await open();
     await createProduction(store, { title: "Inkbound", format: "story" });

@@ -883,9 +883,22 @@ export async function editChapterPlan(
     pov?: string | null;
     when?: string | null;
     implies?: ChapterImplies | null;
+    goal?: number | null;
+    picture?: string | null;
   },
 ): Promise<void> {
   const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  // A chosen chapter picture (SPEC-056 R-49) is a world-relative image that exists now; a path
+  // that escapes the world, names no picture or names nothing would draw an empty hero.
+  if (typeof changes.picture === "string" && changes.picture.trim() !== "") {
+    const picture = changes.picture.trim();
+    if (picture.startsWith("/") || /^[a-z]:/i.test(picture) || picture.split(/[\\/]/).includes("..") || !/\.(png|jpe?g|webp|gif|avif)$/i.test(picture)) {
+      throw new Error(`${picture} is not a picture in this world`);
+    }
+    const found = await stat(toExtendedLength(join(store.dir, fromPortable(picture)))).catch(() => null);
+    if (!found?.isFile()) throw new Error(`${picture} is not in this world`);
+    changes = { ...changes, picture };
+  }
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = MarkdownFile.parse(live);
   const next: Record<string, unknown> = { ...doc.data };
