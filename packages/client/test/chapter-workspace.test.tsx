@@ -2981,10 +2981,14 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     assert.equal(m.sent.slice(before).some((message) => message.kind === "world-chat-send" || message.kind === "world-chat-create"), false, "stepping back asks nothing");
     const keep = [...q(m, '[data-testid="page-held-bar"]')!.querySelectorAll("button")].find((b) => b.textContent === "Accept") as HTMLButtonElement;
     await act(async () => keep.click());
-    const discarded = m.sent.filter((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }>[];
-    assert.deepEqual(discarded.map((message) => message.proposalId), [SECOND.proposal.id], "the version not kept goes");
     const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
     assert.equal(accepted?.proposalId, PASSAGE.proposal.id, "the shown version is the one kept");
+    const discards = () => (m.sent.filter((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }>[]).map((message) => message.proposalId);
+    assert.deepEqual(discards(), [], "nothing is let go before the kept one lands (codex on PR 1807)");
+    // Landed: the kept proposal is gone, and the version not kept goes with it.
+    const landed = inkbound([SECOND]);
+    await act(async () => __setStateForTest(landed, { connection: "open" }));
+    assert.deepEqual(discards(), [SECOND.proposal.id], "the version not kept goes");
   });
 
   it("at the newest, the arrow asks for another of the same passage, up to three", async () => {
