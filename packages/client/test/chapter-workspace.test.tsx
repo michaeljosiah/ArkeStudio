@@ -8,6 +8,7 @@ import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type Chapt
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
+import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -2682,5 +2683,57 @@ describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
     } as ClientState;
     await act(async () => __setStateForTest(accepted, { connection: "open" }));
     assert.deepEqual(plans(m).map((plan) => plan.changes), [{ pov: "maren-kest-2" }], "the sheet the proposal made");
+  });
+});
+
+describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
+  const rect = { left: 200, right: 260, top: 300, bottom: 320, width: 60, height: 20, x: 200, y: 300 } as DOMRect;
+  const mountCard = async (sheets: NameCardSheet[], calls: string[]) => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <MemoryRouter>
+        <NameCard sheets={sheets} rect={rect} onEnter={() => calls.push("enter")} onLeave={() => calls.push("leave")}
+          onClose={() => calls.push("close")} onAsk={(sheet) => calls.push(`ask ${sheet.id}`)} />
+      </MemoryRouter>,
+    ));
+    const mounted = { container, root, sent: [], navigate: () => {} };
+    open.push(mounted);
+    return mounted;
+  };
+
+  it("says who, how much they speak here and across the book, their voice, and where to go", async () => {
+    const calls: string[] = [];
+    const m = await mountCard([{
+      id: "maren-kest", kind: "character", name: "Maren Kest", role: "Bell-keeper", face: null,
+      linesHere: 3, chapters: [1, 2, 4], voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
+    }], calls);
+    const card = q(m, '[data-testid="name-card"]')!;
+    assert.match(card.textContent ?? "", /Maren KestBell-keeper/);
+    assert.match(card.textContent ?? "", /3 lines here/);
+    assert.match(card.textContent ?? "", /Ch 1–4 · 3 chapters/, "first and last seen, and how many");
+    assert.match(card.textContent ?? "", /Ama · ElevenLabs/);
+    assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest/voice?book=inkbound"]'), "Change goes to the voice");
+    assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest"]'), "Open goes to the sheet");
+    const ask = [...card.querySelectorAll("button")].find((button) => button.textContent === "Ask Arke") as HTMLElement;
+    await act(async () => ask.click());
+    assert.deepEqual(calls, ["ask maren-kest"]);
+    const escape = new dom.window.Event("keydown") as unknown as KeyboardEvent;
+    Object.assign(escape, { key: "Escape" });
+    await act(async () => { dom.window.dispatchEvent(escape as unknown as Event); });
+    assert.deepEqual(calls, ["ask maren-kest", "close"], "Esc closes");
+  });
+
+  it("lists both sheets a shared name names, and a place has no voice", async () => {
+    const m = await mountCard([
+      { id: "ade", kind: "character", name: "Adeyemi Akinola", face: null, open: "/w/x/cast/ade" },
+      { id: "ade-pier", kind: "place", name: "Ade Pier", face: null, open: "/w/x/locations/ade-pier" },
+    ], []);
+    const card = q(m, '[data-testid="name-card"]')!;
+    assert.equal(card.querySelectorAll(".fy-namecard__sheet").length, 2);
+    assert.match(card.textContent ?? "", /No voice/, "a character without one says so");
+    assert.equal(card.querySelectorAll(".fy-namecard__voice").length, 1, "the place has no voice row");
+    assert.equal(card.getAttribute("aria-label"), "Adeyemi Akinola, Ade Pier");
   });
 });
