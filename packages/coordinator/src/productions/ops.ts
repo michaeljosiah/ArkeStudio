@@ -737,7 +737,8 @@ export async function createChapter(
   // it (codex, PR 1799). With nothing ranked, the last chapter shown is.
   const sheets = store.getBundle().sheets;
   const live = existing.filter((c) => !c.retired);
-  const ranked = live.filter((c) => (ranks.get(c.file) ?? 0) > 0).sort((a, b) => ranks.get(b.file)! - ranks.get(a.file)!);
+  // Ties on a rank go by file name, as the scanner orders them, so the last of a tie is the one before.
+  const ranked = live.filter((c) => (ranks.get(c.file) ?? 0) > 0).sort((a, b) => ranks.get(b.file)! - ranks.get(a.file)! || b.file.localeCompare(a.file));
   const previous = ranked[0] ?? [...live].sort((a, b) => b.order - a.order)[0];
   const pov = previous?.pov !== undefined && sheets.some((sheet) => sheet.id === previous.pov && sheet.type === "character" && !sheet.retired) ? previous.pov : undefined;
   const doc = MarkdownFile.create(

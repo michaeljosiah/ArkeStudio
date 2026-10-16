@@ -2657,10 +2657,15 @@ describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
     const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
     (production as { chapters: ChapterSummary[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, pov: undefined } : c)) as ChapterSummary[];
     const plans = (m: Mounted) => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
-    const m = await mount(state, `${ROUTE}?pov-name=${encodeURIComponent("Maren Kest")}`);
+    // An older Maren Kest is already waiting for review; the press's own proposal is the one taken.
+    const older = { ...staged, proposal: { ...staged.proposal, id: "pr_01J8H0000000000000000000N0", created: "2026-10-16T09:00:00Z",
+      targets: [{ path: "characters/maren-kest-old.md", baseVersion: null, baseHash: null }] },
+      review: { targets: [{ path: "characters/maren-kest-old.md", label: "Maren Kest", kind: "character", action: "create", fields: [] }] } } as unknown as StagedProposal;
+    (state.world as { proposals: StagedProposal[] }).proposals = [...state.world!.proposals, older];
+    const m = await mount(state, `${ROUTE}?pov-name=${encodeURIComponent("Maren Kest")}&pov-since=${encodeURIComponent("2026-10-16T11:59:00Z")}`);
     await answerOpen(m);
     assert.equal(plans(m).length, 0, "the older sheet of the same name is not chosen");
-    assert.equal(q(m, '[data-testid="chapter-new-character"]'), null, "nothing to review until the draft is staged");
+    assert.equal(q(m, '[data-testid="chapter-new-character"]'), null, "nor the older proposal: nothing to review until the press's own is staged");
 
     const withStaged = { ...state, world: { ...state.world!, proposals: [...state.world!.proposals, staged] } };
     await act(async () => __setStateForTest(withStaged, { connection: "open" }));

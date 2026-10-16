@@ -1449,20 +1449,26 @@ export function ChapterWorkspace({
    * staged proposal once it arrives; from then on the address carries its path.
    */
   const povName = searchParams.get("pov-name");
+  const povSince = searchParams.get("pov-since");
   const povPath = searchParams.get("pov-path");
   useEffect(() => {
     if (povName === null) return;
     const wanted = povName.trim().toLowerCase();
+    // Only a proposal staged since the press: a few seconds' grace for the two clocks.
+    const since = povSince === null ? Number.NaN : Date.parse(povSince) - 5_000;
+    const created = new Map(world.proposals.map((staged) => [staged.proposal.id, Date.parse(staged.proposal.created)]));
     const staged = pendingSheets(world.proposals, "character", world.conversations)
-      .findLast((sheet) => sheet.name.trim().toLowerCase() === wanted && (sheet.production === undefined || sheet.production === prodId));
+      .findLast((sheet) => sheet.name.trim().toLowerCase() === wanted && (sheet.production === undefined || sheet.production === prodId)
+        && (Number.isNaN(since) || (created.get(sheet.proposalId) ?? 0) >= since));
     if (staged === undefined) return;
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
       next.delete("pov-name");
+      next.delete("pov-since");
       next.set("pov-path", staged.path);
       return next;
     }, { replace: true });
-  }, [povName, world.proposals, world.conversations, prodId, setSearchParams]);
+  }, [povName, povSince, world.proposals, world.conversations, prodId, setSearchParams]);
   useEffect(() => {
     if (povPath === null) return;
     const id = /^characters\/([^/]+)\.md$/.exec(povPath)?.[1];

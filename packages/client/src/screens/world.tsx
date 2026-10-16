@@ -2805,7 +2805,9 @@ function NewSheetScreen({
       onClick={() => {
         if (!worldId) return;
         createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
-        navigate(returnTo !== null ? `${returnTo}${returnTo.includes("?") ? "&" : "?"}pov-name=${encodeURIComponent(name.trim())}` : `/w/${worldId}/${listPath}`);
+        // The time goes with the name, so the chapter takes the proposal this press stages and not
+        // an older one waiting under the same name (codex on PR 1799).
+        navigate(returnTo !== null ? `${returnTo}${returnTo.includes("?") ? "&" : "?"}pov-name=${encodeURIComponent(name.trim())}&pov-since=${encodeURIComponent(new Date().toISOString())}` : `/w/${worldId}/${listPath}`);
       }}
     >
       {harnessReady ? "Draft the sheet" : "Create as sketch"}
