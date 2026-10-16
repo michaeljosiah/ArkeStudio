@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { CHAPTER_GOAL_LIMITS, CHAPTER_PLAN_LIMITS, type ChapterGoalSource } from "@arke-studio/contracts";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PanelLeft, Search, Sparkle, X } from "../components/icons.js";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronsDown, ChevronUp, PanelLeft, Search, Sparkle, X } from "../components/icons.js";
 import { cx } from "../components/ui.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 
@@ -284,6 +284,35 @@ export function FindBar({ query, count, current, opened, onQuery, onStep, onClos
       <button type="button" className="fy-ch__wbtn" aria-label="Close find" onClick={onClose}>
         <X size={14} />
       </button>
+    </div>
+  );
+}
+
+/**
+ * The phone's format bar (SPEC-056 R-46, 227l): held above the keyboard while the page is being
+ * written. A press must not take the caret from the editor, or the keyboard would drop with it, so
+ * every press is refused the focus it would otherwise take.
+ */
+export function FormatBar({ bold, italic, onBold, onItalic, onMention, onSlash, onArke, onHide }: {
+  bold: boolean;
+  italic: boolean;
+  onBold: () => void;
+  onItalic: () => void;
+  onMention: () => void;
+  onSlash: () => void;
+  onArke: () => void;
+  onHide: () => void;
+}) {
+  const keep = (event: { preventDefault: () => void }) => event.preventDefault();
+  return (
+    <div className="fy-formatbar" role="toolbar" aria-label="Format" onMouseDown={keep} onPointerDown={keep} data-testid="format-bar">
+      <button type="button" className={cx("fy-formatbar__b", bold && "fy-formatbar__b--on")} aria-label="Bold" aria-pressed={bold} onClick={onBold}><b>B</b></button>
+      <button type="button" className={cx("fy-formatbar__b", italic && "fy-formatbar__b--on")} aria-label="Italic" aria-pressed={italic} onClick={onItalic}><i>I</i></button>
+      <button type="button" className="fy-formatbar__b" aria-label="Mention" onClick={onMention}>@</button>
+      <button type="button" className="fy-formatbar__b" aria-label="Commands" onClick={onSlash}>/</button>
+      <span className="fy-formatbar__push" />
+      <button type="button" className="fy-formatbar__b fy-formatbar__arke" onClick={onArke}><Sparkle size={14} />Arke</button>
+      <button type="button" className="fy-formatbar__b" aria-label="Hide keyboard" onClick={onHide}><ChevronsDown size={16} /></button>
     </div>
   );
 }

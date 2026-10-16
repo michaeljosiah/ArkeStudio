@@ -9,6 +9,7 @@ import { App } from "../src/App.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __clearHeldAsksForTest } from "../src/screens/chapter-workspace.js";
+import { FormatBar } from "../src/screens/chapter-room.js";
 import { chapterLayoutFixture, CHAPTER_BODY, CHAPTER_HASH } from "./chapter-layout-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
@@ -27,6 +28,8 @@ let root:Root|null=null, sent:ClientMessage[]=[];
 const find=(selector:string)=>document.querySelector<HTMLElement>(selector)!;
 const props=(element:HTMLElement)=>{const key=Object.keys(element).find(key=>key.startsWith('__reactProps$'))!;return (element as unknown as Record<string,Record<string,(event:never)=>void>>)[key]!;};
 const click=async(element:HTMLElement)=>{assert.ok(element);await act(async()=>element.click());};
+// The phone bar's ⋯ (SPEC-056 R-7, 227l): Brief, the read and the views are its items.
+const pageAction=async(label:string)=>{await click(find('[aria-label="Page actions"]'));await click([...document.querySelectorAll<HTMLElement>('.fy-scene-menu button')].find(b=>b.textContent===label)!);};
 async function mount(route='p/ledger/story/chapters',size=390,mode='normal',remote=false,touch=true){
   width=size;coarse=touch;sent=[];
   const host=document.createElement('div');document.body.append(host);root=createRoot(host);
@@ -56,7 +59,7 @@ it('source selections are detected by selectionchange without mouseup on touch',
 });
 it('Notes is a sheet, Arke is the app\'s Chat, and resizing keeps the manuscript draft (turn 227)',async()=>{
  await mount('p/ledger/story/chapters/neap');await openChapter();const area=find('.fy-ch__source'),draftText=CHAPTER_BODY+'\n\nMy unsaved sentence. <br>';
- await act(async()=>props(area).onChange!({target:{value:draftText}} as never));await click(find('[aria-label="Notes"]'));assert.ok(find('.fy-chapter-notes-sheet[open]'));
+ await act(async()=>props(area).onChange!({target:{value:draftText}} as never));await pageAction('Brief');assert.ok(find('.fy-chapter-notes-sheet[open]'));
  await act(async()=>{width=984;for(const listener of listeners)listener();});assert.equal((find('.fy-ch__source') as HTMLTextAreaElement).value,draftText);
  await click(find('.fy-chapter-notes-sheet [aria-label="Close"]'));
  // The page draws no Arke of its own (SPEC-056 R-3): no rail to pin it back, no dock sheet, no half.
@@ -101,7 +104,7 @@ it('an open chapter menu resolves its file against a replacement snapshot', asyn
  assert.deepEqual(command.orderedFiles,['01-chapter','03-chapter','02-chapter','04-chapter']);
 });
 it('a newer chapter title closes the Notes editor without writing its stale draft', async () => {
- await mount('p/ledger/story/chapters/neap'); await openChapter(); await click(find('[aria-label="Notes"]'));
+ await mount('p/ledger/story/chapters/neap'); await openChapter(); await pageAction('Brief');
  await click(find('.fy-ch__plan [role="textbox"]'));
  const field=find('.fy-ch__plan input') as HTMLInputElement;assert.ok(field);field.value='My stale name';const blur=props(field).onBlur!;
  const fresh=chapterLayoutFixture();fresh.world!.productions[0]!.chapters[0]!.title='Name from another window';
@@ -120,7 +123,21 @@ it('Fold source selections position the ask at the captured line rather than aft
 it('compact chapters retain voiced playback whenever a voice record exists',async()=>{
  await mount('p/ledger/story/chapters/neap');const ask=sent.findLast(m=>m.kind==='open-chapter');assert.ok(ask);
  await act(async()=>__applyEventForTest({type:'chapter.open-result',at:'2026-09-28T14:00:00Z',requestId:ask.requestId,worldId:ask.worldId,productionId:ask.productionId,chapterId:'neap',disposition:'opened',body:CHAPTER_BODY+'\n\n<br>',version:4,hash:CHAPTER_HASH,versions:[3,2],voices:{version:4,hash:CHAPTER_HASH,derivedAt:'2026-09-28T14:00:00Z',passes:1,dropped:0,omitted:0,lines:[]}}));
- assert.match(find('.fy-ch__compact-actions').textContent!,/Read voiced chapter/);
+ await click(find('[aria-label="Page actions"]'));
+ assert.ok([...document.querySelectorAll<HTMLElement>('.fy-scene-menu button')].some(b=>b.textContent==='Read voiced chapter'),'the phone bar\'s ⋯ holds the voiced read');
+});
+it('a phone Manuscript is the phone bar over the page, its views in the ⋯ (SPEC-056 R-7, R-46)',async()=>{
+ await mount('p/ledger/story/chapters/neap');await openChapter();
+ assert.ok(find('.fy-scene-back [data-testid="chapter-goal"]'),'the goal beside the title');
+ assert.equal(find('.fy-sw__head'),null,'no chips, view row or read row over the page');
+ assert.ok(find('.fy-ch__dochead'),'the document opens on its number and title');
+ await click(find('[aria-label="Page actions"]'));
+ const items=[...document.querySelectorAll<HTMLElement>('.fy-scene-menu button')].map(b=>b.textContent);
+ for(const label of ['Brief','Chapter','Audiobook','Audio Studio'])assert.ok(items.includes(label),label);
+ await click([...document.querySelectorAll<HTMLElement>('.fy-scene-menu button')].find(b=>b.textContent==='Chapter')!);
+ assert.ok(find('[data-testid="chapter-overview"]'));
+ const foot=find('.fy-chov-held');assert.ok(foot,'Write and Listen held at the foot');assert.match(foot.textContent!,/^Write/);
+ await click([...foot.querySelectorAll<HTMLElement>('button')].find(b=>b.textContent==='Write')!);assert.ok(find('.fy-ch__dochead'),'Write is the Manuscript');
 });
 it('the phone audiobook door holds no count, price or eyebrow until the door lands',async()=>{
  await mount('p/ledger/story/audiobook');
@@ -138,4 +155,15 @@ it('a compact chapter keeps its time in the Brief and draws no empty mark (turn 
  await act(async()=>__setStateForTest(fresh));
  assert.equal(find('[aria-label="Chapter state"]'),null,'no chips row, so no empty pill');
  assert.ok(find('.fy-ch__plan [role="textbox"], .fy-ch__plan textarea, .fy-ch__plan input'),'an unset time is a field to type in, not an empty mark');
+});
+it('the phone format bar keeps the caret: its presses refuse focus, and each says what it does (SPEC-056 R-46)',async()=>{
+ const calls:string[]=[];const host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<FormatBar bold italic={false} onBold={()=>calls.push('bold')} onItalic={()=>calls.push('italic')} onMention={()=>calls.push('@')} onSlash={()=>calls.push('/')} onArke={()=>calls.push('arke')} onHide={()=>calls.push('hide')}/>));
+ const bar=find('[data-testid="format-bar"]');let refused=0;
+ props(bar).onMouseDown!({preventDefault:()=>{refused++;}} as never);props(bar).onPointerDown!({preventDefault:()=>{refused++;}} as never);assert.equal(refused,2);
+ assert.equal(find('[aria-label="Bold"]').getAttribute('aria-pressed'),'true');
+ for(const label of ['Bold','Italic','Mention','Commands','Hide keyboard'])await click(find(`[aria-label="${label}"]`));
+ await click([...bar.querySelectorAll<HTMLElement>('button')].find(b=>b.textContent==='Arke')!);
+ assert.deepEqual(calls,['bold','italic','@','/','hide','arke']);
+ for(const button of bar.querySelectorAll('button'))assert.equal(button.getAttribute('type'),'button');
 });
