@@ -133,6 +133,17 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.equal(owner.forPage()?.props?.subject?.kind, "timeline-clip");
     owner.open(); assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip");
   });
+  it("the same mounted page moving its own route carries its prompts along (SPEC-056 R-42)", () => {
+    const owner = new GlobalChatController(); const host = {} as HTMLElement;
+    owner.setCurrent(production); owner.register(production, host); owner.open(production);
+    const audiobook: ChatSurface = { ...production, path: production.path + "?view=audiobook", props: { ...production.props!, placeholder: "Direct this chapter" } };
+    owner.setCurrent(audiobook); owner.refresh(audiobook, host);
+    assert.equal(owner.getSnapshot().selected?.path, audiobook.path, "the view it moved to");
+    assert.equal(owner.getSnapshot().selected?.props?.placeholder, "Direct this chapter", "and that view's prompts");
+    const other: ChatSurface = { ...audiobook, path: production.path + "/elsewhere", props: { ...audiobook.props!, placeholder: "Not mine" } };
+    owner.refresh(other, {} as HTMLElement);
+    assert.equal(owner.getSnapshot().selected?.path, audiobook.path, "another page's host does not move it");
+  });
   it("retains a validated structured subject and its send prefix after reload", () => {
     let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
     const prefix = "About clip one: " + "selected words ".repeat(50);

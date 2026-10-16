@@ -58,7 +58,7 @@ import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
-import { BriefFields, DocHead, GoalRing, WritingBar } from "./chapter-room.js";
+import { BriefFields, DocHead, GoalField, GoalRing, WritingBar } from "./chapter-room.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -1953,14 +1953,16 @@ export function ChapterWorkspace({
   // (now on the toolbar) and Ask Arke. Timing's narrow dock keeps its floating press.
   const foldedAudiobook = compact && view === "audiobook";
   const toolbarDock = view !== "manuscript" && (!compact || foldedAudiobook);
+  // With the app's Chat the press follows the panel itself, and pressing it again puts it away.
+  const arkeOn = globalChat ? chatOpen : dock;
   const arkePress = toolbarDock ? (
     <button
       type="button"
-      className={cx("fy-ab__ico", dock && "fy-ab__ico--on")}
-      aria-label={dock ? "Put Arke away" : "Open Arke"}
-      aria-pressed={dock}
+      className={cx("fy-ab__ico", arkeOn && "fy-ab__ico--on")}
+      aria-label={arkeOn ? "Put Arke away" : "Open Arke"}
+      aria-pressed={arkeOn}
       title="Arke"
-      onClick={() => setDock(!dock)}
+      onClick={() => (globalChat && chatOpen ? globalChat.close() : setDock(!arkeOn))}
       data-testid="audiobook-arke"
     >
       <Chat size={16} />
@@ -2931,6 +2933,7 @@ export function ChapterWorkspace({
               <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} maxLength={CHAPTER_PLAN_LIMITS.synopsis} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
               <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
               {locked && !chapter.when ? null : <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} maxLength={CHAPTER_PLAN_LIMITS.when} onCommit={when => plan({ when: when || null })} />}</label>}
+              <label>Goal<GoalField goal={goal.words} goalSource={goal.source} locked={locked} onPlan={(changes) => plan(changes)} /></label>
             </section>}
           </aside>
           </ResponsiveSheet>

@@ -27,7 +27,7 @@
 .fy-ch__goal b { color: var(--foreground); font-weight: 500; }
 .fy-ch__goal-ring { --p: 0; width: 18px; height: 18px; flex: none; border-radius: 50%;
   background: conic-gradient(var(--foreground) calc(var(--p) * 1%), color-mix(in srgb, var(--foreground) 18%, transparent) 0);
-  -webkit-mask: radial-gradient(circle, transparent 5.5px, #000 6px); mask: radial-gradient(circle, transparent 5.5px, #000 6px); }
+  -webkit-mask: radial-gradient(circle, transparent 5.5px, black 6px); mask: radial-gradient(circle, transparent 5.5px, black 6px); }
 
 /* The top of the document (R-8). */
 .fy-ch__dochead { padding: 48px 0 6px; }

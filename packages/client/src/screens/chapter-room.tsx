@@ -154,35 +154,50 @@ export function BriefFields({
       </label>}
       <label className="fy-ch__brief-field">
         <span>Goal</span>
-        <input
-          type="number"
-          className="fy-ch__goal-input"
-          aria-label="Goal in words"
-          title={GOAL_SOURCE[goalSource]}
-          min={CHAPTER_GOAL_LIMITS.min}
-          max={CHAPTER_GOAL_LIMITS.max}
-          step={100}
-          disabled={locked}
-          // Keyed so a goal written from elsewhere replaces what the field holds.
-          key={`${goal}:${goalSource}`}
-          defaultValue={goal}
-          onBlur={(e) => {
-            const raw = e.currentTarget.value.trim();
-            if (raw === "") {
-              if (goalSource === "chapter") onPlan({ goal: null });
-              return;
-            }
-            const value = Math.round(Number(raw));
-            if (!Number.isFinite(value) || value < CHAPTER_GOAL_LIMITS.min || value > CHAPTER_GOAL_LIMITS.max) {
-              e.currentTarget.value = String(goal);
-              return;
-            }
-            // Only a changed figure is written: tabbing through the field must not turn a derived
-            // goal into one the chapter states.
-            if (value !== goal) onPlan({ goal: value });
-          }}
-        />
+        <GoalField goal={goal} goalSource={goalSource} locked={locked} onPlan={onPlan} />
       </label>
     </section>
+  );
+}
+
+/** The goal's own field (D-2): in the Brief, and in the compact plan below 1100. */
+export function GoalField({ goal, goalSource, locked, onPlan }: {
+  goal: number;
+  goalSource: ChapterGoalSource;
+  locked: boolean;
+  onPlan: (changes: { goal?: number | null }) => void;
+}) {
+  return (
+    <input
+      type="number"
+      className="fy-ch__goal-input"
+      aria-label="Goal in words"
+      title={GOAL_SOURCE[goalSource]}
+      min={CHAPTER_GOAL_LIMITS.min}
+      max={CHAPTER_GOAL_LIMITS.max}
+      step={100}
+      disabled={locked}
+      // Keyed so a goal written from elsewhere replaces what the field holds.
+      key={`${goal}:${goalSource}`}
+      defaultValue={goal}
+      onBlur={(e) => {
+        const raw = e.currentTarget.value.trim();
+        if (raw === "") {
+          // Cleared, a chapter's own goal goes and the derived one returns; a derived goal
+          // has nothing to clear, so the field shows it again rather than standing blank.
+          if (goalSource === "chapter") onPlan({ goal: null });
+          else e.currentTarget.value = String(goal);
+          return;
+        }
+        const value = Math.round(Number(raw));
+        if (!Number.isFinite(value) || value < CHAPTER_GOAL_LIMITS.min || value > CHAPTER_GOAL_LIMITS.max) {
+          e.currentTarget.value = String(goal);
+          return;
+        }
+        // Only a changed figure is written: tabbing through the field must not turn a derived
+        // goal into one the chapter states.
+        if (value !== goal) onPlan({ goal: value });
+      }}
+    />
   );
 }
