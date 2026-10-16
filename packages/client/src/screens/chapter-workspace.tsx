@@ -59,6 +59,8 @@ import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { BriefFields, DocHead, GoalField, GoalRing, WritingBar } from "./chapter-room.js";
+import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
+import type { ChapterView } from "../lib/chapter-dock.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
@@ -1146,7 +1148,7 @@ export function ChapterWorkspace({
     if (view !== "timing" || viewParam === "audio-studio") return;
     setSearchParams(params => { const next = new URLSearchParams(params); next.set("view", "audio-studio"); return next; }, { replace: true });
   }, [view, viewParam, setSearchParams]);
-  const chooseView = (next: "manuscript" | "audiobook" | "timing") => {
+  const chooseView = (next: ChapterView) => {
     rememberChapterView(worldId, prodId, chapter.id, next);
     setSearchParams(
       (params) => {
@@ -1968,12 +1970,390 @@ export function ChapterWorkspace({
       <Chat size={16} />
     </button>
   ) : null;
+  // A performed speaker's row (design turn 200): in Voices, and in the Chapter view's voice card.
+  const performerFor = (who: (typeof speakers)[number]) => {
+                      const key = who.sheet ?? who.speaker;
+                      const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+                      // The book's own note, else the character's narration (design turn 200, R-166).
+                      const own = production.audiobook?.notes?.[key];
+                      const narration = sheet !== undefined && sheet.type === "character" && !sheet.retired && sheet.narration?.trim() ? sheet.narration.trim() : undefined;
+                      const note = own ?? narration;
+                      const model = audiobook.modelOf(audiobook.narrator);
+                      const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
+                      // A speaker's line may sit inside a block of several turns (design turn 190).
+                      const holds = (row: (typeof audiobook.rows)[number]) => row.speakerKey === key || (row.speakers ?? []).some((turn) => turn.key === key);
+                      const line = selectedRow !== undefined && holds(selectedRow) ? selectedRow : (audiobook.rows.find(holds) ?? null);
+                      return (
+                        <PerformedSpeaker
+                          key={key}
+                          worldId={worldId}
+                          productionId={prodId}
+                          chapterFile={chapter.file}
+                          speakerKey={key}
+                          name={sheet?.name ?? who.speaker}
+                          lines={who.lines}
+                          tone={who.sheet === undefined ? "none" : String(speakerColours.get(who.sheet) ?? "none")}
+                          {...(note !== undefined ? { note, source: own !== undefined ? "this book" as const : "character" as const } : {})}
+                          noteHeld={model === null || performanceNote(note ?? "x", model).mode === "unsupported"}
+                          line={line}
+                          model={model}
+                          slug={worldSlug}
+                          focused={performer === key}
+                          onFocus={() => setPerformer(key)}
+                        />
+                      );
+  };
+  const narratorDialog = (
+    <>
+              {narratorOpen && (
+                <NarratorDialog
+                  worldId={worldId}
+                  productionId={prodId}
+                  narratorLabel={audiobook.narrator.label ?? narratorName}
+                  {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+                  appLabel={narratorName}
+                  trial={{ chapterFile: chapter.file, block: audiobook.selected ?? "title" }}
+                  slug={worldSlug}
+                  data={`${chapter.title} · ${audiobook.rows.length} blocks`}
+                  onClose={() => setNarratorOpen(false)}
+                />
+              )}
+    </>
+  );
+  const bookSection = (
+    <>
+            <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">The book</h2>
+              <p className="fy-bible__empty fy-mono">
+                {target === null
+                  ? `${bookWords.toLocaleString()} words`
+                  : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
+              </p>
+              {target !== null && (
+                <div className="fy-ch__target" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
+                  <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
+                </div>
+              )}
+            </section>
+
+            {/* The style, in one line (turn 128); the cards are on the Overview, where it was settled. */}
+    </>
+  );
+  const continuitySection = (
+    <>
+            <section className="fy-bible__panel" data-testid="chapter-continuity">
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                After this chapter
+                <span className="fy-ch__panelpush" />
+                {derivingNow ? (
+                  <span className="fy-ch__deriving">
+                    <span className="fy-mono">deriving…</span>
+                    {/* Stop stands where the press stood (codex on PR 907): a slow or mistaken run
+                        is the author's to end, and a stop leaves the last record standing. */}
+                    <button type="button" className="fy-ch__derive" onClick={() => stopContinuity(worldId, prodId, chapter.file)}>
+                      Stop
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={derive}>
+                    <RotateCcw size={11} />
+                    {continuity === null ? "Derive" : "Derive again"}
+                  </button>
+                )}
+              </h2>
+              {continuity === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Derive again replaces it</div>}
+              {continuityStale && continuityRecord !== null && (
+                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
+              )}
+              {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
+              {/* Not derived is the heading and its Derive press, one line (design turn 192): a
+                  panel says nothing until there is something to say. */}
+              {continuityRecord === null ? null : continuityRecord.characters.length === 0 ? (
+                <p className="fy-bible__empty">Nothing placed yet.</p>
+              ) : (
+                <ul className="fy-ch__who">
+                  {continuityRecord.characters.map((who) => (
+                    <li key={who.sheet ?? who.character}>
+                      <div className="fy-ch__who-head">
+                        <span className="fy-ch__who-name">{named(who)}</span>
+                        {who.where !== undefined && (
+                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
+                            <Pin size={10} />
+                            {sheetName(who.where)}
+                          </span>
+                        )}
+                        {!who.present && (
+                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
+                            gone
+                          </span>
+                        )}
+                        {who.unsure && (
+                          <span className="fy-ch__who-where fy-mono" title="the chapter said they moved and could not prove where">
+                            place dropped
+                          </span>
+                        )}
+                        {sheetNow(who) && (
+                          <span className="fy-ch__who-where fy-mono" title="Derive again to make them a column">
+                            has a sheet now
+                          </span>
+                        )}
+                      </div>
+                      {who.knows.slice(0, 3).map((line) => (
+                        <div key={line} className="fy-ch__line">“{line}”</div>
+                      ))}
+                      {who.knows.length > 3 && <div className="fy-ch__line fy-ch__line--more">and {who.knows.length - 3} more</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {continuityRecord !== null && <p className="fy-ch__stamp fy-mono">{continuityStamp(continuityRecord)}</p>}
+            </section>
+
+    </>
+  );
+  const voicesSection = (
+    <>
+            <section className="fy-bible__panel" data-testid="chapter-voices">
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                Voices
+                <span className="fy-ch__panelpush" />
+                {/* The chapter's Looks from the rail too (design turn 193, rule 18), so Manuscript reaches them;
+                    once the chapter is cast, since an uncast panel is its heading and its press alone (turn 192). */}
+                {voicesRecord !== null && (
+                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={() => setIllustrationLookOpen(true)} data-testid="voices-looks">
+                    Looks
+                  </button>
+                )}
+                {castingNow ? (
+                  <span className="fy-ch__deriving">
+                    <span className="fy-mono">casting…</span>
+                    <button type="button" className="fy-ch__derive" onClick={() => stopVoices(worldId, prodId, chapter.file)}>
+                      Stop
+                    </button>
+                  </span>
+                ) : toCastCount > 0 && audiobook.castItems.length > 0 ? (
+                  // Only edited paragraphs need casting (design turn 198, rule 13): Cast again offers
+                  // them beside the chapter, as the Audiobook toolbar's press does.
+                  <MenuPress className="fy-ch__derive" testId="voices-cast-again" items={audiobook.castItems} disabled={locked || connection !== "open"} end label={<><RotateCcw size={11} />Cast again</>} />
+                ) : (
+                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={() => castLinesPress()}>
+                    <RotateCcw size={11} />
+                    {voices === null ? "Cast the lines" : "Cast again"}
+                  </button>
+                )}
+              </h2>
+              {voices === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Cast again replaces it</div>}
+              {voicesMoved && voicesRecord !== null && (
+                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · cast against v{voicesRecord.version}</div>
+              )}
+              {toCastCount > 0 && <div className="fy-ch__moved fy-ch__moved--line">{paragraphsToCast(toCastCount)}</div>}
+              {castNote !== null && !castingNow && <div className="fy-ch__moved fy-ch__moved--line">{castNote}</div>}
+              {voicesRecord === null ? null : (
+                <ul className="fy-ch__who">
+                  <li>
+                    <div className="fy-ch__who-head">
+                      <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
+                      <button type="button" className="fy-ch__who-where fy-mono fy-ab__narrator-press" onClick={() => setNarratorOpen(true)} data-testid="voices-narrator">
+                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
+                      </button>
+                      <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
+                    </div>
+                  </li>
+                  {production?.audiobook?.reading === "performed" &&
+                    speakers.map(performerFor)}
+                  {production?.audiobook?.reading !== "performed" && speakers.map((who) => {
+                    const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+                    const voice = sheet?.voice;
+                    return (
+                      <li key={who.sheet ?? who.speaker}>
+                        <div className="fy-ch__who-head">
+                          <span className="fy-ch__who-name">
+                            <i className={`fy-ab__speaker-dot fy-voice--${who.sheet === undefined ? "none" : (speakerColours.get(who.sheet) ?? "none")}`} aria-hidden="true" />
+                            <span>{sheet?.name ?? who.speaker}</span>
+                          </span>
+                          {voice !== undefined && voiceUnavailable(voice) ? (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
+                          ) : voice !== undefined ? (
+                            <span className="fy-ch__who-where fy-mono" title={`${voiceDisplayLabel(voice, world)} · ${readerPlace(voice.provider)}`}>{voiceDisplayLabel(voice, world)} · {readerPlace(voice.provider)}</span>
+                          ) : who.sheet === undefined ? (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>
+                          ) : (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no voice · narrator</span>
+                          )}
+                          <span className="fy-ch__who-count fy-mono">{who.lines} line{who.lines === 1 ? "" : "s"}</span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {voicesRecord !== null && (
+                <p className="fy-ch__stamp fy-mono">
+                  {[
+                    `cast · v${voicesRecord.version}`,
+                    `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
+                    `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
+                    // A drop is said; a clean check is the count alone (design turn 192).
+                    ...(voicesRecord.dropped > 0 ? [`${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`] : []),
+                    ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
+                    ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
+                    ...((voicesRecord.pins?.length ?? 0) > 0 ? [`${voicesRecord.pins!.length} set by you`] : []),
+                    ...(voicesRecord.lost !== undefined ? [`${voicesRecord.lost} correction${voicesRecord.lost === 1 ? "" : "s"} lost`] : []),
+                  ].join(" · ")}
+                </p>
+              )}
+              {narratorDialog}
+            </section>
+
+    </>
+  );
+  const styleSection = (
+    <>
+            {style !== null && (
+              <section className="fy-bible__panel" data-testid="chapter-style">
+                <h2 className="fy-bible__paneltitle">Style</h2>
+                <p className="fy-ch__style">
+                  {[...(style.pov !== undefined ? [style.pov] : []), ...(style.tense !== undefined ? [style.tense] : []), `v${style.version}`].join(" · ")}
+                </p>
+                <p className="fy-bible__empty fy-mono">settled in Develop</p>
+              </section>
+            )}
+
+    </>
+  );
+  const impliesSection = (
+    <>
+            {/* Implies appears with its first fact (design turn 192; 127b draws it only with items). */}
+            {implies.length > 0 && (
+            <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">
+                Implies <span className="fy-mono">{implies.length}</span>
+              </h2>
+                <ul className="fy-ch__implies">
+                  {implies.map((fact, i) => {
+                    // The state lives on the item (codex on turn 127): a reload keeps what was
+                    // pressed, and a proposed fact offers no Dismiss — the card is where a
+                    // proposal is discarded.
+                    const key = fact.id ?? `${i}:${fact.kind}:${fact.what}`;
+                    const isProposed = fact.state === "proposed";
+                    return (
+                      <li key={key}>
+                        <span className="fy-mono">{fact.kind}</span>
+                        <span className="fy-ch__fact">{fact.what}</span>
+                        {isProposed ? (
+                          <span className="fy-mono">proposed</span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            disabled={locked}
+                            onClick={() => {
+                              // Written first, said second: the state is the record, the line is the ask.
+                              plan({ implies: implies.map((other, j) => (j === i ? { ...other, state: "proposed" as const } : other)) });
+                              setSay((current) => ({ line: `Propose as ${fact.kind}: ${fact.what}`, seq: (current?.seq ?? 0) + 1 }));
+                            }}
+                          >
+                            Propose
+                          </Button>
+                        )}
+                        {!isProposed && (
+                          <button
+                            type="button"
+                            className="fy-ch__dismiss"
+                            aria-label="Dismiss"
+                            disabled={locked}
+                            onClick={() => {
+                              const rest = implies.filter((_, j) => j !== i);
+                              plan({ implies: rest.length === 0 ? null : rest });
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+            </section>
+            )}
+
+    </>
+  );
+  const drawsSection = (
+    <>
+            <section className="fy-bible__panel" data-testid="chapter-draws">
+              {/* Empty, Draws on is its heading and an Add press, one line (design turn 192,
+                  amending 126): Add starts the line in the thread, where draws is changed. */}
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                Draws on
+                {drawsEmpty && <span className="fy-ch__panelpush" />}
+                {drawsEmpty && (
+                  <button type="button" className="fy-ch__derive" disabled={locked || asking} onClick={askDraws}>
+                    Add
+                  </button>
+                )}
+              </h2>
+              {drawsEmpty ? null : (
+                <ul className="fy-ch__draws">
+                  {draws.sheets.map((slug) => {
+                    const sheet = world.sheets.find((s) => s.id === slug);
+                    // Each kind has its own screen; a sheet the world no longer holds still links
+                    // to where it would be, and says its slug, rather than vanishing from the list.
+                    const shelf = sheet?.type === "location" ? "locations" : sheet?.type === "faction" ? "factions" : "cast";
+                    return (
+                      <li key={`sheet:${slug}`}>
+                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/${shelf}/${encodeURIComponent(slug)}`}>
+                          <span className="fy-mono">{sheet?.type ?? "sheet"}</span>
+                          <span className="fy-ch__draw-name">{sheet?.name ?? slug}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                  {draws.canon.map((id) => {
+                    const entry = world.canon.find((c) => c.id === id);
+                    return (
+                      <li key={`canon:${id}`}>
+                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/canon/${encodeURIComponent(id)}`}>
+                          <span className="fy-mono">{id}</span>
+                          <span className="fy-ch__draw-name">{entry?.title ?? id}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+    </>
+  );
+  const versionsSection = (
+    <>
+            {/* Earlier versions appears with the first one kept (design turn 192). */}
+            {history.length > 0 && (
+              <section className="fy-bible__panel">
+                <h2 className="fy-bible__paneltitle">Earlier versions</h2>
+                <ul className="fy-bible__versions">
+                  {history.map((version) => (
+                    <li key={version}>
+                      <span className="fy-mono">v{version}</span>
+                      <Button variant="ghost" disabled={locked} onClick={() => restoreChapter(worldId, prodId, chapter.file, version)}>
+                        Restore
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+    </>
+  );
   const barArke = phone && foldedAudiobook ? arkePress : null;
   // The writing room (design turn 227, SPEC-056 §1.6): the Manuscript above a phone's width is one
   // bar over the page, the chapter's number and title the top of the document.
   const room = view === "manuscript" && !phone;
   const viewNav = (
     <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
+      <button type="button" className={cx("fy-seg__item", view === "chapter" && "fy-seg__item--active")} onClick={() => chooseView("chapter")}>
+        Chapter
+      </button>
       <button type="button" className={cx("fy-seg__item", view === "manuscript" && "fy-seg__item--active")} onClick={() => chooseView("manuscript")}>
         Manuscript
       </button>
@@ -1984,6 +2364,13 @@ export function ChapterWorkspace({
         Audio Studio
       </button>
     </nav>
+  );
+  const pageReadControl = paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
+    <PageReadControl read={readVoiced} label="Voiced" />
+  ) : pageRead.reading ? (
+    <PageReadControl read={read} label="Read the chapter" />
+  ) : (
+    <ReadPress read={read} voiced={voicesRecord !== null ? readVoiced : null} />
   );
   const readControl = view !== "manuscript" || paragraphs.length === 0 || stagedDraft !== undefined ? null : voicedRead.reading ? (
     <PageReadControl read={readVoiced} label="Voiced" />
@@ -2086,6 +2473,95 @@ export function ChapterWorkspace({
         />
   );
   const reviewControl = <ChapterReviewControl worldId={worldId} productionId={prodId} chapterId={chapter.id} slug={worldSlug} held={locked || saving || draft !== null || stagedDraft !== undefined || saveRefusal !== null} />;
+  // The Chapter view (design turn 227, SPEC-056 §1.11).
+  const [castOpen, setCastOpen] = useState<string | null>(null);
+  const pictureFiles = [...placedPictures.byKey.entries()];
+  const heroFile = chapter.picture ?? pictureFiles[0]?.[1].file ?? null;
+  const portraitOf = (sheetId: string | undefined): string | null => {
+    if (sheetId === undefined) return null;
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+    const photo = kit ? mainPhotoFor(kit) : null;
+    return photo ? mediaUrl(worldSlug, `references/${sheetId}/${photo.file}`) : null;
+  };
+  const castCards: CastCard[] = voicesRecord === null ? [] : [
+    { key: "narrator", name: audiobook.narrator.label ?? narratorName, line: `Narrator · ${narrationBlocks} blocks`, picture: null, narrator: true },
+    ...speakers.map((who) => {
+      const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+      const voice = sheet?.voice;
+      return {
+        key: who.sheet ?? who.speaker,
+        name: sheet?.name ?? who.speaker,
+        line: `${who.lines} line${who.lines === 1 ? "" : "s"}${voice !== undefined ? ` · ${voiceDisplayLabel(voice, world)}` : ""}`,
+        picture: portraitOf(who.sheet),
+      };
+    }),
+  ];
+  const openCast = castOpen === null ? null : speakers.find((who) => (who.sheet ?? who.speaker) === castOpen) ?? null;
+  const voiceCard = openCast === null ? null : (
+    <div className="fy-chov__voice" role="dialog" aria-label={castCards.find((card) => card.key === castOpen)?.name ?? "Voice"}>
+      <button type="button" className="fy-chov__voice-x" aria-label="Close voice" onClick={() => setCastOpen(null)}><X size={14} /></button>
+      {production?.audiobook?.reading === "performed" ? (
+        <ul className="fy-ch__who">{performerFor(openCast)}</ul>
+      ) : (
+        <p className="fy-chov__voice-line">{castCards.find((card) => card.key === castOpen)?.line}</p>
+      )}
+      {openCast.sheet !== undefined && <Link className="fy-chov__voice-open" to={`/w/${encodeURIComponent(worldId)}/cast/${encodeURIComponent(openCast.sheet)}`}>Open character</Link>}
+    </div>
+  );
+  const goChapter = (id: string) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(id)}?view=chapter`);
+  const povSheet = chapter.pov === undefined ? undefined : world.sheets.find((sheet) => sheet.id === chapter.pov);
+  const madeAll = audiobook.counts.total > 0 && audiobook.counts.made === audiobook.counts.total;
+  const progressSteps: ProgressStep[] = [
+    { key: "written", label: "Written", state: words > 0 ? "done" : "idle", value: `${words.toLocaleString()} of ${goal.words.toLocaleString()} words`, meta: `v${record?.version ?? chapter.version}`,
+      action: <Button variant="ghost" onClick={() => chooseView("manuscript")}>Write</Button> },
+    voicesRecord === null
+      ? { key: "cast", label: "Cast", state: words > 0 ? "need" : "idle", value: castingNow ? "Casting…" : "Not cast",
+          ...(words > 0 ? { action: <Button variant="ghost" disabled={locked || connection !== "open" || castingNow} onClick={() => castLinesPress()}>Cast the lines</Button> } : {}) }
+      : { key: "cast", label: "Cast", state: toCastCount > 0 ? "need" : "done", value: castingNow ? "Casting…" : toCastCount > 0 ? paragraphsToCast(toCastCount) : `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
+          meta: `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"} · narrator`,
+          action: <Button variant="ghost" disabled={locked || connection !== "open" || castingNow} onClick={() => castLinesPress(toCastCount > 0 ? "changed" : undefined)}>Cast again</Button> },
+    { key: "read", label: "Read", state: madeAll ? "done" : audiobook.counts.made > 0 ? "need" : "idle",
+      value: audiobook.counts.made > 0 ? `${audiobook.counts.made} of ${audiobook.counts.total} blocks` : "Not read",
+      ...(placedPictures.count > 0 ? { meta: `${placedPictures.count} picture${placedPictures.count === 1 ? "" : "s"}` } : {}),
+      ...(voicesRecord !== null ? { action: audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : <Button variant="ghost" onClick={() => chooseView("audiobook")}>Open Audiobook</Button> } : {}) },
+    // Mixed once the chapter has a timing: playback then uses its mix (SPEC-047 R-179).
+    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : audiobook.counts.made > 0 ? "Audio Studio" : "Not started",
+      ...(audiobook.counts.made > 0 ? { action: <Button variant="ghost" onClick={() => chooseView("timing")}>Open Audio Studio</Button> } : {}) },
+  ];
+  const overview = view !== "chapter" ? null : (
+    <ChapterOverview
+      picture={heroFile === null ? null : mediaUrl(worldSlug, heroFile)}
+      strip={<BookStrip chapters={activeChapters.map((c) => ({ id: c.id, order: c.order, title: c.title, words: c.words ?? 0, planned: (c.words ?? 0) === 0 }))} current={chapter.id} onChapter={goChapter} />}
+      title={<SceneTitle title={chapter.title} locked={locked} onCommit={(title) => plan({ title })} />}
+      synopsis={chapter.synopsis}
+      meta={<>
+        {povSheet !== undefined && <span className="fy-chov__pov">{portraitOf(povSheet.id) !== null && <img src={portraitOf(povSheet.id)!} alt="" />}{povSheet.name}</span>}
+        {chapter.when !== undefined && chapter.when !== "" && <span>{chapter.when}</span>}
+        <span>{words.toLocaleString()} words</span>
+        <span>{chapter.status}</span>
+      </>}
+      actions={<>
+        {audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
+        {reviewControl}
+      </>}
+      views={viewNav}
+      cast={castCards.length > 0 ? <CastCards cards={castCards} selected={castOpen} onCard={(key) => (key === "narrator" ? setNarratorOpen(true) : setCastOpen((open) => (open === key ? null : key)))} /> : null}
+      voiceCard={voiceCard}
+      steps={<ProgressSteps steps={progressSteps} />}
+      pictures={pictureFiles.map(([, picture]) => mediaUrl(worldSlug, picture.file))}
+      onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) audiobook.setSelected(key); }}
+      illustrate={<Button variant="ghost" onClick={() => chooseView("audiobook")}>Illustrate</Button>}
+      continuity={continuitySection}
+      versions={<>
+        {bookSection}
+        {stale && <p className="fy-ch__moved">overview moved · v{chapter.draftedAgainst} → v{production.story?.version}</p>}
+        {versionsSection}
+      </>}
+      // The Voices panel keeps what the cards cannot carry — the cast's stamp, Stop while casting,
+      // a voice the catalogue cannot speak — beside the cards it details (SPEC-056 R-37, R-38).
+      more={<>{voicesSection}{styleSection}{impliesSection}{drawsSection}</>}
+    />
+  );
   return (
     <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view} data-chat={globalChat ? "global" : undefined} data-room={room ? "true" : undefined}>
       {view === "timing" && <AudioStudioWorkspace key={`${worldId}/${prodId}/${chapter.id}`} book={production.meta.title} title={chapter.title}
@@ -2101,7 +2577,8 @@ export function ChapterWorkspace({
         {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so
             the bar stays put when the switch below it changes view (the master draws Audiobook). */}
         {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
-        {room ? (
+        {overview}
+        {view === "chapter" ? null : room ? (
           <WritingBar
             brief={compact ? notesOpen : brief}
             onBrief={() => (compact ? setNotesOpen((open) => !open) : setBriefChoice(!brief))}
@@ -2112,7 +2589,6 @@ export function ChapterWorkspace({
             goal={<GoalRing words={words} goal={goal.words} source={goal.source} />}
           >
             {readControl}
-            {reviewControl}
           </WritingBar>
         ) : (
         <header className="fy-sw__head">
@@ -2258,7 +2734,7 @@ export function ChapterWorkspace({
         </header>
         )}
 
-        <div className={cx("fy-ch__body", view !== "manuscript" && "fy-ch__body--audiobook")} data-brief={room ? (brief ? "open" : "closed") : undefined}>
+        <div className={cx("fy-ch__body", view !== "manuscript" && "fy-ch__body--audiobook")} hidden={view === "chapter"} data-brief={room ? (brief ? "open" : "closed") : undefined}>
           {view === "audiobook" && (
             <div className="fy-ch__manuscript" data-testid="audiobook-column" ref={audiobookColumn}>
               {audiobook.sounding !== null && (
@@ -2588,345 +3064,19 @@ export function ChapterWorkspace({
             {view === "manuscript" && stale && (
               <p className="fy-ch__moved">overview moved · v{chapter.draftedAgainst} → v{production.story?.version}</p>
             )}
-            <section className="fy-bible__panel">
-              <h2 className="fy-bible__paneltitle">The book</h2>
-              <p className="fy-bible__empty fy-mono">
-                {target === null
-                  ? `${bookWords.toLocaleString()} words`
-                  : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
-              </p>
-              {target !== null && (
-                <div className="fy-ch__target" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
-                  <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
-                </div>
-              )}
-            </section>
-
-            {/* The style, in one line (turn 128); the cards are on the Overview, where it was settled. */}
-            <section className="fy-bible__panel" data-testid="chapter-continuity">
-              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
-                After this chapter
-                <span className="fy-ch__panelpush" />
-                {derivingNow ? (
-                  <span className="fy-ch__deriving">
-                    <span className="fy-mono">deriving…</span>
-                    {/* Stop stands where the press stood (codex on PR 907): a slow or mistaken run
-                        is the author's to end, and a stop leaves the last record standing. */}
-                    <button type="button" className="fy-ch__derive" onClick={() => stopContinuity(worldId, prodId, chapter.file)}>
-                      Stop
-                    </button>
-                  </span>
-                ) : (
-                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={derive}>
-                    <RotateCcw size={11} />
-                    {continuity === null ? "Derive" : "Derive again"}
-                  </button>
-                )}
-              </h2>
-              {continuity === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Derive again replaces it</div>}
-              {continuityStale && continuityRecord !== null && (
-                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
-              )}
-              {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
-              {/* Not derived is the heading and its Derive press, one line (design turn 192): a
-                  panel says nothing until there is something to say. */}
-              {continuityRecord === null ? null : continuityRecord.characters.length === 0 ? (
-                <p className="fy-bible__empty">Nothing placed yet.</p>
-              ) : (
-                <ul className="fy-ch__who">
-                  {continuityRecord.characters.map((who) => (
-                    <li key={who.sheet ?? who.character}>
-                      <div className="fy-ch__who-head">
-                        <span className="fy-ch__who-name">{named(who)}</span>
-                        {who.where !== undefined && (
-                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
-                            <Pin size={10} />
-                            {sheetName(who.where)}
-                          </span>
-                        )}
-                        {!who.present && (
-                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
-                            gone
-                          </span>
-                        )}
-                        {who.unsure && (
-                          <span className="fy-ch__who-where fy-mono" title="the chapter said they moved and could not prove where">
-                            place dropped
-                          </span>
-                        )}
-                        {sheetNow(who) && (
-                          <span className="fy-ch__who-where fy-mono" title="Derive again to make them a column">
-                            has a sheet now
-                          </span>
-                        )}
-                      </div>
-                      {who.knows.slice(0, 3).map((line) => (
-                        <div key={line} className="fy-ch__line">“{line}”</div>
-                      ))}
-                      {who.knows.length > 3 && <div className="fy-ch__line fy-ch__line--more">and {who.knows.length - 3} more</div>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {continuityRecord !== null && <p className="fy-ch__stamp fy-mono">{continuityStamp(continuityRecord)}</p>}
-            </section>
-
-            <section className="fy-bible__panel" data-testid="chapter-voices">
-              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
-                Voices
-                <span className="fy-ch__panelpush" />
-                {/* The chapter's Looks from the rail too (design turn 193, rule 18), so Manuscript reaches them;
-                    once the chapter is cast, since an uncast panel is its heading and its press alone (turn 192). */}
-                {voicesRecord !== null && (
-                  <button type="button" className="fy-ch__derive" disabled={connection !== "open"} onClick={() => setIllustrationLookOpen(true)} data-testid="voices-looks">
-                    Looks
-                  </button>
-                )}
-                {castingNow ? (
-                  <span className="fy-ch__deriving">
-                    <span className="fy-mono">casting…</span>
-                    <button type="button" className="fy-ch__derive" onClick={() => stopVoices(worldId, prodId, chapter.file)}>
-                      Stop
-                    </button>
-                  </span>
-                ) : toCastCount > 0 && audiobook.castItems.length > 0 ? (
-                  // Only edited paragraphs need casting (design turn 198, rule 13): Cast again offers
-                  // them beside the chapter, as the Audiobook toolbar's press does.
-                  <MenuPress className="fy-ch__derive" testId="voices-cast-again" items={audiobook.castItems} disabled={locked || connection !== "open"} end label={<><RotateCcw size={11} />Cast again</>} />
-                ) : (
-                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={() => castLinesPress()}>
-                    <RotateCcw size={11} />
-                    {voices === null ? "Cast the lines" : "Cast again"}
-                  </button>
-                )}
-              </h2>
-              {voices === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Cast again replaces it</div>}
-              {voicesMoved && voicesRecord !== null && (
-                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · cast against v{voicesRecord.version}</div>
-              )}
-              {toCastCount > 0 && <div className="fy-ch__moved fy-ch__moved--line">{paragraphsToCast(toCastCount)}</div>}
-              {castNote !== null && !castingNow && <div className="fy-ch__moved fy-ch__moved--line">{castNote}</div>}
-              {voicesRecord === null ? null : (
-                <ul className="fy-ch__who">
-                  <li>
-                    <div className="fy-ch__who-head">
-                      <span className="fy-ch__who-name"><i className="fy-ab__speaker-dot fy-voice--narrator" aria-hidden="true" /><span>Narration</span></span>
-                      <button type="button" className="fy-ch__who-where fy-mono fy-ab__narrator-press" onClick={() => setNarratorOpen(true)} data-testid="voices-narrator">
-                        {audiobook.narrator.label ?? narratorName} · {production?.audiobook?.narrator !== undefined ? "this book" : "narrator"}
-                      </button>
-                      <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
-                    </div>
-                  </li>
-                  {production?.audiobook?.reading === "performed" &&
-                    speakers.map((who) => {
-                      const key = who.sheet ?? who.speaker;
-                      const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
-                      // The book's own note, else the character's narration (design turn 200, R-166).
-                      const own = production.audiobook?.notes?.[key];
-                      const narration = sheet !== undefined && sheet.type === "character" && !sheet.retired && sheet.narration?.trim() ? sheet.narration.trim() : undefined;
-                      const note = own ?? narration;
-                      const model = audiobook.modelOf(audiobook.narrator);
-                      const selectedRow = audiobook.rows.find((row) => row.block.key === audiobook.selected);
-                      // A speaker's line may sit inside a block of several turns (design turn 190).
-                      const holds = (row: (typeof audiobook.rows)[number]) => row.speakerKey === key || (row.speakers ?? []).some((turn) => turn.key === key);
-                      const line = selectedRow !== undefined && holds(selectedRow) ? selectedRow : (audiobook.rows.find(holds) ?? null);
-                      return (
-                        <PerformedSpeaker
-                          key={key}
-                          worldId={worldId}
-                          productionId={prodId}
-                          chapterFile={chapter.file}
-                          speakerKey={key}
-                          name={sheet?.name ?? who.speaker}
-                          lines={who.lines}
-                          tone={who.sheet === undefined ? "none" : String(speakerColours.get(who.sheet) ?? "none")}
-                          {...(note !== undefined ? { note, source: own !== undefined ? "this book" as const : "character" as const } : {})}
-                          noteHeld={model === null || performanceNote(note ?? "x", model).mode === "unsupported"}
-                          line={line}
-                          model={model}
-                          slug={worldSlug}
-                          focused={performer === key}
-                          onFocus={() => setPerformer(key)}
-                        />
-                      );
-                    })}
-                  {production?.audiobook?.reading !== "performed" && speakers.map((who) => {
-                    const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
-                    const voice = sheet?.voice;
-                    return (
-                      <li key={who.sheet ?? who.speaker}>
-                        <div className="fy-ch__who-head">
-                          <span className="fy-ch__who-name">
-                            <i className={`fy-ab__speaker-dot fy-voice--${who.sheet === undefined ? "none" : (speakerColours.get(who.sheet) ?? "none")}`} aria-hidden="true" />
-                            <span>{sheet?.name ?? who.speaker}</span>
-                          </span>
-                          {voice !== undefined && voiceUnavailable(voice) ? (
-                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
-                          ) : voice !== undefined ? (
-                            <span className="fy-ch__who-where fy-mono" title={`${voiceDisplayLabel(voice, world)} · ${readerPlace(voice.provider)}`}>{voiceDisplayLabel(voice, world)} · {readerPlace(voice.provider)}</span>
-                          ) : who.sheet === undefined ? (
-                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>
-                          ) : (
-                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no voice · narrator</span>
-                          )}
-                          <span className="fy-ch__who-count fy-mono">{who.lines} line{who.lines === 1 ? "" : "s"}</span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {voicesRecord !== null && (
-                <p className="fy-ch__stamp fy-mono">
-                  {[
-                    `cast · v${voicesRecord.version}`,
-                    `${castLinesRead.length} line${castLinesRead.length === 1 ? "" : "s"}`,
-                    `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
-                    // A drop is said; a clean check is the count alone (design turn 192).
-                    ...(voicesRecord.dropped > 0 ? [`${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`] : []),
-                    ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
-                    ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
-                    ...((voicesRecord.pins?.length ?? 0) > 0 ? [`${voicesRecord.pins!.length} set by you`] : []),
-                    ...(voicesRecord.lost !== undefined ? [`${voicesRecord.lost} correction${voicesRecord.lost === 1 ? "" : "s"} lost`] : []),
-                  ].join(" · ")}
-                </p>
-              )}
-              {narratorOpen && (
-                <NarratorDialog
-                  worldId={worldId}
-                  productionId={prodId}
-                  narratorLabel={audiobook.narrator.label ?? narratorName}
-                  {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
-                  appLabel={narratorName}
-                  trial={{ chapterFile: chapter.file, block: audiobook.selected ?? "title" }}
-                  slug={worldSlug}
-                  data={`${chapter.title} · ${audiobook.rows.length} blocks`}
-                  onClose={() => setNarratorOpen(false)}
-                />
-              )}
-            </section>
-
-            {style !== null && (
-              <section className="fy-bible__panel" data-testid="chapter-style">
-                <h2 className="fy-bible__paneltitle">Style</h2>
-                <p className="fy-ch__style">
-                  {[...(style.pov !== undefined ? [style.pov] : []), ...(style.tense !== undefined ? [style.tense] : []), `v${style.version}`].join(" · ")}
-                </p>
-                <p className="fy-bible__empty fy-mono">settled in Develop</p>
-              </section>
-            )}
-
-            {/* Implies appears with its first fact (design turn 192; 127b draws it only with items). */}
-            {implies.length > 0 && (
-            <section className="fy-bible__panel">
-              <h2 className="fy-bible__paneltitle">
-                Implies <span className="fy-mono">{implies.length}</span>
-              </h2>
-                <ul className="fy-ch__implies">
-                  {implies.map((fact, i) => {
-                    // The state lives on the item (codex on turn 127): a reload keeps what was
-                    // pressed, and a proposed fact offers no Dismiss — the card is where a
-                    // proposal is discarded.
-                    const key = fact.id ?? `${i}:${fact.kind}:${fact.what}`;
-                    const isProposed = fact.state === "proposed";
-                    return (
-                      <li key={key}>
-                        <span className="fy-mono">{fact.kind}</span>
-                        <span className="fy-ch__fact">{fact.what}</span>
-                        {isProposed ? (
-                          <span className="fy-mono">proposed</span>
-                        ) : (
-                          <Button
-                            variant="ghost"
-                            disabled={locked}
-                            onClick={() => {
-                              // Written first, said second: the state is the record, the line is the ask.
-                              plan({ implies: implies.map((other, j) => (j === i ? { ...other, state: "proposed" as const } : other)) });
-                              setSay((current) => ({ line: `Propose as ${fact.kind}: ${fact.what}`, seq: (current?.seq ?? 0) + 1 }));
-                            }}
-                          >
-                            Propose
-                          </Button>
-                        )}
-                        {!isProposed && (
-                          <button
-                            type="button"
-                            className="fy-ch__dismiss"
-                            aria-label="Dismiss"
-                            disabled={locked}
-                            onClick={() => {
-                              const rest = implies.filter((_, j) => j !== i);
-                              plan({ implies: rest.length === 0 ? null : rest });
-                            }}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-            </section>
-            )}
-
-            <section className="fy-bible__panel" data-testid="chapter-draws">
-              {/* Empty, Draws on is its heading and an Add press, one line (design turn 192,
-                  amending 126): Add starts the line in the thread, where draws is changed. */}
-              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
-                Draws on
-                {drawsEmpty && <span className="fy-ch__panelpush" />}
-                {drawsEmpty && (
-                  <button type="button" className="fy-ch__derive" disabled={locked || asking} onClick={askDraws}>
-                    Add
-                  </button>
-                )}
-              </h2>
-              {drawsEmpty ? null : (
-                <ul className="fy-ch__draws">
-                  {draws.sheets.map((slug) => {
-                    const sheet = world.sheets.find((s) => s.id === slug);
-                    // Each kind has its own screen; a sheet the world no longer holds still links
-                    // to where it would be, and says its slug, rather than vanishing from the list.
-                    const shelf = sheet?.type === "location" ? "locations" : sheet?.type === "faction" ? "factions" : "cast";
-                    return (
-                      <li key={`sheet:${slug}`}>
-                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/${shelf}/${encodeURIComponent(slug)}`}>
-                          <span className="fy-mono">{sheet?.type ?? "sheet"}</span>
-                          <span className="fy-ch__draw-name">{sheet?.name ?? slug}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                  {draws.canon.map((id) => {
-                    const entry = world.canon.find((c) => c.id === id);
-                    return (
-                      <li key={`canon:${id}`}>
-                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/canon/${encodeURIComponent(id)}`}>
-                          <span className="fy-mono">{id}</span>
-                          <span className="fy-ch__draw-name">{entry?.title ?? id}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-
-            {/* Earlier versions appears with the first one kept (design turn 192). */}
-            {history.length > 0 && (
-              <section className="fy-bible__panel">
-                <h2 className="fy-bible__paneltitle">Earlier versions</h2>
-                <ul className="fy-bible__versions">
-                  {history.map((version) => (
-                    <li key={version}>
-                      <span className="fy-mono">v{version}</span>
-                      <Button variant="ghost" disabled={locked} onClick={() => restoreChapter(worldId, prodId, chapter.file, version)}>
-                        Restore
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+            {/* The Brief keeps the plan and After this chapter in the desktop Manuscript (SPEC-056 R-10);
+                the rest moved to the Chapter view (R-5). Below 1100, and under Audiobook's rules, the
+                sheet holds the column as it was. In the Chapter view it holds nothing: the view does. */}
+            {view === "chapter" ? null : view === "manuscript" && !compact ? continuitySection : (
+              <>
+                {bookSection}
+                {continuitySection}
+                {voicesSection}
+                {styleSection}
+                {impliesSection}
+                {drawsSection}
+                {versionsSection}
+              </>
             )}
             {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
               <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>

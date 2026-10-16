@@ -8,7 +8,8 @@
  */
 const KEY = "arke.chapter-dock.";
 
-export type ChapterView = "manuscript" | "audiobook" | "timing";
+/** The chapter's views; Chapter is the production home (design turn 227, SPEC-056 R-1). */
+export type ChapterView = "chapter" | "manuscript" | "audiobook" | "timing";
 
 /** The dock as each view opens it here: remembered, else open in the Manuscript and put away elsewhere. */
 export function rememberedDocks(): Record<ChapterView, boolean> {
@@ -20,7 +21,7 @@ export function rememberedDocks(): Record<ChapterView, boolean> {
       return null;
     }
   };
-  return { manuscript: held("manuscript") ?? true, audiobook: held("audiobook") ?? false, timing: held("timing") ?? false };
+  return { chapter: held("chapter") ?? false, manuscript: held("manuscript") ?? true, audiobook: held("audiobook") ?? false, timing: held("timing") ?? false };
 }
 
 export function rememberDock(view: ChapterView, open: boolean): void {
