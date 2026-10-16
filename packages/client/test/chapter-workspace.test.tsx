@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { BookStrip } from "../src/screens/chapter-overview.js";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -2571,5 +2572,25 @@ describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
     const m = await mount(state);
     await answerOpen(m);
     assert.match(text(m), /Saved · v4 · \+612 today/);
+  });
+});
+
+describe("the book strip (design turn 227, SPEC-056 R-36)", () => {
+  it("numbers a chapter by its own order, past a retired one, and its segments stay buttons", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const chose: string[] = [];
+    await act(async () => root.render(
+      <BookStrip chapters={[{ id: "two", order: 2, title: "Two", words: 900, planned: false }, { id: "three", order: 3, title: "Three", words: 0, planned: true }]}
+        current="two" onChapter={(id) => chose.push(id)} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    assert.match(container.textContent ?? "", /Chapter 2of 2/, "chapter 1 was retired; this is still Chapter 2");
+    const segments = [...container.querySelectorAll(".fy-chov__seg")];
+    assert.deepEqual(segments.map((segment) => segment.getAttribute("aria-label")), ["Chapter 2 · Two", "Chapter 3 · Three"]);
+    assert.ok(segments.every((segment) => segment.getAttribute("role") === null), "a segment is announced as the button it is");
+    await act(async () => (segments[1] as HTMLElement).click());
+    assert.deepEqual(chose, ["three"]);
   });
 });

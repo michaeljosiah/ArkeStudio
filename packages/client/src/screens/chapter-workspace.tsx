@@ -2524,13 +2524,14 @@ export function ChapterWorkspace({
       value: audiobook.counts.made > 0 ? `${audiobook.counts.made} of ${audiobook.counts.total} blocks` : "Not read",
       ...(placedPictures.count > 0 ? { meta: `${placedPictures.count} picture${placedPictures.count === 1 ? "" : "s"}` } : {}),
       ...(voicesRecord !== null ? { action: audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : <Button variant="ghost" onClick={() => chooseView("audiobook")}>Open Audiobook</Button> } : {}) },
-    { key: "mixed", label: "Mixed", state: "idle", value: audiobook.counts.made > 0 ? "Audio Studio" : "Not started",
+    // Mixed once the chapter has a timing: playback then uses its mix (SPEC-047 R-179).
+    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : audiobook.counts.made > 0 ? "Audio Studio" : "Not started",
       ...(audiobook.counts.made > 0 ? { action: <Button variant="ghost" onClick={() => chooseView("timing")}>Open Audio Studio</Button> } : {}) },
   ];
   const overview = view !== "chapter" ? null : (
     <ChapterOverview
       picture={heroFile === null ? null : mediaUrl(worldSlug, heroFile)}
-      strip={<BookStrip chapters={activeChapters.map((c) => ({ id: c.id, title: c.title, words: c.words ?? 0, planned: (c.words ?? 0) === 0 }))} current={chapter.id} onChapter={goChapter} />}
+      strip={<BookStrip chapters={activeChapters.map((c) => ({ id: c.id, order: c.order, title: c.title, words: c.words ?? 0, planned: (c.words ?? 0) === 0 }))} current={chapter.id} onChapter={goChapter} />}
       title={<SceneTitle title={chapter.title} locked={locked} onCommit={(title) => plan({ title })} />}
       synopsis={chapter.synopsis}
       meta={<>
@@ -2545,7 +2546,7 @@ export function ChapterWorkspace({
       </>}
       views={viewNav}
       cast={castCards.length > 0 ? <CastCards cards={castCards} selected={castOpen} onCard={(key) => (key === "narrator" ? setNarratorOpen(true) : setCastOpen((open) => (open === key ? null : key)))} /> : null}
-      voiceCard={<>{voiceCard}{narratorDialog}</>}
+      voiceCard={voiceCard}
       steps={<ProgressSteps steps={progressSteps} />}
       pictures={pictureFiles.map(([, picture]) => mediaUrl(worldSlug, picture.file))}
       onPicture={(index) => { const key = pictureFiles[index]?.[0]; chooseView("audiobook"); if (key !== undefined) audiobook.setSelected(key); }}

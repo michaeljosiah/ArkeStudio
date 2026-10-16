@@ -9,7 +9,8 @@ import { cx } from "../components/ui.js";
  * column held. Every write stays the workspace's: this draws, and calls back.
  */
 
-export type BookStripChapter = { id: string; title: string; words: number; planned: boolean };
+/** `order` is the chapter's own number, which a retired chapter before it does not change. */
+export type BookStripChapter = { id: string; order: number; title: string; words: number; planned: boolean };
 
 /** One segment a chapter, sized by its words; the open one solid, planned ones outlined (R-36). */
 export function BookStrip({ chapters, current, onChapter }: { chapters: readonly BookStripChapter[]; current: string; onChapter: (id: string) => void }) {
@@ -21,18 +22,17 @@ export function BookStrip({ chapters, current, onChapter }: { chapters: readonly
       <button type="button" className="fy-chov__nav" aria-label="Previous chapter" title={previous?.title} disabled={previous === null} onClick={() => previous && onChapter(previous.id)}>
         <ChevronLeft size={12} />
       </button>
-      <b>Chapter {at + 1}</b>
+      <b>Chapter {chapters[at]?.order ?? at + 1}</b>
       <span>of {chapters.length}</span>
-      <span className="fy-chov__strip" role="list" aria-label="Chapters">
-        {chapters.map((c, i) => (
+      <span className="fy-chov__strip" role="group" aria-label="Chapters">
+        {chapters.map((c) => (
           <button
             key={c.id}
             type="button"
-            role="listitem"
             className={cx("fy-chov__seg", c.id === current && "fy-chov__seg--here", c.planned && "fy-chov__seg--planned")}
             style={{ flexGrow: Math.max(c.words, 300) }}
-            title={`Chapter ${i + 1} · ${c.title}`}
-            aria-label={`Chapter ${i + 1} · ${c.title}`}
+            title={`Chapter ${c.order} · ${c.title}`}
+            aria-label={`Chapter ${c.order} · ${c.title}`}
             aria-current={c.id === current ? "page" : undefined}
             onClick={() => c.id !== current && onChapter(c.id)}
           />
