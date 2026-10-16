@@ -2829,6 +2829,7 @@ export function ChapterWorkspace({
         closeName();
         // The name is what Chat is about now, not a passage still selected (codex on PR 1800).
         setSelection(null);
+        setMarked(null);
         setNameAsk(sheet.name);
         setDock(true);
       }}
