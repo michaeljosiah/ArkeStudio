@@ -80,8 +80,9 @@ export class SocketWriter {
     this.closeTimer.unref();
   }
 
-  dispose(): void {
-    this.stopped = true; clearTimeout(this.timer); clearTimeout(this.closeTimer);
+  dispose(options: { preserveCloseTimeout?: boolean } = {}): void {
+    this.stopped = true; clearTimeout(this.timer);
+    if (!options.preserveCloseTimeout) clearTimeout(this.closeTimer);
     this.queue = []; this.queuedBytes = 0;
   }
 }

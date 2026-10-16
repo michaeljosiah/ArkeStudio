@@ -68,3 +68,18 @@ it("handles failed sends without pumping queued frames", () => {
   assert.equal(f.sent.length, 1); assert.equal(f.logs[0]!.localCloseReason, "outbound send failed");
   assert.ok(!JSON.stringify(f.logs).includes("private")); f.writer.dispose();
 });
+
+it("preserves the bounded forced close while the coordinator drains a stalled peer", async () => {
+  const f = fixture({ maxFrameBytes: 1, closeTimeoutMs: 10 });
+  f.writer.send("oversized");
+  f.writer.dispose({ preserveCloseTimeout: true });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(f.terminated(), true, "shutdown must not cancel the forced-close deadline");
+  f.writer.dispose();
+  const g = fixture({ maxFrameBytes: 1, closeTimeoutMs: 10 });
+  g.writer.send("oversized");
+  g.writer.dispose({ preserveCloseTimeout: true });
+  g.writer.dispose(); // Peer completed its close handshake before the deadline.
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(g.terminated(), false, "the close event still cancels the deadline");
+});

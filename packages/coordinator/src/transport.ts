@@ -339,7 +339,7 @@ export class Transport {
     this.wss = null;
     const http = this.http;
     this.http = null;
-    for (const conn of this.connections) { conn.writer.dispose(); conn.socket.close(1001, "coordinator stopping"); }
+    for (const conn of this.connections) { conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));
