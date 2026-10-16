@@ -84,17 +84,32 @@ describe("the margins (SPEC-056 R-14)", () => {
     let state = open("Maren spoke.\n\n- a list\n\nThe tide turned.\n");
     const before = state.doc;
     state = state.apply(state.tr.setMeta(marginsKey, [
-      { paragraph: 0, kind: "face", src: null, label: "Maren", title: "Maren Kest" },
-      { paragraph: 1, kind: "face", src: null, title: "Rook" },
-      { paragraph: 2, kind: "picture", src: "pic.png", title: "Passage picture" },
-      { paragraph: 9, kind: "picture", src: "gone.png", title: "Passage picture" },
+      { paragraph: 0, anchor: "Maren spoke.", kind: "face", src: null, label: "Maren", title: "Maren Kest" },
+      { paragraph: 1, anchor: "- a list", kind: "face", src: null, title: "Rook" },
+      { paragraph: 2, anchor: "The tide turned.", kind: "picture", src: "pic.png", title: "Passage picture" },
+      { paragraph: 2, anchor: "The tide turned.", kind: "picture", src: "pic2.png", title: "Passage picture" },
+      { paragraph: 9, anchor: "Not in this chapter.", kind: "picture", src: "gone.png", title: "Passage picture" },
     ]));
     const plugin = marginsKey.get(state)!;
     const set = plugin.props.decorations!.call(plugin, state) as DecorationSet;
     const widgets = set.find().map((deco) => deco.from);
     const first = 1;
     const third = state.doc.child(0).nodeSize + state.doc.child(1).nodeSize + state.doc.child(2).nodeSize - 1;
-    assert.deepEqual(widgets, [first, third], "the face at the first paragraph's start, the picture at the third's end; the list and the missing paragraph take none");
+    assert.deepEqual(widgets, [first, third], "the face at the first paragraph's start, both pictures in one widget at the third's end; the list and the missing paragraph take none");
     assert.ok(state.doc.eq(before), "the document is untouched");
+  });
+});
+
+describe("a margin finds its paragraph by its words (codex on PR 1803)", () => {
+  it("a heading run straight into its prose is one paragraph to the cast and two blocks to the editor", () => {
+    let state = open("# The Vigil\nMaren spoke first.\n\nRook answered.\n");
+    state = state.apply(state.tr.setMeta(marginsKey, [
+      { paragraph: 1, anchor: "Rook answered.", kind: "face", src: null, title: "Rook" },
+    ]));
+    const plugin = marginsKey.get(state)!;
+    const set = plugin.props.decorations!.call(plugin, state) as DecorationSet;
+    const [face] = set.find();
+    assert.ok(face !== undefined);
+    assert.equal(state.doc.resolve(face.from).parent.textContent, "Rook answered.", "beside Rook's words, not the second block");
   });
 });

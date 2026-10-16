@@ -179,6 +179,12 @@ export function RichMarkdownEditor({
   mentionRef.current = mention;
   mentionRowsRef.current = mentionRows;
   mentionSelectedRef.current = mentionSelected;
+  // A sheet arriving or renamed while the menu is open changes its rows at once (codex on PR 1800).
+  const mentionsText = JSON.stringify(mentions ?? null);
+  useEffect(() => {
+    const open = mentionRef.current;
+    if (open !== null && mentionsRef.current !== undefined) setMentionRows(filterMentions(mentionsRef.current, open.query));
+  }, [mentionsText]);
   // Esc closes and leaves the `@` typed (R-18): the trigger it closed stays closed until the caret
   // leaves it, or the next keystroke would open it again.
   const dismissedAt = useRef<number | null>(null);
@@ -529,7 +535,16 @@ export function RichMarkdownEditor({
     : {};
 
   return (
-    <div className={cx("fy-rme", readOnly && "fy-rme--read")} ref={shellRef} onBlur={flush} {...nameEvents}>
+    <div
+      className={cx("fy-rme", readOnly && "fy-rme--read")}
+      ref={shellRef}
+      onBlur={(event) => {
+        flush();
+        // Leaving the editor closes the `@` menu; choosing one of its rows never blurs it.
+        if (!(event.relatedTarget instanceof Node) || !shellRef.current?.contains(event.relatedTarget)) setMention(null);
+      }}
+      {...nameEvents}
+    >
       <EditorContent editor={editor} />
       {mention && editor && (
         <MentionMenu

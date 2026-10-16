@@ -65,7 +65,6 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
 import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
-import { nameMatcher } from "../components/editor/linked-names.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { CompareVersions } from "./chapter-compare.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
@@ -2708,8 +2707,10 @@ export function ChapterWorkspace({
   const marginItems: MarginItem[] = [];
   if (margins.faces) {
     // A face for each spoken paragraph, its first name on the first of a run (R-14).
+    // The voiced blocks are in reading order, so a pinned line is not taken after a later derived one.
     const firstSpeaker = new Map<number, { sheet?: string; speaker: string }>();
-    for (const line of castLinesRead) if (!firstSpeaker.has(line.paragraph)) firstSpeaker.set(line.paragraph, line);
+    for (const block of voiced.blocks) if (block.speaker !== undefined && !firstSpeaker.has(block.paragraph)) firstSpeaker.set(block.paragraph, { speaker: block.speaker, ...(block.sheet !== undefined ? { sheet: block.sheet } : {}) });
+    const proseParagraphs = chapterParagraphs(live);
     let previous: string | null = null;
     for (const paragraph of [...firstSpeaker.keys()].sort((a, b) => a - b)) {
       const who = firstSpeaker.get(paragraph)!;
@@ -2717,32 +2718,34 @@ export function ChapterWorkspace({
       const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
       const name = sheet?.name ?? who.speaker;
       const runStarts = previous !== key || !firstSpeaker.has(paragraph - 1);
-      marginItems.push({ paragraph, kind: "face", src: portraitOf(who.sheet), title: name, ...(runStarts ? { label: sheet !== undefined ? shortNameOf(sheet) : who.speaker } : {}) });
+      marginItems.push({ paragraph, anchor: proseParagraphs[paragraph] ?? "", kind: "face", src: portraitOf(who.sheet), title: name, ...(runStarts ? { label: sheet !== undefined ? shortNameOf(sheet) : defaultShortName(who.speaker) } : {}) });
       previous = key;
     }
   }
   if (margins.pictures) {
-    // A passage picture beside the paragraph its block begins (block keys are `p<paragraph>.<n>`).
-    const seen = new Set<number>();
+    // Every passage picture beside the paragraph its block begins (block keys are `p<paragraph>.<n>`).
+    const proseParagraphs = chapterParagraphs(live);
     for (const [key, picture] of placedPictures.byKey) {
       const paragraph = Number(/^p(\d+)\./.exec(key)?.[1] ?? Number.NaN);
-      if (!Number.isInteger(paragraph) || seen.has(paragraph)) continue;
-      seen.add(paragraph);
-      marginItems.push({ paragraph, kind: "picture", src: mediaUrl(worldSlug, picture.file), title: "Passage picture" });
+      if (!Number.isInteger(paragraph)) continue;
+      marginItems.push({ paragraph, anchor: proseParagraphs[paragraph] ?? "", kind: "picture", src: mediaUrl(worldSlug, picture.file), title: "Passage picture" });
     }
   }
   // The names in this chapter, in the order they first appear: ⋯'s keyboard way to them (R-54).
-  const namesHere = useMemo(() => {
-    const matcher = nameMatcher(linkedNames);
-    if (matcher === null) return [];
+  // Read off the page's own linked names, so a name in code (never linked) is not offered, and a name
+  // typed and not yet saved is (codex on PR 1803).
+  const [linkedHere, setLinkedHere] = useState<string[]>([]);
+  useEffect(() => {
     const order: string[] = [];
-    for (const hit of matcher.find(live)) for (const id of hit.ids) if (!order.includes(id)) order.push(id);
-    return order.flatMap((id) => {
-      const sheet = world.sheets.find((candidate) => candidate.id === id);
-      return sheet === undefined ? [] : [{ id, name: sheet.name }];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, JSON.stringify(linkedNames)]);
+    for (const element of manuscriptRef.current?.querySelectorAll<HTMLElement>(".fy-ln") ?? []) {
+      for (const id of (element.dataset.names ?? "").split(" ")) if (id !== "" && !order.includes(id)) order.push(id);
+    }
+    setLinkedHere((was) => (was.join(" ") === order.join(" ") ? was : order));
+  });
+  const namesHere = linkedHere.flatMap((id) => {
+    const sheet = world.sheets.find((candidate) => candidate.id === id);
+    return sheet === undefined ? [] : [{ id, name: sheet.name }];
+  });
   const showName = (id: string) => {
     const element = manuscriptRef.current?.querySelector<HTMLElement>(`.fy-ln[data-names~="${CSS.escape(id)}"]`);
     if (!element) return;
@@ -2850,8 +2853,8 @@ export function ChapterWorkspace({
     return () => document.removeEventListener("keydown", onKey);
   }, [view, phone, richMode, enterFocus, leaveFocus, openFind]);
   const moreItems: ToolMenuItem[] = [
-    { key: "faces", label: "Speaker faces", state: margins.faces ? "On" : "Off", disabled: voicesRecord === null, press: () => setMargins({ ...margins, faces: !margins.faces }), testId: "chapter-more-faces" },
-    { key: "pictures", label: "Margin pictures", state: margins.pictures ? "On" : "Off", disabled: placedPictures.count === 0, press: () => setMargins({ ...margins, pictures: !margins.pictures }), testId: "chapter-more-pictures" },
+    { key: "faces", label: "Speaker faces", state: margins.faces ? "On" : "Off", disabled: !margins.faces && voicesRecord === null, press: () => setMargins({ ...margins, faces: !margins.faces }), testId: "chapter-more-faces" },
+    { key: "pictures", label: "Margin pictures", state: margins.pictures ? "On" : "Off", disabled: !margins.pictures && placedPictures.count === 0, press: () => setMargins({ ...margins, pictures: !margins.pictures }), testId: "chapter-more-pictures" },
     { key: "names", label: "Linked names", state: namesOn ? "On" : "Off", disabled: false, press: () => setNamesOn(!namesOn), testId: "chapter-more-names", separator: true },
     {
       key: "names-here",
@@ -2903,6 +2906,8 @@ export function ChapterWorkspace({
       onClose={closeName}
       onAsk={(sheet) => {
         closeName();
+        // The name is what Chat is about now, not a passage still selected (codex on PR 1800).
+        setSelection(null);
         setNameAsk(sheet.name);
         setDock(true);
       }}
