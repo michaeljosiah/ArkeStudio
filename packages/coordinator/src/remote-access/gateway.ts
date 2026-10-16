@@ -264,6 +264,9 @@ export class RemoteGateway {
         writer.send(JSON.stringify(refusal)); return;
       }
       if (parsed.data.kind === "hello") {
+        // The renderer may retry a legacy hello before a slow snapshot arrives.
+        // Negotiation is sticky on this connection; that retry needs no second response.
+        if (helloReceived && retainHistory && parsed.data.retainHistory !== true) return;
         helloReceived = true; retainHistory = parsed.data.retainHistory === true; hello(); return;
       }
       // A decision names a stored card, not its effect. Impose this after parsing so the peer

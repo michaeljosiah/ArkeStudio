@@ -518,9 +518,16 @@ it("compacts request bodies, retains unchanged history only when negotiated, and
   returning.send({ kind: "hello", token: TOKEN, lastSeq: 7, retainHistory: true }); await returning.nextFrame(2);
   const restored = returning.frames[0]!;
   if (restored.kind === "snapshot") { assert.equal(restored.retainedHistory, undefined); assert.equal(restored.state.app.jobs.length, 1); }
-  client.send({ kind: "hello", token: TOKEN }); await client.nextFrame(9);
+  client.send({ kind: "hello", token: TOKEN });
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true }); await client.nextFrame(9);
+  const retried = client.frames[7]!;
+  if (retried.kind === "snapshot") assert.equal(retried.state.app.jobs[0]!.params.text, undefined, "fallback cannot downgrade negotiation");
   transport.broadcastSnapshot(); await client.nextFrame(11);
-  const legacy = client.frames[9]!;
-  if (legacy.kind === "snapshot") { assert.equal(legacy.retainedHistory, undefined); assert.equal(legacy.state.app.jobs.length, 1); }
+  const retained = client.frames[9]!;
+  if (retained.kind === "snapshot") assert.deepEqual(retained.retainedHistory, ["jobs", "ledger"], "legacy fallback emitted no duplicate full snapshot");
+  const legacyClient = new TestClient(port); await legacyClient.open(); t.after(() => legacyClient.close());
+  legacyClient.send({ kind: "hello", token: TOKEN }); await legacyClient.nextFrame(2);
+  const legacy = legacyClient.frames[0]!;
+  if (legacy.kind === "snapshot") { assert.equal(legacy.retainedHistory, undefined); assert.equal(legacy.state.app.jobs[0]!.params.text, job.params.text); }
   assert.deepEqual(client.frames.map(f => f.seq), Array.from({ length: 11 }, (_, i) => i + 1));
 });

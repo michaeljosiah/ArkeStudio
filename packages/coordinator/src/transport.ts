@@ -241,7 +241,9 @@ export class Transport {
         return;
       }
       if (msg.kind === "hello") {
-        if (conn.initialising) return;
+        // A legacy retry is only for old strict servers. Never downgrade an already
+        // negotiated connection or queue another full snapshot behind a slow first one.
+        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true)) return;
         conn.retainHistory = msg.retainHistory === true;
         conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {

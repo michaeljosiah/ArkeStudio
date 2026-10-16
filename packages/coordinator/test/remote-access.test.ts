@@ -300,6 +300,11 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     assert.equal(JSON.parse((await allowed)[0].toString()).kind, "refresh-diagnostics", "allowed commands still work after all refusals");
     // A command this schema rejects is dropped, as the coordinator drops it: closing here sent the
     // phone through reconnect and a fresh snapshot, and a screen that re-sent it reloaded its world.
+    const beforeFallback = received.length;
+    phone.send(JSON.stringify({ kind: "hello" }));
+    const fallbackBarrier = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
+    assert.equal(JSON.parse((await fallbackBarrier)[0].toString()).kind, "refresh-diagnostics");
+    assert.equal(received.length, beforeFallback + 1, "legacy retry is not forwarded after negotiation, even before the first snapshot arrives");
     const forwarded = received.length;
     phone.send(JSON.stringify({ kind: "open-world", worldId: 42 }));
     const after = once(phone, "message"); phone.send(JSON.stringify({ kind: "refresh-diagnostics" }));
