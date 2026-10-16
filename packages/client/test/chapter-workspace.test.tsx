@@ -2633,13 +2633,49 @@ describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
     assert.equal(plans.length, 0, "and chooses nothing yet");
   });
 
-  it("back from New character… with a name, the chapter chooses that character once its sheet is there", async () => {
+  it("back from New character…, the staged character is reviewed on the chapter and chosen by its sheet once accepted (codex on PR 1799)", async () => {
+    // A second Maren Kest: the name the author typed is already a sheet's, so only the staged
+    // proposal's path may say which character this chapter's point of view becomes.
+    const NEW_PATH = "characters/maren-kest-2.md";
+    const staged: StagedProposal = {
+      proposal: {
+        id: "pr_01J8H0000000000000000000N1",
+        kind: "new-sheet",
+        summary: "New character: Maren Kest",
+        targets: [{ path: NEW_PATH, baseVersion: null, baseHash: null }],
+        baseCanonRevision: 42,
+        reservedCanonIds: [],
+        source: "studio",
+        created: "2026-10-16T12:00:00Z",
+        draftRevision: 1,
+        decision: { mode: "attended", owner: { kind: "surface", surface: "sheet-list", targetPath: NEW_PATH } },
+      },
+      ripple: null,
+      review: { targets: [{ path: NEW_PATH, label: "Maren Kest", kind: "character", action: "create", fields: [] }] },
+    } as unknown as StagedProposal;
     const state = inkbound();
     const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
     (production as { chapters: ChapterSummary[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, pov: undefined } : c)) as ChapterSummary[];
+    const plans = (m: Mounted) => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
     const m = await mount(state, `${ROUTE}?pov-name=${encodeURIComponent("Maren Kest")}`);
     await answerOpen(m);
-    const plan = m.sent.findLast((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
-    assert.deepEqual(plan?.changes, { pov: "maren-kest" });
+    assert.equal(plans(m).length, 0, "the older sheet of the same name is not chosen");
+    assert.equal(q(m, '[data-testid="chapter-new-character"]'), null, "nothing to review until the draft is staged");
+
+    const withStaged = { ...state, world: { ...state.world!, proposals: [...state.world!.proposals, staged] } };
+    await act(async () => __setStateForTest(withStaged, { connection: "open" }));
+    assert.ok(q(m, '[data-testid="chapter-new-character"]'), "the new character is reviewed on the chapter");
+    assert.equal(plans(m).length, 0, "and nothing is chosen before it is accepted");
+
+    const accepted = {
+      ...withStaged,
+      world: {
+        ...withStaged.world,
+        proposals: state.world!.proposals,
+        sheets: [...state.world!.sheets, { ...state.world!.sheets.find((sheet) => sheet.id === "maren-kest")!, id: "maren-kest-2", version: 1, status: "draft" }],
+      },
+    } as ClientState;
+    await act(async () => __setStateForTest(accepted, { connection: "open" }));
+    assert.deepEqual(plans(m).map((plan) => plan.changes), [{ pov: "maren-kest-2" }], "the sheet the proposal made");
   });
 });

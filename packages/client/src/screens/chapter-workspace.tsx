@@ -48,6 +48,7 @@ import {
   CHAPTER_PLAN_LIMITS,
   chapterGoal,
   storyProgressDay,
+  pendingSheets,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -58,7 +59,8 @@ import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
-import { BriefFields, DocHead, GoalField, GoalRing, WritingBar } from "./chapter-room.js";
+import { BriefFields, DocHead, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
+import { ConnectedProposalPanel } from "../domain/connected.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
 import type { ChapterView } from "../lib/chapter-dock.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
@@ -1439,17 +1441,43 @@ export function ChapterWorkspace({
   // New character… (D-4): character creation, then back here with the name; the point of view is
   // chosen when that character's sheet arrives (below).
   const newCharacter = () => navigate(`/w/${encodeURIComponent(worldId)}/cast/new?then=${encodeURIComponent(`/w/${worldId}/p/${prodId}/story/chapters/${chapter.id}`)}`);
-  // Back from New character… with the name typed there (D-4): once a character by that name is in
-  // the world, it is this chapter's point of view, and the address forgets the name.
+  /*
+   * Back from New character… (D-4). Creating a character stages its sheet for review rather than
+   * writing one (codex on PR 1799), so the chapter holds that review where the author is, and the
+   * point of view is set to the sheet the accepted proposal creates: found by the proposal's path,
+   * never by a name an older sheet or another book's guest might share. The name only finds the
+   * staged proposal once it arrives; from then on the address carries its path.
+   */
   const povName = searchParams.get("pov-name");
+  const povPath = searchParams.get("pov-path");
   useEffect(() => {
     if (povName === null) return;
     const wanted = povName.trim().toLowerCase();
-    const sheet = world.sheets.find((candidate) => candidate.type === "character" && !candidate.retired && candidate.name.trim().toLowerCase() === wanted);
+    const staged = pendingSheets(world.proposals, "character", world.conversations)
+      .findLast((sheet) => sheet.name.trim().toLowerCase() === wanted && (sheet.production === undefined || sheet.production === prodId));
+    if (staged === undefined) return;
+    setSearchParams((params) => {
+      const next = new URLSearchParams(params);
+      next.delete("pov-name");
+      next.set("pov-path", staged.path);
+      return next;
+    }, { replace: true });
+  }, [povName, world.proposals, world.conversations, prodId, setSearchParams]);
+  useEffect(() => {
+    if (povPath === null) return;
+    const id = /^characters\/([^/]+)\.md$/.exec(povPath)?.[1];
+    const sheet = id === undefined ? undefined : world.sheets.find((candidate) => candidate.id === id && candidate.type === "character");
     if (sheet === undefined) return;
     if (chapter.pov !== sheet.id) editChapterPlan(worldId, prodId, chapter.file, { pov: sheet.id });
-    setSearchParams((params) => { const next = new URLSearchParams(params); next.delete("pov-name"); return next; }, { replace: true });
-  }, [povName, world.sheets, chapter.pov, chapter.file, worldId, prodId, setSearchParams]);
+    setSearchParams((params) => { const next = new URLSearchParams(params); next.delete("pov-path"); return next; }, { replace: true });
+  }, [povPath, world.sheets, chapter.pov, chapter.file, worldId, prodId, setSearchParams]);
+  const povProposal = povPath === null ? undefined : world.proposals.find((staged) => staged.proposal.targets.some((target) => target.path === povPath));
+  const povReview = povProposal === undefined ? null : (
+    <section className="fy-bible__panel fy-ch__povreview" data-testid="chapter-new-character">
+      <h2 className="fy-bible__paneltitle">New character</h2>
+      <ConnectedProposalPanel staged={povProposal} />
+    </section>
+  );
   const characters = world.sheets.filter(
     (sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId),
   );
@@ -2625,7 +2653,7 @@ export function ChapterWorkspace({
           </p>
           <div className="fy-sw__headline">
             <h1 className="fy-sw__title">
-              <SceneTitle title={chapter.title} locked={locked} onCommit={(title) => plan({ title })} />
+              <SceneTitle title={chapter.title} label="Chapter title" locked={locked} startEditing={freshChapter} onCommit={(title) => plan({ title })} />
             </h1>
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
@@ -2824,6 +2852,7 @@ export function ChapterWorkspace({
                 )}
               </DocHead>
             )}
+            {povReview}
             {voicedAt !== null && (
               <div className="fy-ch__band" data-testid="voiced-band">
                 <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
@@ -3110,7 +3139,10 @@ export function ChapterWorkspace({
             {compact && <section className="fy-bible__panel fy-ch__plan"><h2 className="fy-bible__paneltitle">Chapter plan</h2>
               <label>Title{locked ? <span>{chapter.title}</span> : <span className="fy-ch__plan-field"><SceneTitle title={chapter.title} label="Chapter title" onCommit={title => plan({ title })} /></span>}</label>
               <label>Synopsis{locked ? <span>{chapter.synopsis}</span> : <EditableText value={chapter.synopsis ?? ""} placeholder="What this chapter is for." className="fy-ch__plan-field" rows={2} maxLength={CHAPTER_PLAN_LIMITS.synopsis} onCommit={synopsis => plan({ synopsis: synopsis || null })} />}</label>
-              <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => plan({ pov: event.target.value || null })}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}</select></label>
+              <label>Point of view<select aria-label="Point of view" disabled={locked} value={chapter.pov ?? ""} onChange={event => {
+                if (event.target.value === NEW_CHARACTER) { event.target.value = chapter.pov ?? ""; newCharacter(); return; }
+                plan({ pov: event.target.value || null });
+              }}><option value="">Not set</option>{characters.map(sheet => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}<option value={NEW_CHARACTER}>New character…</option></select></label>
               {locked && !chapter.when ? null : <label>When{locked ? <span>{chapter.when}</span> : <EditableText value={chapter.when ?? ""} placeholder="When" className="fy-ch__plan-field" rows={1} maxLength={CHAPTER_PLAN_LIMITS.when} onCommit={when => plan({ when: when || null })} />}</label>}
               <label>Goal<GoalField goal={goal.words} goalSource={goal.source} locked={locked} onPlan={(changes) => plan(changes)} /></label>
             </section>}

@@ -163,3 +163,6 @@
   .fy-chov__cards { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
   .fy-chov__card { flex: none; width: 124px; }
 }
+
+/* A character made from the point of view, reviewed where the chapter is (D-4). */
+.fy-ch__povreview { margin: 0 0 24px; }

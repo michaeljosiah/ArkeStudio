@@ -728,11 +728,17 @@ export async function createChapter(
   // The rank the press asks for is the dense count plus one, and the bundle's orders are dense
   // too; the files are not. A legacy production ranked 10, 20 would take a new chapter at 3 and
   // sort it first, so the rank written is at least one past the highest persisted (codex, PR 879).
-  const order = Math.max(input.order, (await highestChapterRank(store, productionId, existing.map((c) => c.file))) + 1);
+  const ranks = await chapterRanks(store, productionId, existing.map((c) => c.file));
+  const order = Math.max(input.order, Math.max(0, ...ranks.values()) + 1);
   // A new chapter takes the point of view of the chapter before it (SPEC-056 D-3), when that is a
   // character the world still holds: most books stay with one viewpoint for a run of chapters.
+  // "Before it" by the ranks on disk, not the summaries' dense orders: the new rank is past every
+  // ranked chapter, so a legacy chapter with no rank (sorted last in the summaries) is not before
+  // it (codex, PR 1799). With nothing ranked, the last chapter shown is.
   const sheets = store.getBundle().sheets;
-  const previous = existing.filter((c) => !c.retired && c.order < order).sort((a, b) => b.order - a.order)[0];
+  const live = existing.filter((c) => !c.retired);
+  const ranked = live.filter((c) => (ranks.get(c.file) ?? 0) > 0).sort((a, b) => ranks.get(b.file)! - ranks.get(a.file)!);
+  const previous = ranked[0] ?? [...live].sort((a, b) => b.order - a.order)[0];
   const pov = previous?.pov !== undefined && sheets.some((sheet) => sheet.id === previous.pov && sheet.type === "character" && !sheet.retired) ? previous.pov : undefined;
   const doc = MarkdownFile.create(
     {
@@ -763,15 +769,20 @@ export async function createChapter(
 
 /** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
 export async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
-  let highest = 0;
+  return Math.max(0, ...(await chapterRanks(store, productionId, files)).values());
+}
+
+/** Each chapter file's persisted rank (`order`, else the legacy `number`); 0 where it has none. */
+export async function chapterRanks(store: WorldStore, productionId: string, files: readonly string[]): Promise<Map<string, number>> {
+  const ranks = new Map<string, number>();
   for (const file of files) {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
     if (raw === null) continue;
     const data = MarkdownFile.parse(raw).data;
     const rank = typeof data["order"] === "number" ? data["order"] : typeof data["number"] === "number" ? data["number"] : 0;
-    if (Number.isFinite(rank) && rank > highest) highest = rank;
+    ranks.set(file, Number.isFinite(rank) && rank > 0 ? rank : 0);
   }
-  return highest;
+  return ranks;
 }
 
 /** Direct authoring: saves in place, no proposal, no version cut (R-5). */
