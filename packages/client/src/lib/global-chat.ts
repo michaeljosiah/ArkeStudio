@@ -59,6 +59,12 @@ export function chatSurfaceForPage(state: ClientState | null, path: string): Cha
       title = kind === "stage" ? "Stage Chat" : kind === "takes" ? "Takes Chat" : "Shot Chat";
       label += ` / Shot ${shot.number}`;
     } else if (scene) { entry = { kind: "scene", productionId: production.meta.id, sceneId: scene.id }; label += ` / Scene ${scene.number}`; }
+    else if (route[4] === "story" && route[5] === "chapters" && route[6]) {
+      // A chapter's conversation is the production's own thread (turn 126); the Chat names the
+      // chapter it is open beside (SPEC-056 R-42).
+      const chapter = production.chapters.find(c => c.id === route[6] || c.file === route[6]);
+      if (chapter) label += " / " + chapter.title;
+    }
     else if (route[4] === "episodes" && route[5]) {
       const episode = production.episodes.find(e => e.id === route[5]);
       if (episode) { entry = { kind: "episode", productionId: production.meta.id, episodeId: episode.id }; label += ` / Episode ${episode.order}`; }
@@ -196,13 +202,18 @@ export class GlobalChatController {
     return () => { if (this.registrations.get(surface.key)?.host === host) { this.registrations.delete(surface.key); this.changed(); } };
   }
   refresh(surface: ChatSurface, host: HTMLElement) {
-    const previous = this.registrations.get(surface.key)?.surface;
+    const registered = this.registrations.get(surface.key);
+    const previous = registered?.surface;
     this.registrations.set(surface.key, { surface, host });
     const selected = this.snapshot.selected;
     // Revisions/decisions for the retained context remain live. A page candidate cannot
-    // replace its route, entry, structured subject or the subject prefixed to a send.
-    if (selected?.key === surface.key && selected.path === surface.path && chatSubjectKey(selected) === chatSubjectKey(surface) && selected.props !== surface.props) {
-      this.changed({ selected: { ...selected, props: surface.props } });
+    // replace its route, entry, structured subject or the subject prefixed to a send. The one
+    // exception is the same mounted page moving its own route: a chapter switching between
+    // Manuscript and Audiobook keeps its host and subject, and its prompts must follow the view
+    // (SPEC-056 R-42) rather than stay the view it opened in.
+    const samePage = selected?.path === surface.path || (registered?.host === host && previous?.path === selected?.path);
+    if (selected?.key === surface.key && samePage && chatSubjectKey(selected) === chatSubjectKey(surface) && (selected.props !== surface.props || selected.path !== surface.path)) {
+      this.changed({ selected: { ...selected, path: surface.path, props: surface.props } });
     } else if (!previous || previous.path !== surface.path || chatSubjectKey(previous) !== chatSubjectKey(surface)) this.changed();
   }
   forPage = () => this.current ? [...this.registrations.values()].findLast(row => row.surface.path === this.current!.path)?.surface ?? this.registrations.get(this.current.key)?.surface ?? this.current : null;

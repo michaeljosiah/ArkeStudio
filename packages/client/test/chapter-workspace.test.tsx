@@ -224,7 +224,7 @@ it("reopens a chapter from its actual list row in the last view, with explicit a
   const m = await mount(inkbound());
   const shown = () => q(m, '[data-testid="chapter-workspace"]')?.getAttribute("data-view");
   const choose = async (label: string) => {
-    const button = [...m.container.querySelectorAll(".fy-ch__viewline button")].find(button => button.textContent === label) as HTMLElement;
+    const button = [...m.container.querySelectorAll(".fy-ch__viewrow button")].find(button => button.textContent === label) as HTMLElement;
     assert.ok(button, `visible ${label} tab`);
     await act(async () => button.click());
   };
@@ -388,14 +388,15 @@ describe("the chapter, opened (turn 126)", () => {
     assert.equal(ask.productionId, "inkbound");
     assert.equal(ask.chapterId, "neap");
     assert.match(text(m), /Opening…/, "nothing stands in for the prose until it arrives");
-    assert.match(text(m), /CHAPTER 02 OF 2/);
+    assert.match(text(m), /Chapter 2/, "the chapter's number heads the document (turn 227)");
     assert.match(text(m), /The counting of bells/);
 
     await answerOpen(m);
     // linkedom does not mirror a controlled value back through `.value`; the foot's count is
     // computed from the same text the editor holds, so it is what proves the body arrived.
     assert.ok(q(m, "textarea.fy-ch__source"), "the body is in the editor");
-    assert.match(text(m), /Saved · v4 · 12 words/, "the foot says saved, the version and the words of the body it read");
+    assert.match(text(m), /Saved · v4/, "the foot says saved and the version");
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/, "the goal counts the words of the body it read against the default goal (SPEC-056 D-2)");
     assert.match(text(m), /6,390 of 80,000 words/, "the book's count against the target the overview names");
     assert.match(text(m), /maren-kest|Maren Kest/, "Draws on lists the sheet");
     assert.match(text(m), /CANON-002/, "and the canon");
@@ -414,7 +415,6 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /decide in the thread/);
     assert.match(text(m), /Drafted anew\./, "the draft's own prose is what stands in the manuscript");
     assert.match(text(m), /Locked while a draft waits · v4/);
-    assert.match(text(m), /draft waiting/);
     assert.match(text(m), /Accept/, "the card holds Accept");
   });
 
@@ -1607,8 +1607,7 @@ describe("the craft loop (turn 128)", () => {
     assert.match(text(m), /decide in the thread/);
     assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
     assert.match(text(m), /Six, and the tide/, "and the rest of the chapter is untouched");
-    assert.match(text(m), /passage waiting/);
-    assert.doesNotMatch(text(m), /draft waiting/);
+    assert.doesNotMatch(text(m), /draft waits/);
     assert.match(text(m), /Locked while a passage waits · v4/);
     assert.match(text(m), /chapter 02 · passage/, "the card names the passage");
     assert.doesNotMatch(text(m), /the rest of the chapter is untouched/, "no caption under the gate (turn 137)");
@@ -2448,5 +2447,64 @@ describe("the voiced read (turn 130)", () => {
     const unreadable = await mount(inkbound());
     await answerOpenCast(unreadable, { voicesUnreadable: true });
     assert.match(text(unreadable), /record unreadable · Cast again replaces it/);
+  });
+});
+
+describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
+  it("one bar over the page: Brief, the chapters either side, the views, then the goal; the document opens with the number and title", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const bar = q(m, '[role="toolbar"][aria-label="Writing"]');
+    assert.ok(bar, "the writing bar stands over the page");
+    const labels = [...bar!.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    assert.deepEqual(labels.slice(0, 6), ["Brief", "Previous chapter", "Next chapter", "Manuscript", "Audiobook", "Audio Studio"], "in the order the turn draws");
+    assert.ok(bar!.querySelector('[data-testid="chapter-goal"]'), "the goal is on the bar");
+    assert.equal(q(m, ".fy-sw__breadcrumb"), null, "no CHAPTER 02 OF 2 line; the document carries the number");
+    assert.match(q(m, ".fy-ch__dochead")!.textContent ?? "", /^Chapter 2The counting of bells$/);
+    assert.equal(q(m, '[aria-label="Chapter state"]'), null, "the chips row is retired (R-6)");
+  });
+
+  it("the arrows open the chapter before; the last chapter has no after", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const next = q(m, '[aria-label="Next chapter"]') as HTMLButtonElement;
+    assert.equal(next.disabled, true, "neap is the last chapter");
+    await act(async () => (q(m, '[aria-label="Previous chapter"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
+    assert.equal(asked.chapterId, "slack-water", "the previous chapter opens");
+  });
+
+  it("Brief opens and puts away the plan beside the page; a goal is written only when changed", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const body = () => q(m, ".fy-ch__body")!.getAttribute("data-brief");
+    assert.equal(body(), "closed", "Brief starts put away below 2000");
+    await act(async () => (q(m, '[aria-label="Brief"]') as HTMLButtonElement).click());
+    assert.equal(body(), "open");
+    assert.ok(q(m, '[data-testid="chapter-brief"]'), "the plan is the Brief's");
+    const field = q(m, '[aria-label="Goal in words"]') as HTMLInputElement;
+    assert.equal(field.getAttribute("title"), "Default goal", "the field says where the goal came from");
+    const plans = () => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
+    const blur = (value: string) => act(async () => {
+      field.value = value;
+      field.dispatchEvent(new dom.window.Event("focusout", { bubbles: true }) as unknown as Event);
+    });
+    await blur("3000");
+    assert.equal(plans().length, 0, "tabbing through an unchanged derived goal writes nothing");
+    await blur("4500");
+    assert.deepEqual(plans().at(-1)?.changes, { goal: 4500 });
+    await blur("20");
+    assert.equal(plans().length, 1, "a goal out of range is not sent");
+  });
+
+  it("the foot says saved and the version, and the words written today when there are any", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    (production as { progress?: unknown }).progress = { version: 1, days: { [today]: 612 } };
+    const m = await mount(state);
+    await answerOpen(m);
+    assert.match(text(m), /Saved · v4 · \+612 today/);
   });
 });

@@ -1,0 +1,69 @@
+/*
+ * The chapter's writing room (design turn 227, SPEC-056 §1.5–§1.6). Loaded after
+ * chapter-responsive.css, whose caps it lifts: the Manuscript fills the centre like Dashboard and
+ * Chapters, and the width goes to the margins and the Brief, never to the line. Everything here is
+ * scoped to the chapter's root (`data-room` on the Manuscript above a phone's width, `data-chat` when
+ * the app's Chat holds the conversation), so the scene workspace's `.fy-sw` is untouched.
+ */
+
+/* No page-owned Arke column while the app's Chat holds the thread (R-3). */
+[data-screen="chapter"][data-chat="global"] { grid-template-columns: minmax(0, 1fr); }
+
+/* The bar (R-7): the only chrome above the page. */
+.fy-ch__wbar { flex: none; position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fy-ch__wbar .fy-ch__viewrow { margin: 0; }
+.fy-ch__wbar .fy-seg__item { white-space: nowrap; }
+/* Where the centre is short of the bar's one line (a Fold beside the production rail), the presses
+   after the goal take a second row rather than squeezing the views or running off the edge. */
+.fy-ch__wbar { flex-wrap: wrap; row-gap: 8px; }
+@container (max-width: 900px) { .fy-ch__wbar { padding-block: 10px; } }
+.fy-ch__wbar-gap { flex: 1; }
+.fy-ch__chapnav { display: inline-flex; gap: 2px; }
+.fy-ch__wbtn { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-ch__wbtn:hover:not(:disabled), .fy-ch__wbtn:focus-visible { background: var(--accent); color: var(--foreground); }
+.fy-ch__wbtn--on { background: var(--muted); color: var(--foreground); }
+.fy-ch__wbtn:disabled { opacity: .35; cursor: default; }
+.fy-ch__goal { display: inline-flex; align-items: center; gap: 8px; font: 500 12px/1 var(--font-sans); color: var(--muted-foreground); white-space: nowrap; }
+.fy-ch__goal b { color: var(--foreground); font-weight: 500; }
+.fy-ch__goal-ring { --p: 0; width: 18px; height: 18px; flex: none; border-radius: 50%;
+  background: conic-gradient(var(--foreground) calc(var(--p) * 1%), color-mix(in srgb, var(--foreground) 18%, transparent) 0);
+  -webkit-mask: radial-gradient(circle, transparent 5.5px, black 6px); mask: radial-gradient(circle, transparent 5.5px, black 6px); }
+
+/* The top of the document (R-8). */
+.fy-ch__dochead { padding: 48px 0 6px; }
+.fy-ch__kick { margin: 0 0 10px; font: 500 12px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-ch__doctitle { margin: 0 0 22px; font: 600 36px/1.1 var(--font-sans); letter-spacing: -0.02em; }
+
+/* The Brief's plan (R-10). */
+.fy-ch__brief { display: grid; gap: 14px; }
+.fy-ch__brief-field { display: grid; gap: 6px; font: 400 13px/1.45 var(--font-sans); }
+.fy-ch__brief-field > span { color: var(--muted-foreground); font-weight: 500; font-size: 12px; }
+.fy-ch__brief-field p { margin: 0; }
+.fy-ch__brief .fy-ch__pick { min-height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+.fy-ch__goal-input { width: 120px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+
+@media (min-width: 600px) {
+  [data-screen="chapter"][data-room="true"] { --room-measure: 660px; }
+  /* The column fills the centre; the bar runs edge to edge over it. */
+  [data-screen="chapter"][data-room="true"] .fy-sw__centre { padding: 0; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-sw__head, .fy-ch__body) { max-width: none; margin-inline: 0; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body { padding: 0 32px; }
+  /* The page keeps its measure in whatever room it has (R-2, D-9). */
+  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript { align-items: center; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > :is(.fy-ch__dochead, .fy-ch__prose, .fy-ch__source, .fy-ch__band, .fy-ch__foot, .fy-ch__draft) { width: min(var(--room-measure), 100%); max-width: none; margin-right: 0; box-sizing: border-box; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font: 400 18px/1.75 var(--font-sans); }
+}
+
+/* At desktop widths the Brief is a column at the page's left, put away by its press. */
+@media (min-width: 1100px) {
+  [data-screen="chapter"][data-room="true"] .fy-ch__body { gap: 32px; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body[data-brief="closed"] > .fy-ch__panels { display: none; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body[data-brief="open"] > .fy-ch__panels { order: -1; width: 320px; padding: 20px 24px 0 0; border-right: 1px solid var(--border); box-sizing: border-box; }
+}
+
+/* From 2000 the type steps up and the measure with it, never the line alone (D-9). */
+@media (min-width: 2000px) {
+  [data-screen="chapter"][data-room="true"] { --room-measure: 760px; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font-size: 20px; line-height: 1.72; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__doctitle { font-size: 48px; }
+}
