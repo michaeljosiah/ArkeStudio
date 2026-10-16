@@ -166,4 +166,10 @@ it('the phone format bar keeps the caret: its presses refuse focus, and each say
  await click([...bar.querySelectorAll<HTMLElement>('button')].find(b=>b.textContent==='Arke')!);
  assert.deepEqual(calls,['bold','italic','@','/','hide','arke']);
  for(const button of bar.querySelectorAll('button'))assert.equal(button.getAttribute('type'),'button');
+ // Focus moving within the bar or back to the page is still writing; anywhere else it is not (codex on PR 1814).
+ let left=0;await act(async()=>root!.render(<FormatBar bold italic={false} onBold={()=>{}} onItalic={()=>{}} onMention={()=>{}} onSlash={()=>{}} onArke={()=>{}} onHide={()=>{}} onLeave={()=>{left++;}}/>));
+ const page=document.createElement('div');page.className='ProseMirror';document.body.append(page);
+ props(bar).onBlur!({currentTarget:bar,relatedTarget:find('[aria-label="Italic"]')} as never);
+ props(bar).onBlur!({currentTarget:bar,relatedTarget:page} as never);assert.equal(left,0);
+ props(bar).onBlur!({currentTarget:bar,relatedTarget:null} as never);assert.equal(left,1);
 });

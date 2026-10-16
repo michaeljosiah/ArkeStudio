@@ -293,7 +293,7 @@ export function FindBar({ query, count, current, opened, onQuery, onStep, onClos
  * written. A press must not take the caret from the editor, or the keyboard would drop with it, so
  * every press is refused the focus it would otherwise take.
  */
-export function FormatBar({ bold, italic, onBold, onItalic, onMention, onSlash, onArke, onHide }: {
+export function FormatBar({ bold, italic, onBold, onItalic, onMention, onSlash, onArke, onHide, onLeave }: {
   bold: boolean;
   italic: boolean;
   onBold: () => void;
@@ -302,10 +302,17 @@ export function FormatBar({ bold, italic, onBold, onItalic, onMention, onSlash, 
   onSlash: () => void;
   onArke: () => void;
   onHide: () => void;
+  /** Focus has left both the bar and the page. */
+  onLeave?: () => void;
 }) {
   const keep = (event: { preventDefault: () => void }) => event.preventDefault();
+  const leave = (event: { currentTarget: Element; relatedTarget: EventTarget | null }) => {
+    const to = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+    if (to !== null && (event.currentTarget.contains(to) || to.closest(".ProseMirror") !== null)) return;
+    onLeave?.();
+  };
   return (
-    <div className="fy-formatbar" role="toolbar" aria-label="Format" onMouseDown={keep} onPointerDown={keep} data-testid="format-bar">
+    <div className="fy-formatbar" role="toolbar" aria-label="Format" onMouseDown={keep} onPointerDown={keep} onBlur={leave} data-testid="format-bar">
       <button type="button" className={cx("fy-formatbar__b", bold && "fy-formatbar__b--on")} aria-label="Bold" aria-pressed={bold} onClick={onBold}><b>B</b></button>
       <button type="button" className={cx("fy-formatbar__b", italic && "fy-formatbar__b--on")} aria-label="Italic" aria-pressed={italic} onClick={onItalic}><i>I</i></button>
       <button type="button" className="fy-formatbar__b" aria-label="Mention" onClick={onMention}>@</button>

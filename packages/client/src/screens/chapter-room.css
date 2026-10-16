@@ -82,7 +82,7 @@
 
 /* The format bar above the keyboard (R-46, 227l). */
 .fy-formatbar-held { padding: 0; }
-.fy-formatbar { display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-top: 1px solid var(--border); background: var(--background); }
+.fy-formatbar { flex: 1; width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-top: 1px solid var(--border); background: var(--background); }
 .fy-formatbar__b { min-width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground); font: 500 16px var(--font-sans); }
 .fy-formatbar__b--on { background: var(--muted); }
 .fy-formatbar__arke { font-size: 14px; }

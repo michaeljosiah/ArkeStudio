@@ -1598,13 +1598,15 @@ export function ChapterWorkspace({
   const [writing, setWriting] = useState(false);
   // The bar reads the marks at the caret, so it follows each transaction while it stands.
   const [, setMarksAt] = useState(0);
+  // Only where the bar is drawn (codex on PR 1814): elsewhere each caret move would redraw the page.
+  const formatBarShown = phone && view === "manuscript";
   useEffect(() => {
     const editor = editorRef.current;
-    if (!writing || editor === null) return;
+    if (!writing || !formatBarShown || editor === null) return;
     const follow = () => setMarksAt((count) => count + 1);
     editor.on("transaction", follow);
     return () => void editor.off("transaction", follow);
-  }, [writing]);
+  }, [writing, formatBarShown]);
   // When the editor last moved, so a Continue can wait for its words to be handed on.
   const lastTyped = useRef(0);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
@@ -3714,7 +3716,11 @@ export function ChapterWorkspace({
                     editorRef.current = live;
                     setWriting(live !== null && live.isFocused);
                     live?.on("focus", () => setWriting(true));
-                    live?.on("blur", () => setWriting(false));
+                    // Focus moving into the format bar is still writing (codex on PR 1814): a keyboard
+                    // user tabs from the page to Bold, and the bar must not go from under them.
+                    live?.on("blur", ({ event }) => {
+                      if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest(".fy-formatbar"))) setWriting(false);
+                    });
                   }}
                   extraCommands={arkeCommands}
                   reviewMarks={notesShown ? { marks: reviewPlaced.placed.map((note) => ({ n: note.n, text: quoteText(note.finding.quote), nth: note.nth })), current: noteOpen } : { marks: [], current: null }}
@@ -4056,12 +4062,17 @@ export function ChapterWorkspace({
                 void chain.insertContent("/").run();
               }}
               onArke={() => setDock(true)}
-              onHide={() => void live.commands.blur()}
+              onHide={() => {
+                setWriting(false);
+                void live.commands.blur();
+              }}
+              onLeave={() => setWriting(false)}
             />
           </HeldBar>
         );
       })()}
-      {phone && view === "chapter" && (
+      {/* Not under a passage decision, which holds the same foot (codex on PR 1814). */}
+      {phone && view === "chapter" && !(stagedDraft !== undefined && passageChange !== null) && (
         // Write and Listen held at the foot of the phone's Chapter view (R-46, 227n).
         <HeldBar className="fy-chov-held">
           <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>
