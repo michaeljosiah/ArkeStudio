@@ -449,6 +449,20 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Draft4 words/, "the words it adds");
   });
 
+  it("words run on from the last paragraph stand in it, and an empty ripple is still decided on the page (codex on PR 1806)", async () => {
+    const runOn: StagedProposal = {
+      ...DRAFT,
+      ripple: { computedAt: "2026-09-06T12:00:00Z", governing: false, items: [] },
+      review: { targets: [{ ...DRAFT.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: `${BODY.trimEnd()} Then the seventh.` }] }] },
+    } as StagedProposal;
+    const m = await mount(inkbound([runOn]));
+    await answerOpen(m);
+    const paragraphs = [...m.container.querySelectorAll(".fy-ch__draft p")];
+    assert.equal(paragraphs.some((p) => p.classList.contains("fy-ch__ghost")), false, "no new paragraph");
+    assert.equal(paragraphs.at(-1)?.querySelector(".fy-ch__ghost")?.textContent, " Then the seventh.");
+    assert.ok(q(m, '[data-testid="page-held-bar"]'), "an empty preview is no ripple");
+  });
+
   it("Discard on the page refuses the draft (R-27)", async () => {
     const m = await mount(inkbound([DRAFT]));
     await answerOpen(m);

@@ -1791,7 +1791,8 @@ export function ChapterWorkspace({
    * confirm. One that ripples into other files still goes to Chat's card, where its consequences
    * are shown and confirmed before it lands.
    */
-  const decidedOnPage = view === "manuscript" && !phone && stagedDraft !== undefined && stagedDraft.staged.ripple === null;
+  // Every staged proposal carries a preview, empty when nothing ripples (codex on PR 1806).
+  const decidedOnPage = view === "manuscript" && !phone && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
   // What a draft adds after the saved prose, when it only adds; null when it rewrites.
   const draftAdds = stagedDraft === undefined || passageChange !== null || live.trim() === "" ? null
     : (stagedDraft.body ?? "").startsWith(live.trimEnd()) ? (stagedDraft.body ?? "").slice(live.trimEnd().length) : null;
@@ -3287,12 +3288,24 @@ export function ChapterWorkspace({
                     ? chapterParagraphs(stagedDraft.body ?? live).map((paragraph, i) => (
                         <p key={i} className="fy-ch__ghost" aria-describedby={ghostNote}>{paragraph}</p>
                       ))
-                    : <>
-                        {chapterParagraphs(live).map((paragraph, i) => <p key={`live-${i}`}>{paragraph}</p>)}
-                        {chapterParagraphs(draftAdds).map((paragraph, i) => (
-                          <p key={`adds-${i}`} className="fy-ch__ghost" aria-describedby={ghostNote}>{paragraph}</p>
-                        ))}
-                      </>}
+                    : (() => {
+                        // Words that run on from the last paragraph stand in it, as they will land;
+                        // only what follows a blank line is a paragraph of its own (codex on PR 1806).
+                        const own = chapterParagraphs(live);
+                        const blank = draftAdds.search(/\n[ \t]*\n/);
+                        const inline = /^\s*\n[ \t]*\n/.test(draftAdds) ? "" : blank < 0 ? draftAdds : draftAdds.slice(0, blank);
+                        return <>
+                          {own.map((paragraph, i) => (
+                            <p key={`live-${i}`}>
+                              {paragraph}
+                              {i === own.length - 1 && inline.trim() !== "" && <span className="fy-ch__ghost" aria-describedby={ghostNote}>{inline}</span>}
+                            </p>
+                          ))}
+                          {chapterParagraphs(draftAdds.slice(inline.length)).map((paragraph, i) => (
+                            <p key={`adds-${i}`} className="fy-ch__ghost" aria-describedby={ghostNote}>{paragraph}</p>
+                          ))}
+                        </>;
+                      })()}
                 </div>
               </div>
             ) : richMode ? (
