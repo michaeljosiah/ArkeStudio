@@ -2,6 +2,7 @@ import { Extension } from "@tiptap/core";
 import type { Node as ProseNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { marginsPlugin } from "./margins.js";
 
 /**
  * The writing room's aids (SPEC-056 R-7, R-12): the paragraph holding the caret, marked so Focus
@@ -113,6 +114,6 @@ export function currentMatch(find: FindState, count: number): number {
 export const WritingAids = Extension.create({
   name: "writingAids",
   addProseMirrorPlugins() {
-    return [caretBlockPlugin(), findPlugin()];
+    return [caretBlockPlugin(), findPlugin(), marginsPlugin()];
   },
 });

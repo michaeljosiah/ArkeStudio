@@ -51,6 +51,7 @@ import {
   pendingSheets,
   defaultShortName,
   designatedVoiceSample,
+  shortNameOf,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -58,11 +59,13 @@ import { updateRichModeGate, type RichModeGate } from "../components/editor/rich
 import { ArrowLeftRight, Chat, ChevronDown, FileText, Maximize2, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
-import { namesRemembered, rememberDock, rememberedDocks, rememberNames } from "../lib/chapter-dock.js";
+import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
 import type { FindState } from "../components/editor/writing-aids.js";
+import type { MarginItem } from "../components/editor/margins.js";
+import { nameMatcher } from "../components/editor/linked-names.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { CompareVersions } from "./chapter-compare.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
@@ -2695,6 +2698,58 @@ export function ChapterWorkspace({
     rememberNames(book, on);
     if (!on) closeName();
   };
+  // The margins (R-14, D-5): off until turned on, remembered per book.
+  const [margins, setMarginsState] = useState<ChapterMargins>(() => marginsRemembered(book));
+  useEffect(() => setMarginsState(marginsRemembered(book)), [book]);
+  const setMargins = (next: ChapterMargins) => {
+    setMarginsState(next);
+    rememberMargins(book, next);
+  };
+  const marginItems: MarginItem[] = [];
+  if (margins.faces) {
+    // A face for each spoken paragraph, its first name on the first of a run (R-14).
+    const firstSpeaker = new Map<number, { sheet?: string; speaker: string }>();
+    for (const line of castLinesRead) if (!firstSpeaker.has(line.paragraph)) firstSpeaker.set(line.paragraph, line);
+    let previous: string | null = null;
+    for (const paragraph of [...firstSpeaker.keys()].sort((a, b) => a - b)) {
+      const who = firstSpeaker.get(paragraph)!;
+      const key = who.sheet ?? who.speaker;
+      const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+      const name = sheet?.name ?? who.speaker;
+      const runStarts = previous !== key || !firstSpeaker.has(paragraph - 1);
+      marginItems.push({ paragraph, kind: "face", src: portraitOf(who.sheet), title: name, ...(runStarts ? { label: sheet !== undefined ? shortNameOf(sheet) : who.speaker } : {}) });
+      previous = key;
+    }
+  }
+  if (margins.pictures) {
+    // A passage picture beside the paragraph its block begins (block keys are `p<paragraph>.<n>`).
+    const seen = new Set<number>();
+    for (const [key, picture] of placedPictures.byKey) {
+      const paragraph = Number(/^p(\d+)\./.exec(key)?.[1] ?? Number.NaN);
+      if (!Number.isInteger(paragraph) || seen.has(paragraph)) continue;
+      seen.add(paragraph);
+      marginItems.push({ paragraph, kind: "picture", src: mediaUrl(worldSlug, picture.file), title: "Passage picture" });
+    }
+  }
+  // The names in this chapter, in the order they first appear: ⋯'s keyboard way to them (R-54).
+  const namesHere = useMemo(() => {
+    const matcher = nameMatcher(linkedNames);
+    if (matcher === null) return [];
+    const order: string[] = [];
+    for (const hit of matcher.find(live)) for (const id of hit.ids) if (!order.includes(id)) order.push(id);
+    return order.flatMap((id) => {
+      const sheet = world.sheets.find((candidate) => candidate.id === id);
+      return sheet === undefined ? [] : [{ id, name: sheet.name }];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, JSON.stringify(linkedNames)]);
+  const showName = (id: string) => {
+    const element = manuscriptRef.current?.querySelector<HTMLElement>(`.fy-ln[data-names~="${CSS.escape(id)}"]`);
+    if (!element) return;
+    element.scrollIntoView?.({ block: "center" });
+    holdName();
+    setNameHit({ ids: (element.dataset.names ?? id).split(" "), text: element.textContent ?? "", rect: element.getBoundingClientRect() });
+  };
   const [find, setFind] = useState<FindState | null>(null);
   const [found, setFound] = useState({ count: 0, current: -1 });
   const [findOpened, setFindOpened] = useState(0);
@@ -2795,7 +2850,16 @@ export function ChapterWorkspace({
     return () => document.removeEventListener("keydown", onKey);
   }, [view, phone, richMode, enterFocus, leaveFocus, openFind]);
   const moreItems: ToolMenuItem[] = [
-    { key: "names", label: "Linked names", state: namesOn ? "On" : "Off", disabled: false, press: () => setNamesOn(!namesOn), testId: "chapter-more-names" },
+    { key: "faces", label: "Speaker faces", state: margins.faces ? "On" : "Off", disabled: voicesRecord === null, press: () => setMargins({ ...margins, faces: !margins.faces }), testId: "chapter-more-faces" },
+    { key: "pictures", label: "Margin pictures", state: margins.pictures ? "On" : "Off", disabled: placedPictures.count === 0, press: () => setMargins({ ...margins, pictures: !margins.pictures }), testId: "chapter-more-pictures" },
+    { key: "names", label: "Linked names", state: namesOn ? "On" : "Off", disabled: false, press: () => setNamesOn(!namesOn), testId: "chapter-more-names", separator: true },
+    {
+      key: "names-here",
+      label: "Names in this chapter",
+      state: namesHere.length === 0 ? "None" : String(namesHere.length),
+      disabled: namesHere.length === 0 || !namesOn || !richMode,
+      children: namesHere.map((name) => ({ key: name.id, label: name.name, state: "", disabled: false, press: () => showName(name.id) })),
+    },
     { key: "source", label: "Markdown source", state: richRefusal !== null ? "Only" : preferSource ? "On" : "Off", disabled: locked || richRefusal !== null, press: () => setPreferSource((on) => !on) },
     { key: "find", label: "Find", state: `${MOD}F`, disabled: !richMode, press: openFind, testId: "chapter-more-find" },
     {
@@ -3135,7 +3199,7 @@ export function ChapterWorkspace({
               )}
             </div>
           )}
-          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"} data-compare={room && comparing ? "true" : undefined}>
+          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"} data-margins={marginItems.length > 0 ? "true" : undefined} data-compare={room && comparing ? "true" : undefined}>
             {room && findBar}
             {room && comparing && record !== null && (
               <CompareVersions
@@ -3287,6 +3351,7 @@ export function ChapterWorkspace({
                   find={find}
                   onFind={(count, current) => setFound((was) => (was.count === count && was.current === current ? was : { count, current }))}
                   onCaret={holdCaret}
+                  margins={marginItems}
                 />
                 {nameCard}
               </div>

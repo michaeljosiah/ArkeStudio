@@ -8,6 +8,7 @@ import { LinkedNames, linkedNamesKey, nameMatcher, type LinkedName, type NameMat
 import { MentionMenu } from "./mention-menu.js";
 import { filterMentions, insertMention, readMentionState, type Mention, type MentionMenuState } from "./mentions.js";
 import { currentMatch, findKey, WritingAids, type FindState } from "./writing-aids.js";
+import { marginsKey, type MarginItem } from "./margins.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
 import { documentMarkdown, serializeMarkdown } from "./round-trip.js";
 import { SlashMenu } from "./slash-menu.js";
@@ -83,6 +84,8 @@ interface RichMarkdownEditorProps {
   onFind?: (count: number, current: number) => void;
   /** Where the caret is on screen after it moves or the text changes, for Focus to hold it (R-12). */
   onCaret?: (caret: { top: number; bottom: number }) => void;
+  /** Speaker faces and passage pictures beside their paragraphs (R-14); empty when both are off. */
+  margins?: readonly MarginItem[];
 }
 
 /**
@@ -126,6 +129,7 @@ export function RichMarkdownEditor({
   find = null,
   onFind,
   onCaret,
+  margins,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -460,6 +464,13 @@ export function RichMarkdownEditor({
     if (match !== undefined) centreOn(editor, match.from);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, withAids, findKeyText]);
+
+  // The margins are the screen's to choose; the editor only places them.
+  const marginsText = JSON.stringify(margins ?? []);
+  useEffect(() => {
+    if (!editor || !withAids || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta(marginsKey, JSON.parse(marginsText) as MarginItem[]).setMeta("addToHistory", false));
+  }, [editor, withAids, marginsText]);
 
   // New names (a sheet arrived, one was renamed): the chapter is read again for them.
   useEffect(() => {

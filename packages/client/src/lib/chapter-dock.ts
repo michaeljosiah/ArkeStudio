@@ -47,6 +47,40 @@ function booksWithNamesOff(): Set<string> {
   }
 }
 
+/*
+ * Which margins a book's chapters show (D-5): speaker faces and passage pictures, each off until
+ * turned on from ⋯, kept per book on this device.
+ */
+const MARGINS_KEY = "arke.chapter.margins";
+export type ChapterMargins = { faces: boolean; pictures: boolean };
+
+function marginsByBook(): Record<string, string[]> {
+  try {
+    const raw = JSON.parse(window.localStorage?.getItem(MARGINS_KEY) ?? "{}") as unknown;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter((entry): entry is [string, string[]] => Array.isArray(entry[1])));
+  } catch {
+    return {};
+  }
+}
+
+export function marginsRemembered(book: string): ChapterMargins {
+  const on = marginsByBook()[book] ?? [];
+  return { faces: on.includes("faces"), pictures: on.includes("pictures") };
+}
+
+export function rememberMargins(book: string, margins: ChapterMargins): void {
+  const all = marginsByBook();
+  const on = [...(margins.faces ? ["faces"] : []), ...(margins.pictures ? ["pictures"] : [])];
+  if (on.length === 0) delete all[book];
+  else all[book] = on;
+  try {
+    window.localStorage?.setItem(MARGINS_KEY, JSON.stringify(all));
+  } catch {
+    // Not kept: the next visit opens with the margins off, as the default has them.
+  }
+}
+
 export function namesRemembered(book: string): boolean {
   return !booksWithNamesOff().has(book);
 }

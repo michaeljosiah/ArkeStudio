@@ -311,3 +311,27 @@
   .fy-compare__cell.fy-compare__cell--older { display: none; }
   .fy-compare__head, .fy-compare__cell { padding-inline: 0; }
 }
+
+/* The margins (R-14, D-5): faces in the left margin, pictures in the right where the page has
+   room for them; where it does not, pictures sit inside the column after their passage at 16:9.
+   The page is the container, so a Brief or Chat beside it narrows the room the margins have. */
+[data-screen="chapter"][data-room="true"] .fy-ch__manuscript[data-margins="true"] { container: page / inline-size; }
+.fy-ch__manuscript[data-margins="true"] .fy-rme__doc > :is(p, h1, h2, h3, h4, h5, h6) { position: relative; }
+.fy-margin { user-select: none; }
+.fy-margin--face { position: absolute; top: .3em; right: calc(100% + 18px); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 44px; pointer-events: none; }
+.fy-margin--face img, .fy-margin__initial { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: 50% 14%; }
+.fy-margin__initial { display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); font: 500 11px var(--font-sans); }
+.fy-margin--face b { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-margin--picture { display: block; width: 100%; margin: 14px 0 4px; }
+.fy-margin--picture img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; object-fit: cover; }
+@container page (min-width: 1260px) {
+  .fy-margin--picture { position: absolute; top: .3em; left: calc(100% + 40px); width: 240px; margin: 0; }
+  .fy-margin--picture img { aspect-ratio: 4 / 3; }
+}
+@container page (min-width: 1560px) {
+  .fy-margin--picture { width: 360px; }
+}
+/* Faces need the left margin; a page too narrow for it keeps the words and drops the faces. */
+@container page (max-width: 760px) { .fy-margin--face { display: none; } }
+/* Focus is the page alone (R-12). */
+[data-focus="true"] .fy-margin { display: none; }
