@@ -170,6 +170,8 @@ afterEach(async () => {
 const portals = (m: Mounted): HTMLElement[] => [...m.container.ownerDocument.body.children].filter((node) => !open.some((mounted) => mounted.container === node)) as HTMLElement[];
 const text = (m: Mounted): string => (m.container.textContent ?? "") + portals(m).filter((node) => node.tagName !== "DIALOG" || node.hasAttribute("open")).map((node) => node.textContent ?? "").join("");
 const q = (m: Mounted, selector: string): HTMLElement | null => (m.container.querySelector(selector) ?? portals(m).flatMap((node) => [...node.querySelectorAll(selector)])[0] ?? null) as HTMLElement | null;
+/** A view tab by its label: the Chapter view leads the switch now (design turn 227). */
+const tab = (m: Mounted, label: string): HTMLElement => [...m.container.querySelectorAll(".fy-ch__viewrow button")].find((button) => button.textContent === label) as HTMLElement;
 const all = (m: Mounted, selector: string): HTMLElement[] => [...m.container.querySelectorAll(selector), ...portals(m).flatMap((node) => [...node.querySelectorAll(selector)])] as HTMLElement[];
 
 /** Arke's dock, put away in the Audiobook view until the toolbar's press opens it (design turn 194, rule 13). */
@@ -514,13 +516,13 @@ describe("the Audiobook view (turn 146)", () => {
     assert.equal(q(m, '[data-testid="audiobook-tab-voice"]')?.textContent, "Voicev1", "and the Voice tab counts it (194g)");
 
     // Typing, then the press: the read waits for the save, and goes out once it lands.
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source");
     assert.ok(area, "the manuscript view's source editor");
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
     await act(async () => q(m, '[data-testid="read-audiobook"]')!.click());
     assert.equal(m.sent.filter((message) => message.kind === "read-audiobook-chapter").length, before, "not sent while the draft is unsaved");
@@ -1079,12 +1081,12 @@ describe("the Audiobook view (turn 146)", () => {
     const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
     await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
     // Typing in the manuscript, then back to the blocks: the press must wait for the save.
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source")!;
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     await act(async () => all(m, ".fy-ab__block")[1]!.click());
     const before = m.sent.filter((message) => message.kind === "read-audiobook-chapter").length;
     await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
@@ -1120,12 +1122,12 @@ describe("the Audiobook view (turn 146)", () => {
     const proposed = { title: { delivery: "measured" as const, speed: 1, cues: [] } };
     await act(async () => __applyEventForTest({ at: AT, type: "direction.started", ...ids }));
     await act(async () => __applyEventForTest({ at: AT, type: "direction.finished", ...ids, outcome: "directed", directed: 1, dropped: 0, hash: HASH, chapterVersion: 4, proposed }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Manuscript").click());
     const area = q(m, "textarea.fy-ch__source")!;
     const key = Object.keys(area).find((k) => k.startsWith("__reactProps$"))!;
     const props = (area as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
     await act(async () => props.onChange({ target: { value: `${BODY}\n\nA new line.` } }));
-    await act(async () => q(m, ".fy-seg__item:not(.fy-seg__item--active)")!.click());
+    await act(async () => tab(m, "Audiobook").click());
     await act(async () => q(m, '[data-testid="direction-accept"]')!.click());
     assert.equal(m.sent.some((message) => message.kind === "accept-direction"), false, "not accepted against words the save is about to replace");
     const save = m.sent.findLast((message) => message.kind === "save-chapter") as Extract<ClientMessage, { kind: "save-chapter" }>;

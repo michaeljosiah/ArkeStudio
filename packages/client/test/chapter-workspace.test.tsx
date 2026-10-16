@@ -219,6 +219,12 @@ afterEach(async () => {
 
 const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
+/** Into the Chapter view (design turn 227): the production home holds what the side column did. */
+const toView = async (m: Mounted, label: "Chapter" | "Manuscript") => {
+  const tab = [...m.container.querySelectorAll(".fy-ch__viewrow button")].find((button) => button.textContent === label) as HTMLElement | undefined;
+  assert.ok(tab, `the ${label} tab`);
+  await act(async () => tab.click());
+};
 
 it("reopens a chapter from its actual list row in the last view, with explicit addresses taking precedence", async () => {
   const m = await mount(inkbound());
@@ -397,10 +403,12 @@ describe("the chapter, opened (turn 126)", () => {
     assert.ok(q(m, "textarea.fy-ch__source"), "the body is in the editor");
     assert.match(text(m), /Saved · v4/, "the foot says saved and the version");
     assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/, "the goal counts the words of the body it read against the default goal (SPEC-056 D-2)");
+    await toView(m, "Chapter");
     assert.match(text(m), /6,390 of 80,000 words/, "the book's count against the target the overview names");
     assert.match(text(m), /maren-kest|Maren Kest/, "Draws on lists the sheet");
     assert.match(text(m), /CANON-002/, "and the canon");
     assert.match(text(m), /v1|v2|v3/, "earlier versions are listed for a v4 chapter");
+    await toView(m, "Manuscript");
     assert.match(text(m), /Arke · Chapter 02/, "Arke is docked about this chapter");
     // The dock's line is what is waiting, not a promise about what talking does not do
     // (issue 1008): the promise is the rule the dock is built to, and it is in the rule.
@@ -433,6 +441,7 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /overview moved · v2 → v3/);
     assert.ok(q(m, "select.fy-ch__pick"), "point of view is picked from the world's characters");
     assert.match(text(m), /Draft the rest/, "a chapter with prose is continued, not drafted from the synopsis");
+    await toView(m, "Chapter");
     assert.match(text(m), /Implies 2/, "the implied facts are listed with their count");
     assert.match(text(m), /The bells can ring uncalled/);
   });
@@ -461,6 +470,7 @@ describe("the chapter, opened (turn 126)", () => {
   it("Propose says the fact into the thread in the author's name, and Dismiss edits the plan (turn 127)", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
+    await toView(m, "Chapter");
     const propose = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Propose") as HTMLElement | undefined;
     assert.ok(propose, "each implied fact has a press");
     await act(async () => propose!.click());
@@ -538,8 +548,10 @@ describe("the craft loop (turn 128)", () => {
     const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
     const m = await mount(state);
     await answerOpen(m);
-    assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
+    await toView(m, "Chapter");
+    assert.match(text(m), /close third · past · v2/, "the Chapter view says the style in one line");
     assert.match(text(m), /settled in Develop/);
+    await toView(m, "Manuscript");
     assert.match(text(m), /Hold this against the style/, "with a style settled, holding the chapter against it is offered");
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered before anything is selected");
 
@@ -2348,6 +2360,7 @@ describe("the voiced read (turn 130)", () => {
   it("not cast yet: the panel is its heading and the press, the press casts by the chapter's file, and there is no Voiced read without a cast", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
+    await toView(m, "Chapter");
     assert.equal(q(m, '[data-testid="chapter-voices"]')!.textContent, "VoicesCast the lines", "one line (design turn 192)");
     assert.equal(q(m, '[aria-label="More ways to read"]'), null, "Read the chapter has no menu before a cast");
     const press = [...m.container.querySelectorAll(".fy-ch__derive")].find((button) => button.textContent?.includes("Cast the lines")) as HTMLElement;
@@ -2364,6 +2377,7 @@ describe("the voiced read (turn 130)", () => {
   it("cast: the narration and each speaker with the voice that will read them and their count, the stamp, and Voiced names the chapter once", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.match(text(m), /Narration/);
     assert.match(text(m), /Maren Kest/);
     assert.match(text(m), /George · narrator/, "the narration in the narrator's voice");
@@ -2373,6 +2387,8 @@ describe("the voiced read (turn 130)", () => {
     assert.match(text(m), /cast · v4 · 2 lines · 2 speakers/);
     assert.doesNotMatch(text(m), /every line is the chapter’s own words/);
     assert.match(text(m), /Cast again/);
+    // The dock's prompts are the Manuscript's: without the app's Chat it is put away in the Chapter view.
+    await toView(m, "Manuscript");
     assert.match(text(m), /Who speaks in this chapter\?/);
     assert.match(text(m), /Which lines are Maren Kest’s\?/);
     // One Read press; the voiced read is its menu (design turn 192).
@@ -2388,9 +2404,28 @@ describe("the voiced read (turn 130)", () => {
     assert.deepEqual(read.sources, [{ of: "chapter-voiced", productionId: "inkbound", chapterId: "neap" }], "the chapter named once; the coordinator expands it");
   });
 
+  it("the Chapter view's cast is cards: the narrator first, each speaker's card opens its voice (SPEC-056 R-37/R-38)", async () => {
+    const m = await mount(withBodyHash(inkbound(), HASH));
+    await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
+    const cards = [...m.container.querySelectorAll('[data-testid="chapter-cast"] .fy-chov__card')] as HTMLElement[];
+    assert.deepEqual(cards.map((card) => card.querySelector(".fy-polaroid__name")?.textContent), ["George", "Maren Kest", "Odile Sarn"], "narrator, then speakers in order of first line");
+    assert.match(cards[0]!.textContent ?? "", /Narrator · \d+ blocks/);
+    assert.equal(q(m, ".fy-chov__voice"), null, "no voice card until a card is pressed");
+    await act(async () => cards[1]!.click());
+    assert.equal(cards[1]!.getAttribute("aria-pressed"), "true");
+    const card = q(m, ".fy-chov__voice");
+    assert.ok(card, "Maren Kest's voice card is open");
+    assert.match(card!.textContent ?? "", /Low tide/, "the voice that reads her");
+    assert.ok(card!.querySelector('a[href$="/characters/maren-kest"]'), "Open character goes to her sheet");
+    await act(async () => (card!.querySelector('[aria-label="Close voice"]') as HTMLElement).click());
+    assert.equal(q(m, ".fy-chov__voice"), null);
+  });
+
   it("a voice the catalogue cannot speak now reads in the narrator's, and the row says so (codex on PR 914)", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.ok(m.sent.some((message) => message.kind === "voice-catalogue"), "the catalogue is asked for once a cast is shown");
     assert.match(text(m), /Low tide · ElevenLabs · cloud/, "the assignment stands until the catalogue answers");
     await act(async () => {
@@ -2410,8 +2445,10 @@ describe("the voiced read (turn 130)", () => {
   it("stale: the cast was read against an earlier body, the rows stay, and Cast again is a press under the dock", async () => {
     const m = await mount(withBodyHash(inkbound(), `sha256:${"b".repeat(64)}`));
     await answerOpenCast(m, { voices: CAST });
+    await toView(m, "Chapter");
     assert.match(text(m), /chapter moved · cast against v4/);
     assert.match(text(m), /Maren Kest/);
+    await toView(m, "Manuscript");
     const prompts = [...m.container.querySelectorAll(".fy-arke__prompt")] as HTMLElement[];
     const again = prompts.find((prompt) => prompt.textContent === "Cast again");
     assert.ok(again, "Cast again is under the dock");
@@ -2425,6 +2462,7 @@ describe("the voiced read (turn 130)", () => {
   it("casting puts Stop in the press's place; finishing brings the cast; a record that cannot be read is said so", async () => {
     const m = await mount(withBodyHash(inkbound(), HASH));
     await answerOpen(m);
+    await toView(m, "Chapter");
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "voices.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" });
     });
@@ -2446,6 +2484,7 @@ describe("the voiced read (turn 130)", () => {
 
     const unreadable = await mount(inkbound());
     await answerOpenCast(unreadable, { voicesUnreadable: true });
+    await toView(unreadable, "Chapter");
     assert.match(text(unreadable), /record unreadable · Cast again replaces it/);
   });
 });
@@ -2457,7 +2496,7 @@ describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
     const bar = q(m, '[role="toolbar"][aria-label="Writing"]');
     assert.ok(bar, "the writing bar stands over the page");
     const labels = [...bar!.querySelectorAll("button")].map((button) => button.getAttribute("aria-label") ?? button.textContent);
-    assert.deepEqual(labels.slice(0, 6), ["Brief", "Previous chapter", "Next chapter", "Manuscript", "Audiobook", "Audio Studio"], "in the order the turn draws");
+    assert.deepEqual(labels.slice(0, 7), ["Brief", "Previous chapter", "Next chapter", "Chapter", "Manuscript", "Audiobook", "Audio Studio"], "in the order the turn draws");
     assert.ok(bar!.querySelector('[data-testid="chapter-goal"]'), "the goal is on the bar");
     assert.equal(q(m, ".fy-sw__breadcrumb"), null, "no CHAPTER 02 OF 2 line; the document carries the number");
     assert.match(q(m, ".fy-ch__dochead")!.textContent ?? "", /^Chapter 2The counting of bells$/);
@@ -2495,6 +2534,32 @@ describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
     assert.deepEqual(plans().at(-1)?.changes, { goal: 4500 });
     await blur("20");
     assert.equal(plans().length, 1, "a goal out of range is not sent");
+  });
+
+  it("?view=chapter opens the Chapter view: the strip, the steps, and the manuscript kept mounted under it (SPEC-056 §1.11)", async () => {
+    const m = await mount(inkbound(), `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    assert.equal(q(m, '[data-testid="chapter-workspace"]')!.getAttribute("data-view"), "chapter");
+    assert.ok(q(m, '[data-testid="chapter-overview"]'), "the Chapter view");
+    assert.equal(q(m, '[role="toolbar"][aria-label="Writing"]'), null, "no writing bar over the Chapter view");
+    assert.ok(q(m, ".fy-chov__hero--bare"), "no chapter picture and no passage picture: the hero is type only (D-10)");
+    const segments = [...m.container.querySelectorAll(".fy-chov__seg")];
+    assert.equal(segments.length, 2, "one segment a chapter");
+    assert.equal(segments[1]!.getAttribute("aria-current"), "page", "the open chapter is marked");
+    assert.deepEqual([...m.container.querySelectorAll(".fy-chov__stepk")].map((step) => step.textContent?.replace(/^\d/, "")), ["Written", "Cast", "Read", "Mixed"], "progress in order (R-39)");
+    assert.ok(q(m, "textarea.fy-ch__source"), "the editor stays mounted, hidden, so its draft is kept");
+    assert.equal(q(m, ".fy-ch__body")!.hasAttribute("hidden"), true);
+  });
+
+  it("the hero shows the chapter's chosen picture (D-10)", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: { id: string; picture?: string }[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, picture: "artifacts/harbour.png" } : c));
+    const m = await mount(state, `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    const art = q(m, ".fy-chov__art");
+    assert.ok(art, "the picture fades in behind the title");
+    assert.match(art!.getAttribute("style") ?? "", /artifacts\/harbour\.png/);
   });
 
   it("the foot says saved and the version, and the words written today when there are any", async () => {

@@ -67,3 +67,87 @@
   [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font-size: 20px; line-height: 1.72; }
   [data-screen="chapter"][data-room="true"] .fy-ch__doctitle { font-size: 48px; }
 }
+
+/* ---- The Chapter view (design turn 227, SPEC-056 §1.11) ---------------------------------------
+   The production home: the chapter's picture fading in behind the title, the book strip, the cast
+   as the world overview's polaroids, progress in four steps, the pictures, then continuity and
+   versions. The manuscript stays mounted under it, hidden, as it does under Audiobook. */
+[data-screen="chapter"] .fy-ch__body[hidden] { display: none; }
+[data-screen="chapter"][data-view="chapter"] .fy-sw__centre { padding: 0; overflow-y: auto; }
+.fy-chov { display: flex; flex-direction: column; min-width: 0; }
+.fy-chov__hero { position: relative; min-height: 320px; padding: 24px 48px 28px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+.fy-chov__hero--bare { min-height: 0; padding-top: 32px; }
+.fy-chov__art { position: absolute; top: 0; right: 0; bottom: 0; width: min(64%, 1180px); background-size: cover; background-position: 65% 30%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 46%), linear-gradient(180deg, #000 55%, transparent 100%); -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0, #000 46%), linear-gradient(180deg, #000 55%, transparent 100%); mask-composite: intersect; }
+.fy-chov__heroin { position: relative; max-width: 600px; display: flex; flex-direction: column; gap: 14px; }
+.fy-chov__book { display: flex; align-items: center; gap: 10px; font: 500 12px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__book b { color: var(--foreground); font-weight: 500; }
+.fy-chov__nav { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--foreground); cursor: pointer; }
+.fy-chov__nav:disabled { opacity: .35; cursor: default; }
+.fy-chov__strip { display: flex; gap: 2px; width: 300px; height: 6px; }
+.fy-chov__seg { flex-basis: 0; min-width: 3px; height: 6px; padding: 0; border: 0; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 22%, transparent); cursor: pointer; }
+.fy-chov__seg--here { background: var(--foreground); }
+.fy-chov__seg--planned { background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent); }
+.fy-chov__title { margin: 0; font: 600 48px/1.04 var(--font-sans); letter-spacing: -0.02em; }
+.fy-chov__synopsis { margin: 0; max-width: 540px; font: 400 15px/1.5 var(--font-sans); color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fy-chov__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font: 400 13px/1.3 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__pov { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 4px; border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); font-weight: 500; }
+.fy-chov__pov img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; object-position: 50% 18%; }
+.fy-chov__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.fy-chov__views { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; min-height: 52px; padding: 0 48px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fy-chov__views .fy-ch__viewrow { margin: 0; }
+.fy-chov__views .fy-seg__item { white-space: nowrap; }
+.fy-chov__body { display: flex; flex-direction: column; gap: 34px; padding: 22px 48px 60px; }
+.fy-chov__section h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font: 600 18px/1.3 var(--font-sans); }
+.fy-chov__section h2 small { font: 400 13px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__push { flex: 1; }
+/* The cast: the world overview's card (fidelity.css .fy-polaroid), straightened a degree either way. */
+.fy-chov__cards { display: flex; flex-wrap: wrap; gap: 18px; }
+.fy-chov__card { display: block; text-align: left; color: var(--foreground); font: inherit; }
+.fy-chov__card:nth-child(odd) { transform: rotate(-1.2deg); }
+.fy-chov__card:nth-child(even) { transform: rotate(1deg); }
+.fy-chov__card--open { transform: translateY(-8px) !important; box-shadow: var(--shadow-xl); }
+.fy-chov__frame { position: relative; display: block; overflow: hidden; border-radius: 6px; background: var(--muted); }
+.fy-chov__frame img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; display: block; }
+.fy-chov__initial { display: grid; place-items: center; height: 100%; font: 600 40px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__badge { position: absolute; left: 8px; bottom: 8px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--media-overlay-bg, #0a0a0a) 60%, transparent); color: var(--media-overlay-fg, #fafafa); }
+.fy-chov__voice { position: relative; max-width: 560px; margin-top: 16px; padding: 16px 16px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--popover); box-shadow: 0 18px 50px rgba(0, 0, 0, .22); }
+.fy-chov__voice-x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.fy-chov__voice-line { margin: 0 0 10px; font: 400 13px var(--font-sans); }
+.fy-chov__voice-open { display: inline-block; margin-top: 10px; font: 500 13px var(--font-sans); color: var(--foreground); }
+/* Progress in four steps (R-39); a step that needs the author marks its number, not its border. */
+.fy-chov__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.fy-chov__step { display: flex; flex-direction: column; gap: 6px; min-height: 112px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-chov__stepk { display: flex; align-items: center; gap: 8px; font: 500 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__stepk i { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; font-style: normal; font-size: 11px; background: var(--muted); color: var(--foreground); }
+.fy-chov__step--done .fy-chov__stepk i { background: var(--foreground); color: var(--background); }
+.fy-chov__step--need .fy-chov__stepk i { background: color-mix(in srgb, var(--warning) 22%, var(--muted)); }
+.fy-chov__step b { font: 600 15px/1.3 var(--font-sans); }
+.fy-chov__step small { font: 400 11px/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__stepact { margin-top: auto; }
+.fy-chov__pics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.fy-chov__pic { aspect-ratio: 3 / 2; border: 0; border-radius: 10px; background-size: cover; background-position: center; cursor: pointer; }
+.fy-chov__pic--more { display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); font: 500 13px var(--font-sans); cursor: default; }
+.fy-chov__two { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+@media (min-width: 2000px) {
+  .fy-chov__hero { min-height: 420px; padding-inline: 64px; }
+  .fy-chov__views, .fy-chov__body { padding-inline: 64px; }
+  .fy-chov__strip { width: 420px; }
+}
+@media (max-width: 1099px) {
+  .fy-chov__hero, .fy-chov__views, .fy-chov__body { padding-inline: 32px; }
+  .fy-chov__title { font-size: 36px; }
+  .fy-chov__two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 599px) {
+  .fy-chov__hero { min-height: 300px; padding: 20px; }
+  .fy-chov__art { width: 100%; -webkit-mask-image: linear-gradient(180deg, #000 40%, transparent 100%); mask-image: linear-gradient(180deg, #000 40%, transparent 100%); }
+  .fy-chov__strip { width: auto; flex: 1; }
+  .fy-chov__title { font-size: 30px; }
+  .fy-chov__views, .fy-chov__body { padding-inline: 20px; }
+  .fy-chov__steps { grid-template-columns: 1fr 1fr; }
+  .fy-chov__pics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fy-chov__cards { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
+  .fy-chov__card { flex: none; width: 124px; }
+}
