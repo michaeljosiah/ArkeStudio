@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from "react";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { cx } from "../ui.js";
 import { commitMarkdown, type ReconcileBaselines } from "./commit.js";
 import { markdownExtensions } from "./extensions.js";
+import { LinkedNames, linkedNamesKey, nameMatcher, type LinkedName, type NameMatcher } from "./linked-names.js";
+import { MentionMenu } from "./mention-menu.js";
+import { filterMentions, insertMention, readMentionState, type Mention, type MentionMenuState } from "./mentions.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
 import { documentMarkdown, serializeMarkdown } from "./round-trip.js";
 import { SlashMenu } from "./slash-menu.js";
@@ -58,7 +61,21 @@ interface RichMarkdownEditorProps {
    * the chapter workspace makes the dock's subject; nothing is done with it here.
    */
   onSelect?: (text: string | null, paragraph: number | null) => void;
+  /**
+   * The world's characters and places to underline in the prose (SPEC-056 R-15). Decoration only:
+   * the extension is added to the live editor alone, never to the round-trip proof's set. Whether
+   * it is given at all is read once, at mount; the names themselves may change at any time.
+   */
+  linkedNames?: readonly LinkedName[];
+  /** A linked name held under the pointer for 300ms, or long-pressed (R-17); null when it is left. */
+  onName?: (hit: { ids: string[]; text: string; rect: DOMRect } | null) => void;
+  /** What `@` offers (R-18). Absent, `@` is only a character. */
+  mentions?: readonly Mention[];
 }
+
+/** How long the pointer rests on a name before its card opens (R-17). */
+const NAME_HOVER_MS = 300;
+const NAME_PRESS_MS = 500;
 
 export function RichMarkdownEditor({
   value,
@@ -67,6 +84,9 @@ export function RichMarkdownEditor({
   ariaLabel,
   readOnly = false,
   onSelect,
+  linkedNames,
+  onName,
+  mentions,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -103,6 +123,32 @@ export function RichMarkdownEditor({
   commandsRef.current = commands;
   selectedRef.current = selected;
 
+  // The `@` menu, kept beside the slash menu's state rather than merged into it: the two never
+  // open together (one needs a `/` at the block's start, the other an `@` after a space).
+  const mentionsRef = useRef(mentions);
+  mentionsRef.current = mentions;
+  const [mention, setMention] = useState<MentionMenuState | null>(null);
+  const [mentionRows, setMentionRows] = useState<Mention[]>([]);
+  const [mentionSelected, setMentionSelected] = useState(0);
+  const mentionRef = useRef<MentionMenuState | null>(null);
+  const mentionRowsRef = useRef<Mention[]>([]);
+  const mentionSelectedRef = useRef(0);
+  mentionRef.current = mention;
+  mentionRowsRef.current = mentionRows;
+  mentionSelectedRef.current = mentionSelected;
+  // Esc closes and leaves the `@` typed (R-18): the trigger it closed stays closed until the caret
+  // leaves it, or the next keystroke would open it again.
+  const dismissedAt = useRef<number | null>(null);
+
+  // Keyed by content rather than identity: the screen rebuilds its list every render, and a new
+  // array of the same names is not a reason to read the whole chapter again.
+  const namesKey = useMemo(() => JSON.stringify(linkedNames ?? null), [linkedNames]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const matcher = useMemo(() => (linkedNames === undefined ? null : nameMatcher(linkedNames)), [namesKey]);
+  const matcherRef = useRef<NameMatcher | null>(matcher);
+  matcherRef.current = matcher;
+  const withNames = useRef(linkedNames !== undefined).current;
+
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /*
    * `onCreate` is where the baselines are seeded, and reconciliation against an unseeded
@@ -112,6 +158,15 @@ export function RichMarkdownEditor({
   const ready = useRef(false);
 
   const syncMenu = useCallback((instance: Editor) => {
+    const offered = mentionsRef.current;
+    const at = offered === undefined ? null : readMentionState(instance, shellRef.current);
+    if (at === null || dismissedAt.current !== at.from) dismissedAt.current = null;
+    const shown = at !== null && dismissedAt.current === null ? at : null;
+    setMention(shown);
+    if (shown !== null) {
+      setMentionRows(filterMentions(offered ?? [], shown.query));
+      setMentionSelected(0);
+    }
     const next = readSlashMenuState(instance, shellRef.current);
     setMenu(next);
     if (!next) return;
@@ -154,7 +209,10 @@ export function RichMarkdownEditor({
    * creation and never again, so letting the live value through would defeat the comparison for no
    * benefit. Later documents arrive by adoption, below.
    */
-  const extensions = useMemo(() => markdownExtensions({ placeholder }), [placeholder]);
+  const extensions = useMemo(
+    () => [...markdownExtensions({ placeholder }), ...(withNames ? [LinkedNames.configure({ getMatcher: () => matcherRef.current })] : [])],
+    [placeholder, withNames],
+  );
   const mountContent = useRef(value).current;
   const editorProps = useMemo(
     () => ({
@@ -165,6 +223,29 @@ export function RichMarkdownEditor({
         ...(readOnly ? { "aria-readonly": "true" } : {}),
       },
       handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
+        const at = mentionRef.current;
+        if (at) {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            dismissedAt.current = at.from;
+            setMention(null);
+            return true;
+          }
+          const rows = mentionRowsRef.current;
+          if (rows.length === 0) return false;
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setMentionSelected(moveSelection(mentionSelectedRef.current, event.key === "ArrowDown" ? 1 : -1, rows.length));
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            event.preventDefault();
+            const row = rows[mentionSelectedRef.current] ?? rows[0];
+            if (row && editorRef.current) insertMention(editorRef.current, at, row);
+            return true;
+          }
+          return false;
+        }
         const open = menuRef.current;
         if (!open) return false;
 
@@ -301,9 +382,74 @@ export function RichMarkdownEditor({
     }
   }, [editor, value]);
 
+  // New names (a sheet arrived, one was renamed): the chapter is read again for them.
+  useEffect(() => {
+    if (!editor || !withNames || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta(linkedNamesKey, "refresh").setMeta("addToHistory", false));
+  }, [editor, withNames, namesKey]);
+
+  /*
+   * The name card's trigger (R-17): a rest of 300ms on a name, or a long press on touch. The card
+   * itself is the screen's — this only says which sheets and where — so it can hold the screen's
+   * links, voices and Chat without the editor knowing any of them.
+   */
+  const onNameRef = useRef(onName);
+  onNameRef.current = onName;
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hovered = useRef<Element | null>(null);
+  const clearNameTimer = () => {
+    if (nameTimer.current) clearTimeout(nameTimer.current);
+    nameTimer.current = null;
+  };
+  useEffect(() => clearNameTimer, []);
+  const nameAt = (target: EventTarget | null): HTMLElement | null =>
+    target instanceof Element ? target.closest<HTMLElement>(".fy-ln") : null;
+  const report = (element: HTMLElement) => {
+    const ids = (element.dataset.names ?? "").split(" ").filter(Boolean);
+    if (ids.length > 0) onNameRef.current?.({ ids, text: element.textContent ?? "", rect: element.getBoundingClientRect() });
+  };
+  const nameEvents = withNames
+    ? {
+        onMouseOver: (event: ReactMouseEvent) => {
+          const element = nameAt(event.target);
+          if (element === hovered.current) return;
+          hovered.current = element;
+          clearNameTimer();
+          if (element === null) {
+            onNameRef.current?.(null);
+            return;
+          }
+          nameTimer.current = setTimeout(() => report(element), NAME_HOVER_MS);
+        },
+        onMouseLeave: () => {
+          hovered.current = null;
+          clearNameTimer();
+          onNameRef.current?.(null);
+        },
+        onTouchStart: (event: ReactTouchEvent) => {
+          const element = nameAt(event.target);
+          clearNameTimer();
+          // A touch anywhere else puts an open card away, as moving the pointer off a name does.
+          if (element === null) onNameRef.current?.(null);
+          else nameTimer.current = setTimeout(() => report(element), NAME_PRESS_MS);
+        },
+        onTouchMove: clearNameTimer,
+        onTouchEnd: clearNameTimer,
+      }
+    : {};
+
   return (
-    <div className={cx("fy-rme", readOnly && "fy-rme--read")} ref={shellRef} onBlur={flush}>
+    <div className={cx("fy-rme", readOnly && "fy-rme--read")} ref={shellRef} onBlur={flush} {...nameEvents}>
       <EditorContent editor={editor} />
+      {mention && editor && (
+        <MentionMenu
+          menu={mention}
+          rows={mentionRows}
+          selected={mentionSelected}
+          onHover={setMentionSelected}
+          onPick={(row) => insertMention(editor, mention, row)}
+        />
+      )}
       {menu && editor && (
         <SlashMenu
           editor={editor}

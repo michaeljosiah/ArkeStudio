@@ -49,6 +49,8 @@ import {
   chapterGoal,
   storyProgressDay,
   pendingSheets,
+  defaultShortName,
+  designatedVoiceSample,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -62,6 +64,9 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { BriefFields, DocHead, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
+import { NameCard, type NameCardSheet } from "./chapter-names.js";
+import type { LinkedName } from "../components/editor/linked-names.js";
+import type { Mention } from "../components/editor/mentions.js";
 import type { ChapterView } from "../lib/chapter-dock.js";
 import { PageReadControl, useProsePageRead, type PageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -140,6 +145,20 @@ import {
 const AUTOSAVE_MS = 1200;
 
 /** What an empty chapter says. */
+/*
+ * What the prose calls a character: the full name, and the short name — the written one, or the
+ * default when it is a real name rather than an article or a title, which would otherwise mark
+ * every sentence that starts with one.
+ */
+const NOT_A_NAME = new Set(["the", "a", "an", "old", "young", "mr", "mrs", "ms", "dr", "sir", "lady", "lord", "miss", "mister", "captain", "king", "queen"]);
+function proseNames(sheet: { name: string; shortName?: string }): string[] {
+  const written = sheet.shortName?.trim();
+  if (written !== undefined && written !== "" && written !== sheet.name) return [sheet.name, written];
+  const short = defaultShortName(sheet.name);
+  // In any case: `the Queen` defaults to `the`, which would otherwise be linked everywhere.
+  return short === sheet.name || NOT_A_NAME.has(short.replace(/\.$/, "").toLowerCase()) ? [sheet.name] : [sheet.name, short];
+}
+
 // A placeholder labels; it does not explain (turn 137, SPEC-056 R-53).
 const PLACEHOLDER = "Start writing";
 /** Draws on's Add, started in the thread for the author to finish (design turn 192). */
@@ -1606,7 +1625,16 @@ export function ChapterWorkspace({
   const dockSubject: WorldChatSubject = passage === null
     ? { kind: "chapter", chapterId: chapter.id }
     : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
-  const dockPrefix = passage !== null
+  const [nameAsk, setNameAsk] = useState<string | null>(null);
+  // A name is Chat's subject until Chat is put away or the page moves on (codex on PR 1800).
+  useEffect(() => setNameAsk(null), [chapter.id, view]);
+  const chatShown = globalChat ? chatOpen : dock;
+  useEffect(() => {
+    if (!chatShown) setNameAsk(null);
+  }, [chatShown]);
+  const dockPrefix = passage === null && nameAsk !== null
+    ? `About ${nameAsk} in ${chapterLabel}:`
+    : passage !== null
     ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
     : `About ${chapterLabel}:`;
   // The dock's head, and the sheet's on a phone: Arke names what it is about (126a, 172a, 195g).
@@ -2485,7 +2513,9 @@ export function ChapterWorkspace({
             about: chapterLabel,
             // A line a menu press started is about the passage it was pressed on, and the dock
             // says that one, not whatever is selected now (codex on PR 1232).
-            ...(shownSubject.kind === "passage" ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` } : {}),
+            ...(shownSubject.kind === "passage"
+              ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
+              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : {}),
           }}
           openingNote="opening…"
           emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}
@@ -2565,6 +2595,102 @@ export function ChapterWorkspace({
     </div>
   );
   const goChapter = (id: string) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(id)}?view=chapter`);
+  // Linked names and `@` (SPEC-056 R-15 – R-18): the world's characters and places, and this
+  // book's guests, as the prose names them.
+  const nameSheets = world.sheets.filter(
+    (sheet) => !sheet.retired && sheet.type !== "faction" && (sheet.production === undefined || sheet.production === prodId),
+  );
+  const linkedNames: LinkedName[] = nameSheets.map((sheet) => ({
+    id: sheet.id,
+    kind: sheet.type === "character" ? "character" : "place",
+    names: sheet.type === "character" ? proseNames(sheet) : [sheet.name],
+    colour: sheet.type === "character" ? (speakerColours.get(sheet.id) ?? null) : null,
+  }));
+  const hereIds = new Set(speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : [])));
+  if (chapter.pov !== undefined) hereIds.add(chapter.pov);
+  const mentions: Mention[] = nameSheets.map((sheet) => ({
+    id: sheet.id,
+    name: sheet.name,
+    // The short name where the sheet has one written (R-18); a default one is a guess.
+    insert: sheet.type === "character" && sheet.shortName?.trim() ? sheet.shortName.trim() : sheet.name,
+    group: sheet.type !== "character" ? "Places" : hereIds.has(sheet.id) ? "In this chapter" : "Characters",
+    face: sheet.type === "character" ? portraitOf(sheet.id) : null,
+  }));
+  // The chapters each character speaks in, from the book's cast stamps: the card's first and last seen.
+  const appearances = new Map<string, number[]>();
+  for (const each of [...production.chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
+    const stamp = each.voices;
+    if (stamp === undefined || "unreadable" in stamp) continue;
+    for (const who of stamp.speakers) {
+      if (who.sheet === undefined) continue;
+      const list = appearances.get(who.sheet) ?? [];
+      if (list[list.length - 1] !== each.order) list.push(each.order);
+      appearances.set(who.sheet, list);
+    }
+  }
+  const [nameHit, setNameHit] = useState<{ ids: string[]; text: string; rect: DOMRect } | null>(null);
+  const nameClose = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdName = useCallback(() => {
+    if (nameClose.current) clearTimeout(nameClose.current);
+    nameClose.current = null;
+  }, []);
+  // A moment's grace, so the pointer can cross from the name to its card.
+  const leaveName = useCallback(() => {
+    holdName();
+    nameClose.current = setTimeout(() => setNameHit(null), 250);
+  }, [holdName]);
+  const closeName = useCallback(() => {
+    holdName();
+    setNameHit(null);
+  }, [holdName]);
+  useEffect(() => closeName, [closeName]);
+  useEffect(() => closeName(), [view, chapter.id, closeName]);
+  const onName = useCallback((hit: { ids: string[]; text: string; rect: DOMRect } | null) => {
+    if (hit === null) leaveName();
+    else {
+      holdName();
+      setNameHit(hit);
+    }
+  }, [holdName, leaveName]);
+  const cardSheets: NameCardSheet[] = nameHit === null ? [] : nameHit.ids.flatMap((id): NameCardSheet[] => {
+    const sheet = world.sheets.find((candidate) => candidate.id === id);
+    if (sheet === undefined) return [];
+    const at = encodeURIComponent(worldId), sid = encodeURIComponent(id);
+    if (sheet.type !== "character") {
+      return [{ id, kind: "place" as const, name: sheet.name, face: null, open: `/w/${at}/locations/${sid}` }];
+    }
+    return [{
+      id,
+      kind: "character" as const,
+      name: sheet.name,
+      ...(sheet.role !== undefined ? { role: sheet.role } : {}),
+      face: portraitOf(id),
+      linesHere: speakers.find((who) => who.sheet === id)?.lines ?? 0,
+      chapters: appearances.get(id) ?? [],
+      ...(sheet.voice !== undefined ? { voice: voiceDisplayLabel(sheet.voice, world) } : {}),
+      ...(designatedVoiceSample(world.referenceKits.find((kit) => kit.sheetId === id) ?? null) !== null ? { sample: true } : {}),
+      voicePage: `/w/${at}/cast/${sid}/voice?book=${encodeURIComponent(prodId)}`,
+      open: `/w/${at}/cast/${sid}`,
+    }];
+  });
+  const nameCard = nameHit === null || cardSheets.length === 0 ? null : (
+    <NameCard
+      sheets={cardSheets}
+      rect={nameHit.rect}
+      onEnter={holdName}
+      onLeave={leaveName}
+      onClose={closeName}
+      onAsk={(sheet) => {
+        closeName();
+        setNameAsk(sheet.name);
+        setDock(true);
+      }}
+      onHear={(sheet) => {
+        const sample = designatedVoiceSample(world.referenceKits.find((kit) => kit.sheetId === sheet.id) ?? null);
+        if (sample !== null) void playClip({ id: `${worldId}/${sample.file}`, url: mediaUrl(worldSlug, sample.file), title: `${sheet.name} · voice` });
+      }}
+    />
+  );
   const povSheet = chapter.pov === undefined ? undefined : world.sheets.find((sheet) => sheet.id === chapter.pov);
   const madeAll = audiobook.counts.total > 0 && audiobook.counts.made === audiobook.counts.total;
   const progressSteps: ProgressStep[] = [
@@ -2979,7 +3105,11 @@ export function ChapterWorkspace({
                   onSelect={onSelect}
                   placeholder={PLACEHOLDER}
                   ariaLabel={`Chapter ${chapter.order}`}
+                  linkedNames={linkedNames}
+                  onName={onName}
+                  mentions={mentions}
                 />
+                {nameCard}
               </div>
             ) : (
               <textarea
