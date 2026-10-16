@@ -2725,6 +2725,24 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
     assert.deepEqual(calls, ["ask maren-kest", "close"], "Esc closes");
   });
 
+  it("hears a character's designated sample, and a press elsewhere puts the card away", async () => {
+    const calls: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <MemoryRouter>
+        <NameCard sheets={[{ id: "maren-kest", kind: "character", name: "Maren Kest", face: null, sample: true, open: "/w/x/cast/maren-kest" }]} rect={rect}
+          onEnter={() => {}} onLeave={() => {}} onClose={() => calls.push("close")} onAsk={() => {}} onHear={(sheet) => calls.push(`hear ${sheet.id}`)} />
+      </MemoryRouter>,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    await act(async () => (container.querySelector('[aria-label="Hear Maren Kest"]') as HTMLButtonElement).click());
+    assert.deepEqual(calls, ["hear maren-kest"]);
+    await act(async () => { dom.document.body.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true }) as unknown as Event); });
+    assert.deepEqual(calls, ["hear maren-kest", "close"]);
+  });
+
   it("lists both sheets a shared name names, and a place has no voice", async () => {
     const m = await mountCard([
       { id: "ade", kind: "character", name: "Adeyemi Akinola", face: null, open: "/w/x/cast/ade" },

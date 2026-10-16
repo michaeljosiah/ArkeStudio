@@ -264,3 +264,5 @@
   flex: 1;
   justify-content: center;
 }
+.fy-namecard__hear { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--foreground); cursor: pointer; }
+.fy-namecard__hear:hover, .fy-namecard__hear:focus-visible { background: var(--accent); }

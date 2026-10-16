@@ -80,10 +80,15 @@ export function nameMatcher(names: readonly LinkedName[]): NameMatcher | null {
       }
     }
     // The two expressions can overlap (`Maren` and `maren kest`): the longer, then the earlier, wins.
+    // The same span found by both (`Ade` and `ade`) names every sheet either found (codex on PR 1800).
     hits.sort((a, b) => a.from - b.from || b.to - b.from - (a.to - a.from));
     const kept: NameHit[] = [];
     for (const hit of hits) {
       const last = kept[kept.length - 1];
+      if (last !== undefined && hit.from === last.from && hit.to === last.to) {
+        last.ids = [...new Set([...last.ids, ...hit.ids])];
+        continue;
+      }
       if (last !== undefined && hit.from < last.to) continue;
       kept.push(hit);
     }
@@ -99,6 +104,8 @@ function decorate(matcher: NameMatcher, block: ProseNode, offset: number): Decor
   // Text runs, not the block's text: a mark boundary or an inline node splits a name, and a name
   // across a bold run is rare enough to leave plain rather than to map positions for.
   block.descendants((node, pos) => {
+    // Code nested anywhere (a fence inside a list) is code, not people.
+    if (node.type.spec.code) return false;
     if (!node.isText || node.text === undefined) return true;
     if (node.marks.some((mark) => mark.type.name === "code" || mark.type.name === "link")) return false;
     for (const hit of matcher.find(node.text)) {

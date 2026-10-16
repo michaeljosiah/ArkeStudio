@@ -55,8 +55,10 @@ export function filterMentions(mentions: readonly Mention[], rawQuery: string): 
   const rows = query === ""
     ? [...mentions]
     : mentions.filter((row) => {
-        const words = `${row.name} ${row.insert}`.toLowerCase();
-        return words.startsWith(query) || words.includes(` ${query}`);
+        const names = [row.name, row.insert].map((name) => name.toLowerCase());
+        // A word's start anywhere in the name, `Marie` in `Anne-Marie` too, or the whole name's
+        // start for a query that runs past one word (`maren ke`).
+        return names.some((name) => name.startsWith(query) || name.split(/[\s\-\u2010-\u2014'\u2019.]+/).some((word) => word.startsWith(query)));
       });
   return rows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
 }
@@ -82,7 +84,8 @@ export function readMentionState(editor: Editor, shell: HTMLElement | null): Men
   if (query === null) return null;
   const at = before.length - query.length - 1;
   const from = selection.from - ($from.parentOffset - at);
-  const caret = editor.view.coordsAtPos(from);
+  // At the caret, not the `@`: a long query, or one that wraps, keeps the menu by what is typed.
+  const caret = editor.view.coordsAtPos(selection.from);
   const bounds = shell.getBoundingClientRect();
   return { query, from, to: selection.from, left: caret.left - bounds.left, top: caret.bottom - bounds.top + 6 };
 }

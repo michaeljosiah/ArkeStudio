@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { Play } from "../components/icons.js";
 import { Button, cx } from "../components/ui.js";
 
 /**
@@ -18,6 +19,8 @@ export interface NameCardSheet {
   /** The chapters, by number, the book's cast stamps have them speaking in. */
   chapters?: number[];
   voice?: string;
+  /** The character's designated voice sample, to hear from the card (227b). */
+  sample?: boolean;
   open: string;
   voicePage?: string;
 }
@@ -26,7 +29,9 @@ const CARD_WIDTH = 320;
 const GUTTER = 16;
 
 function where(rect: DOMRect, height: number): { left: number; top: number } {
-  const left = Math.min(Math.max(GUTTER, rect.left), window.innerWidth - CARD_WIDTH - GUTTER);
+  // The card narrows with the window (its CSS max-width), so it is placed by the width it has.
+  const width = Math.min(CARD_WIDTH, window.innerWidth - 2 * GUTTER);
+  const left = Math.max(GUTTER, Math.min(rect.left, window.innerWidth - width - GUTTER));
   // Below the name unless that runs off the window, then above it.
   const below = rect.bottom + 8;
   const top = below + height > window.innerHeight - GUTTER ? Math.max(GUTTER, rect.top - 8 - height) : below;
@@ -41,13 +46,14 @@ function seen(chapters: number[]): string | null {
     : `Ch ${first}–${last} · ${chapters.length} chapters`;
 }
 
-export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk }: {
+export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk, onHear }: {
   sheets: NameCardSheet[];
   rect: DOMRect;
   onEnter: () => void;
   onLeave: () => void;
   onClose: () => void;
   onAsk: (sheet: NameCardSheet) => void;
+  onHear?: (sheet: NameCardSheet) => void;
 }) {
   const card = useRef<HTMLDivElement | null>(null);
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
@@ -62,11 +68,17 @@ export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk }: {
     const scroll = (event: Event) => {
       if (!(event.target instanceof Node) || !card.current?.contains(event.target)) onClose();
     };
+    // A press anywhere else puts it away: on touch there is no pointer to move off it.
+    const press = (event: Event) => {
+      if (!(event.target instanceof Node) || !card.current?.contains(event.target)) onClose();
+    };
     window.addEventListener("keydown", key);
     window.addEventListener("scroll", scroll, true);
+    document.addEventListener("pointerdown", press);
     return () => {
       window.removeEventListener("keydown", key);
       window.removeEventListener("scroll", scroll, true);
+      document.removeEventListener("pointerdown", press);
     };
   }, [onClose]);
   return (
@@ -99,6 +111,11 @@ export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk }: {
           )}
           {sheet.kind === "character" && (
             <p className="fy-namecard__voice">
+              {sheet.sample === true && onHear !== undefined && (
+                <button type="button" className="fy-namecard__hear" aria-label={`Hear ${sheet.name}`} onClick={() => onHear(sheet)}>
+                  <Play size={12} />
+                </button>
+              )}
               <span>{sheet.voice ?? "No voice"}</span>
               {sheet.voicePage !== undefined && <Link to={sheet.voicePage}>Change</Link>}
             </p>

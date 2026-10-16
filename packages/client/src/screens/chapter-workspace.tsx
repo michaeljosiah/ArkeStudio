@@ -50,6 +50,7 @@ import {
   storyProgressDay,
   pendingSheets,
   defaultShortName,
+  designatedVoiceSample,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -149,12 +150,13 @@ const AUTOSAVE_MS = 1200;
  * default when it is a real name rather than an article or a title, which would otherwise mark
  * every sentence that starts with one.
  */
-const NOT_A_NAME = new Set(["The", "A", "An", "Old", "Young", "Mr", "Mrs", "Ms", "Dr", "Sir", "Lady", "Lord", "Miss", "Mister", "Captain", "King", "Queen"]);
+const NOT_A_NAME = new Set(["the", "a", "an", "old", "young", "mr", "mrs", "ms", "dr", "sir", "lady", "lord", "miss", "mister", "captain", "king", "queen"]);
 function proseNames(sheet: { name: string; shortName?: string }): string[] {
   const written = sheet.shortName?.trim();
   if (written !== undefined && written !== "" && written !== sheet.name) return [sheet.name, written];
   const short = defaultShortName(sheet.name);
-  return short === sheet.name || NOT_A_NAME.has(short.replace(/\.$/, "")) ? [sheet.name] : [sheet.name, short];
+  // In any case: `the Queen` defaults to `the`, which would otherwise be linked everywhere.
+  return short === sheet.name || NOT_A_NAME.has(short.replace(/\.$/, "").toLowerCase()) ? [sheet.name] : [sheet.name, short];
 }
 
 // A placeholder labels; it does not explain (turn 137, SPEC-056 R-53).
@@ -1624,7 +1626,12 @@ export function ChapterWorkspace({
     ? { kind: "chapter", chapterId: chapter.id }
     : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
   const [nameAsk, setNameAsk] = useState<string | null>(null);
-  useEffect(() => setNameAsk(null), [chapter.id]);
+  // A name is Chat's subject until Chat is put away or the page moves on (codex on PR 1800).
+  useEffect(() => setNameAsk(null), [chapter.id, view]);
+  const chatShown = globalChat ? chatOpen : dock;
+  useEffect(() => {
+    if (!chatShown) setNameAsk(null);
+  }, [chatShown]);
   const dockPrefix = passage === null && nameAsk !== null
     ? `About ${nameAsk} in ${chapterLabel}:`
     : passage !== null
@@ -2661,6 +2668,7 @@ export function ChapterWorkspace({
       linesHere: speakers.find((who) => who.sheet === id)?.lines ?? 0,
       chapters: appearances.get(id) ?? [],
       ...(sheet.voice !== undefined ? { voice: voiceDisplayLabel(sheet.voice, world) } : {}),
+      ...(designatedVoiceSample(world.referenceKits.find((kit) => kit.sheetId === id) ?? null) !== null ? { sample: true } : {}),
       voicePage: `/w/${at}/cast/${sid}/voice?book=${encodeURIComponent(prodId)}`,
       open: `/w/${at}/cast/${sid}`,
     }];
@@ -2676,6 +2684,10 @@ export function ChapterWorkspace({
         closeName();
         setNameAsk(sheet.name);
         setDock(true);
+      }}
+      onHear={(sheet) => {
+        const sample = designatedVoiceSample(world.referenceKits.find((kit) => kit.sheetId === sheet.id) ?? null);
+        if (sample !== null) void playClip({ id: `${worldId}/${sample.file}`, url: mediaUrl(worldSlug, sample.file), title: `${sheet.name} · voice` });
       }}
     />
   );

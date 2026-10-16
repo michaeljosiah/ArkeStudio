@@ -43,6 +43,11 @@ describe("recognising names (SPEC-056 R-15)", () => {
     assert.deepEqual(shared.find("Maren said")[0]!.ids.sort(), ["maren-kest", "maren-the-elder"]);
   });
 
+  it("names every sheet when an exact and a folded name find the same text (codex on PR 1800)", () => {
+    const both = nameMatcher([{ id: "ade", kind: "character", names: ["Ade"], colour: null }, { id: "ade-river", kind: "place", names: ["ade"], colour: null }])!;
+    assert.deepEqual(both.find("Ade waded in.")[0]!.ids.sort(), ["ade", "ade-river"]);
+  });
+
   it("skips one-letter names and has no matcher for none", () => {
     assert.equal(nameMatcher([{ id: "a", kind: "character", names: ["A"], colour: null }]), null);
     assert.equal(nameMatcher([]), null);
@@ -103,9 +108,9 @@ describe("linked names in the editor (R-15, R-16)", () => {
     assert.deepEqual(marked().map((m) => m.text), ["Ife", "Maren"]);
   });
 
-  it("leaves code alone", () => {
-    const { marked } = open("Maren `Maren` said.\n\n```\nMaren\n```\n", CAST);
-    assert.deepEqual(marked().map((m) => m.text), ["Maren"]);
+  it("leaves code alone, a fence inside a list too", () => {
+    const { marked } = open("Maren `Maren` said.\n\n```\nMaren\n```\n\n- Rook\n\n  ```\n  Rook\n  ```\n", CAST);
+    assert.deepEqual(marked().map((m) => m.text), ["Maren", "Rook"]);
   });
 
   it("is not in the set the round-trip proof uses", () => {
@@ -137,5 +142,8 @@ describe("the @ menu (R-18)", () => {
     assert.deepEqual(filterMentions(rows, "").map((row) => row.id), ["maren", "rook", "pier"]);
     assert.deepEqual(filterMentions(rows, "ke").map((row) => row.id), ["maren"], "a surname's start");
     assert.deepEqual(filterMentions(rows, "ier").map((row) => row.id), [], "not the middle of a word");
+    const anne: Mention = { id: "anne", name: "Anne-Marie Holt", insert: "Anne-Marie", group: "Characters" };
+    assert.deepEqual(filterMentions([anne], "marie").map((row) => row.id), ["anne"], "a hyphenated name's second word");
+    assert.deepEqual(filterMentions([anne], "anne-ma").map((row) => row.id), ["anne"], "or the name's start past the hyphen");
   });
 });

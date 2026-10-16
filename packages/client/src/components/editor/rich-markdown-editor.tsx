@@ -429,7 +429,9 @@ export function RichMarkdownEditor({
         onTouchStart: (event: ReactTouchEvent) => {
           const element = nameAt(event.target);
           clearNameTimer();
-          if (element !== null) nameTimer.current = setTimeout(() => report(element), NAME_PRESS_MS);
+          // A touch anywhere else puts an open card away, as moving the pointer off a name does.
+          if (element === null) onNameRef.current?.(null);
+          else nameTimer.current = setTimeout(() => report(element), NAME_PRESS_MS);
         },
         onTouchMove: clearNameTimer,
         onTouchEnd: clearNameTimer,
