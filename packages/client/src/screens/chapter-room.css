@@ -69,6 +69,8 @@
 @media (max-width: 599px) {
   [data-screen="chapter"] .fy-ch__dochead { padding: 20px 0 4px; }
   [data-screen="chapter"] .fy-ch__doctitle { font-size: 30px; }
+  /* The goal beside the title (R-7): the bar's own rule makes every span a line of its own. */
+  .fy-scene-back .fy-ch__goal { display: inline-flex; flex: none; margin-right: 4px; }
   .fy-ch__phone-read { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
   /* A chapter with no picture has no picture's height to hold. */
   .fy-chov__hero.fy-chov__hero--bare { min-height: 0; }
@@ -106,6 +108,8 @@
    versions. The manuscript stays mounted under it, hidden, as it does under Audiobook. */
 [data-screen="chapter"] .fy-ch__body[hidden] { display: none; }
 [data-screen="chapter"][data-view="chapter"] .fy-sw__centre { padding: 0; overflow-y: auto; }
+/* The Chapter view's centre has no gutter for the phone bar to reach out over (R-46, 227m). */
+[data-screen="chapter"][data-view="chapter"] .fy-sw__centre > .fy-scene-back { margin-inline: 0; }
 .fy-chov { display: flex; flex-direction: column; min-width: 0; }
 .fy-chov__hero { position: relative; min-height: 320px; padding: 24px 48px 28px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
 .fy-chov__hero--bare { min-height: 0; padding-top: 32px; }
