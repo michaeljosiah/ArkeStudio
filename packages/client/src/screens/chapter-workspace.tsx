@@ -2958,11 +2958,18 @@ export function ChapterWorkspace({
     });
   }, [worldId, prodId, chapter.id]);
   const manuscriptShown = view === "manuscript";
+  const savedHash = record?.hash ?? null;
   useEffect(() => {
     if (connection === "open" && manuscriptShown) requestChapterReview("chapter-review-read", worldId, prodId, chapter.id);
-  }, [connection, manuscriptShown, worldId, prodId, chapter.id]);
+  }, [connection, manuscriptShown, worldId, prodId, chapter.id, savedHash]);
   const [notesOn, setNotesOn] = useState(true);
   const reviewDone = review !== null && (review.status === "complete" || review.status === "partial");
+  // A new review's notes are shown when it finishes, though the last one's were put away (D-8,
+  // codex on PR 1810).
+  const finishedReview = reviewDone ? `${review.id}:${review.requestId}` : null;
+  useEffect(() => {
+    if (finishedReview !== null) setNotesOn(true);
+  }, [finishedReview]);
   const reviewPlaced = useMemo(
     () => (reviewDone ? placeReviewNotes(live, review.findings) : { placed: [] as PlacedNote[], lost: [] as ReviewFinding[] }),
     [reviewDone, review, live],
@@ -3494,7 +3501,7 @@ export function ChapterWorkspace({
                 lost={reviewPlaced.lost}
                 current={noteOpen}
                 // A review of words since changed decides nothing, as its report says.
-                disabled={locked || connection !== "open" || review?.stale === true}
+                disabled={locked || connection !== "open" || review?.stale === true || draft !== null || saving}
                 onCurrent={setCurrentNote}
                 onFix={fixNote}
                 onDecide={decideNote}

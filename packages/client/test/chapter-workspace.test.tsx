@@ -3142,5 +3142,19 @@ describe("review notes in the margin (design turn 227r, SPEC-056 R-29 – R-31)"
     });
     await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
     assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOn", "on when a review finishes (D-8)");
+    await act(async () => (q(m, '[data-testid="chapter-more-review-notes"]') as HTMLButtonElement).click());
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOff");
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter-review.updated", at: "2026-10-16T12:05:00Z", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap",
+        review: {
+          worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", schemaVersion: 1, id: "55555555-5555-4555-a555-555555555555", requestId: "r2",
+          title: "The counting of bells", createdAt: "now", updatedAt: "later", status: "complete", sourceHash: "h", contextHash: "c", body: BODY, images: [], tasks: [],
+          facts: [], findings: [first], checks: [], rejectedFindings: 0, stale: false, staleReasons: [], audioListened: false,
+        },
+      } as never);
+    });
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOn", "a new review's notes are shown when it finishes (codex on PR 1810)");
   });
 });
