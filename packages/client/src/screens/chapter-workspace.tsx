@@ -2505,7 +2505,7 @@ export function ChapterWorkspace({
       ) : (
         <p className="fy-chov__voice-line">{castCards.find((card) => card.key === castOpen)?.line}</p>
       )}
-      {openCast.sheet !== undefined && <Link className="fy-chov__voice-open" to={`/w/${encodeURIComponent(worldId)}/characters/${encodeURIComponent(openCast.sheet)}`}>Open character</Link>}
+      {openCast.sheet !== undefined && <Link className="fy-chov__voice-open" to={`/w/${encodeURIComponent(worldId)}/cast/${encodeURIComponent(openCast.sheet)}`}>Open character</Link>}
     </div>
   );
   const goChapter = (id: string) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(id)}?view=chapter`);

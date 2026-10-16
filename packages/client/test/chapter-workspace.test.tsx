@@ -2417,7 +2417,7 @@ describe("the voiced read (turn 130)", () => {
     const card = q(m, ".fy-chov__voice");
     assert.ok(card, "Maren Kest's voice card is open");
     assert.match(card!.textContent ?? "", /Low tide/, "the voice that reads her");
-    assert.ok(card!.querySelector('a[href$="/characters/maren-kest"]'), "Open character goes to her sheet");
+    assert.ok(card!.querySelector('a[href$="/cast/maren-kest"]'), "Open character goes to her sheet");
     await act(async () => (card!.querySelector('[aria-label="Close voice"]') as HTMLElement).click());
     assert.equal(q(m, ".fy-chov__voice"), null);
   });
