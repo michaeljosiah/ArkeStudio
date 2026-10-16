@@ -854,16 +854,28 @@ export type VersionParagraph =
  * older and newer ones left over are paired in order as changes; the rest were added or removed.
  */
 export function versionDiff(older: string, newer: string): VersionParagraph[] {
-  const a = chapterParagraphs(older);
-  const b = chapterParagraphs(newer);
+  const all = chapterParagraphs(older);
+  const bll = chapterParagraphs(newer);
+  // The opening and closing paragraphs both keep are matched without a table, so the table holds
+  // only the stretch that changed (codex on PR 1802).
+  let head = 0;
+  while (head < all.length && head < bll.length && all[head] === bll[head]) head += 1;
+  let tail = 0;
+  while (tail < all.length - head && tail < bll.length - head && all[all.length - 1 - tail] === bll[bll.length - 1 - tail]) tail += 1;
+  const a = all.slice(head, all.length - tail);
+  const b = bll.slice(head, bll.length - tail);
+  // Past the cap the stretch is not worth its table: its paragraphs are paired by position.
+  const tabled = a.length * b.length <= VERSION_DIFF_CELLS;
   const width = b.length + 1;
-  const table = new Uint32Array((a.length + 1) * width);
-  for (let i = a.length - 1; i >= 0; i--) {
-    for (let j = b.length - 1; j >= 0; j--) {
-      table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+  const table = new Uint32Array(tabled ? (a.length + 1) * width : 0);
+  if (tabled) {
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+      }
     }
   }
-  const out: VersionParagraph[] = [];
+  const out: VersionParagraph[] = all.slice(0, head).map((text) => ({ kind: "same" as const, text }));
   let removed: string[] = [];
   let added: string[] = [];
   const settle = () => {
@@ -885,25 +897,35 @@ export function versionDiff(older: string, newer: string): VersionParagraph[] {
     removed = [];
     added = [];
   };
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      settle();
-      out.push({ kind: "same", text: a[i]! });
-      i += 1;
-      j += 1;
-    } else if (j < b.length && (i >= a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
-      added.push(b[j]!);
-      j += 1;
-    } else {
-      removed.push(a[i]!);
-      i += 1;
+  if (!tabled) {
+    removed = [...a];
+    added = [...b];
+    settle();
+  } else {
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        settle();
+        out.push({ kind: "same", text: a[i]! });
+        i += 1;
+        j += 1;
+      } else if (j < b.length && (i >= a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
+        added.push(b[j]!);
+        j += 1;
+      } else {
+        removed.push(a[i]!);
+        i += 1;
+      }
     }
+    settle();
   }
-  settle();
+  for (const text of all.slice(all.length - tail)) out.push({ kind: "same", text });
   return out;
 }
+
+/** Past this many paragraph pairs the changed stretch is compared by position instead (about 4 MB). */
+const VERSION_DIFF_CELLS = 1_000_000;
 
 /** Half or more of the longer paragraph's words are also the other's. */
 function alike(a: string, b: string): boolean {

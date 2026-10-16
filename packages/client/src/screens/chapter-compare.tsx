@@ -24,6 +24,8 @@ export function CompareVersions({ kept, now, read, locked, onRestore, onClose }:
   const [bodies, setBodies] = useState<ReadonlyMap<number, string>>(() => new Map([[now.version, now.body]]));
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => setBodies((held) => new Map(held).set(now.version, now.body)), [now.version, now.body]);
+  // A read that failed is about the versions it was for; choosing others asks afresh (codex on PR 1802).
+  useEffect(() => setFailed(null), [left, right]);
   useEffect(() => {
     let live = true;
     for (const version of [left, right]) {

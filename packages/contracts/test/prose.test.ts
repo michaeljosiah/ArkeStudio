@@ -398,3 +398,19 @@ describe("comparing a paragraph with repeated words (codex on PR 1802)", () => {
     assert.deepEqual(versionDiff("Kept.\n\nvery very very very warm night", "Kept.\n\nvery very very very cold night").map((p) => p.kind), ["same", "changed"]);
   });
 });
+
+describe("comparing a chapter of very many paragraphs (codex on PR 1802)", () => {
+  it("matches the unchanged ends without a table and stays bounded in the middle", () => {
+    const many = (prefix: string) => Array.from({ length: 3_000 }, (_, i) => `${prefix} ${i} kept words here.`).join("\n\n");
+    const older = many("Para");
+    const newer = many("Line");
+    const started = Date.now();
+    const diff = versionDiff(older, newer);
+    assert.ok(Date.now() - started < 5_000, "no 9M-cell table");
+    assert.equal(diff.length, 3_000, "paired by position, each a change");
+    assert.ok(diff.every((p) => p.kind === "changed"));
+    const ends = versionDiff(`A first.\n\n${older}\n\nZ last.`, `A first.\n\n${newer}\n\nZ last.`);
+    assert.equal(ends[0]?.kind, "same");
+    assert.equal(ends.at(-1)?.kind, "same");
+  });
+});
