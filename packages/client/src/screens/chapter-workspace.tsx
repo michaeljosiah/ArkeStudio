@@ -287,9 +287,10 @@ subscribeWorldChatSendResults((result) => {
     if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
   }
 });
-/** Test hook: asks outlive a screen by design, so each test starts with none. */
+/** Test hook: asks and parked drafts outlive a screen by design, so each test starts with none. */
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();
+  parkedDrafts.clear();
   heldKeeps.clear();
   heldAccepts.clear();
 }
@@ -469,7 +470,8 @@ function barAt(host: HTMLElement | null, fallback: AskAt): BarAt {
   if (rect.width === 0 && rect.height === 0) return barFromAnchor(fallback);
   const frame = host.getBoundingClientRect();
   const left = Math.max(0, Math.min(rect.left + rect.width / 2 - frame.left - BAR_WIDTH / 2, frame.width - BAR_WIDTH));
-  return { top: Math.max(0, rect.top - frame.top - 46), left, below: rect.bottom - frame.top + 8, end: left > frame.width - 320 };
+  // The tones open beside the menu: 228px more, so they take their own side (codex on PR 1804).
+  return { top: Math.max(0, rect.top - frame.top - 46), left, below: rect.bottom - frame.top + 8, end: left > frame.width - 320, subEnd: left > frame.width - 560 };
 }
 
 /**
@@ -1548,8 +1550,13 @@ export function ChapterWorkspace({
     return () => { window.removeEventListener("resize", fit); area.style.height = ""; };
   }, [compact, text, view, richMode]);
   useEffect(() => {
-    if (locked) setSelection(null);
+    // Locked, or another chapter: the selection, and the bar over it, are gone (codex on PR 1804).
+    if (locked) {
+      setSelection(null);
+      setMarked(null);
+    }
   }, [locked]);
+  useEffect(() => setMarked(null), [chapter.id]);
   const passage = selection?.text ?? null;
   /*
    * What the dock is about and what it says first: the passage, when one is selected. The dock's
@@ -3330,9 +3337,11 @@ export function ChapterWorkspace({
                     bold: live.isActive("bold"),
                     italic: live.isActive("italic"),
                     quote: live.isActive("blockquote"),
-                    onBold: () => void live.chain().focus().toggleBold().run(),
-                    onItalic: () => void live.chain().focus().toggleItalic().run(),
-                    onQuote: () => void live.chain().focus().toggleBlockquote().run(),
+                    // Setting the selection again after the mark re-reports it, so the passage the
+                    // bar would ask about is quoted as formatted (codex on PR 1804).
+                    onBold: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleBold().setTextSelection({ from, to }).run(); },
+                    onItalic: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleItalic().setTextSelection({ from, to }).run(); },
+                    onQuote: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleBlockquote().setTextSelection({ from, to }).run(); },
                   };
                 })() : null}
                 words={countWords(marked.text)}

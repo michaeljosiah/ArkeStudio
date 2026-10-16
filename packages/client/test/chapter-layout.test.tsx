@@ -8,6 +8,7 @@ import { type ClientMessage } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
+import { __clearHeldAsksForTest } from "../src/screens/chapter-workspace.js";
 import { chapterLayoutFixture, CHAPTER_BODY, CHAPTER_HASH } from "./chapter-layout-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><head></head><body></body></html>");
@@ -76,6 +77,17 @@ it('with Chat open a selected passage is adopted explicitly into global Chat (22
  const field=find('.fy-global-chat .fy-cx__editor');Object.defineProperty(document,'activeElement',{value:field,configurable:true});area.selectionEnd=0;
  await act(async()=>props(area).onSelect!({currentTarget:area} as never));assert.match(find('.fy-global-chat .fy-arke__subject').textContent!,/Chapter \d+ · paragraph \d+/,'moving into the Chat’s field keeps the passage');
  await click(find('[aria-label="Close Chat"]'));assert.equal(find('.fy-global-chat[open]'),null,'the retained passage chat is closed');
+});
+it('a rewrite asked from the selection goes quietly: sent from the page, Chat left closed (227, codex on PR 1804)',async()=>{
+ __clearHeldAsksForTest();__clearWorldChatHoldsForTest();
+ await mount('p/ledger/story/chapters/neap',1280,'normal',false,false);await openChapter();assert.equal(find('.fy-global-chat[open]'),null);
+ const area=find('.fy-ch__source') as HTMLTextAreaElement;Object.defineProperty(document,'activeElement',{value:area,configurable:true});area.selectionStart=0;area.selectionEnd=31;
+ await act(async()=>document.dispatchEvent(new Event('selectionchange')));
+ await click(find('.fy-selbar .fy-ch__ask'));
+ const tighten=[...document.querySelectorAll<HTMLElement>('.fy-askm [role=menuitem]')].find(b=>b.textContent==='Tighten');assert.ok(tighten,'the menu offers Tighten');
+ await click(tighten!);
+ assert.equal(find('.fy-global-chat[open]'),null,'Chat stays closed for a rewrite whose answer comes back on the page');
+ assert.ok(sent.some(m=>(m.kind==='world-chat-send'||m.kind==='world-chat-create')&&JSON.stringify(m).includes('Tighten this')),'and the ask is still sent, by the page’s own conversation');
 });
 it('a compact waiting passage has an attended decision without opening Arke',async()=>{
  await mount('p/ledger/story/chapters/neap',390,'waiting');await openChapter();assert.ok(find('.fy-passage-decision'));assert.equal(find('.fy-season-arke-sheet[open]'),null);

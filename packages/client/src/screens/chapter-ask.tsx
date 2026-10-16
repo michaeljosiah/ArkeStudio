@@ -11,7 +11,14 @@ import { ownAsk, TONE_ACTIONS, toneAction, type PassageAction } from "../lib/pas
  */
 
 /** Where the bar and the menu sit, in the manuscript's own coordinates. */
-export type BarAt = { top: number; left: number; below: number; end: boolean };
+export type BarAt = {
+  top: number;
+  left: number;
+  below: number;
+  end: boolean;
+  /** Change tone opens on the left: the menu and its tones together do not fit to the right. */
+  subEnd?: boolean;
+};
 
 /** One rule for the gate's refusal (SPEC-012 R-58a), said in one clause on Ask Arke. */
 export function passageRefusal(text: string): string | null {
@@ -87,6 +94,7 @@ export function SelectionBar({ at, format, words, held, refused, actions, onAsk,
         <AskArkeMenu
           below={at.below - at.top}
           end={at.end}
+          subEnd={at.subEnd ?? at.end}
           actions={actions}
           focusFirst={fromKeys}
           onFocused={() => setFromKeys(false)}
@@ -113,9 +121,10 @@ const REPLIES = ["style", "critique"];
  * tone ›, the replies marked as such, and Open in Arke. Arrows move, Enter chooses, → opens Change
  * tone and ← or Esc comes back, Esc again closes.
  */
-function AskArkeMenu({ below, end, actions, focusFirst, onFocused, onAsk, onOpenInArke, onClose }: {
+function AskArkeMenu({ below, end, subEnd, actions, focusFirst, onFocused, onAsk, onOpenInArke, onClose }: {
   below: number;
   end: boolean;
+  subEnd: boolean;
   actions: readonly PassageAction[];
   focusFirst: boolean;
   onFocused: () => void;
@@ -207,7 +216,7 @@ function AskArkeMenu({ below, end, actions, focusFirst, onFocused, onAsk, onOpen
           <ChevronRight size={13} />
         </button>
         {tones && (
-          <div ref={sub} className={cx("fy-askm fy-askm__sub", end && "fy-askm__sub--end")} role="menu" aria-label="Change tone" onKeyDown={(e) => keys(e, sub.current, true)}>
+          <div ref={sub} className={cx("fy-askm fy-askm__sub", subEnd && "fy-askm__sub--end")} role="menu" aria-label="Change tone" onKeyDown={(e) => keys(e, sub.current, true)}>
             {TONE_ACTIONS.map((action) => (
               <button key={action.id} type="button" role="menuitem" className="fy-askm__item" onMouseDown={(e) => e.preventDefault()} onClick={() => onAsk(action)}>
                 {action.label}
