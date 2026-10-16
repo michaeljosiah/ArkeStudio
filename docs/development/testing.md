@@ -1088,3 +1088,16 @@ native Stop/output bounds, lease/source revocation, MCP and schema-81 replay. Ac
 perceived-emotion and voice-delivery accuracy requires an installed-model smoke and human review.
 
 Chapter review: run the contract evidence tests, coordinator production and harness review tests, and client review tests described in [chapter-review.md](chapter-review.md). Include action registry and picture-brief tests when changing orchestration or camera guidance. Fixture tests do not establish live-model judgment quality.
+
+
+### Snapshot size and slow remote delivery
+
+Run contracts `test/job-summary.test.ts`, coordinator `test/socket-writer.test.ts`,
+`test/transport.test.ts` and `test/remote-access.test.ts`, plus client
+`test/snapshot-history.test.ts` from the client directory. These cover payload projection without
+journal mutation, recovery metadata, byte/frame queue bounds, stalled sends, event ordering,
+negotiated history retention and fresh history on reconnect. Keep the transport-auth,
+preload-auth and both dev-session regressions listed in CLAUDE.md. After building, run
+`node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` for the real sandboxed file-page
+hello, compact/repeated snapshots and authenticated media range. This disposable local check
+uses no generation and does not establish performance on a physical phone or through Tailscale.

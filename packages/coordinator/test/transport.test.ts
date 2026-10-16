@@ -483,3 +483,44 @@ it("session verification identifies Arke only after capability and origin authen
     assert.equal(await response.text(), "");
   }
 });
+
+it("compacts request bodies, retains unchanged history only when negotiated, and reconnects with full history", async t => {
+  const { JobSchema } = await import("@arke-studio/contracts");
+  const job = JobSchema.parse({ id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HC", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+    worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", target: { kind: "voice-preview" }, capability: "voice-tts", provider: "test", model: "voice",
+    params: { text: "private words".repeat(10000), purpose: "audiobook", blocks: ["one", "two"] },
+    estimatedMicroUsd: 123, status: "running", createdAt: "2026-10-16T10:00:00Z", updatedAt: "2026-10-16T10:00:00Z" });
+  let state = emptyClientState({ jobs: [job] });
+  const transport = new Transport({ auth: AUTH, getSnapshot: () => state, getInitialEvents: () => [EVENT] });
+  const port = await transport.start(); t.after(() => transport.stop());
+  const client = new TestClient(port); await client.open(); t.after(() => client.close());
+  client.send({ kind: "hello", token: TOKEN, retainHistory: true }); await client.nextFrame(2);
+  const first = client.frames[0]!; assert.equal(first.kind, "snapshot");
+  if (first.kind !== "snapshot") return;
+  assert.equal(first.retainedHistory, undefined); assert.equal(first.state.app.jobs[0]!.params.text, undefined);
+  assert.deepEqual(first.state.app.jobs[0]!.params.blocks, ["one", "two"]);
+  assert.equal(job.params.text, "private words".repeat(10000), "projection does not mutate queue authority");
+  transport.broadcastSnapshot(); await client.nextFrame(4);
+  const refresh = client.frames[2]!; assert.equal(refresh.kind, "snapshot");
+  if (refresh.kind !== "snapshot") return;
+  assert.deepEqual(refresh.retainedHistory, ["jobs", "ledger"]); assert.deepEqual(refresh.state.app.jobs, []);
+  state = { ...state, app: { ...state.app, jobs: [{ ...job, status: "succeeded" }] } };
+  transport.broadcast({ type: "job.updated", at: job.updatedAt, job: state.app.jobs[0]! });
+  transport.broadcastSnapshot(); await client.nextFrame(7);
+  const update = client.frames[4]!; assert.equal(update.kind, "event");
+  if (update.kind === "event" && update.event.type === "job.updated") assert.equal(update.event.job.params.text, undefined);
+  const changed = client.frames[5]!;
+  if (changed.kind === "snapshot") {
+    assert.deepEqual(changed.retainedHistory, ["ledger"]);
+    assert.equal(changed.state.app.jobs[0]!.status, "succeeded");
+  }
+  const returning = new TestClient(port); await returning.open(); t.after(() => returning.close());
+  returning.send({ kind: "hello", token: TOKEN, lastSeq: 7, retainHistory: true }); await returning.nextFrame(2);
+  const restored = returning.frames[0]!;
+  if (restored.kind === "snapshot") { assert.equal(restored.retainedHistory, undefined); assert.equal(restored.state.app.jobs.length, 1); }
+  client.send({ kind: "hello", token: TOKEN }); await client.nextFrame(9);
+  transport.broadcastSnapshot(); await client.nextFrame(11);
+  const legacy = client.frames[9]!;
+  if (legacy.kind === "snapshot") { assert.equal(legacy.retainedHistory, undefined); assert.equal(legacy.state.app.jobs.length, 1); }
+  assert.deepEqual(client.frames.map(f => f.seq), Array.from({ length: 11 }, (_, i) => i + 1));
+});

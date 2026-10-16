@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { SocketWriter } from "../socket-writer.js";
 import WebSocket, { WebSocketServer } from "ws";
 import { ClientMessageSchema, isRemoteHostCommand, type RemoteCommandRefusal, type ClientMessage } from "@arke-studio/contracts";
 import { RemoteDevices } from "./devices.js";
@@ -49,7 +50,7 @@ export class RemoteGateway {
   }); });
   private wss = new WebSocketServer({ noServer: true, maxPayload: frameLimit,
     handleProtocols: protocols => protocols.has("arke-remote") ? "arke-remote" : false });
-  private clients = new Map<WebSocket, { proof: string; upstream: WebSocket }>();
+  private clients = new Map<WebSocket, { proof: string; upstream: WebSocket; writer: SocketWriter }>();
   private transfers = new Map<ServerResponse, { proof: string; cancel: () => void }>();
   private sweep: ReturnType<typeof setInterval> | undefined;
   private closing = false;
@@ -212,25 +213,37 @@ export class RemoteGateway {
   }
   private connect(client: WebSocket, proof: string): void {
     const upstream = new WebSocket(`ws://127.0.0.1:${this.options.session.port}`, { maxPayload: frameLimit, handshakeTimeout: 10_000 });
-    this.clients.set(client, { proof, upstream });
     const id = this.options.devices.authenticate(proof);
     const device = this.options.devices.list().find(row => row.id === id)?.name ?? id;
     this.options.trace?.("remote.socket", { event: "open", device });
+    const writer = new SocketWriter(client, { label: "remote gateway",
+      trace: detail => this.options.trace?.("remote.socket", { device, ...detail }),
+      busy: sending => { if (upstream.readyState === WebSocket.OPEN) { if (sending) upstream.pause(); else upstream.resume(); } },
+    });
+    this.clients.set(client, { proof, upstream, writer });
     const pending: string[] = [];
     let pendingBytes = 0;
+    let helloReceived = false;
+    let retainHistory = false;
+    const helloTimer = setTimeout(() => { client.close(1008, "expected hello"); upstream.terminate(); }, 10_000);
+    helloTimer.unref();
     const refuse = () => {
       // A phone that left before Studio answered is not a refusal; only a revocation is.
       if (client.readyState === WebSocket.OPEN) {
         this.options.trace?.("remote.socket", { event: "refused", device, why: this.closing ? "closing" : "device no longer paired" });
       }
-      client.close(1008, "session authentication required"); upstream.terminate();
+      writer.dispose(); client.close(1008, "session authentication required"); upstream.terminate();
     };
     const check = () => !this.closing && !!this.options.devices.authenticate(proof);
-    upstream.on("open", () => {
+    const hello = () => {
       if (!check() || client.readyState !== WebSocket.OPEN) { refuse(); return; }
-      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token }));
+      if (!helloReceived || upstream.readyState !== WebSocket.OPEN) return;
+      clearTimeout(helloTimer);
+      upstream.send(JSON.stringify({ kind: "hello", token: this.options.session.token, retainHistory }));
       for (const message of pending.splice(0)) upstream.send(message);
-    });
+      pendingBytes = 0;
+    };
+    upstream.on("open", hello);
     client.on("message", raw => {
       if (!check()) { refuse(); return; }
       let input: unknown;
@@ -248,43 +261,48 @@ export class RemoteGateway {
       }
       if (Object.hasOwn(hostFileCommands, parsed.data.kind) || isRemoteHostCommand(parsed.data)) {
         const refusal = { kind: "command-refused", refused: "host-only", command: parsed.data.kind } as RemoteCommandRefusal;
-        client.send(JSON.stringify(refusal)); return;
+        writer.send(JSON.stringify(refusal)); return;
       }
-      if (parsed.data.kind === "hello") return;
+      if (parsed.data.kind === "hello") {
+        helloReceived = true; retainHistory = parsed.data.retainHistory === true; hello(); return;
+      }
       // A decision names a stored card, not its effect. Impose this after parsing so the peer
       // cannot omit it; the lifecycle resolves the authoritative kind before approval or replay.
       const message = JSON.stringify(parsed.data.kind === "conversation-action-decide"
         ? { ...parsed.data, hostActions: "refuse" } : parsed.data);
-      if (upstream.readyState === WebSocket.OPEN) upstream.send(message);
+      if (helloReceived && upstream.readyState === WebSocket.OPEN) upstream.send(message);
       else if (pending.length < 32 && (pendingBytes += Buffer.byteLength(message)) <= frameLimit) pending.push(message);
       else client.close(1008, "too many pending commands");
     });
     upstream.on("message", raw => {
       if (!check()) { refuse(); return; }
-      if (client.readyState === WebSocket.OPEN) {
-        if (client.bufferedAmount > frameLimit) { client.terminate(); return; }
-        client.send(raw.toString());
-      }
+      writer.send(raw.toString());
     });
     upstream.on("error", () => client.close(1011, "Studio is unavailable"));
-    upstream.on("close", () => { if (client.readyState === WebSocket.OPEN) client.close(1012, "Studio is restarting"); });
+    upstream.on("close", (code) => {
+      if (client.readyState === WebSocket.OPEN) {
+        this.options.trace?.("remote.socket", { event: "upstream-closed", device, code, ...writer.stats() });
+        client.close(code === 1013 ? 1013 : 1012, code === 1013 ? "Client is too far behind; reconnect" : "Studio is restarting");
+      }
+    });
     client.on("error", () => upstream.terminate());
     client.on("close", (code, reason) => {
-      this.options.trace?.("remote.socket", { event: "closed", device, code, reason: reason.toString().slice(0, 80) });
+      this.options.trace?.("remote.socket", { event: "closed", device, code, reason: reason.toString().slice(0, 80), ...writer.stats() });
+      clearTimeout(helloTimer); writer.dispose();
       this.clients.delete(client); upstream.terminate();
     });
   }
   recheckDevices(): void {
-    for (const [client, { proof, upstream }] of this.clients) if (client.readyState === WebSocket.OPEN && !this.options.devices.authenticate(proof)) {
+    for (const [client, { proof, upstream, writer }] of this.clients) if (client.readyState === WebSocket.OPEN && !this.options.devices.authenticate(proof)) {
       this.options.trace?.("remote.socket", { event: "refused", why: "device no longer paired" });
-      client.close(1008, "session authentication required"); upstream.terminate();
+      writer.dispose(); client.close(1008, "session authentication required"); upstream.terminate();
     }
     for (const transfer of this.transfers.values()) if (!this.options.devices.authenticate(transfer.proof)) transfer.cancel();
   }
   async stop(): Promise<void> {
     this.closing = true;
     clearInterval(this.sweep);
-    for (const [client, { upstream }] of this.clients) { client.terminate(); upstream.terminate(); }
+    for (const [client, { upstream, writer }] of this.clients) { writer.dispose(); client.terminate(); upstream.terminate(); }
     for (const transfer of this.transfers.values()) transfer.cancel();
     this.wss.close();
     const closed = new Promise<void>((resolve, reject) => this.server.close(error => error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING" ? reject(error) : resolve()));

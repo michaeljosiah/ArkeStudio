@@ -148,8 +148,10 @@ function get(port: number, path: string, options: { method?: string; headers?: R
   });
 }
 function connect(port: number, proof?: string, pageOrigin = origin) {
-  return new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/`, ["arke-remote", "arke-browser." + browserKey], { origin: pageOrigin,
     headers: { Host: new URL(origin).host, ...(proof ? { Cookie: "__Host-arke-device=" + sealed(proof) } : {}) } });
+  socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", retainHistory: true })));
+  return socket;
 }
 async function closeServer(server: Server) { await new Promise<void>(resolve => server.close(() => resolve())); }
 it("gateway cookies respect fixed approval deadlines and renew Never without restoring revoked access", async () => {
@@ -319,7 +321,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     assert.equal((await get(port, "/remote/device")).status, 401);
 
     const laptop = connect(port, laptopDevice.proof); sockets.push(laptop); await once(laptop, "message");
-    assert.deepEqual(received[0], { kind: "hello", token });
+    assert.deepEqual(received[0], { kind: "hello", token, retainHistory: true });
     const closed = once(phone, "close");
     await devices.revoke(id); gateway.recheckDevices();
     assert.equal((await closed)[0], 1008);

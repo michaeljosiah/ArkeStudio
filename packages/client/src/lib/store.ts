@@ -1526,6 +1526,11 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
+    if (frame.retainedHistory?.length) {
+      if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
+      if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
+      if (frame.retainedHistory.includes("ledger")) frame.state.app.ledger = current.state.app.ledger;
+    }
     frameRunQuoteListeners.clear();
     frameRunStartResultListeners.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
@@ -2826,7 +2831,7 @@ function handleStatus(status: ConnectionStatus): void {
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
-    send({ kind: "hello", lastSeq });
+    send({ kind: "hello", lastSeq, retainHistory: true });
   }
   if (status === "closed") {
     const delay = Math.min(10_000, 500 * 2 ** reconnectAttempts++);

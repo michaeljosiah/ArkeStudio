@@ -60,7 +60,8 @@ import {
   TakeIdSchema,
   UlidSchema,
 } from "./ids.js";
-import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
+import { JobSummarySchema as JobSchema } from "./job-summary.js";
+import { LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
 import { ModelChoicesSchema, ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
 import { RippleItemSchema } from "./proposal.js";
