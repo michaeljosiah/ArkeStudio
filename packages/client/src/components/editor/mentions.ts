@@ -79,6 +79,8 @@ export function readMentionState(editor: Editor, shell: HTMLElement | null): Men
   if (!selection.empty) return null;
   const { $from } = selection;
   if (!$from.parent.isTextblock || $from.parent.type.spec.code) return null;
+  // Inline code is code too: a name typed there is literal text (codex on PR 1800).
+  if ((editor.state.storedMarks ?? $from.marks()).some((mark) => mark.type.name === "code")) return null;
   const before = $from.parent.textBetween(0, $from.parentOffset, "\0", "\0");
   const query = matchMentionTrigger(before);
   if (query === null) return null;

@@ -2792,7 +2792,10 @@ describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => 
     await answerOpen(m);
     await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
     const items = () => [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent);
-    assert.deepEqual(items(), ["Linked namesOn", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"], "this chapter can only be source: Find is the rich editor's");
+    assert.deepEqual(items(), ["Speaker facesOff", "Margin picturesOff", "Linked namesOn", "Names in this chapterNone", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"],
+      "the margins off by default (D-5); this chapter can only be source, so Find and the names list are the rich editor's");
+    assert.equal(q(m, '[data-testid="chapter-more-faces"]')!.getAttribute("aria-disabled"), "true", "no cast, no faces");
+    assert.equal(q(m, '[data-testid="chapter-more-pictures"]')!.getAttribute("aria-disabled"), "true", "no pictures placed");
     assert.equal(q(m, '[data-testid="chapter-more-find"]')!.getAttribute("aria-disabled"), "true");
     await act(async () => (q(m, '[data-testid="chapter-more-names"]') as HTMLButtonElement).click());
     assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-names"), "off");

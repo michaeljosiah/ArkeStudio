@@ -8,6 +8,7 @@ import { LinkedNames, linkedNamesKey, nameMatcher, type LinkedName, type NameMat
 import { MentionMenu } from "./mention-menu.js";
 import { filterMentions, insertMention, readMentionState, type Mention, type MentionMenuState } from "./mentions.js";
 import { currentMatch, findKey, WritingAids, type FindState } from "./writing-aids.js";
+import { marginsKey, type MarginItem } from "./margins.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
 import { documentMarkdown, serializeMarkdown } from "./round-trip.js";
 import { SlashMenu } from "./slash-menu.js";
@@ -83,6 +84,8 @@ interface RichMarkdownEditorProps {
   onFind?: (count: number, current: number) => void;
   /** Where the caret is on screen after it moves or the text changes, for Focus to hold it (R-12). */
   onCaret?: (caret: { top: number; bottom: number }) => void;
+  /** Speaker faces and passage pictures beside their paragraphs (R-14); empty when both are off. */
+  margins?: readonly MarginItem[];
 }
 
 /**
@@ -126,6 +129,7 @@ export function RichMarkdownEditor({
   find = null,
   onFind,
   onCaret,
+  margins,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -175,6 +179,12 @@ export function RichMarkdownEditor({
   mentionRef.current = mention;
   mentionRowsRef.current = mentionRows;
   mentionSelectedRef.current = mentionSelected;
+  // A sheet arriving or renamed while the menu is open changes its rows at once (codex on PR 1800).
+  const mentionsText = JSON.stringify(mentions ?? null);
+  useEffect(() => {
+    const open = mentionRef.current;
+    if (open !== null && mentionsRef.current !== undefined) setMentionRows(filterMentions(mentionsRef.current, open.query));
+  }, [mentionsText]);
   // Esc closes and leaves the `@` typed (R-18): the trigger it closed stays closed until the caret
   // leaves it, or the next keystroke would open it again.
   const dismissedAt = useRef<number | null>(null);
@@ -461,6 +471,13 @@ export function RichMarkdownEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, withAids, findKeyText]);
 
+  // The margins are the screen's to choose; the editor only places them.
+  const marginsText = JSON.stringify(margins ?? []);
+  useEffect(() => {
+    if (!editor || !withAids || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta(marginsKey, JSON.parse(marginsText) as MarginItem[]).setMeta("addToHistory", false));
+  }, [editor, withAids, marginsText]);
+
   // New names (a sheet arrived, one was renamed): the chapter is read again for them.
   useEffect(() => {
     if (!editor || !withNames || editor.isDestroyed) return;
@@ -518,7 +535,16 @@ export function RichMarkdownEditor({
     : {};
 
   return (
-    <div className={cx("fy-rme", readOnly && "fy-rme--read")} ref={shellRef} onBlur={flush} {...nameEvents}>
+    <div
+      className={cx("fy-rme", readOnly && "fy-rme--read")}
+      ref={shellRef}
+      onBlur={(event) => {
+        flush();
+        // Leaving the editor closes the `@` menu; choosing one of its rows never blurs it.
+        if (!(event.relatedTarget instanceof Node) || !shellRef.current?.contains(event.relatedTarget)) setMention(null);
+      }}
+      {...nameEvents}
+    >
       <EditorContent editor={editor} />
       {mention && editor && (
         <MentionMenu

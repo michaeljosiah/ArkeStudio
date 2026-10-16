@@ -5,13 +5,14 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 import type { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { markdownExtensions } from "../src/components/editor/extensions.js";
 import { caretBlockKey, caretBlockPlugin, currentMatch, findKey, findMatches, findPlugin } from "../src/components/editor/writing-aids.js";
+import { marginsKey, marginsPlugin } from "../src/components/editor/margins.js";
 
 /** The writing room's aids over a plain state, as the linked names' tests do (Tiptap builds plugins only on a page). */
 function open(source: string) {
   const editor = new Editor({ element: null, extensions: markdownExtensions(), content: source, contentType: "markdown" });
   const doc = editor.state.doc;
   editor.destroy();
-  return EditorState.create({ doc, plugins: [caretBlockPlugin(), findPlugin()] });
+  return EditorState.create({ doc, plugins: [caretBlockPlugin(), findPlugin(), marginsPlugin()] });
 }
 
 const classes = (state: EditorState, key: typeof caretBlockKey | typeof findKey) => {
@@ -75,5 +76,40 @@ describe("Find (R-7)", () => {
     assert.equal(currentMatch({ query: "x", index: 3 }, 3), 0);
     assert.equal(currentMatch({ query: "x", index: -1 }, 3), 2);
     assert.equal(currentMatch({ query: "x", index: 0 }, 0), -1);
+  });
+});
+
+describe("the margins (SPEC-056 R-14)", () => {
+  it("places a face before a paragraph's words and a picture after them, skips a list, and writes nothing", () => {
+    let state = open("Maren spoke.\n\n- a list\n\nThe tide turned.\n");
+    const before = state.doc;
+    state = state.apply(state.tr.setMeta(marginsKey, [
+      { paragraph: 0, anchor: "Maren spoke.", kind: "face", src: null, label: "Maren", title: "Maren Kest" },
+      { paragraph: 1, anchor: "- a list", kind: "face", src: null, title: "Rook" },
+      { paragraph: 2, anchor: "The tide turned.", kind: "picture", src: "pic.png", title: "Passage picture" },
+      { paragraph: 2, anchor: "The tide turned.", kind: "picture", src: "pic2.png", title: "Passage picture" },
+      { paragraph: 9, anchor: "Not in this chapter.", kind: "picture", src: "gone.png", title: "Passage picture" },
+    ]));
+    const plugin = marginsKey.get(state)!;
+    const set = plugin.props.decorations!.call(plugin, state) as DecorationSet;
+    const widgets = set.find().map((deco) => deco.from);
+    const first = 1;
+    const third = state.doc.child(0).nodeSize + state.doc.child(1).nodeSize + state.doc.child(2).nodeSize - 1;
+    assert.deepEqual(widgets, [first, third], "the face at the first paragraph's start, both pictures in one widget at the third's end; the list and the missing paragraph take none");
+    assert.ok(state.doc.eq(before), "the document is untouched");
+  });
+});
+
+describe("a margin finds its paragraph by its words (codex on PR 1803)", () => {
+  it("a heading run straight into its prose is one paragraph to the cast and two blocks to the editor", () => {
+    let state = open("# The Vigil\nMaren spoke first.\n\nRook answered.\n");
+    state = state.apply(state.tr.setMeta(marginsKey, [
+      { paragraph: 1, anchor: "Rook answered.", kind: "face", src: null, title: "Rook" },
+    ]));
+    const plugin = marginsKey.get(state)!;
+    const set = plugin.props.decorations!.call(plugin, state) as DecorationSet;
+    const [face] = set.find();
+    assert.ok(face !== undefined);
+    assert.equal(state.doc.resolve(face.from).parent.textContent, "Rook answered.", "beside Rook's words, not the second block");
   });
 });
