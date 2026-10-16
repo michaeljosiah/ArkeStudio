@@ -840,6 +840,81 @@ export type PassageSegment =
   | { kind: "same"; text: string }
   | { kind: "edit"; index: number; before: string; after: string };
 
+/** One paragraph of a comparison between two versions of a chapter (SPEC-056 R-13). */
+export type VersionParagraph =
+  | { kind: "same"; text: string }
+  | { kind: "changed"; segments: PassageSegment[] }
+  | { kind: "added"; text: string }
+  | { kind: "removed"; text: string };
+
+/**
+ * Two versions of a chapter compared for reading side by side: paragraphs matched first, so a
+ * whole chapter never goes through one word table (past `PASSAGE_DIFF_CELLS` that would be one
+ * edit), then the words of each paragraph that changed. Between two matched paragraphs, the
+ * older and newer ones left over are paired in order as changes; the rest were added or removed.
+ */
+export function versionDiff(older: string, newer: string): VersionParagraph[] {
+  const a = chapterParagraphs(older);
+  const b = chapterParagraphs(newer);
+  const width = b.length + 1;
+  const table = new Uint32Array((a.length + 1) * width);
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+    }
+  }
+  const out: VersionParagraph[] = [];
+  let removed: string[] = [];
+  let added: string[] = [];
+  const settle = () => {
+    // Each older paragraph left over pairs with the first newer one, in order, that shares most of
+    // its words; otherwise a rewrite would read as a page of struck and marked fragments rather
+    // than one gone and one new. Newer paragraphs it passes over were added before it.
+    let next = 0;
+    for (const before of removed) {
+      const at = added.findIndex((after, k) => k >= next && alike(before, after));
+      if (at === -1) {
+        out.push({ kind: "removed", text: before });
+        continue;
+      }
+      for (const text of added.slice(next, at)) out.push({ kind: "added", text });
+      out.push({ kind: "changed", segments: passageDiff(before, added[at]!) });
+      next = at + 1;
+    }
+    for (const text of added.slice(next)) out.push({ kind: "added", text });
+    removed = [];
+    added = [];
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      settle();
+      out.push({ kind: "same", text: a[i]! });
+      i += 1;
+      j += 1;
+    } else if (j < b.length && (i >= a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
+      added.push(b[j]!);
+      j += 1;
+    } else {
+      removed.push(a[i]!);
+      i += 1;
+    }
+  }
+  settle();
+  return out;
+}
+
+/** Half or more of the longer paragraph's words are also the other's. */
+function alike(a: string, b: string): boolean {
+  const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+  const left = words(a), right = new Set(words(b));
+  const longer = Math.max(left.length, right.size);
+  if (longer === 0) return true;
+  const shared = new Set(left.filter((word) => right.has(word))).size;
+  return shared / longer >= 0.5;
+}
+
 /** Past this many token pairs the diff is not worth its table, and the passage is one edit. */
 const PASSAGE_DIFF_CELLS = 4_000_000;
 

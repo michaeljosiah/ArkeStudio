@@ -4,7 +4,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ClientMessageSchema } from "@arke-studio/contracts";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
+import { createChapter, createProduction, editChapterPlan, openChapter, readChapterVersion, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -370,6 +370,12 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(back.version, 6);
     assert.equal(back.body.trim(), before.body.trim());
     assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
+
+    // Compare reads a kept version's prose without the front matter (SPEC-056 R-13).
+    assert.equal((await readChapterVersion(store, LEDGER, "01-neap", 4)).trim(), before.body.trim());
+    assert.match(await readChapterVersion(store, LEDGER, "01-neap", 5), /Drafted anew/);
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "01-neap", 99), /not kept/, "a version never written");
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "../01-neap", 4), /no longer in this production/, "only the production's own chapters");
   });
 });
 

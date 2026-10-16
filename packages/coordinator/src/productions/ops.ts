@@ -962,6 +962,23 @@ export function withImpliedIds(implies: ChapterImplies): ChapterImplies {
   });
 }
 
+/**
+ * One kept version's prose, for Compare (SPEC-056 R-13): the snapshot on the chapter's history
+ * track (commit.ts writes `v<n>.md` per version), its front matter dropped. Read only. The file
+ * must be one of the production's chapters, so the name can never reach outside its track.
+ */
+export async function readChapterVersion(store: WorldStore, productionId: string, chapterFile: string, version: number): Promise<string> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) throw new Error("That production is no longer in this world.");
+  const summary = production.chapters.find((c) => c.file === chapterFile);
+  if (!summary) throw new Error("That chapter is no longer in this production.");
+  const snapshot = toExtendedLength(join(store.dir, fromPortable(`.history/productions/${productionId}/chapters/${summary.file}/v${version}.md`)));
+  const raw = await readFile(snapshot, "utf8").catch(() => null);
+  if (raw === null) throw new Error(`Version ${version} is not kept for this chapter.`);
+  const body = MarkdownFile.parse(raw).body;
+  return body.trim() === "" ? "" : body;
+}
+
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */
 export async function restoreChapter(
   store: WorldStore,

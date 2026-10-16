@@ -2263,6 +2263,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterId: SlugSchema,
     })
     .strict(),
+  /**
+   * Compare versions (SPEC-056 R-13): the prose of one kept version of a chapter, read only. The
+   * answer is `chapter.version-result`, by requestId. Restoring stays `restore-chapter`.
+   */
+  z
+    .object({
+      kind: z.literal("read-chapter-version"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
+    })
+    .strict(),
   /** SPEC-012 R-5: direct authoring saves in place — no proposal, no version cut. */
   z
     .object({

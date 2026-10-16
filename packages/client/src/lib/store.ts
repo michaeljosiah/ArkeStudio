@@ -1067,6 +1067,8 @@ export function subscribeChapterCreateResults(listener: (result: ChapterCreateRe
 /** A chapter's body, answered to the screen that asked (turn 126), by requestId. */
 export type ChapterOpenResult = Extract<DomainEvent, { type: "chapter.open-result" }>;
 const chapterOpenListeners = new Set<(result: ChapterOpenResult) => void>();
+export type ChapterVersionResult = Extract<DomainEvent, { type: "chapter.version-result" }>;
+const chapterVersionListeners = new Set<(result: ChapterVersionResult) => void>();
 export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult) => void): () => void {
   chapterOpenListeners.add(listener);
   return () => chapterOpenListeners.delete(listener);
@@ -1748,6 +1750,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "chapter.open-result") {
       for (const listener of chapterOpenListeners) listener(event);
+    }
+    if (event.type === "chapter.version-result") {
+      for (const listener of chapterVersionListeners) listener(event);
     }
     if (event.type === "chapter.save-result") {
       for (const listener of chapterSaveListeners) listener(event);
@@ -5014,6 +5019,27 @@ export function saveChapter(
     return null;
   }
   return requestId;
+}
+
+/**
+ * One kept version's prose, for Compare (SPEC-056 R-13): asked once, answered by requestId.
+ * Rejects with the coordinator's reason, or when the frame cannot be sent.
+ */
+export function readChapterVersion(worldId: string, productionId: string, chapterFile: string, version: number): Promise<string> {
+  const requestId = ulid();
+  return new Promise((resolve, reject) => {
+    const listener = (result: ChapterVersionResult) => {
+      if (result.requestId !== requestId) return;
+      chapterVersionListeners.delete(listener);
+      if (result.disposition === "read") resolve(result.body ?? "");
+      else reject(new Error(result.reason ?? "That version could not be read."));
+    };
+    chapterVersionListeners.add(listener);
+    if (!send({ kind: "read-chapter-version", worldId, productionId, requestId, chapterFile, version })) {
+      chapterVersionListeners.delete(listener);
+      reject(new Error("Not connected."));
+    }
+  });
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version and nothing between is lost. */

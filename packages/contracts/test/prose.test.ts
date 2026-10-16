@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProseReadSourceSchema, changedSpan, chapterGoal, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
-import { occurrencesOf, pinnedLines, pinTarget, voicedBlocks } from "../src/prose.js";
+import { occurrencesOf, pinnedLines, pinTarget, versionDiff, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -355,4 +355,39 @@ it('episode reads name one saved promise field and reject unknown fields or epis
  assert.deepEqual(ProseReadSourceSchema.parse(source),source);
  assert.equal(ProseReadSourceSchema.safeParse({...source,field:'script'}).success,false);
  assert.equal(ProseReadSourceSchema.safeParse({...source,episodeId:'../other'}).success,false);
+});
+
+describe("comparing two versions of a chapter (SPEC-056 R-13)", () => {
+  it("matches paragraphs first, then marks the words of a changed one", () => {
+    const older = "The ledger is kept.\n\nMaren reads it once.\n\nThe bells are silent.";
+    const newer = "The ledger is kept.\n\nMaren reads it twice.\n\nA new line.\n\nThe bells are silent.";
+    const diff = versionDiff(older, newer);
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "changed", "added", "same"]);
+    const changed = diff[1]!;
+    assert.ok(changed.kind === "changed");
+    assert.deepEqual(changed.segments.filter((s) => s.kind === "edit").map((s) => s.kind === "edit" ? [s.before, s.after] : null), [["once.", "twice."]]);
+  });
+
+  it("says what went, and compares a long chapter without giving up on it", () => {
+    assert.deepEqual(versionDiff("One.\n\nTwo.", "One.").map((p) => p.kind), ["same", "removed"]);
+    const long = Array.from({ length: 400 }, (_, i) => `Paragraph ${i} with some words to make it long enough to matter.`).join("\n\n");
+    const edited = long.replace("Paragraph 200 with", "Paragraph 200, changed, with");
+    const diff = versionDiff(long, edited);
+    assert.equal(diff.filter((p) => p.kind === "changed").length, 1, "one paragraph changed, not the whole chapter as one edit");
+    assert.equal(diff.length, 400);
+  });
+});
+
+describe("comparing a rewritten paragraph (SPEC-056 R-13)", () => {
+  it("a paragraph written anew is one gone and one new, not a page of fragments", () => {
+    const diff = versionDiff("Kept.\n\nThe tide came in slowly over the flats.\n\nKept too.", "Kept.\n\nNobody answered the bell that night.\n\nKept too.");
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "removed", "added", "same"]);
+  });
+});
+
+describe("comparing past an inserted paragraph (SPEC-056 R-13)", () => {
+  it("a paragraph changed after one inserted before it still pairs with its new self", () => {
+    const diff = versionDiff("Kept.\n\nMaren reads that twice and then once more.\n\nEnd.", "Kept.\n\nA new beat arrives here first.\n\nMaren reads that twice and then a third time.\n\nEnd.");
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "added", "changed", "same"]);
+  });
 });
