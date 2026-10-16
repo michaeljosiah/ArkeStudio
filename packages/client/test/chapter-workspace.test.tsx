@@ -2756,19 +2756,19 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
   });
 });
 
-describe("Focus and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
+describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
   const key = (init: { key: string; ctrlKey?: boolean; shiftKey?: boolean }) => {
     const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
     Object.assign(event, { metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, ...init });
     return event;
   };
 
-  it("after the goal, Focus and then ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
+  it("after the goal, Focus, Compare and ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
     const bar = q(m, '[role="toolbar"][aria-label="Writing"]')!;
-    const tail = [...bar.children].slice(-3).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
-    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-more"], "the goal, Focus, then ⋯ (R-7)");
+    const tail = [...bar.children].slice(-4).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
+    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-compare-press", "chapter-more"], "the goal, Focus, Compare, then ⋯ (R-7)");
     const root = () => q(m, '[data-testid="chapter-workspace"]')!;
     const titlebar = dom.document.createElement("div");
     titlebar.className = "fy-titlebar";
