@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { CHAPTER_GOAL_LIMITS, CHAPTER_PLAN_LIMITS, type ChapterGoalSource } from "@arke-studio/contracts";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PanelLeft, Search, X } from "../components/icons.js";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PanelLeft, Search, Sparkle, X } from "../components/icons.js";
 import { cx } from "../components/ui.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 
@@ -283,6 +283,31 @@ export function FindBar({ query, count, current, opened, onQuery, onStep, onClos
       </button>
       <button type="button" className="fy-ch__wbtn" aria-label="Close find" onClick={onClose}>
         <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Arke's change, decided on the page (SPEC-056 R-21, R-24, R-27): one held bar at the foot of the
+ * page while a revision or a draft waits where it will land. It says what was asked, how much it
+ * changes, and the two ways out: refuse it, or keep it (in part, when edits are refused one by one).
+ */
+export function PageHeldBar({ name, detail, refuse, keep }: {
+  name: string;
+  detail: string;
+  refuse: { label: string; onPress: () => void; disabled?: boolean };
+  keep: { label: string; onPress: () => void; blocked?: string };
+}) {
+  return (
+    <div className="fy-pageheld" role="region" aria-label="Arke's change" data-testid="page-held-bar">
+      <Sparkle size={14} />
+      <strong>{name}</strong>
+      <span className="fy-pageheld__detail">{detail}</span>
+      <span className="fy-pageheld__push" />
+      <button type="button" className="ui-btn ui-btn--ghost ui-btn--default" disabled={refuse.disabled} onClick={refuse.onPress}>{refuse.label}</button>
+      <button type="button" className="ui-btn ui-btn--primary ui-btn--default" disabled={keep.blocked !== undefined} title={keep.blocked} onClick={keep.onPress}>
+        {keep.blocked ?? keep.label}
       </button>
     </div>
   );

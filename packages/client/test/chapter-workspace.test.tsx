@@ -423,10 +423,53 @@ describe("the chapter, opened (turn 126)", () => {
     await answerOpen(m);
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the draft waits");
     assert.match(text(m), /Arke’s draft/);
-    assert.match(text(m), /decide in the thread/);
+    assert.doesNotMatch(text(m), /decide in the thread/, "the writing room decides it on the page (R-27)");
     assert.match(text(m), /Drafted anew\./, "the draft's own prose is what stands in the manuscript");
+    assert.ok([...m.container.querySelectorAll(".fy-ch__draft p")].every((p) => p.classList.contains("fy-ch__ghost")), "a rewrite is grey throughout, a suggestion");
     assert.match(text(m), /Locked while a draft waits · v4/);
-    assert.match(text(m), /Accept/, "the card holds Accept");
+    const bar = q(m, '[data-testid="page-held-bar"]')!;
+    assert.match(bar.textContent ?? "", /^Draft6 wordsDiscardKeep$/, "Draft, its words, Discard and Keep (R-27)");
+    const press = (label: string) => act(async () => ([...bar.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement).click());
+    await press("Keep");
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, DRAFT.proposal.id, "Keep accepts the staged draft");
+    assert.equal(accepted?.expectedDraftRevision, 1, "fenced to the revision on the page");
+  });
+
+  it("a draft that adds after the prose shows the prose as it is and only what it adds in grey (R-27)", async () => {
+    const adds: StagedProposal = {
+      ...DRAFT,
+      review: { targets: [{ ...DRAFT.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: `${BODY}\n\nThen the seventh bell.` }] }] },
+    } as StagedProposal;
+    const m = await mount(inkbound([adds]));
+    await answerOpen(m);
+    const paragraphs = [...m.container.querySelectorAll(".fy-ch__draft p")];
+    assert.deepEqual(paragraphs.map((p) => p.classList.contains("fy-ch__ghost")), [false, false, true]);
+    assert.equal(paragraphs.at(-1)?.textContent, "Then the seventh bell.");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Draft4 words/, "the words it adds");
+  });
+
+  it("words run on from the last paragraph stand in it, and an empty ripple is still decided on the page (codex on PR 1806)", async () => {
+    const runOn: StagedProposal = {
+      ...DRAFT,
+      ripple: { computedAt: "2026-09-06T12:00:00Z", governing: false, items: [] },
+      review: { targets: [{ ...DRAFT.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: `${BODY.trimEnd()} Then the seventh.` }] }] },
+    } as StagedProposal;
+    const m = await mount(inkbound([runOn]));
+    await answerOpen(m);
+    const paragraphs = [...m.container.querySelectorAll(".fy-ch__draft p")];
+    assert.equal(paragraphs.some((p) => p.classList.contains("fy-ch__ghost")), false, "no new paragraph");
+    assert.equal(paragraphs.at(-1)?.querySelector(".fy-ch__ghost")?.textContent, " Then the seventh.");
+    assert.ok(q(m, '[data-testid="page-held-bar"]'), "an empty preview is no ripple");
+  });
+
+  it("Discard on the page refuses the draft (R-27)", async () => {
+    const m = await mount(inkbound([DRAFT]));
+    await answerOpen(m);
+    const bar = q(m, '[data-testid="page-held-bar"]')!;
+    await act(async () => ([...bar.querySelectorAll("button")].find((b) => b.textContent === "Discard") as HTMLButtonElement).click());
+    const discarded = m.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, DRAFT.proposal.id);
   });
 
   it("a chapter the bundle does not hold is said to be missing, with the way back (codex, PR 879)", async () => {
@@ -1620,7 +1663,8 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the passage waits");
     // Spans, so the text runs together without the spaces the screen draws between them.
     assert.match(text(m), /Arke’s passage ?· 1 → 2 words ?· against v4/);
-    assert.match(text(m), /decide in the thread/);
+    const held = q(m, '[data-testid="page-held-bar"]')!;
+    assert.match(held.textContent ?? "", /^Revise a passage: The counting of bells1 edit · 1 → 2 wordsRefuse allAccept$/, "the ask, its edits and words, Refuse all and Accept (R-24)");
     assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
     assert.match(text(m), /Six, and the tide/, "and the rest of the chapter is untouched");
     assert.doesNotMatch(text(m), /draft waits/);

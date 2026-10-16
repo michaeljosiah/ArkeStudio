@@ -360,3 +360,11 @@
 .fy-askm__sub { top: -6px; left: calc(100% + 8px); width: 220px; }
 .fy-askm__sub--end { left: auto; right: calc(100% + 8px); }
 .fy-askm__sub .fy-askm__field { margin: 6px 0 0; }
+
+/* Arke's change, decided on the page (R-21, R-24, R-27): one held bar at the page's foot. */
+.fy-pageheld { position: sticky; bottom: 16px; z-index: 4; display: flex; align-items: center; gap: 10px; width: min(var(--room-measure, 660px), 100%); margin: 16px auto 0; padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); box-sizing: border-box; }
+.fy-pageheld strong { font: 600 13px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.fy-pageheld__detail { font: 400 12px var(--font-sans); color: var(--muted-foreground); white-space: nowrap; }
+.fy-pageheld__push { flex: 1; }
+/* A suggestion is grey but readable: 42% of the foreground at the least (R-54). */
+.fy-ch__ghost { color: color-mix(in srgb, var(--foreground) 46%, transparent); }

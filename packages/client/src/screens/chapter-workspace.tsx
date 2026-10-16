@@ -62,7 +62,7 @@ import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
-import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
+import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, PageHeldBar, WritingBar } from "./chapter-room.js";
 import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -120,6 +120,7 @@ import {
   useAudiobookRuns,
   useAudiobookRecords,
   acceptProposal,
+  discardProposal,
   onWorldChange,
   subscribeWorldChatSendResults,
   updateProposalPassage,
@@ -1785,6 +1786,25 @@ export function ChapterWorkspace({
   }, [accepting, connection, rejoins, acceptingGone, notices]);
   // Every passage accept is fenced to the revision on screen (codex on PR 1232), one edit or many.
   const pending = keeping !== null || accepting !== null;
+  /*
+   * Decided on the page (SPEC-056 R-24, R-27): in the writing room, a change with nothing else to
+   * confirm. One that ripples into other files still goes to Chat's card, where its consequences
+   * are shown and confirmed before it lands.
+   */
+  // Every staged proposal carries a preview, empty when nothing ripples (codex on PR 1806).
+  const decidedOnPage = view === "manuscript" && !phone && stagedDraft !== undefined && (stagedDraft.staged.ripple?.items.length ?? 0) === 0;
+  // What a draft adds after the saved prose, when it only adds; null when it rewrites.
+  const draftAdds = stagedDraft === undefined || passageChange !== null || live.trim() === "" ? null
+    : (stagedDraft.body ?? "").startsWith(live.trimEnd()) ? (stagedDraft.body ?? "").slice(live.trimEnd().length) : null;
+  const ghostNote = useId();
+  const keepDraft = () => {
+    if (stagedDraft === undefined) return;
+    const proposal = stagedDraft.staged.proposal;
+    const requestId = crypto.randomUUID();
+    if (acceptProposal(worldId, proposal.id, undefined, proposal.draftRevision, requestId)) {
+      setAccepting({ id: proposal.id, requestId, revision: proposal.draftRevision });
+    }
+  };
   // Too long for the frame a keep travels in (codex on PR 1232): a span widened to whole words
   // round an unbroken run can outgrow it, and the transport would drop the keep unanswered.
   const keepFits = passageChange !== null && passageChange.before.length <= PASSAGE_SPAN_MAX
@@ -3198,7 +3218,7 @@ export function ChapterWorkspace({
                   {choosing && <span>· {keptCount} of {editCount} changes kept</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
-                  <span>decide in the thread</span>
+                  {!decidedOnPage && <span>decide in the thread</span>}
                 </div>
                 <div className="fy-ch__draft-passage" aria-label="Arke's passage">
                   {passageParagraphs.map((paragraph, i) => {
@@ -3258,14 +3278,34 @@ export function ChapterWorkspace({
                   {stagedDraft.body !== null && <span>· {countWords(stagedDraft.body).toLocaleString()} words</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
-                  <span>decide in the thread</span>
+                  {!decidedOnPage && <span>decide in the thread</span>}
                 </div>
-                {/* Read, not edited: the draft is decided on the card, so it is drawn as paragraphs
-                    rather than handed to an editor that would have to refuse every keystroke. */}
+                {/* Read, not edited: the draft waits where it will land (R-27). What it adds after
+                    the prose is grey, a suggestion; a draft that rewrites is grey throughout. */}
                 <div className="fy-ch__draft" aria-label="Arke's draft">
-                  {chapterParagraphs(stagedDraft.body ?? live).map((paragraph, i) => (
-                    <p key={i}>{paragraph}</p>
-                  ))}
+                  <span id={ghostNote} className="fy-sr-only">Suggested by Arke, not yet kept</span>
+                  {draftAdds === null
+                    ? chapterParagraphs(stagedDraft.body ?? live).map((paragraph, i) => (
+                        <p key={i} className="fy-ch__ghost" aria-describedby={ghostNote}>{paragraph}</p>
+                      ))
+                    : (() => {
+                        // Words that run on from the last paragraph stand in it, as they will land;
+                        // only what follows a blank line is a paragraph of its own (codex on PR 1806).
+                        const own = chapterParagraphs(live);
+                        const blank = draftAdds.search(/\n[ \t]*\n/);
+                        const inline = /^\s*\n[ \t]*\n/.test(draftAdds) ? "" : blank < 0 ? draftAdds : draftAdds.slice(0, blank);
+                        return <>
+                          {own.map((paragraph, i) => (
+                            <p key={`live-${i}`}>
+                              {paragraph}
+                              {i === own.length - 1 && inline.trim() !== "" && <span className="fy-ch__ghost" aria-describedby={ghostNote}>{inline}</span>}
+                            </p>
+                          ))}
+                          {chapterParagraphs(draftAdds.slice(inline.length)).map((paragraph, i) => (
+                            <p key={`adds-${i}`} className="fy-ch__ghost" aria-describedby={ghostNote}>{paragraph}</p>
+                          ))}
+                        </>;
+                      })()}
                 </div>
               </div>
             ) : richMode ? (
@@ -3365,6 +3405,25 @@ export function ChapterWorkspace({
             {/* With the half open the dock's composer is where a passage is asked about (202): the
                  selection is its subject, said over the composer, and its prompts are the passage's. */}
             {selection !== null && !locked && coarse && !chatBeside && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {decidedOnPage && stagedDraft !== undefined && (passageChange !== null ? (
+              <PageHeldBar
+                name={stagedDraft.staged.proposal.summary}
+                detail={`${editCount === 1 ? "1 edit" : `${editCount} edits`} · ${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`}
+                refuse={{ label: "Refuse all", onPress: () => discardProposal(worldId, stagedDraft.staged.proposal.id), disabled: pending }}
+                keep={{
+                  label: accept !== undefined && "label" in accept ? accept.label : "Accept",
+                  onPress: () => (accept !== undefined && "onAccept" in accept ? accept.onAccept() : undefined),
+                  ...(accept?.blocked !== undefined ? { blocked: accept.blocked } : pending ? { blocked: "Accepting…" } : {}),
+                }}
+              />
+            ) : (
+              <PageHeldBar
+                name="Draft"
+                detail={`${countWords(draftAdds ?? stagedDraft.body ?? "").toLocaleString()} words`}
+                refuse={{ label: "Discard", onPress: () => discardProposal(worldId, stagedDraft.staged.proposal.id), disabled: pending }}
+                keep={{ label: "Keep", onPress: keepDraft, ...(pending ? { blocked: accepting !== null ? "Keeping…" : "Accepting…" } : {}) }}
+              />
+            ))}
             {focus && (
               <div className="fy-ch__focusfoot" data-testid="chapter-focus-foot">
                 <span className="fy-ch__focustrack" role="progressbar" aria-label="Chapter goal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalShare}><i style={{ width: `${goalShare}%` }} /></span>
