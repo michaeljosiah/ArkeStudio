@@ -414,3 +414,14 @@ describe("comparing a chapter of very many paragraphs (codex on PR 1802)", () =>
     assert.equal(ends.at(-1)?.kind, "same");
   });
 });
+
+describe("comparing a whole chapter rewritten (codex on PR 1802)", () => {
+  it("pairs a long unlike stretch by position without searching it", () => {
+    const older = Array.from({ length: 4_000 }, (_, i) => `Old line ${i} about tides.`).join("\n\n");
+    const newer = Array.from({ length: 4_000 }, (_, i) => `Wholly different words number ${i * 7} here.`).join("\n\n");
+    const started = Date.now();
+    const diff = versionDiff(older, newer);
+    assert.ok(Date.now() - started < 3_000, "bounded work");
+    assert.equal(diff.length, 8_000, "each one gone and one new");
+  });
+});

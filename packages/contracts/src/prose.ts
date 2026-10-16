@@ -884,7 +884,9 @@ export function versionDiff(older: string, newer: string): VersionParagraph[] {
     // than one gone and one new. Newer paragraphs it passes over were added before it.
     let next = 0;
     for (const before of removed) {
-      const at = added.findIndex((after, k) => k >= next && alike(before, after));
+      // A bounded look ahead (codex on PR 1802): a long stretch rewritten whole would otherwise
+      // compare every paragraph gone with every paragraph new.
+      const at = added.findIndex((after, k) => k >= next && k < next + VERSION_PAIR_WINDOW && alike(before, after));
       if (at === -1) {
         out.push({ kind: "removed", text: before });
         continue;
@@ -898,9 +900,16 @@ export function versionDiff(older: string, newer: string): VersionParagraph[] {
     added = [];
   };
   if (!tabled) {
-    removed = [...a];
-    added = [...b];
-    settle();
+    // Past the cap, paired by position: each pair alike or not, and no search at all.
+    const pairs = Math.max(a.length, b.length);
+    for (let k = 0; k < pairs; k++) {
+      const before = a[k], after = b[k];
+      if (before !== undefined && after !== undefined && alike(before, after)) out.push({ kind: "changed", segments: passageDiff(before, after) });
+      else {
+        if (before !== undefined) out.push({ kind: "removed", text: before });
+        if (after !== undefined) out.push({ kind: "added", text: after });
+      }
+    }
   } else {
     let i = 0;
     let j = 0;
@@ -926,6 +935,8 @@ export function versionDiff(older: string, newer: string): VersionParagraph[] {
 
 /** Past this many paragraph pairs the changed stretch is compared by position instead (about 4 MB). */
 const VERSION_DIFF_CELLS = 1_000_000;
+/** How far ahead a paragraph gone looks for its new self among the paragraphs added. */
+const VERSION_PAIR_WINDOW = 50;
 
 /** Half or more of the longer paragraph's words are also the other's. */
 function alike(a: string, b: string): boolean {
