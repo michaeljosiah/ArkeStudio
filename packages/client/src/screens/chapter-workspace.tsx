@@ -55,13 +55,14 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Chat, ChevronDown, FileText, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
+import { Chat, ChevronDown, FileText, Maximize2, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
-import { rememberDock, rememberedDocks } from "../lib/chapter-dock.js";
+import { namesRemembered, rememberDock, rememberedDocks, rememberNames } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
-import { BriefFields, DocHead, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
+import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
+import type { FindState } from "../components/editor/writing-aids.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
 import { NameCard, type NameCardSheet } from "./chapter-names.js";
@@ -80,7 +81,7 @@ import { BlockPicturePanel, pictureStart, useChapterPictures } from "../componen
 import { IllustrationSheet, IllustrationStatus, useIllustration, useIllustrationSheet } from "../components/audiobook-illustrate.js";
 import { LookSheet } from "../components/audiobook-look.js";
 import { NewLookSheet } from "../components/audiobook-new-look.js";
-import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick } from "./chapter-audiobook.js";
+import { AudiobookBlocks, AudiobookFilterMenu, AudiobookSide, BlockPanel, BlocksPress, useBlockSeamActs, DirectSheet, DirectionCard, MenuPress, NotesPress, ReadSheet, ReadSheetActions, PerformedSpeaker, ReadingMenu, SpeakerLinesDialog, ToolMenu, blockPanelHead, blockTakes, paragraphsToCast, useChapterAudiobook, type AudiobookIntent, type BlockRow, type PanelTab, type SpeakerChoices, type SpeakerPick, type ToolMenuItem } from "./chapter-audiobook.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
 import { BlockTimingPanel, betweenClocks, chapterTimingOf, proposedView, timingLanes, useTimingProposal } from "./chapter-timing.js";
 import { BedPanel, ReactionsPanel } from "../components/audiobook-beds.js";
@@ -158,6 +159,16 @@ function proseNames(sheet: { name: string; shortName?: string }): string[] {
   // In any case: `the Queen` defaults to `the`, which would otherwise be linked everywhere.
   return short === sheet.name || NOT_A_NAME.has(short.replace(/\.$/, "").toLowerCase()) ? [sheet.name] : [sheet.name, short];
 }
+
+const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+/** The room's shortcuts, as ⋯ lists them (D-7). */
+const SHORTCUTS: readonly [string, string][] = [
+  ["Focus", `${MOD}Shift+F`],
+  ["Leave Focus", "Esc"],
+  ["Find", `${MOD}F`],
+  ["Insert a name", "@"],
+  ["Blocks", "/"],
+];
 
 // A placeholder labels; it does not explain (turn 137, SPEC-056 R-53).
 const PLACEHOLDER = "Start writing";
@@ -2673,6 +2684,124 @@ export function ChapterWorkspace({
       open: `/w/${at}/cast/${sid}`,
     }];
   });
+  // The writing room's own controls (SPEC-056 R-7, R-12): Focus, Find, and the names' switch.
+  const book = `${worldId}/${prodId}`;
+  const [namesOn, setNamesOnState] = useState(() => namesRemembered(book));
+  useEffect(() => setNamesOnState(namesRemembered(book)), [book]);
+  const setNamesOn = (on: boolean) => {
+    setNamesOnState(on);
+    rememberNames(book, on);
+    if (!on) closeName();
+  };
+  const [find, setFind] = useState<FindState | null>(null);
+  const [found, setFound] = useState({ count: 0, current: -1 });
+  useEffect(() => setFind(null), [chapter.id, view]);
+  const openFind = useCallback(() => setFind((open) => open ?? { query: "", index: 0 }), []);
+  const [focus, setFocus] = useState(false);
+  const focusRef = useRef(false);
+  focusRef.current = focus;
+  const focusScroll = useRef<number | null>(null);
+  const enterFocus = useCallback(() => {
+    focusScroll.current = chapterCentre.current?.scrollTop ?? null;
+    setFocus(true);
+  }, []);
+  const leaveFocus = useCallback(() => setFocus(false), []);
+  useEffect(() => setFocus(false), [chapter.id, view]);
+  useEffect(() => {
+    if (!focus) return;
+    // The chrome sits under the page and is out of reach of the keyboard as well as the pointer.
+    const chrome = [...document.querySelectorAll(".fy-prodrail, .fy-titlebar, .fy-global-chat, .fy-sw__rail")];
+    for (const element of chrome) element.setAttribute("inert", "");
+    // On the desktop the window goes full screen; a browser hides the app's chrome only (R-12).
+    const desktop = window.arke !== undefined;
+    if (desktop && document.fullscreenElement === null) void document.documentElement.requestFullscreen?.().catch(() => {});
+    // Leaving the window's full screen another way (the system's own key) leaves Focus too.
+    const onFull = () => {
+      if (document.fullscreenElement === null) setFocus(false);
+    };
+    if (desktop) document.addEventListener("fullscreenchange", onFull);
+    // The caret's paragraph comes to the middle, and the caret back into the page.
+    const page = manuscriptRef.current;
+    page?.querySelector<HTMLElement>(".fy-rme__here")?.scrollIntoView?.({ block: "center" });
+    page?.querySelector<HTMLElement>(".fy-rme__doc")?.focus();
+    return () => {
+      for (const element of chrome) element.removeAttribute("inert");
+      if (desktop) {
+        document.removeEventListener("fullscreenchange", onFull);
+        if (document.fullscreenElement !== null) void document.exitFullscreen?.().catch(() => {});
+      }
+    };
+  }, [focus]);
+  // Out of Focus, the page is where the author left it.
+  useLayoutEffect(() => {
+    if (focus || focusScroll.current === null) return;
+    chapterCentre.current?.scrollTo?.({ top: focusScroll.current });
+    focusScroll.current = null;
+  }, [focus]);
+  // The caret's line holds at the middle as the author types (R-12); with reduced motion it jumps.
+  const holdCaret = useCallback((caret: { top: number; bottom: number }) => {
+    if (!focusRef.current) return;
+    const page = manuscriptRef.current;
+    if (!page) return;
+    const box = page.getBoundingClientRect();
+    const delta = (caret.top + caret.bottom) / 2 - (box.top + box.height / 2);
+    if (Math.abs(delta) < 4) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    page.scrollBy?.({ top: delta, behavior: reduce || Math.abs(delta) < 120 ? "auto" : "smooth" });
+  }, []);
+  useEffect(() => {
+    if (view !== "manuscript" || phone) return;
+    const onKey = (event: KeyboardEvent) => {
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (mod && event.shiftKey && key === "f") {
+        event.preventDefault();
+        if (focusRef.current) leaveFocus();
+        else enterFocus();
+        return;
+      }
+      if (mod && !event.shiftKey && !event.altKey && key === "f" && richMode && !focusRef.current) {
+        event.preventDefault();
+        openFind();
+        return;
+      }
+      // Esc leaves Focus unless something above the page took it: a menu in the prose, a dialog.
+      if (event.key === "Escape" && focusRef.current && !event.defaultPrevented && document.querySelector("dialog[open], [role='menu']") === null) {
+        leaveFocus();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [view, phone, richMode, enterFocus, leaveFocus, openFind]);
+  const moreItems: ToolMenuItem[] = [
+    { key: "names", label: "Linked names", state: namesOn ? "On" : "Off", disabled: false, press: () => setNamesOn(!namesOn), testId: "chapter-more-names" },
+    { key: "source", label: "Markdown source", state: richRefusal !== null ? "Only" : preferSource ? "On" : "Off", disabled: locked || richRefusal !== null, press: () => setPreferSource((on) => !on) },
+    { key: "find", label: "Find", state: `${MOD}F`, disabled: !richMode, press: openFind, testId: "chapter-more-find" },
+    {
+      key: "shortcuts",
+      label: "Shortcuts",
+      state: "",
+      disabled: false,
+      separator: true,
+      children: SHORTCUTS.map(([label, keys]) => ({ key: label, label, state: keys, disabled: true, press: () => {} })),
+    },
+  ];
+  const focusPress = (
+    <button type="button" className={cx("fy-ch__wbtn", focus && "fy-ch__wbtn--on")} aria-label="Focus" title={`Focus · ${MOD}Shift+F`} aria-pressed={focus} onClick={enterFocus} data-testid="chapter-focus">
+      <Maximize2 size={15} />
+    </button>
+  );
+  const findBar = find === null ? null : (
+    <FindBar
+      query={find.query}
+      count={found.count}
+      current={found.current}
+      onQuery={(query) => setFind({ query, index: 0 })}
+      onStep={(delta) => setFind((open) => (open === null ? open : { ...open, index: open.index + delta }))}
+      onClose={() => setFind(null)}
+    />
+  );
+  const goalShare = goal.words > 0 ? Math.min(100, Math.round((words / goal.words) * 100)) : 0;
   const nameCard = nameHit === null || cardSheets.length === 0 ? null : (
     <NameCard
       sheets={cardSheets}
@@ -2745,7 +2874,7 @@ export function ChapterWorkspace({
     />
   );
   return (
-    <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view} data-chat={globalChat ? "global" : undefined} data-room={room ? "true" : undefined}>
+    <div className={cx("fy-sw", view === "timing" && "fy-sw--audio-studio")} data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"} data-view={view} data-chat={globalChat ? "global" : undefined} data-room={room ? "true" : undefined} data-focus={focus ? "true" : undefined}>
       {view === "timing" && <AudioStudioWorkspace key={`${worldId}/${prodId}/${chapter.id}`} book={production.meta.title} title={chapter.title}
         worldId={worldId} productionId={prodId} chapterId={chapter.id} chapterFile={chapter.file} slug={worldSlug}
         connection={connection} stamp={audiobook.lastRecord?.seq} rows={audiobook.rows} timing={shownTiming}
@@ -2768,9 +2897,11 @@ export function ChapterWorkspace({
             next={nextChapter === null ? null : { id: nextChapter.id, title: nextChapter.title }}
             onChapter={(id) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(id)}`)}
             views={viewNav}
+            lead={readControl}
             goal={<GoalRing words={words} goal={goal.words} source={goal.source} />}
           >
-            {readControl}
+            {focusPress}
+            <ToolMenu icon label="More" items={moreItems} testId="chapter-more" />
           </WritingBar>
         ) : (
         <header className="fy-sw__head">
@@ -2975,7 +3106,8 @@ export function ChapterWorkspace({
               )}
             </div>
           )}
-          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"}>
+          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"}>
+            {room && findBar}
             {room && (
               <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
                 {emptyChapter && (
@@ -3106,8 +3238,12 @@ export function ChapterWorkspace({
                   placeholder={PLACEHOLDER}
                   ariaLabel={`Chapter ${chapter.order}`}
                   linkedNames={linkedNames}
-                  onName={onName}
+                  {...(namesOn ? { onName } : {})}
                   mentions={mentions}
+                  writingAids
+                  find={find}
+                  onFind={(count, current) => setFound((was) => (was.count === count && was.current === current ? was : { count, current }))}
+                  onCaret={holdCaret}
                 />
                 {nameCard}
               </div>
@@ -3170,6 +3306,12 @@ export function ChapterWorkspace({
             {/* With the half open the dock's composer is where a passage is asked about (202): the
                  selection is its subject, said over the composer, and its prompts are the passage's. */}
             {selection !== null && !locked && coarse && !chatBeside && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
+            {focus && (
+              <div className="fy-ch__focusfoot" data-testid="chapter-focus-foot">
+                <span className="fy-ch__focustrack" role="progressbar" aria-label="Chapter goal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalShare}><i style={{ width: `${goalShare}%` }} /></span>
+                {wordsToday > 0 && <span className="fy-mono">+{wordsToday.toLocaleString()} today</span>}
+              </div>
+            )}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
               <span className="fy-ch__foot-push" />

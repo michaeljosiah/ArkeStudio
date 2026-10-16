@@ -266,3 +266,25 @@
 }
 .fy-namecard__hear { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--foreground); cursor: pointer; }
 .fy-namecard__hear:hover, .fy-namecard__hear:focus-visible { background: var(--accent); }
+
+/* ⋯ sits in the bar at the bar's own size. */
+.fy-ch__wbar .fy-ab__ico { width: 34px; height: 34px; }
+
+/* Find (R-7): one line under the bar, at the page's measure. */
+.fy-ch__find { position: sticky; top: 68px; z-index: 2; display: flex; align-items: center; gap: 8px; width: min(var(--room-measure, 660px), 100%); margin: 12px 0 -40px; box-sizing: border-box; padding: 4px 6px 4px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-pop); color: var(--muted-foreground); }
+.fy-ch__find-input { flex: 1; min-width: 0; height: 30px; border: 0; background: transparent; color: var(--foreground); font: 400 14px var(--font-sans); outline: none; }
+.fy-ch__find-count { font-size: 12px; white-space: nowrap; }
+.fy-find { border-radius: 2px; background: color-mix(in srgb, var(--warning) 22%, transparent); }
+.fy-find--here { background: color-mix(in srgb, var(--warning) 55%, transparent); }
+
+/* Focus (R-12, 227g): the window is the page. The chrome stays mounted under it and inert. */
+[data-screen="chapter"][data-focus="true"] .fy-ch__manuscript { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 50vh 24px; overflow-y: auto; background: var(--background); }
+[data-screen="chapter"][data-focus="true"] .fy-ch__manuscript > :is(.fy-ch__dochead, .fy-ch__prose, .fy-ch__source) { width: min(var(--room-measure, 660px), 100%); }
+[data-screen="chapter"][data-focus="true"] :is(.fy-ch__foot, .fy-ch__povreview, .fy-passage-anchor) { display: none; }
+[data-focus="true"] .fy-rme__doc > * { opacity: .26; transition: opacity .24s ease; }
+[data-focus="true"] .fy-rme__doc > .fy-rme__here { opacity: 1; }
+[data-focus="true"] .fy-ln { text-decoration: none; }
+.fy-ch__focusfoot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; display: flex; align-items: center; gap: 14px; padding: 0 24px 16px; font: 500 12px var(--font-sans); color: var(--muted-foreground); pointer-events: none; }
+.fy-ch__focustrack { flex: 1; height: 3px; overflow: hidden; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 12%, transparent); }
+.fy-ch__focustrack i { display: block; height: 100%; background: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { [data-focus="true"] .fy-rme__doc > * { transition: none; } }
