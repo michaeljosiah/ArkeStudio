@@ -1853,7 +1853,8 @@ export function ChapterWorkspace({
     const line = `${memory?.line ?? "Revise this"}. Another version, different from the one shown.`;
     const press = crypto.randomUUID();
     setVersionPress(press);
-    setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject });
+    // Quiet, as the rewrite it repeats: the version lands on the page, not in Chat.
+    setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject, quiet: true });
   };
   const versionControls = passageChange === null || versions.length === 0 ? undefined : {
     at: Math.max(0, versionAt),
