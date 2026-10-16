@@ -30,3 +30,22 @@ it("requests a full hello instead of retaining stale history across a reconnect"
     assert.equal(__stateForTest().state!.app.jobs.length, FIXTURE_STATE.app.jobs.length);
   } finally { __setBridgeForTest(null); }
 });
+
+it("falls back once to a legacy hello when an older strict coordinator silently drops the extension", t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sent: { kind: string; retainHistory?: boolean }[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "browser", send: text => { sent.push(JSON.parse(text)); }, connect() {}, subscribe() {} });
+  try {
+    __connectionStatusForTest("open");
+    assert.equal(sent[0]!.retainHistory, true);
+    t.mock.timers.tick(15_000);
+    assert.equal(sent.length, 2); assert.equal(sent[1]!.retainHistory, undefined);
+    t.mock.timers.tick(30_000); assert.equal(sent.length, 2, "only one fallback");
+    __handleFrameForTest({ kind: "snapshot", seq: 1, state: FIXTURE_STATE });
+    __connectionStatusForTest("open");
+    __handleFrameForTest({ kind: "snapshot", seq: 1, state: FIXTURE_STATE });
+    t.mock.timers.tick(15_000); assert.equal(sent.length, 3, "a snapshot cancels fallback");
+    __connectionStatusForTest("open"); __connectionStatusForTest("auth-refused");
+    t.mock.timers.tick(15_000); assert.equal(sent.length, 4, "a closed connection cancels fallback");
+  } finally { __setBridgeForTest(null); }
+});
