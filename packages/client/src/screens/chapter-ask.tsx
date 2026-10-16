@@ -72,7 +72,7 @@ export function SelectionBar({ at, format, words, held, refused, actions, onAsk,
             setOpen((was) => !was);
           }}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
               setFromKeys(true);
               setOpen(true);
@@ -174,7 +174,8 @@ function AskArkeMenu({ below, end, actions, focusFirst, onFocused, onAsk, onOpen
         value={own}
         onChange={(e) => setOwn(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && own.trim() !== "") {
+          // Enter that commits an IME candidate is not a send.
+          if (e.key === "Enter" && !e.nativeEvent.isComposing && own.trim() !== "") {
             e.preventDefault();
             onAsk(ownAsk(own));
           }
@@ -219,7 +220,7 @@ function AskArkeMenu({ below, end, actions, focusFirst, onFocused, onAsk, onOpen
               value={tone}
               onChange={(e) => setTone(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && tone.trim() !== "") {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing && tone.trim() !== "") {
                   e.preventDefault();
                   onAsk(toneAction(tone));
                 }

@@ -2870,12 +2870,15 @@ describe("the selection bar and Ask Arke (design turn 227p–q, SPEC-056 R-22, R
     await keyup(area, 0, 24);
     await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
     const field = q(m, ".fy-askm__field") as HTMLInputElement;
-    const props = (field as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onKeyDown: (event: { key: string; preventDefault: () => void }) => void }>)[
+    const props = (field as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onKeyDown: (event: { key: string; preventDefault: () => void; nativeEvent: { isComposing: boolean } }) => void }>)[
       Object.keys(field).find((key) => key.startsWith("__reactProps$"))!
     ]!;
     await act(async () => props.onChange({ target: { value: "Make her colder" } }));
     const after = (q(m, ".fy-askm__field") as unknown as Record<string, typeof props>)[Object.keys(q(m, ".fy-askm__field")!).find((key) => key.startsWith("__reactProps$"))!]!;
-    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {} }));
+    // Enter that commits an IME candidate is not a send.
+    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {}, nativeEvent: { isComposing: true } }));
+    assert.equal(sends(m).length, 0);
+    await act(async () => after.onKeyDown({ key: "Enter", preventDefault() {}, nativeEvent: { isComposing: false } }));
     assert.match(sends(m).at(-1)?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Make her colder$/);
     assert.equal(q(m, "[role=menu]"), null, "an ask closes the menu");
   });

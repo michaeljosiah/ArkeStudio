@@ -427,8 +427,8 @@ const ASK_ELSE = passageAction("other")!;
 const NONE_REFUSED: ReadonlySet<number> = new Set();
 const HOLD_TO_STYLE = passageAction("style")!;
 
-/** The widest the menu of asks draws, its border and padding included (fidelity.css). */
-const ASK_MENU_WIDTH = 200;
+/** The widest the Ask Arke menu draws, its border and padding included (chapter-room.css). */
+const ASK_MENU_WIDTH = 320;
 
 /**
  * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
@@ -1613,6 +1613,7 @@ export function ChapterWorkspace({
       subject: dockSubject,
       ...(action.replyOnly ? { replyOnly: true } : {}),
       ...(action.draft ? { draft: true } : {}),
+      ...(!action.replyOnly && !action.draft ? { quiet: true } : {}),
     });
   };
 
