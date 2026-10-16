@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
+import { ArkePrompt } from "../src/screens/chapter-ask.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
 import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
@@ -3013,5 +3014,54 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     const THIRD = { ...SECOND, proposal: { ...SECOND.proposal, id: "pr_01J8H0000000000000000000Q3", created: "2026-09-06T12:10:00Z" } } as StagedProposal;
     await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD], proposals: [...styled.world!.proposals, THIRD] }, worldChat: workspace } as ClientState, { connection: "open" }));
     assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /3 of 3/, "the answer to the ask is the third version");
+  });
+});
+
+describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
+  const CONTINUED: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000K1" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the bells. The seventh never came.") }] }] },
+  } as StagedProposal;
+  const key = (init: { key: string; shiftKey?: boolean }) => {
+    const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
+    Object.assign(event, { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, ...init });
+    return event;
+  };
+
+  it("what Arke writes on from the caret waits in grey after it, with Continue, its words, Discard and Keep", async () => {
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    const ghost = q(m, ".fy-ch__draft-passage .fy-ch__ghost");
+    assert.equal(ghost?.textContent, " The seventh never came.", "the written-on words, grey, after the words that stood");
+    assert.equal(q(m, ".fy-ch__draft-passage ins"), null, "not tracked as an edit");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue4 words1 of 1DiscardKeep$/);
+  });
+
+  it("Tab keeps it and Esc lets it go (D-7)", async () => {
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Tab" }) as unknown as Event); });
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, CONTINUED.proposal.id, "Tab keeps");
+    const other = await mount(inkbound([CONTINUED]));
+    await answerOpen(other);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    const discarded = other.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, CONTINUED.proposal.id, "Esc discards");
+  });
+
+  it("Dialogue for… asks whose lines, from the characters, and Enter takes the first that matches", async () => {
+    const asked: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ArkePrompt kind="dialogue" at={{ top: 0, left: 0 }} characters={[{ id: "maren-kest", name: "Maren Kest" }, { id: "rook", name: "Rook Vane" }]} onAsk={(who) => asked.push(who)} onClose={() => {}} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    assert.deepEqual([...container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent), ["Maren Kest", "Rook Vane"]);
+    await act(async () => ([...container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Rook Vane") as HTMLButtonElement).click());
+    assert.deepEqual(asked, ["Rook Vane"]);
   });
 });

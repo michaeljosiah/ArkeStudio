@@ -252,3 +252,50 @@ function AskArkeMenu({ below, end, subEnd, actions, focusFirst, onFocused, onAsk
     </div>
   );
 }
+
+/**
+ * Describe… and Dialogue for… (R-19): what to describe, in a field, or whose lines, from the
+ * characters, asked at the caret. Esc puts it away and the caret stays where it was.
+ */
+export function ArkePrompt({ kind, at, characters, onAsk, onClose }: {
+  kind: "describe" | "dialogue";
+  at: { top: number; left: number };
+  characters: readonly { id: string; name: string }[];
+  onAsk: (what: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const field = useRef<HTMLInputElement | null>(null);
+  useEffect(() => field.current?.focus(), []);
+  const people = kind === "dialogue" ? characters.filter((who) => who.name.toLowerCase().includes(value.trim().toLowerCase())) : [];
+  return (
+    <div className="fy-askm fy-arkeprompt" style={{ top: at.top, left: at.left }} role="dialog" aria-label={kind === "describe" ? "Describe" : "Dialogue for"}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+        }
+      }}>
+      <input
+        ref={field}
+        className="fy-askm__field"
+        aria-label={kind === "describe" ? "What to describe" : "Whose lines"}
+        placeholder={kind === "describe" ? "A person, place or moment" : "A character"}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          if (kind === "describe" && value.trim() !== "") onAsk(value.trim());
+          else if (kind === "dialogue" && people[0] !== undefined) onAsk(people[0].name);
+        }}
+      />
+      {people.map((who) => (
+        <button key={who.id} type="button" role="menuitem" className="fy-askm__item" onMouseDown={(e) => e.preventDefault()} onClick={() => onAsk(who.name)}>
+          {who.name}
+        </button>
+      ))}
+    </div>
+  );
+}
