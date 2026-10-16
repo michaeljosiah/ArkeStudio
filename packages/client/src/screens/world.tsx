@@ -5,7 +5,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { ReadAloudConfirmation } from "../components/read-aloud-confirmation.js";
 import { CharacterHeader } from "./character-reference.js";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   artifactPosterPath,
   CHARACTER_ROLE_MAX,
@@ -2781,6 +2781,11 @@ function NewSheetScreen({
   const harnessReady = state?.app.health.harness.status === "healthy";
   const characters = world?.sheets.filter((s) => s.type === "character" && !s.retired) ?? [];
   const listPath = sheetType === "character" ? "cast" : `${sheetType}s`;
+  // Opened from a chapter's point of view (SPEC-056 D-4): back there with the name, and the chapter
+  // chooses the character once its sheet arrives. Only an in-app address is followed.
+  const [searchParams] = useSearchParams();
+  const then = sheetType === "character" ? searchParams.get("then") : null;
+  const returnTo = then !== null && then.startsWith("/w/") && !then.startsWith("//") ? then : null;
   const contextPills = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
       <span className="fy-mono">drafts with:</span>
@@ -2800,7 +2805,9 @@ function NewSheetScreen({
       onClick={() => {
         if (!worldId) return;
         createSheetFromSentence(worldId, sheetType, name.trim(), sentence.trim());
-        navigate(`/w/${worldId}/${listPath}`);
+        // The time goes with the name, so the chapter takes the proposal this press stages and not
+        // an older one waiting under the same name (codex on PR 1799).
+        navigate(returnTo !== null ? `${returnTo}${returnTo.includes("?") ? "&" : "?"}pov-name=${encodeURIComponent(name.trim())}&pov-since=${encodeURIComponent(new Date().toISOString())}` : `/w/${worldId}/${listPath}`);
       }}
     >
       {harnessReady ? "Draft the sheet" : "Create as sketch"}

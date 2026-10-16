@@ -39,7 +39,13 @@
 .fy-ch__brief-field { display: grid; gap: 6px; font: 400 13px/1.45 var(--font-sans); }
 .fy-ch__brief-field > span { color: var(--muted-foreground); font-weight: 500; font-size: 12px; }
 .fy-ch__brief-field p { margin: 0; }
-.fy-ch__brief .fy-ch__pick { min-height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+:is(.fy-ch__brief, .fy-ch__props) .fy-ch__pick { min-height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+/* A new chapter's plan at the top of its page (R-32, 227u): label and value rows between rules. */
+.fy-ch__props { display: grid; gap: 10px; margin: -8px 0 34px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.fy-ch__props .fy-ch__brief-field { grid-template-columns: 120px minmax(0, 1fr); align-items: baseline; column-gap: 18px; }
+.fy-ch__props .fy-ch__pick { justify-self: start; }
+/* The plan's fields are one line at rest: the scene script's field box (min-height, padding) is not theirs. */
+:is(.fy-ch__brief, .fy-ch__props) .fy-sbscript { min-height: 0; margin: 0; padding: 2px 4px; margin-inline: -4px; border-radius: 6px; font: inherit; }
 .fy-ch__goal-input { width: 120px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
 
 @media (min-width: 600px) {
@@ -157,3 +163,6 @@
   .fy-chov__cards { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
   .fy-chov__card { flex: none; width: 124px; }
 }
+
+/* A character made from the point of view, reviewed where the chapter is (D-4). */
+.fy-ch__povreview { margin: 0 0 24px; }

@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
+import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import { __clearChapterViewsForTest } from "../src/lib/chapter-view.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -2592,5 +2593,94 @@ describe("the book strip (design turn 227, SPEC-056 R-36)", () => {
     assert.ok(segments.every((segment) => segment.getAttribute("role") === null), "a segment is announced as the button it is");
     await act(async () => (segments[1] as HTMLElement).click());
     assert.deepEqual(chose, ["three"]);
+  });
+});
+
+describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
+  async function render(node: React.ReactNode): Promise<Mounted> {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MemoryRouter>{node}</MemoryRouter>));
+    const mounted = { container, root, sent: [], navigate: () => {} };
+    open.push(mounted);
+    return mounted;
+  }
+
+  it("a just-made chapter opens with its title being typed; an older one shows it", async () => {
+    const fresh = await render(<DocHead order={3} title="Untitled" locked={false} fresh onTitle={() => {}} />);
+    assert.equal((q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.getAttribute("value") ?? (q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.defaultValue, "Untitled", "typing replaces Untitled (R-32)");
+    const older = await render(<DocHead order={3} title="Neap" locked={false} onTitle={() => {}} />);
+    assert.equal(q(older, 'input[aria-label="Chapter title"]'), null);
+    assert.match(text(older), /^Chapter 3Neap$/);
+  });
+
+  it("the plan at the top of the page offers No point of view and New character…, which opens creation instead of choosing (D-4)", async () => {
+    const plans: unknown[] = [];
+    let opened = 0;
+    const m = await render(
+      <BriefFields page synopsis={undefined} pov={undefined} when={undefined} goal={3000} goalSource="default" characters={[]} locked={false}
+        onPlan={(changes) => plans.push(changes)} onNewCharacter={() => { opened += 1; }} />,
+    );
+    assert.ok(q(m, '[data-testid="chapter-props"]'), "the page's plan, not the Brief's");
+    const select = q(m, 'select[aria-label="Point of view"]') as HTMLSelectElement;
+    assert.deepEqual([...select.querySelectorAll("option")].map((option) => option.textContent), ["No point of view", "New character…"], "a world with no characters never dead-ends the field");
+    // linkedom does not report a chosen option's value, so the picker's own handler is called.
+    const key = Object.keys(select).find((k) => k.startsWith("__reactProps$"))!;
+    const onChange = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!.onChange;
+    await act(async () => onChange({ target: { value: NEW_CHARACTER } }));
+    assert.equal(opened, 1, "New character… opens character creation");
+    assert.equal(plans.length, 0, "and chooses nothing yet");
+  });
+
+  it("back from New character…, the staged character is reviewed on the chapter and chosen by its sheet once accepted (codex on PR 1799)", async () => {
+    // A second Maren Kest: the name the author typed is already a sheet's, so only the staged
+    // proposal's path may say which character this chapter's point of view becomes.
+    const NEW_PATH = "characters/maren-kest-2.md";
+    const staged: StagedProposal = {
+      proposal: {
+        id: "pr_01J8H0000000000000000000N1",
+        kind: "new-sheet",
+        summary: "New character: Maren Kest",
+        targets: [{ path: NEW_PATH, baseVersion: null, baseHash: null }],
+        baseCanonRevision: 42,
+        reservedCanonIds: [],
+        source: "studio",
+        created: "2026-10-16T12:00:00Z",
+        draftRevision: 1,
+        decision: { mode: "attended", owner: { kind: "surface", surface: "sheet-list", targetPath: NEW_PATH } },
+      },
+      ripple: null,
+      review: { targets: [{ path: NEW_PATH, label: "Maren Kest", kind: "character", action: "create", fields: [] }] },
+    } as unknown as StagedProposal;
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: ChapterSummary[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, pov: undefined } : c)) as ChapterSummary[];
+    const plans = (m: Mounted) => m.sent.filter((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }>[];
+    // An older Maren Kest is already waiting for review; the press's own proposal is the one taken.
+    const older = { ...staged, proposal: { ...staged.proposal, id: "pr_01J8H0000000000000000000N0", created: "2026-10-16T09:00:00Z",
+      targets: [{ path: "characters/maren-kest-old.md", baseVersion: null, baseHash: null }] },
+      review: { targets: [{ path: "characters/maren-kest-old.md", label: "Maren Kest", kind: "character", action: "create", fields: [] }] } } as unknown as StagedProposal;
+    (state.world as { proposals: StagedProposal[] }).proposals = [...state.world!.proposals, older];
+    const m = await mount(state, `${ROUTE}?pov-name=${encodeURIComponent("Maren Kest")}&pov-since=${encodeURIComponent("2026-10-16T11:59:00Z")}`);
+    await answerOpen(m);
+    assert.equal(plans(m).length, 0, "the older sheet of the same name is not chosen");
+    assert.equal(q(m, '[data-testid="chapter-new-character"]'), null, "nor the older proposal: nothing to review until the press's own is staged");
+
+    const withStaged = { ...state, world: { ...state.world!, proposals: [...state.world!.proposals, staged] } };
+    await act(async () => __setStateForTest(withStaged, { connection: "open" }));
+    assert.ok(q(m, '[data-testid="chapter-new-character"]'), "the new character is reviewed on the chapter");
+    assert.equal(plans(m).length, 0, "and nothing is chosen before it is accepted");
+
+    const accepted = {
+      ...withStaged,
+      world: {
+        ...withStaged.world,
+        proposals: state.world!.proposals,
+        sheets: [...state.world!.sheets, { ...state.world!.sheets.find((sheet) => sheet.id === "maren-kest")!, id: "maren-kest-2", version: 1, status: "draft" }],
+      },
+    } as ClientState;
+    await act(async () => __setStateForTest(accepted, { connection: "open" }));
+    assert.deepEqual(plans(m).map((plan) => plan.changes), [{ pov: "maren-kest-2" }], "the sheet the proposal made");
   });
 });

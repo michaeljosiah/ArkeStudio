@@ -269,6 +269,37 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
   });
 
+  it("a new chapter takes the point of view of the chapter before it (SPEC-056 D-3)", async () => {
+    const { dir, store } = await open();
+    await editChapterPlan(store, LEDGER, "01-neap", { pov: "maren-kest" });
+    const chapters = await chaptersOf(dir, LEDGER);
+    const last = [...chapters].filter((c) => !c.retired).sort((a, b) => b.order - a.order)[0]!;
+    if (last.id !== "neap") await editChapterPlan(store, LEDGER, last.file, { pov: "maren-kest" });
+    const made = await createChapter(store, LEDGER, { title: "Untitled", order: 99 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === made)!.pov, "maren-kest");
+    // A point of view the world no longer holds as a character is not carried.
+    await editChapterPlan(store, LEDGER, made + "", { pov: null });
+    const again = await createChapter(store, LEDGER, { title: "Untitled", order: 100 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === again)!.pov, undefined, "nothing before it to carry");
+  });
+
+  it("the chapter before a new one is found by the ranks on disk, past a legacy chapter with none (codex on PR 1799)", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await createProduction(first, { title: "Inkbound", format: "story" });
+    const anchor = await createChapter(first, "inkbound", { title: "Anchor", order: 10 });
+    await editChapterPlan(first, "inkbound", anchor, { pov: "maren-kest" });
+    await first.close();
+    // No rank: the summaries number it after Anchor, but a new chapter's rank (11) sorts before it.
+    await writeFile(join(dir, "productions", "inkbound", "chapters", "bare.md"), "---\nid: bare\ntitle: bare\npov: perrin-tallow\nstatus: planned\nversion: 1\n---\n\nProse.\n");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    await store.reconcileExternalEdit("productions/inkbound/chapters/bare.md");
+    assert.deepEqual((await chaptersOf(dir, "inkbound")).map((c) => c.file), ["anchor", "bare"]);
+    const made = await createChapter(store, "inkbound", { title: "Untitled", order: 3 });
+    assert.equal((await chaptersOf(dir, "inkbound")).find((c) => c.id === made)!.pov, "maren-kest", "Anchor's, the ranked chapter it follows");
+  });
+
   it("a chapter's goal and picture save with the plan, ride on the summary and keep the version (SPEC-056 R-49/R-50)", async () => {
     const { dir, store } = await open();
     const before = await openChapter(store, LEDGER, "neap");
