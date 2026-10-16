@@ -1,6 +1,6 @@
 # The chapter — a writing room, working with Arke, and a Chapter view · turn 227
 
-Status: **revision 4, drawn for review, 15 October 2026.** Nothing is built.
+Status: **revision 4, approved 16 October 2026.** Implementation: issue #1791, against SPEC-056 (private set), which fixes the defaults: goal chain, new-chapter brief, point of view with no characters, margins, versions and shortcuts. Nothing is built yet.
 
 ## Revision 4
 
