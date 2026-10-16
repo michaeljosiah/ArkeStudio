@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
-import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
 import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
@@ -2963,12 +2963,14 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("not yet called.", "still uncalled.") }] }] },
   } as StagedProposal;
 
-  it("are the waiting revisions of one paragraph against one text, oldest first", () => {
-    assert.deepEqual(passageVersions([SECOND, PASSAGE, OTHER_PARAGRAPH, DRAFT], PATH), [PASSAGE.proposal.id, SECOND.proposal.id], "another paragraph's revision and a draft are not versions");
-    assert.deepEqual(passageVersions([PASSAGE], PATH), [PASSAGE.proposal.id]);
+  it("are the revisions the page asked as versions of one, oldest first (codex on PR 1807)", () => {
+    const tags = new Map([[SECOND.proposal.id, { ask: "rewrite" as const, root: PASSAGE.proposal.id }]]);
+    assert.deepEqual(passageVersions([SECOND, PASSAGE, OTHER_PARAGRAPH, DRAFT], PATH, tags), [PASSAGE.proposal.id, SECOND.proposal.id], "another revision and a draft are not versions");
+    assert.deepEqual(passageVersions([SECOND, PASSAGE], PATH, new Map()), [SECOND.proposal.id], "untagged, two revisions of the same words are not versions either");
   });
 
   it("the held bar steps between them, back at no cost, and keeping one discards the other", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
     const m = await mount(inkbound([PASSAGE, SECOND]));
     await answerOpen(m);
     const versionsOf = () => q(m, '[data-testid="page-held-versions"]')?.textContent ?? "";
@@ -2991,7 +2993,8 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     assert.deepEqual(discards(), [SECOND.proposal.id], "the version not kept goes");
   });
 
-  it("at the newest, the arrow asks for another of the same passage, up to three", async () => {
+  it("at the newest, the arrow asks for another of the same passage, and what arrives is its version", async () => {
+    __tagAskForTest(SECOND.proposal.id, { ask: "rewrite", root: PASSAGE.proposal.id });
     const styled = inkbound([PASSAGE, SECOND]);
     const workspace = {
       conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
@@ -3004,5 +3007,8 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     assert.match(asked?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Revise this\. Another version, different from the one shown\.$/);
     assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
     assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /asking…/);
+    const THIRD = { ...SECOND, proposal: { ...SECOND.proposal, id: "pr_01J8H0000000000000000000Q3", created: "2026-09-06T12:10:00Z" } } as StagedProposal;
+    await act(async () => __setStateForTest({ ...styled, world: { ...styled.world!, conversations: [THREAD], proposals: [...styled.world!.proposals, THIRD] }, worldChat: workspace } as ClientState, { connection: "open" }));
+    assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /3 of 3/, "the answer to the ask is the third version");
   });
 });
