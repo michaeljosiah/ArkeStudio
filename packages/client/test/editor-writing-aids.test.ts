@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Editor } from "@tiptap/core";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
-import type { Decoration } from "@tiptap/pm/view";
+import type { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { markdownExtensions } from "../src/components/editor/extensions.js";
 import { caretBlockKey, caretBlockPlugin, currentMatch, findKey, findMatches, findPlugin } from "../src/components/editor/writing-aids.js";
 
@@ -16,8 +16,8 @@ function open(source: string) {
 
 const classes = (state: EditorState, key: typeof caretBlockKey | typeof findKey) => {
   const plugin = key.get(state)!;
-  const set = plugin.props.decorations?.call(plugin, state) ?? null;
-  return (set === null || !("find" in set) ? [] : set.find()).map((deco: Decoration) => ({
+  const set = (plugin.props.decorations?.call(plugin, state) ?? null) as DecorationSet | null;
+  return (set === null ? [] : set.find()).map((deco: Decoration) => ({
     text: state.doc.textBetween(deco.from, deco.to, " "),
     cls: (deco as unknown as { type: { attrs: Record<string, string> } }).type.attrs.class,
   }));
