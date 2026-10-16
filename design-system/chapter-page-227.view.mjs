@@ -64,7 +64,7 @@ const esc = s => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;');
 
 export const titlebar = () => `<header class="tb"><span class="crumb">‹ World <span>Na love or Juju · story</span></span><b>Arke <small>Studio</small></b><span class="util">${I.chat}${I.inbox}${I.bell}${I.gear}${I.user}</span></header>`;
 const RAIL = [['panel', 'Collapse navigation'], ['home', 'Dashboard'], ['cast', 'Cast'], ['chat', 'Develop'], ['overview', 'Overview'], ['book', 'Chapters'], ['speaker', 'Audiobook'], ['folder', 'Artifacts']];
-export const rail = () => `<nav class="rail" aria-label="Production navigation">${RAIL.map(([i, n]) => `<button type="button" aria-label="${n}" title="${n}"${n === 'Chapters' ? ' class="on" aria-current="page"' : ''}>${I[i]}</button>`).join('')}</nav>`;
+export const rail = () => `<nav class="crail" aria-label="Production navigation">${RAIL.map(([i, n]) => `<button type="button" aria-label="${n}" title="${n}"${n === 'Chapters' ? ' class="on" aria-current="page"' : ''}>${I[i]}</button>`).join('')}</nav>`;
 export const fold = () => `<aside class="fold" aria-label="Arke"><button type="button" aria-label="Open Arke" title="Arke">${I.chat}</button></aside>`;
 
 const book = (wide) => `<div class="book"><button type="button" class="nav" disabled aria-label="Previous chapter">${I.left}</button><b>Chapter 1</b> of 26 ${strip(0)}<button type="button" class="nav" aria-label="Next chapter">${I.right}</button></div>`;

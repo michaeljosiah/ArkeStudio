@@ -2,7 +2,8 @@
    Type is set through the tokens only (check-master's rule from turn 139). */
 .ch227{--hero-h:320px;--measure:660px;--gut:48px;position:relative;overflow:hidden;color:var(--foreground);background:var(--background);font:var(--type-body);display:grid;grid-template-rows:44px minmax(0,1fr);text-align:left}
 .ch227 *{box-sizing:border-box}
-.ch227 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+/* The reset stops at turn 225's chat panel, whose own rules (and the model chip's) must win there. */
+.ch227 button:not(:where(.gc224 *)){font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .ch227 svg{width:16px;height:16px;flex:none}
 .ch227 .v1{--v:var(--voice-1)}.ch227 .v2{--v:var(--voice-2)}.ch227 .v3{--v:var(--voice-3)}.ch227 .v4{--v:var(--voice-4)}.ch227 .v6{--v:var(--voice-6)}
 
@@ -14,14 +15,14 @@
 .ch227 .tb .util{display:flex;gap:16px;align-items:center}
 .ch227 .body{display:grid;grid-template-columns:42px minmax(0,1fr);min-height:0}
 .ch227.arke-open .body{grid-template-columns:42px minmax(0,1fr) 400px}
-.ch227 .rail{border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:12px;color:var(--muted-foreground)}
-.ch227 .rail button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
-.ch227 .rail button.on{background:var(--muted);color:var(--foreground)}
+.ch227 .crail{border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:12px;color:var(--muted-foreground)}
+.ch227 .crail button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
+.ch227 .crail button.on{background:var(--muted);color:var(--foreground)}
 .ch227 .fold{border-left:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding-top:12px;color:var(--muted-foreground)}
 .ch227 .fold button{width:32px;height:32px;display:grid;place-items:center;border-radius:8px}
 
 /* The page. One scroll; the hero is the top of it, not a panel. */
-.ch227 .main{position:relative;min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.ch227 .cmain{position:relative;min-width:0;overflow:hidden;display:flex;flex-direction:column}
 .ch227 .scroll{flex:1;min-height:0;overflow:hidden;position:relative}
 
 /* Hero: the chapter's picture fades into the page; the words sit on the faded side. */

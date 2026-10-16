@@ -16,9 +16,12 @@ const STYLE = '<link rel="stylesheet" href="chapter-page-227.css">';
 // Turn 225's chat styles live inline in its own section of the master; the review page borrows them so the
 // panel and composer are the approved drawing, not a copy.
 const t225css = (() => { const m = read('Arke Studio.dc.html'); const i = m.indexOf('<section class="dv-turn" id="t225">'); const j = m.indexOf('<section class="dv-turn"', i + 10); return [...m.slice(i, j).matchAll(/<style>([\s\S]*?)<\/style>/g)].map(x => x[1]).join('\n'); })();
+const CHAT_STYLE = '<link rel="stylesheet" href="chapter-page-227.chat.css">';
+write('chapter-page-227.chat.css', `/* Derived by chapter-page-227.mjs from turn 225's inline styles in the master, so the review pages draw
+   its chat panel, composer and model chip exactly. Do not edit; rerun the generator. */\n${t225css}\n`);
 const frames = FRAMES.map(([letter, title, width, height, kind, draw]) => ({ id: '227' + letter, title, width, height, kind, markup: draw() }));
 
-write('chapter-page-227.review.html', `<!doctype html><html lang="en" class="dark" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chapter page · Turn 227</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${STYLE}<style>${t225css}</style>
+write('chapter-page-227.review.html', `<!doctype html><html lang="en" class="dark" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chapter page · Turn 227</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${STYLE}${CHAT_STYLE}
 <style>body{margin:0;background:#131313;color:#ededed;font-family:var(--font-sans)}html:not(.dark) body{background:#EFEEEB;color:#1a1a1a}.rv{padding:32px;display:flex;flex-direction:column;gap:40px}.rv h2{font:var(--type-ui);margin:0 0 10px}.rv h2 a{color:inherit}.rv .fr{border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08);width:max-content}.rv header{display:flex;gap:12px;align-items:center;font:var(--type-ui)}.rv header button{font:var(--type-ui);padding:6px 12px;border-radius:8px;border:1px solid #555;background:none;color:inherit;cursor:pointer}</style></head>
 <body><div class="rv"><header><b>Turn 227 · revision 4 · approved · a writing room, working with Arke, and a Chapter view</b><button type="button" onclick="document.documentElement.classList.toggle('dark')">Light / dark</button><a href="Arke%20Studio.dc.html#t227" style="color:inherit">Design master</a></header>
 ${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${esc(f.title)}</h2><div class="fr">${f.markup}</div></section>`).join('\n')}</div></body></html>`);
@@ -62,20 +65,23 @@ const start = master.indexOf('<section class="dv-turn" id="t227">');
 if (start >= 0) {
   const next = master.indexOf('<section class="dv-turn"', start + 1);
   if (next < 0) throw new Error('Cannot safely replace final turn');
-  master = master.slice(0, start) + master.slice(next);
+  master = master.slice(0, start) + turn + master.slice(next);
+} else {
+  // Newest first: place above the first turn numbered below 227, never above a newer one.
+  const below = [...master.matchAll(/<section class="dv-turn" id="t(\d+)"/g)].find(m => Number(m[1]) > 0 && Number(m[1]) < 227);
+  if (!below) throw new Error('No turn below 227 to place against');
+  master = master.slice(0, below.index) + turn + master.slice(below.index);
 }
-const first = [...master.matchAll(/<section class="dv-turn" id="t(\d+)"/g)].find(m => Number(m[1]) > 0);
-if (!first || Number(first[1]) >= 227 && start < 0) throw new Error(`Top turn is t${first?.[1]}; renumber before inserting`);
-master = master.slice(0, first.index) + turn + master.slice(first.index);
 if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + STYLE);
 write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN CHAPTER PAGE 227[\s\S]*?  \/\/ END CHAPTER PAGE 227(?:\r?\n)*/g, '\n');
-const entries = frames.map(f => `  { group: "Chapter · turn 227 · revision 4", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },`);
+const entries = frames.map(f => `  { group: "Chapter · turn 227 · revision 4", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN CHAPTER PAGE 227\n' + entries.join('\n') + '\n  // END CHAPTER PAGE 227\n');
 const pageEntry = '{ file: "chapter-page-227.review.html", what: "Turn 227 revision 4: the Manuscript as a writing room (linked names, @ and / menus, compare, focus, Brief), working with Arke (selection menu, versions of an edit, review notes, Continue, Chat about a passage) and a Chapter view with the cast as cards; a new chapter; turn 225’s Chat with voice and upload; desktop, ultrawide, Fold and phone.", state: "approved; implementation tracked in #1791" }';
 if (build.includes('file: "chapter-page-227.review.html"')) build = build.replace(/\{ file: "chapter-page-227\.review\.html",[^\n]+?\}/, pageEntry);
 else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
 if (!build.includes(STYLE)) build = build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', STYLE + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
+if (!build.includes(CHAT_STYLE)) build = build.replace(STYLE, STYLE + '\n' + CHAT_STYLE);
 write('build-review.mjs', build);
 console.log(`Registered turn 227: ${frames.length} frames, ${rules.length} rules. Run check-master --record and build-review next.`);
