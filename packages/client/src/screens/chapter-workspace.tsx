@@ -52,6 +52,7 @@ import {
   defaultShortName,
   designatedVoiceSample,
   shortNameOf,
+  type ChapterReview,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -67,6 +68,9 @@ import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { CompareVersions } from "./chapter-compare.js";
+import { ReviewNotes } from "./chapter-review-notes.js";
+import { placeReviewNotes, quoteText, type PlacedNote, type ReviewFinding } from "../lib/review-notes.js";
+import { acceptChapterReviewUpdate } from "../lib/chapter-review.js";
 import { ArkePrompt, passageRefusal, SelectionBar, type BarAt } from "./chapter-ask.js";
 import type { SlashCommand } from "../components/editor/slash-commands.js";
 import type { Editor } from "@tiptap/core";
@@ -102,6 +106,9 @@ import {
   setAudiobookSound,
   readChapterVersion,
   restoreChapter,
+  subscribeChapterReview,
+  requestChapterReview,
+  decideChapterReview,
   saveChapter,
   subscribeChapterOpenResults,
   subscribeChapterSaveResults,
@@ -1995,6 +2002,18 @@ export function ChapterWorkspace({
     const timer = setTimeout(() => askContinue(queuedContinue.kind, queuedContinue.what), CONTINUE_SETTLE_MS);
     return () => clearTimeout(timer);
   });
+  const fixNote = (note: PlacedNote) => {
+    if (locked || asking || draft !== null || saving || stagedDraft !== undefined) return;
+    const quoted = note.finding.quote.slice(0, 1_200);
+    const line = `Fix this: ${note.finding.correction}`;
+    const subject: WorldChatSubject = { kind: "passage", chapterId: chapter.id, ...(note.paragraph !== null ? { paragraph: note.paragraph } : {}), text: quoted };
+    lastRewrites.set(path, { line, subject });
+    const where = note.paragraph !== null ? `, paragraph ${note.paragraph}` : "";
+    const press = crypto.randomUUID();
+    // Its revision is a rewrite the page asked for, so it can have versions (R-25).
+    awaitedAsks.set(path, { ask: "rewrite", root: null, known: passageRevisions(world.proposals, path).map((entry) => entry.proposal.id), press });
+    setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject, quiet: true });
+  };
   const promptAt = (): { top: number; left: number } => {
     const editor = editorRef.current, host = manuscriptRef.current;
     if (editor === null || host === null) return { top: 0, left: 0 };
@@ -2926,6 +2945,37 @@ export function ChapterWorkspace({
     rememberNames(book, on);
     if (!on) closeName();
   };
+  /*
+   * A finished review's notes in the margin (SPEC-056 R-29 – R-31, D-8): read with the chapter, shown
+   * when it finished, toggled from ⋯. The full report stays the Chapter view's Review.
+   */
+  const [review, setReview] = useState<ChapterReview | null>(null);
+  useEffect(() => {
+    setReview(null);
+    return subscribeChapterReview((event) => {
+      if (event.worldId !== worldId || event.productionId !== prodId || event.chapterId !== chapter.id || event.error) return;
+      setReview((was) => acceptChapterReviewUpdate(was, event.review));
+    });
+  }, [worldId, prodId, chapter.id]);
+  const manuscriptShown = view === "manuscript";
+  useEffect(() => {
+    if (connection === "open" && manuscriptShown) requestChapterReview("chapter-review-read", worldId, prodId, chapter.id);
+  }, [connection, manuscriptShown, worldId, prodId, chapter.id]);
+  const [notesOn, setNotesOn] = useState(true);
+  const reviewDone = review !== null && (review.status === "complete" || review.status === "partial");
+  const reviewPlaced = useMemo(
+    () => (reviewDone ? placeReviewNotes(live, review.findings) : { placed: [] as PlacedNote[], lost: [] as ReviewFinding[] }),
+    [reviewDone, review, live],
+  );
+  const notesShown = notesOn && richMode && stagedDraft === undefined && (reviewPlaced.placed.length > 0 || reviewPlaced.lost.length > 0);
+  const [currentNote, setCurrentNote] = useState<number | null>(null);
+  const noteOpen = currentNote !== null && reviewPlaced.placed.some((note) => note.n === currentNote) ? currentNote : (reviewPlaced.placed[0]?.n ?? null);
+  const decideNote = (finding: ReviewFinding, decision: "intentional" | "dismissed") => {
+    if (review === null) return;
+    if (!decideChapterReview(worldId, prodId, chapter.id, review.id, finding.id, decision)) return;
+    // Said at once; the review's own update follows.
+    setReview((was) => (was === null ? was : { ...was, findings: was.findings.map((each) => (each.id === finding.id ? { ...each, decision } : each)) }));
+  };
   // The margins (R-14, D-5): off until turned on, remembered per book.
   const [margins, setMarginsState] = useState<ChapterMargins>(() => marginsRemembered(book));
   useEffect(() => setMarginsState(marginsRemembered(book)), [book]);
@@ -3085,6 +3135,7 @@ export function ChapterWorkspace({
     { key: "faces", label: "Speaker faces", state: margins.faces ? "On" : "Off", disabled: !margins.faces && voicesRecord === null, press: () => setMargins({ ...margins, faces: !margins.faces }), testId: "chapter-more-faces" },
     { key: "pictures", label: "Margin pictures", state: margins.pictures ? "On" : "Off", disabled: !margins.pictures && placedPictures.count === 0, press: () => setMargins({ ...margins, pictures: !margins.pictures }), testId: "chapter-more-pictures" },
     { key: "names", label: "Linked names", state: namesOn ? "On" : "Off", disabled: false, press: () => setNamesOn(!namesOn), testId: "chapter-more-names", separator: true },
+    { key: "review-notes", label: "Review notes", state: reviewPlaced.placed.length + reviewPlaced.lost.length === 0 ? "None" : notesOn ? "On" : "Off", disabled: reviewPlaced.placed.length + reviewPlaced.lost.length === 0, press: () => setNotesOn(!notesOn), testId: "chapter-more-review-notes" },
     {
       key: "names-here",
       label: "Names in this chapter",
@@ -3434,8 +3485,21 @@ export function ChapterWorkspace({
               )}
             </div>
           )}
-          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"} data-margins={marginItems.length > 0 ? "true" : undefined} data-compare={room && comparing ? "true" : undefined}>
+          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"} data-margins={marginItems.length > 0 ? "true" : undefined} data-notes={room && notesShown ? "true" : undefined} data-compare={room && comparing ? "true" : undefined}>
             {room && findBar}
+            {room && notesShown && (
+              <ReviewNotes
+                host={manuscriptRef.current}
+                placed={reviewPlaced.placed}
+                lost={reviewPlaced.lost}
+                current={noteOpen}
+                // A review of words since changed decides nothing, as its report says.
+                disabled={locked || connection !== "open" || review?.stale === true}
+                onCurrent={setCurrentNote}
+                onFix={fixNote}
+                onDecide={decideNote}
+              />
+            )}
             {room && comparing && record !== null && (
               <CompareVersions
                 // Every kept version, not the sidebar's newest twelve (codex on PR 1802).
@@ -3614,6 +3678,7 @@ export function ChapterWorkspace({
                   ariaLabel={`Chapter ${chapter.order}`}
                   onEditor={(live) => { editorRef.current = live; }}
                   extraCommands={arkeCommands}
+                  reviewMarks={notesShown ? { marks: reviewPlaced.placed.map((note) => ({ n: note.n, text: quoteText(note.finding.quote), nth: note.nth })), current: noteOpen } : { marks: [], current: null }}
                   onContinue={() => askContinue("continue")}
                   linkedNames={linkedNames}
                   {...(namesOn ? { onName } : {})}

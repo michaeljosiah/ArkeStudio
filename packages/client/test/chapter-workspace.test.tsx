@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
+import { ReviewNotes } from "../src/screens/chapter-review-notes.js";
 import { ArkePrompt } from "../src/screens/chapter-ask.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
 import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
@@ -2838,7 +2839,7 @@ describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => 
     await answerOpen(m);
     await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
     const items = () => [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].map((item) => item.textContent);
-    assert.deepEqual(items(), ["Speaker facesOff", "Margin picturesOff", "Linked namesOn", "Names in this chapterNone", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"],
+    assert.deepEqual(items(), ["Speaker facesOff", "Margin picturesOff", "Linked namesOn", "Review notesNone", "Names in this chapterNone", "Markdown sourceOnly", "FindCtrl+F", "Shortcuts"],
       "the margins off by default (D-5); this chapter can only be source, so Find and the names list are the rich editor's");
     assert.equal(q(m, '[data-testid="chapter-more-faces"]')!.getAttribute("aria-disabled"), "true", "no cast, no faces");
     assert.equal(q(m, '[data-testid="chapter-more-pictures"]')!.getAttribute("aria-disabled"), "true", "no pictures placed");
@@ -3088,5 +3089,58 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
     assert.deepEqual([...container.querySelectorAll("[role=menuitem]")].map((b) => b.textContent), ["Maren Kest", "Rook Vane"]);
     await act(async () => ([...container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Rook Vane") as HTMLButtonElement).click());
     assert.deepEqual(asked, ["Rook Vane"]);
+  });
+});
+
+describe("review notes in the margin (design turn 227r, SPEC-056 R-29 – R-31)", () => {
+  const finding = (id: string, quote: string, observation: string) => ({
+    id, taskId: "script", offset: BODY.indexOf(quote), category: "continuity" as const, certainty: "contradiction" as const, quote, imageBlocks: [],
+    observation, impact: "Readers stall.", correction: "Say which bell.", decision: "open" as const,
+  });
+  const first = finding("11111111-1111-4111-a111-111111111111", "Maren counted the bells.", "Which bells, and whose count?");
+  const second = finding("22222222-2222-4222-a222-222222222222", "not yet called.", "The tide was called in chapter one.");
+
+  it("the open note has Fix, Intentional and Dismiss; the others are a line; a gone quote is said so", async () => {
+    const calls: string[] = [];
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const placed = [{ finding: first, n: 1, at: 0, nth: 0, paragraph: 1 }, { finding: second, n: 2, at: 40, nth: 0, paragraph: 2 }];
+    await act(async () => root.render(
+      <ReviewNotes host={null} placed={placed} lost={[{ ...first, id: "33333333-3333-4333-a333-333333333333", observation: "An old worry." }]} current={1} disabled={false}
+        onCurrent={(n) => calls.push(`current ${n}`)} onFix={(note) => calls.push(`fix ${note.n}`)} onDecide={(f, decision) => calls.push(`${decision} ${f.id.slice(0, 1)}`)} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    const notes = container.querySelector('[data-testid="review-notes"]')!;
+    assert.match(notes.textContent ?? "", /^2 notes/);
+    assert.match(notes.textContent ?? "", /Quote no longer in the chapterAn old worry\./);
+    const cards = [...notes.querySelectorAll(".fy-note")];
+    assert.match(cards[0]!.textContent ?? "", /^1Continuity · ContradictionWhich bells, and whose count\?FixIntentionalDismiss$/);
+    assert.match(cards[1]!.textContent ?? "", /^2Continuity · ContradictionThe tide was called in chapter one\.$/, "collapsed to its line, no actions");
+    const press = (label: string) => act(async () => ([...cards[0]!.querySelectorAll("button")].find((b) => b.textContent === label) as HTMLButtonElement).click());
+    await press("Fix");
+    await press("Intentional");
+    await press("Dismiss");
+    await act(async () => (cards[1] as HTMLElement).click());
+    assert.deepEqual(calls, ["fix 1", "intentional 1", "dismissed 1", "current 2"]);
+  });
+
+  it("a finished review's notes are offered from ⋯", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const read = m.sent.findLast((message) => message.kind === "chapter-review-read");
+    assert.ok(read, "the chapter's review is read with it");
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter-review.updated", at: "2026-10-16T12:00:00Z", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap",
+        review: {
+          worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", schemaVersion: 1, id: "44444444-4444-4444-a444-444444444444", requestId: "r",
+          title: "The counting of bells", createdAt: "now", updatedAt: "now", status: "complete", sourceHash: "h", contextHash: "c", body: BODY, images: [], tasks: [],
+          facts: [], findings: [first], checks: [], rejectedFindings: 0, stale: false, staleReasons: [], audioListened: false,
+        },
+      } as never);
+    });
+    await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
+    assert.equal(q(m, '[data-testid="chapter-more-review-notes"]')?.textContent, "Review notesOn", "on when a review finishes (D-8)");
   });
 });

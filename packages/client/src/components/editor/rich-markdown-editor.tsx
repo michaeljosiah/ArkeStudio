@@ -7,7 +7,7 @@ import { markdownExtensions } from "./extensions.js";
 import { LinkedNames, linkedNamesKey, nameMatcher, type LinkedName, type NameMatcher } from "./linked-names.js";
 import { MentionMenu } from "./mention-menu.js";
 import { filterMentions, insertMention, readMentionState, type Mention, type MentionMenuState } from "./mentions.js";
-import { currentMatch, findKey, WritingAids, type FindState } from "./writing-aids.js";
+import { currentMatch, findKey, reviewMarksKey, WritingAids, type FindState, type ReviewMark } from "./writing-aids.js";
 import { marginsKey, type MarginItem } from "./margins.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
 import { documentMarkdown, serializeMarkdown } from "./round-trip.js";
@@ -95,6 +95,8 @@ interface RichMarkdownEditorProps {
   extraCommands?: readonly SlashCommand[];
   /** Ctrl+Enter with nothing selected (D-7): Continue at the caret. */
   onContinue?: () => void;
+  /** A review's notes to mark in the prose, and which is open (R-29). */
+  reviewMarks?: { marks: readonly ReviewMark[]; current: number | null };
 }
 
 /**
@@ -142,6 +144,7 @@ export function RichMarkdownEditor({
   onEditor,
   extraCommands,
   onContinue,
+  reviewMarks,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -506,6 +509,12 @@ export function RichMarkdownEditor({
     onEditorRef.current?.(editor);
     return () => onEditorRef.current?.(null);
   }, [editor]);
+
+  const reviewText = JSON.stringify(reviewMarks ?? { marks: [], current: null });
+  useEffect(() => {
+    if (!editor || !withAids || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta(reviewMarksKey, JSON.parse(reviewText)).setMeta("addToHistory", false));
+  }, [editor, withAids, reviewText]);
 
   // The margins are the screen's to choose; the editor only places them.
   const marginsText = JSON.stringify(margins ?? []);
