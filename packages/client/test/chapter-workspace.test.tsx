@@ -2848,7 +2848,7 @@ describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => 
     await act(async () => (q(m, '[data-testid="chapter-more"]') as HTMLButtonElement).click());
     const shortcuts = [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => item.textContent === "Shortcuts") as HTMLButtonElement;
     await act(async () => shortcuts.click());
-    assert.deepEqual(items(), ["FocusCtrl+Shift+F", "Leave FocusEsc", "FindCtrl+F", "Insert a name@", "Blocks/"]);
+    assert.deepEqual(items(), ["FocusCtrl+Shift+F", "Leave FocusEsc", "FindCtrl+F", "Insert a name@", "Blocks/", "ContinueCtrl+Enter"]);
   });
 });
 
@@ -3047,9 +3047,14 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
     await act(async () => { dom.document.body.dispatchEvent(key({ key: "Tab" }) as unknown as Event); });
     const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
     assert.equal(accepted?.proposalId, CONTINUED.proposal.id, "Tab keeps");
+    // While that keep is on its way, Esc refuses nothing (codex on PR 1808).
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
+    assert.equal(m.sent.some((message) => message.kind === "proposal-discard"), false, "no discard behind a keep");
+    await act(async () => m.root.unmount());
+    __clearHeldAsksForTest();
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
     const other = await mount(inkbound([CONTINUED]));
     await answerOpen(other);
-    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
     await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
     const discarded = other.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
     assert.equal(discarded?.proposalId, CONTINUED.proposal.id, "Esc discards");

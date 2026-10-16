@@ -176,6 +176,7 @@ const SHORTCUTS: readonly [string, string][] = [
   ["Find", `${MOD}F`],
   ["Insert a name", "@"],
   ["Blocks", "/"],
+  ["Continue", `${MOD}Enter`],
 ];
 
 // A placeholder labels; it does not explain (turn 137, SPEC-056 R-53).
@@ -1937,7 +1938,7 @@ export function ChapterWorkspace({
       const slice = editor.state.doc.cut(from, to);
       return (editor.markdown?.serialize(slice.toJSON()) ?? editor.state.doc.textBetween(from, to, " ")).replace(/\n+$/, "");
     };
-    const tail = (text: string) => text.trim().split(/\s+/).filter(Boolean).slice(-16).join(" ");
+    const tail = (text: string) => text.trim().split(/\s+/).filter(Boolean).slice(-16).join(" ").slice(-1_200);
     const blockStart = (index: number) => {
       let at = 0;
       for (let i = 0; i < index; i++) at += editor.state.doc.child(i).nodeSize;
@@ -2042,11 +2043,11 @@ export function ChapterWorkspace({
         for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id);
         return;
       }
-      if (event.key === "Tab" && !event.shiftKey && !pending) {
+      if (event.key === "Tab" && !event.shiftKey && !pending && !versionWanted) {
         event.preventDefault();
         discardOtherVersions();
         if (accept !== undefined && "onAccept" in accept) accept.onAccept();
-      } else if (event.key === "Escape" && stagedDraft !== undefined) {
+      } else if (event.key === "Escape" && stagedDraft !== undefined && !pending) {
         event.preventDefault();
         for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id);
       }
