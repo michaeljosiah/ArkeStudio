@@ -253,6 +253,34 @@ const parkedKey = (worldId: string, prodId: string, file: string): string => `${
  * theirs when they come back.
  */
 const heldAsks = new Map<string, DockAsk>();
+/*
+ * The last rewrite asked of a passage on each chapter (SPEC-056 R-25): what Another version asks
+ * again. Held outside the screen like the asks, so it outlives a remount while its revision waits.
+ */
+const lastRewrites = new Map<string, { line: string; subject: WorldChatSubject }>();
+
+/** How many versions of one edit can be asked for (D-6). */
+const MAX_VERSIONS = 3;
+
+/**
+ * The versions of one passage revision (SPEC-056 R-25): every passage revision waiting on the
+ * chapter against the same text, whose change starts in the same paragraph as the newest one's,
+ * oldest first. Each is its own staged proposal; keeping one discards the rest.
+ */
+export function passageVersions(proposals: readonly StagedProposal[], path: string): string[] {
+  const revisions = [...proposals]
+    .filter((entry) => entry.proposal.kind === "chapter-draft" && entry.proposal.origin?.gesture === "passage-revision" && entry.proposal.targets.some((t) => t.path === path))
+    .sort((left, right) => left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id))
+    .map((staged) => {
+      const prose = staged.review?.targets.find((t) => t.path === path)?.fields.find((f) => f.field === "Prose");
+      const before = prose?.before ?? null;
+      const span = before === null || prose?.proposed === undefined ? null : passageOf(before, prose.proposed);
+      return { id: staged.proposal.id, before, paragraph: before === null || span === null ? -1 : paragraphSpans(before).findIndex((p) => p.end >= span.start) };
+    });
+  const newest = revisions.at(-1);
+  if (newest === undefined || newest.before === null || newest.paragraph < 0) return newest === undefined ? [] : [newest.id];
+  return revisions.filter((entry) => entry.before === newest.before && entry.paragraph === newest.paragraph).map((entry) => entry.id);
+}
 /**
  * A partial accept on its way, by chapter, for the same reason (codex on PR 1232): the keep lands
  * after the screen may have gone, and the accept it promised is sent by the next one to see it.
@@ -294,6 +322,7 @@ export function __clearHeldAsksForTest(): void {
   parkedDrafts.clear();
   heldKeeps.clear();
   heldAccepts.clear();
+  lastRewrites.clear();
 }
 
 /** Sending is not saving: an answer can refuse after the editor has unmounted. */
@@ -913,8 +942,17 @@ export function ChapterWorkspace({
   const richRefusal = gate.current?.verdict ?? null;
   const richMode = richRefusal === null && !preferSource;
 
-  /* The draft waiting on this chapter, if one is; the editor locks while it waits. */
-  const stagedDraft = stagedChapterDraft(world.proposals, path);
+  /*
+   * The draft waiting on this chapter, if one is; the editor locks while it waits. Of a passage's
+   * versions (R-25) the one shown is the author's to choose, the newest until they step back.
+   */
+  const versions = useMemo(() => passageVersions(world.proposals, path), [world.proposals, path]);
+  const [shownVersion, setShownVersion] = useState<string | null>(null);
+  const newestVersion = versions.at(-1) ?? null;
+  // A version arriving is the one to see.
+  useEffect(() => setShownVersion(null), [newestVersion]);
+  const shown = shownVersion !== null && versions.includes(shownVersion) ? shownVersion : undefined;
+  const stagedDraft = stagedChapterDraft(world.proposals, path, shown);
   const locked = stagedDraft !== undefined || record === null;
 
   /*
@@ -1614,6 +1652,7 @@ export function ChapterWorkspace({
     // A rewrite comes back into the page (R-24), so the app's Chat stays where it is; a reply, a
     // line to finish, and the page's own dock (no app Chat) open it.
     if (!globalChat || action.replyOnly || action.draft) setDock(true);
+    if (!action.replyOnly && !action.draft && dockSubject.kind === "passage") lastRewrites.set(path, { line: action.line, subject: dockSubject });
     setAsk({
       press: crypto.randomUUID(),
       line: action.line,
@@ -1797,6 +1836,39 @@ export function ChapterWorkspace({
   const draftAdds = stagedDraft === undefined || passageChange !== null || live.trim() === "" ? null
     : (stagedDraft.body ?? "").startsWith(live.trimEnd()) ? (stagedDraft.body ?? "").slice(live.trimEnd().length) : null;
   const ghostNote = useId();
+  const versionAt = stagedDraft === undefined ? -1 : versions.indexOf(stagedDraft.staged.proposal.id);
+  const [versionPress, setVersionPress] = useState<string | null>(null);
+  // A version landing answers the ask for it.
+  useEffect(() => setVersionPress(null), [newestVersion]);
+  const versionAsk = ask !== null && ask.press === versionPress ? ask : null;
+  const askVersion = () => {
+    if (passageChange === null || versions.length >= MAX_VERSIONS || asking) return;
+    const memory = lastRewrites.get(path);
+    const paragraph = anchorParagraph >= 0 ? anchorParagraph + 1 : undefined;
+    // Without the ask that made it (asked in Chat, say), the passage is the paragraph the change is in.
+    const paragraphText = anchorParagraph >= 0 ? paragraphSpans(stagedDraft?.before ?? live)[anchorParagraph]?.text.trim() : undefined;
+    const subject: WorldChatSubject = memory?.subject ?? { kind: "passage", chapterId: chapter.id, ...(paragraph !== undefined ? { paragraph } : {}), text: (paragraphText || passageChange.before.trim() || passageChange.after.trim()).slice(0, 1_200) };
+    const quoted = subject.kind === "passage" ? subject.text : passageChange.before.trim();
+    const where = subject.kind === "passage" && subject.paragraph !== undefined ? `, paragraph ${subject.paragraph}` : "";
+    const line = `${memory?.line ?? "Revise this"}. Another version, different from the one shown.`;
+    const press = crypto.randomUUID();
+    setVersionPress(press);
+    setAsk({ press, line, text: `About this passage in ${chapterLabel}${where}: «${quoted}» ${line}`, subject });
+  };
+  const versionControls = passageChange === null || versions.length === 0 ? undefined : {
+    at: Math.max(0, versionAt),
+    count: versions.length,
+    max: MAX_VERSIONS,
+    asking: versionAsk !== null && versionAsk.declined !== true && versionAsk.answered !== false,
+    ...(versionAsk?.answered === false || versionAsk?.declined === true ? { note: "No other version" } : {}),
+    onPrevious: () => setShownVersion(versions[Math.max(0, versionAt - 1)] ?? null),
+    onNext: () => (versionAt < versions.length - 1 ? setShownVersion(versions[versionAt + 1] ?? null) : askVersion()),
+  };
+  // Keeping one version is choosing it: the others are discarded with it (R-25).
+  const discardOtherVersions = () => {
+    if (stagedDraft === undefined) return;
+    for (const id of versions) if (id !== stagedDraft.staged.proposal.id) discardProposal(worldId, id);
+  };
   const keepDraft = () => {
     if (stagedDraft === undefined) return;
     const proposal = stagedDraft.staged.proposal;
@@ -3409,10 +3481,15 @@ export function ChapterWorkspace({
               <PageHeldBar
                 name={stagedDraft.staged.proposal.summary}
                 detail={`${editCount === 1 ? "1 edit" : `${editCount} edits`} · ${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`}
-                refuse={{ label: "Refuse all", onPress: () => discardProposal(worldId, stagedDraft.staged.proposal.id), disabled: pending }}
+                {...(versionControls !== undefined ? { versions: versionControls } : {})}
+                refuse={{ label: "Refuse all", onPress: () => { for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id); }, disabled: pending }}
                 keep={{
                   label: accept !== undefined && "label" in accept ? accept.label : "Accept",
-                  onPress: () => (accept !== undefined && "onAccept" in accept ? accept.onAccept() : undefined),
+                  onPress: () => {
+                    if (accept === undefined || !("onAccept" in accept)) return;
+                    discardOtherVersions();
+                    accept.onAccept();
+                  },
                   ...(accept?.blocked !== undefined ? { blocked: accept.blocked } : pending ? { blocked: "Accepting…" } : {}),
                 }}
               />

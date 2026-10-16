@@ -368,3 +368,6 @@
 .fy-pageheld__push { flex: 1; }
 /* A suggestion is grey but readable: 42% of the foreground at the least (R-54). */
 .fy-ch__ghost { color: color-mix(in srgb, var(--foreground) 46%, transparent); }
+.fy-pageheld__versions { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted-foreground); }
+.fy-pageheld__versions .fy-ch__wbtn { width: 28px; height: 28px; }
+.fy-pageheld__note { margin-left: 6px; font: 400 12px var(--font-sans); color: var(--muted-foreground); }

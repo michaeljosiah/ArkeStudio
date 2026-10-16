@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
-import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { ChapterScreen, __clearHeldAsksForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import { BookStrip } from "../src/screens/chapter-overview.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
 import { NameCard, type NameCardSheet } from "../src/screens/chapter-names.js";
@@ -1664,7 +1664,7 @@ describe("the craft loop (turn 128)", () => {
     // Spans, so the text runs together without the spaces the screen draws between them.
     assert.match(text(m), /Arke’s passage ?· 1 → 2 words ?· against v4/);
     const held = q(m, '[data-testid="page-held-bar"]')!;
-    assert.match(held.textContent ?? "", /^Revise a passage: The counting of bells1 edit · 1 → 2 wordsRefuse allAccept$/, "the ask, its edits and words, Refuse all and Accept (R-24)");
+    assert.match(held.textContent ?? "", /^Revise a passage: The counting of bells1 edit · 1 → 2 words1 of 1Refuse allAccept$/, "the ask, its edits and words, Refuse all and Accept (R-24)");
     assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
     assert.match(text(m), /Six, and the tide/, "and the rest of the chapter is untouched");
     assert.doesNotMatch(text(m), /draft waits/);
@@ -2948,5 +2948,57 @@ describe("the selection bar and Ask Arke (design turn 227p–q, SPEC-056 R-22, R
     assert.equal(sends(m).length, 0, "nothing is said until the author says it");
     assert.match(text(m), /Chapter 2 · paragraph 1/, "the scope above the composer (R-28)");
     assert.equal(q(m, ".fy-arke .fy-cx__editor")?.textContent, "");
+  });
+});
+
+describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
+  const SECOND: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000Q1", created: "2026-09-06T12:05:00Z" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted every bell.") }] }] },
+  } as StagedProposal;
+  const OTHER_PARAGRAPH: StagedProposal = {
+    ...PASSAGE,
+    proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000Q2", created: "2026-09-06T11:00:00Z" },
+    review: { targets: [{ ...PASSAGE.review!.targets[0]!, fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("not yet called.", "still uncalled.") }] }] },
+  } as StagedProposal;
+
+  it("are the waiting revisions of one paragraph against one text, oldest first", () => {
+    assert.deepEqual(passageVersions([SECOND, PASSAGE, OTHER_PARAGRAPH, DRAFT], PATH), [PASSAGE.proposal.id, SECOND.proposal.id], "another paragraph's revision and a draft are not versions");
+    assert.deepEqual(passageVersions([PASSAGE], PATH), [PASSAGE.proposal.id]);
+  });
+
+  it("the held bar steps between them, back at no cost, and keeping one discards the other", async () => {
+    const m = await mount(inkbound([PASSAGE, SECOND]));
+    await answerOpen(m);
+    const versionsOf = () => q(m, '[data-testid="page-held-versions"]')?.textContent ?? "";
+    assert.match(versionsOf(), /2 of 2/, "the newest is shown");
+    assert.match(text(m), /Maren counted every bell\./);
+    const before = m.sent.length;
+    await act(async () => (q(m, '[aria-label="Previous version"]') as HTMLButtonElement).click());
+    assert.match(versionsOf(), /1 of 2/);
+    assert.match(text(m), /Maren counted the seven bells\./, "the earlier version, redrawn in place");
+    assert.equal(m.sent.slice(before).some((message) => message.kind === "world-chat-send" || message.kind === "world-chat-create"), false, "stepping back asks nothing");
+    const keep = [...q(m, '[data-testid="page-held-bar"]')!.querySelectorAll("button")].find((b) => b.textContent === "Accept") as HTMLButtonElement;
+    await act(async () => keep.click());
+    const discarded = m.sent.filter((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }>[];
+    assert.deepEqual(discarded.map((message) => message.proposalId), [SECOND.proposal.id], "the version not kept goes");
+    const accepted = m.sent.findLast((message) => message.kind === "proposal-accept") as Extract<ClientMessage, { kind: "proposal-accept" }> | undefined;
+    assert.equal(accepted?.proposalId, PASSAGE.proposal.id, "the shown version is the one kept");
+  });
+
+  it("at the newest, the arrow asks for another of the same passage, up to three", async () => {
+    const styled = inkbound([PASSAGE, SECOND]);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    await act(async () => (q(m, '[aria-label="Another version"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "world-chat-send") as { text: string; subject?: unknown } | undefined;
+    assert.match(asked?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Revise this\. Another version, different from the one shown\.$/);
+    assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /asking…/);
   });
 });
