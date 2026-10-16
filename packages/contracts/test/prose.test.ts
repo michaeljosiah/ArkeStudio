@@ -117,6 +117,9 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.deepEqual(chapterGoal({}, "Each of 6 chapters is 3,250 words", drafted), { words: 3250, source: "story" });
     assert.deepEqual(chapterGoal({}, "24 chapters, 80,000 words", drafted), { words: 3300, source: "story" }, "a total over a stated count, to the hundred");
     assert.deepEqual(chapterGoal({}, "80,000 words", drafted), { words: 4400, source: "median" }, "a total with no count says nothing per chapter");
+    // Both figures are read whichever comes first (codex on PR 1795); the book's band keeps the total.
+    assert.deepEqual(chapterGoal({}, "80,000 words total, 24 chapters, about 3,000 words per chapter", drafted), { words: 3000, source: "story" });
+    assert.equal(targetWords("80,000 words total, 24 chapters, about 3,000 words per chapter", 24), 80_000);
     assert.deepEqual(chapterGoal({}, undefined, drafted), { words: 4400, source: "median" });
     assert.deepEqual(chapterGoal({}, undefined, [{ words: 4000 }, { words: 4400 }, { words: 5000 }, { words: 6000 }]), { words: 4700, source: "median" }, "an even count takes the mean of the middle two");
     // Fewer than three chapters of 500 words, retired ones and drafts too short to count say nothing.

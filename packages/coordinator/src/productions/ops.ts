@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { containedWorldFilePath } from "../world/contained-file.js";
 import {
   compilePasses,
   normalizeAspect,
@@ -873,6 +874,9 @@ export async function openChapter(
  * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
  * as a null the read schema would refuse.
  */
+/** The picture formats the world's media route serves (FsWorldProvider.MEDIA_TYPES). */
+const CHAPTER_PICTURE_TYPE = /\.(png|jpe?g|webp|gif)$/i;
+
 export async function editChapterPlan(
   store: WorldStore,
   productionId: string,
@@ -888,15 +892,17 @@ export async function editChapterPlan(
   },
 ): Promise<void> {
   const path = `productions/${productionId}/chapters/${chapterFile}.md`;
-  // A chosen chapter picture (SPEC-056 R-49) is a world-relative image that exists now; a path
-  // that escapes the world, names no picture or names nothing would draw an empty hero.
+  // A chosen chapter picture (SPEC-056 R-49) is a world-owned image that exists now, in a format
+  // the world's media route serves. It resolves through the same symlink-aware check as every
+  // other world file: a link out of an imported world would be saved and then refused by the
+  // media route, leaving a hero that can never load (codex on PR 1795).
   if (typeof changes.picture === "string" && changes.picture.trim() !== "") {
     const picture = changes.picture.trim();
-    if (picture.startsWith("/") || /^[a-z]:/i.test(picture) || picture.split(/[\\/]/).includes("..") || !/\.(png|jpe?g|webp|gif|avif)$/i.test(picture)) {
-      throw new Error(`${picture} is not a picture in this world`);
-    }
-    const found = await stat(toExtendedLength(join(store.dir, fromPortable(picture)))).catch(() => null);
-    if (!found?.isFile()) throw new Error(`${picture} is not in this world`);
+    if (!CHAPTER_PICTURE_TYPE.test(picture)) throw new Error(`${picture} is not a picture in this world`);
+    await containedWorldFilePath(store.dir, picture, false, "chapter-picture").catch((error: unknown) => {
+      const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+      throw new Error(missing ? `${picture} is not in this world` : `${picture} is not a picture in this world`);
+    });
     changes = { ...changes, picture };
   }
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");

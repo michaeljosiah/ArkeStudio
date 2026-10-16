@@ -282,6 +282,8 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "missing.png" }), /not in this world/);
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "../outside.png" }), /not a picture/);
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "changes.jsonl" }), /not a picture/);
+    // Only what the world's media route serves: an AVIF would be saved and never load (codex on PR 1795).
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "world-art.avif" }), /not a picture/);
     assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!.picture, "world-art.png", "a refused picture writes nothing");
 
     await editChapterPlan(store, LEDGER, "01-neap", { goal: null, picture: null });

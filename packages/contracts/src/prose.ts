@@ -680,13 +680,16 @@ export function storyProgressDay(date: Date): string {
 /**
  * What a story target states, read once for both the book's band and a chapter's goal: the
  * first figure that is the book's own total, the per-chapter figure, and an explicit planned
- * chapter count. A figure is read only when it says it is words (see `targetWords`).
+ * chapter count. A figure is read only when it says it is words (see `targetWords`). The whole
+ * target is read either way: "80,000 words total, about 3,000 words per chapter" states both, and
+ * stopping at the total would have lost the chapter's figure (codex on PR 1795).
  */
 export function parseStoryTarget(targetLength: string | undefined): { total: number | null; perChapter: number | null; planned: number | null } {
   if (!targetLength) return { total: null, perChapter: null, planned: null };
   const plannedMatch = /\b(\d+)\s+chapters?\b/i.exec(targetLength);
   const planned = plannedMatch ? Number(plannedMatch[1]) : null;
   let perChapter: number | null = null;
+  let total: number | null = null;
   for (const match of targetLength.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/gi)) {
     const figure = Number(match[1]!.replace(/,/g, ""));
     const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
@@ -695,12 +698,12 @@ export function parseStoryTarget(targetLength: string | undefined): { total: num
     const after = targetLength.slice(match.index + match[0].length);
     if (/\b(?:per\s+chapter|each\s+(?:of\s+(?:the\s+)?\d+\s+)?chapters?|chapters?\s*[,;:]?\s*each)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
         /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b|in\s+each\s+chapter\b)/i.test(after)) {
-      perChapter = words;
+      perChapter ??= words;
     } else {
-      return { total: Math.round(words), perChapter, planned };
+      total ??= Math.round(words);
     }
   }
-  return { total: null, perChapter, planned };
+  return { total, perChapter, planned };
 }
 
 export function targetWords(targetLength: string | undefined, chapterCount?: number): number | null {
