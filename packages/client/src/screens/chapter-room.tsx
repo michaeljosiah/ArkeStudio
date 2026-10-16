@@ -235,10 +235,12 @@ export function GoalField({ goal, goalSource, locked, onPlan }: {
  * Find (R-7, from ⋯ or Ctrl+F): a line under the bar with the query, `n of m`, and the way between
  * matches. Enter steps on, Shift+Enter back, Esc closes. The matches are the editor's to draw.
  */
-export function FindBar({ query, count, current, onQuery, onStep, onClose }: {
+export function FindBar({ query, count, current, opened, onQuery, onStep, onClose }: {
   query: string;
   count: number;
   current: number;
+  /** Counts each time Find is asked for, so Ctrl+F on an open bar brings the field back. */
+  opened: number;
   onQuery: (query: string) => void;
   onStep: (delta: 1 | -1) => void;
   onClose: () => void;
@@ -247,7 +249,7 @@ export function FindBar({ query, count, current, onQuery, onStep, onClose }: {
   useEffect(() => {
     field.current?.focus();
     field.current?.select();
-  }, []);
+  }, [opened]);
   return (
     <div className="fy-ch__find" role="search" aria-label="Find in chapter" data-testid="chapter-find">
       <Search size={14} />

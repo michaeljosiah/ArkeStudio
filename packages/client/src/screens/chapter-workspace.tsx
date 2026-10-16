@@ -2695,8 +2695,18 @@ export function ChapterWorkspace({
   };
   const [find, setFind] = useState<FindState | null>(null);
   const [found, setFound] = useState({ count: 0, current: -1 });
-  useEffect(() => setFind(null), [chapter.id, view]);
-  const openFind = useCallback(() => setFind((open) => open ?? { query: "", index: 0 }), []);
+  const [findOpened, setFindOpened] = useState(0);
+  // Find is the rich editor's: the Markdown source has nothing to mark.
+  useEffect(() => setFind(null), [chapter.id, view, richMode]);
+  const openFind = useCallback(() => {
+    setFind((open) => open ?? { query: "", index: 0 });
+    setFindOpened((count) => count + 1);
+  }, []);
+  // Closed, the author is back where they were writing.
+  const closeFind = useCallback(() => {
+    setFind(null);
+    manuscriptRef.current?.querySelector<HTMLElement>(".fy-rme__doc")?.focus();
+  }, []);
   const [focus, setFocus] = useState(false);
   const focusRef = useRef(false);
   focusRef.current = focus;
@@ -2706,11 +2716,13 @@ export function ChapterWorkspace({
     setFocus(true);
   }, []);
   const leaveFocus = useCallback(() => setFocus(false), []);
-  useEffect(() => setFocus(false), [chapter.id, view]);
+  // A phone has no room and no bar to leave Focus from, so a window narrowed to one leaves it.
+  useEffect(() => setFocus(false), [chapter.id, view, phone]);
   useEffect(() => {
     if (!focus) return;
     // The chrome sits under the page and is out of reach of the keyboard as well as the pointer.
-    const chrome = [...document.querySelectorAll(".fy-prodrail, .fy-titlebar, .fy-global-chat, .fy-sw__rail")];
+    // The page's own covered controls too: the bar, the Brief and the panels (codex on PR 1801).
+    const chrome = [...document.querySelectorAll(".fy-prodrail, .fy-titlebar, .fy-global-chat, .fy-sw__rail, [data-screen='chapter'] :is(.fy-ch__wbar, .fy-ch__panels, .fy-sw__head)")];
     for (const element of chrome) element.setAttribute("inert", "");
     // On the desktop the window goes full screen; a browser hides the app's chrome only (R-12).
     const desktop = window.arke !== undefined;
@@ -2720,10 +2732,13 @@ export function ChapterWorkspace({
       if (document.fullscreenElement === null) setFocus(false);
     };
     if (desktop) document.addEventListener("fullscreenchange", onFull);
-    // The caret's paragraph comes to the middle, and the caret back into the page.
+    // The caret back into the page (the source's textarea when that is what is writing), and its
+    // line to the middle: the caret itself, not its paragraph, which can be taller than the window.
     const page = manuscriptRef.current;
-    page?.querySelector<HTMLElement>(".fy-rme__here")?.scrollIntoView?.({ block: "center" });
-    page?.querySelector<HTMLElement>(".fy-rme__doc")?.focus();
+    page?.querySelector<HTMLElement>(".fy-rme__doc, .fy-ch__source")?.focus();
+    const caret = window.getSelection?.()?.rangeCount ? window.getSelection()!.getRangeAt(0).getBoundingClientRect?.() : undefined;
+    if (caret !== undefined && caret.height > 0) holdCaret({ top: caret.top, bottom: caret.bottom });
+    else page?.querySelector<HTMLElement>(".fy-rme__here")?.scrollIntoView?.({ block: "center" });
     return () => {
       for (const element of chrome) element.removeAttribute("inert");
       if (desktop) {
@@ -2797,8 +2812,9 @@ export function ChapterWorkspace({
       count={found.count}
       current={found.current}
       onQuery={(query) => setFind({ query, index: 0 })}
+      opened={findOpened}
       onStep={(delta) => setFind((open) => (open === null ? open : { ...open, index: open.index + delta }))}
-      onClose={() => setFind(null)}
+      onClose={closeFind}
     />
   );
   const goalShare = goal.words > 0 ? Math.min(100, Math.round((words / goal.words) * 100)) : 0;

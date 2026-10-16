@@ -35,7 +35,26 @@ describe("the caret's paragraph (SPEC-056 R-12)", () => {
   });
 });
 
+describe("the caret's paragraph inside a list (codex on PR 1801)", () => {
+  it("marks the item's own paragraph, not the whole list", () => {
+    let state = open("- First item.\n- Second item.\n");
+    let at = -1;
+    state.doc.descendants((node, pos) => {
+      if (at === -1 && node.isText && node.text === "Second item.") at = pos;
+      return at === -1;
+    });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at + 1)));
+    assert.deepEqual(classes(state, caretBlockKey).map((d) => d.text), ["Second item."]);
+  });
+});
+
 describe("Find (R-7)", () => {
+  it("finds a phrase across bold, as the reader sees it", () => {
+    const state = open("The **silver bell** rang twice.\n");
+    const matches = findMatches(state.doc, "silver bell rang");
+    assert.deepEqual(matches.map((m) => state.doc.textBetween(m.from, m.to)), ["silver bell rang"]);
+  });
+
   it("finds every occurrence in any case, across paragraphs", () => {
     const state = open("The bell rang. Bells.\n\nNo bell tonight.\n");
     assert.deepEqual(findMatches(state.doc, "BELL").map((m) => state.doc.textBetween(m.from, m.to)), ["bell", "Bell", "bell"]);

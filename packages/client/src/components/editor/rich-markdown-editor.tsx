@@ -85,6 +85,29 @@ interface RichMarkdownEditorProps {
   onCaret?: (caret: { top: number; bottom: number }) => void;
 }
 
+/**
+ * Bring a document position to the middle of whatever scrolls the editor: the match itself, not
+ * the paragraph around it, which can be taller than the window (codex on PR 1801).
+ */
+function centreOn(editor: Editor, pos: number): void {
+  let at: { top: number; bottom: number };
+  try {
+    at = editor.view.coordsAtPos(pos);
+  } catch {
+    return;
+  }
+  let scroller: HTMLElement | null = editor.view.dom.parentElement;
+  while (scroller !== null) {
+    const overflow = getComputedStyle(scroller).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && scroller.scrollHeight > scroller.clientHeight) break;
+    scroller = scroller.parentElement;
+  }
+  const box = scroller?.getBoundingClientRect() ?? { top: 0, height: window.innerHeight };
+  const delta = (at.top + at.bottom) / 2 - (box.top + box.height / 2);
+  if (scroller !== null) scroller.scrollBy?.({ top: delta });
+  else window.scrollBy?.({ top: delta });
+}
+
 /** How long the pointer rests on a name before its card opens (R-17). */
 const NAME_HOVER_MS = 300;
 const NAME_PRESS_MS = 500;
@@ -340,6 +363,8 @@ export function RichMarkdownEditor({
     onUpdate: ({ editor: instance }) => {
       syncMenu(instance);
       reportCaret(instance);
+      const found = withAids ? findKey.getState(instance.state) : undefined;
+      if (found?.find) onFindRef.current?.(found.matches.length, currentMatch(found.find, found.matches.length));
       if (!ready.current) return;
       // Before the debounce rather than inside it, so the document the commit sees is already one
       // that can be written down, and the transaction this may dispatch settles first.
@@ -432,10 +457,7 @@ export function RichMarkdownEditor({
     const here = find === null ? -1 : currentMatch(find, count);
     onFindRef.current?.(count, here);
     const match = here >= 0 ? own?.matches[here] : undefined;
-    if (match === undefined) return;
-    const at = editor.view.domAtPos(match.from);
-    const element = at.node instanceof Element ? at.node : at.node.parentElement;
-    element?.scrollIntoView?.({ block: "center" });
+    if (match !== undefined) centreOn(editor, match.from);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, withAids, findKeyText]);
 

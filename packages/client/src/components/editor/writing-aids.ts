@@ -17,9 +17,11 @@ export function caretBlockPlugin(): Plugin {
     key: caretBlockKey,
     props: {
       decorations(state) {
+        // The text block holding the caret, not its top-level container: in a list or a quote
+        // only the caret's own paragraph comes to full strength (codex on PR 1801).
         const { $head } = state.selection;
-        if ($head.depth === 0) return DecorationSet.empty;
-        const from = $head.before(1);
+        if ($head.depth === 0 || !$head.parent.isTextblock) return DecorationSet.empty;
+        const from = $head.before($head.depth);
         const node = state.doc.nodeAt(from);
         if (node === null) return DecorationSet.empty;
         return DecorationSet.create(state.doc, [Decoration.node(from, from + node.nodeSize, { class: "fy-rme__here" })]);
@@ -43,16 +45,32 @@ type FindPluginState = { find: FindState | null; matches: FindMatch[] };
 
 export const findKey = new PluginKey<FindPluginState>("find");
 
-/** Every case-insensitive occurrence of the query in the document's text runs. */
+/**
+ * Every case-insensitive occurrence of the query, read a text block at a time so a phrase across
+ * a bold or a link (`the **bell** rang`) is found as the reader sees it (codex on PR 1801). Each
+ * inline node is one run of the block's text, mapped back to its document position; a leaf that
+ * is not text (a break, an image) stands as one character nothing typed can match.
+ */
 export function findMatches(doc: ProseNode, query: string): FindMatch[] {
   const needle = query.trim().toLowerCase();
   if (needle === "") return [];
   const out: FindMatch[] = [];
   doc.descendants((node, pos) => {
-    if (!node.isText || node.text === undefined) return true;
-    const hay = node.text.toLowerCase();
+    if (!node.isTextblock) return true;
+    let text = "";
+    const runs: { at: number; pos: number }[] = [];
+    node.forEach((child, offset) => {
+      runs.push({ at: text.length, pos: pos + 1 + offset });
+      text += child.isText ? (child.text ?? "") : "\uFFFC";
+    });
+    const toPos = (index: number) => {
+      let run = runs[0]!;
+      for (const candidate of runs) if (candidate.at <= index) run = candidate;
+      return run.pos + (index - run.at);
+    };
+    const hay = text.toLowerCase();
     for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) {
-      out.push({ from: pos + at, to: pos + at + needle.length });
+      out.push({ from: toPos(at), to: toPos(at + needle.length) });
     }
     return false;
   });
