@@ -840,6 +840,116 @@ export type PassageSegment =
   | { kind: "same"; text: string }
   | { kind: "edit"; index: number; before: string; after: string };
 
+/** One paragraph of a comparison between two versions of a chapter (SPEC-056 R-13). */
+export type VersionParagraph =
+  | { kind: "same"; text: string }
+  | { kind: "changed"; segments: PassageSegment[] }
+  | { kind: "added"; text: string }
+  | { kind: "removed"; text: string };
+
+/**
+ * Two versions of a chapter compared for reading side by side: paragraphs matched first, so a
+ * whole chapter never goes through one word table (past `PASSAGE_DIFF_CELLS` that would be one
+ * edit), then the words of each paragraph that changed. Between two matched paragraphs, the
+ * older and newer ones left over are paired in order as changes; the rest were added or removed.
+ */
+export function versionDiff(older: string, newer: string): VersionParagraph[] {
+  const all = chapterParagraphs(older);
+  const bll = chapterParagraphs(newer);
+  // The opening and closing paragraphs both keep are matched without a table, so the table holds
+  // only the stretch that changed (codex on PR 1802).
+  let head = 0;
+  while (head < all.length && head < bll.length && all[head] === bll[head]) head += 1;
+  let tail = 0;
+  while (tail < all.length - head && tail < bll.length - head && all[all.length - 1 - tail] === bll[bll.length - 1 - tail]) tail += 1;
+  const a = all.slice(head, all.length - tail);
+  const b = bll.slice(head, bll.length - tail);
+  // Past the cap the stretch is not worth its table: its paragraphs are paired by position.
+  const tabled = a.length * b.length <= VERSION_DIFF_CELLS;
+  const width = b.length + 1;
+  const table = new Uint32Array(tabled ? (a.length + 1) * width : 0);
+  if (tabled) {
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+      }
+    }
+  }
+  const out: VersionParagraph[] = all.slice(0, head).map((text) => ({ kind: "same" as const, text }));
+  let removed: string[] = [];
+  let added: string[] = [];
+  const settle = () => {
+    // Each older paragraph left over pairs with the first newer one, in order, that shares most of
+    // its words; otherwise a rewrite would read as a page of struck and marked fragments rather
+    // than one gone and one new. Newer paragraphs it passes over were added before it.
+    let next = 0;
+    for (const before of removed) {
+      // A bounded look ahead (codex on PR 1802): a long stretch rewritten whole would otherwise
+      // compare every paragraph gone with every paragraph new.
+      const at = added.findIndex((after, k) => k >= next && k < next + VERSION_PAIR_WINDOW && alike(before, after));
+      if (at === -1) {
+        out.push({ kind: "removed", text: before });
+        continue;
+      }
+      for (const text of added.slice(next, at)) out.push({ kind: "added", text });
+      out.push({ kind: "changed", segments: passageDiff(before, added[at]!) });
+      next = at + 1;
+    }
+    for (const text of added.slice(next)) out.push({ kind: "added", text });
+    removed = [];
+    added = [];
+  };
+  if (!tabled) {
+    // Past the cap, paired by position: each pair alike or not, and no search at all.
+    const pairs = Math.max(a.length, b.length);
+    for (let k = 0; k < pairs; k++) {
+      const before = a[k], after = b[k];
+      if (before !== undefined && after !== undefined && alike(before, after)) out.push({ kind: "changed", segments: passageDiff(before, after) });
+      else {
+        if (before !== undefined) out.push({ kind: "removed", text: before });
+        if (after !== undefined) out.push({ kind: "added", text: after });
+      }
+    }
+  } else {
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        settle();
+        out.push({ kind: "same", text: a[i]! });
+        i += 1;
+        j += 1;
+      } else if (j < b.length && (i >= a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
+        added.push(b[j]!);
+        j += 1;
+      } else {
+        removed.push(a[i]!);
+        i += 1;
+      }
+    }
+    settle();
+  }
+  for (const text of all.slice(all.length - tail)) out.push({ kind: "same", text });
+  return out;
+}
+
+/** Past this many paragraph pairs the changed stretch is compared by position instead (about 4 MB). */
+const VERSION_DIFF_CELLS = 1_000_000;
+/** How far ahead a paragraph gone looks for its new self among the paragraphs added. */
+const VERSION_PAIR_WINDOW = 50;
+
+/** Half or more of the longer paragraph's words are also the other's. */
+function alike(a: string, b: string): boolean {
+  // Distinct words on both sides, so the measure is the same either way round (codex on PR 1802).
+  const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
+  const left = words(a), right = words(b);
+  const larger = Math.max(left.size, right.size);
+  if (larger === 0) return true;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / larger >= 0.5;
+}
+
 /** Past this many token pairs the diff is not worth its table, and the passage is one edit. */
 const PASSAGE_DIFF_CELLS = 4_000_000;
 

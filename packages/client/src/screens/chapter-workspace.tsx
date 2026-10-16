@@ -55,7 +55,7 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Chat, ChevronDown, FileText, Maximize2, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
+import { ArrowLeftRight, Chat, ChevronDown, FileText, Maximize2, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { namesRemembered, rememberDock, rememberedDocks, rememberNames } from "../lib/chapter-dock.js";
@@ -64,6 +64,7 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, WritingBar } from "./chapter-room.js";
 import type { FindState } from "../components/editor/writing-aids.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
+import { CompareVersions } from "./chapter-compare.js";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
 import { NameCard, type NameCardSheet } from "./chapter-names.js";
 import type { LinkedName } from "../components/editor/linked-names.js";
@@ -94,6 +95,7 @@ import {
   setAudiobookReaction,
   setAudiobookBed,
   setAudiobookSound,
+  readChapterVersion,
   restoreChapter,
   saveChapter,
   subscribeChapterOpenResults,
@@ -2707,6 +2709,10 @@ export function ChapterWorkspace({
     setFind(null);
     manuscriptRef.current?.querySelector<HTMLElement>(".fy-rme__doc")?.focus();
   }, []);
+  // Compare versions (R-13): the page's place, until Close.
+  const [comparing, setComparing] = useState(false);
+  useEffect(() => setComparing(false), [chapter.id, view]);
+  const readVersion = useCallback((version: number) => readChapterVersion(worldId, prodId, chapter.file, version), [worldId, prodId, chapter.file]);
   const [focus, setFocus] = useState(false);
   const focusRef = useRef(false);
   focusRef.current = focus;
@@ -2804,6 +2810,12 @@ export function ChapterWorkspace({
   const focusPress = (
     <button type="button" className={cx("fy-ch__wbtn", focus && "fy-ch__wbtn--on")} aria-label="Focus" title={`Focus · ${MOD}Shift+F`} aria-pressed={focus} onClick={enterFocus} data-testid="chapter-focus">
       <Maximize2 size={15} />
+    </button>
+  );
+  const comparePress = (
+    <button type="button" className={cx("fy-ch__wbtn", comparing && "fy-ch__wbtn--on")} aria-label="Compare versions" title="Compare versions" aria-pressed={comparing}
+      disabled={history.length === 0 || record === null} onClick={() => setComparing((open) => !open)} data-testid="chapter-compare-press">
+      <ArrowLeftRight size={15} />
     </button>
   );
   const findBar = find === null ? null : (
@@ -2917,6 +2929,7 @@ export function ChapterWorkspace({
             goal={<GoalRing words={words} goal={goal.words} source={goal.source} />}
           >
             {focusPress}
+            {comparePress}
             <ToolMenu icon label="More" items={moreItems} testId="chapter-more" />
           </WritingBar>
         ) : (
@@ -3122,8 +3135,22 @@ export function ChapterWorkspace({
               )}
             </div>
           )}
-          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"}>
+          <div className="fy-ch__manuscript" ref={manuscriptRef} hidden={view !== "manuscript"} data-names={namesOn ? undefined : "off"} data-compare={room && comparing ? "true" : undefined}>
             {room && findBar}
+            {room && comparing && record !== null && (
+              <CompareVersions
+                // Every kept version, not the sidebar's newest twelve (codex on PR 1802).
+                kept={[...(record.versions ?? [])].sort((a, b) => a - b)}
+                now={{ version: record.version, body: live }}
+                read={readVersion}
+                locked={locked}
+                onRestore={(version) => {
+                  restoreChapter(worldId, prodId, chapter.file, version);
+                  setComparing(false);
+                }}
+                onClose={() => setComparing(false)}
+              />
+            )}
             {room && (
               <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
                 {emptyChapter && (

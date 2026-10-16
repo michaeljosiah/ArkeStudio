@@ -367,6 +367,22 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** One kept version's prose, for Compare (SPEC-056 R-13). */
+  z
+    .object({
+      ...base,
+      type: z.literal("chapter.version-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
+      disposition: z.enum(["read", "failed"]),
+      body: z.string().optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
   /**
    * What became of one save (turn 126). A save keeps the version but changes the bytes, so the
    * editor needs the new hash before its next save can name a base; a refusal says the file

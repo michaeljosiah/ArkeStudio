@@ -104,7 +104,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "propose-season": "studio", "create-episode": "studio", "propose-episode": "studio",
   "reorder-episodes": "studio", "draft-scene": "studio", "create-scene": "studio",
   "restore-scene": "studio", "delete-scene": "studio", "scene-command": "studio",
-  "create-chapter": "studio", "open-chapter": "studio", "save-chapter": "studio",
+  "create-chapter": "studio", "open-chapter": "studio", "read-chapter-version": "studio", "save-chapter": "studio",
   "retire-chapter": "studio", "restore-chapter-retired": "studio", "edit-chapter-plan": "studio",
   "restore-chapter": "studio", "save-bible": "studio", "restore-bible": "studio",
   "reorder-chapters": "studio", "reorder-scenes": "studio", "set-production-aspect": "studio",

@@ -2756,19 +2756,19 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
   });
 });
 
-describe("Focus and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
+describe("Focus, Compare and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
   const key = (init: { key: string; ctrlKey?: boolean; shiftKey?: boolean }) => {
     const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }) as unknown as KeyboardEvent;
     Object.assign(event, { metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, ...init });
     return event;
   };
 
-  it("after the goal, Focus and then ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
+  it("after the goal, Focus, Compare and ⋯; Focus makes the page the window, and Esc gives the room back", async () => {
     const m = await mount(inkbound());
     await answerOpen(m);
     const bar = q(m, '[role="toolbar"][aria-label="Writing"]')!;
-    const tail = [...bar.children].slice(-3).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
-    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-more"], "the goal, Focus, then ⋯ (R-7)");
+    const tail = [...bar.children].slice(-4).map((child) => child.getAttribute("data-testid") ?? child.querySelector("[data-testid]")?.getAttribute("data-testid"));
+    assert.deepEqual(tail, ["chapter-goal", "chapter-focus", "chapter-compare-press", "chapter-more"], "the goal, Focus, Compare, then ⋯ (R-7)");
     const root = () => q(m, '[data-testid="chapter-workspace"]')!;
     const titlebar = dom.document.createElement("div");
     titlebar.className = "fy-titlebar";
@@ -2800,5 +2800,32 @@ describe("Focus and ⋯ (design turn 227g, SPEC-056 R-7, R-12)", () => {
     const shortcuts = [...m.container.querySelectorAll('[role="menu"] [role="menuitem"]')].find((item) => item.textContent === "Shortcuts") as HTMLButtonElement;
     await act(async () => shortcuts.click());
     assert.deepEqual(items(), ["FocusCtrl+Shift+F", "Leave FocusEsc", "FindCtrl+F", "Insert a name@", "Blocks/"]);
+  });
+});
+
+describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
+  it("puts the last kept version beside the chapter now, its changes marked, and Restore puts it back", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await act(async () => (q(m, '[data-testid="chapter-compare-press"]') as HTMLButtonElement).click());
+    const asked = m.sent.findLast((message) => message.kind === "read-chapter-version") as Extract<ClientMessage, { kind: "read-chapter-version" }>;
+    assert.deepEqual({ file: asked.chapterFile, version: asked.version }, { file: "01-neap", version: 3 }, "the newest kept version, from the chapter's history");
+    assert.match(text(m), /Opening…/);
+    await act(async () => {
+      __applyEventForTest({
+        type: "chapter.version-result", at: "2026-10-16T12:00:00Z", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID,
+        productionId: "inkbound", chapterFile: "01-neap", version: 3, disposition: "read",
+        body: "Maren counted the bells once.\n\nSix, and the tide <br> not yet called.",
+      });
+    });
+    const panel = q(m, '[data-testid="chapter-compare"]')!;
+    assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-compare"), "true", "the comparison takes the page's place");
+    assert.deepEqual([...panel.querySelectorAll("del")].map((node) => node.textContent), ["bells once."]);
+    assert.deepEqual([...panel.querySelectorAll("ins")].map((node) => node.textContent), ["bells."]);
+    const restore = [...panel.querySelectorAll("button")].find((button) => button.textContent === "Restore") as HTMLButtonElement;
+    await act(async () => restore.click());
+    const restored = m.sent.findLast((message) => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
+    assert.equal(restored.version, 3);
+    assert.equal(q(m, '[data-testid="chapter-compare"]'), null, "and writing resumes");
   });
 });

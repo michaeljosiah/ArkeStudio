@@ -10501,6 +10501,30 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "read-chapter-version": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { disposition: "read"; body: string } | { disposition: "failed"; reason: string }) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.version-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterFile: msg.chapterFile,
+            version: msg.version,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        try {
+          answer({ disposition: "read", body: await new ProseAuthoringService(store).readVersion(msg.productionId, msg.chapterFile, msg.version) });
+        } catch (err) {
+          answer({ disposition: "failed", reason: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "restore-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
