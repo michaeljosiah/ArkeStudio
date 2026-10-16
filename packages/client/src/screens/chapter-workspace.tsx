@@ -260,6 +260,9 @@ const heldAsks = new Map<string, DockAsk>();
  */
 const lastRewrites = new Map<string, { line: string; subject: WorldChatSubject }>();
 
+/** How long after a keystroke a Continue waits for the editor to hand its words on. */
+const CONTINUE_SETTLE_MS = 600;
+
 /** How many versions of one edit can be asked for (D-6). */
 const MAX_VERSIONS = 3;
 
@@ -1583,6 +1586,8 @@ export function ChapterWorkspace({
   // in its tooltip why a selection that is not a passage cannot be asked about.
   const [marked, setMarked] = useState<{ text: string; refused: string | null; at: BarAt } | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  // When the editor last moved, so a Continue can wait for its words to be handed on.
+  const lastTyped = useRef(0);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
   // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
   // there and only there, so an occurrence elsewhere can never be the one changed.
@@ -1926,20 +1931,43 @@ export function ChapterWorkspace({
     const editor = editorRef.current;
     if (editor === null || editor.isDestroyed) return null;
     const { $from } = editor.state.selection;
-    const words = (text: string) => text.trim().split(/\s+/).filter(Boolean);
-    const tail = (text: string) => words(text).slice(-16).join(" ");
-    const here = $from.parent.isTextblock ? $from.parent.textBetween(0, $from.parentOffset, " ") : "";
-    if (words(here).length >= 3) return { paragraph: $from.index(0) + 1, anchor: tail(here), fresh: false };
-    // On a line of its own, it goes on from the paragraph before, as a new one.
+    // As the file writes it (codex on PR 1808): the words before the caret serialised by the editor's
+    // own Markdown, so `**seven bells**` is quoted with its marks and a keep does not drop them.
+    const markdownOf = (from: number, to: number): string => {
+      const slice = editor.state.doc.cut(from, to);
+      return (editor.markdown?.serialize(slice.toJSON()) ?? editor.state.doc.textBetween(from, to, " ")).replace(/\n+$/, "");
+    };
+    const tail = (text: string) => text.trim().split(/\s+/).filter(Boolean).slice(-16).join(" ");
+    const blockStart = (index: number) => {
+      let at = 0;
+      for (let i = 0; i < index; i++) at += editor.state.doc.child(i).nodeSize;
+      return at;
+    };
+    if ($from.parent.isTextblock && $from.parentOffset > 0) {
+      const index = $from.index(0);
+      const here = markdownOf(blockStart(index) + 1, $from.pos);
+      if (here.trim() !== "") return { paragraph: index + 1, anchor: tail(here), fresh: false };
+    }
+    // Only on an empty line does it go on from the paragraph before, as a new one (codex on PR 1808).
     for (let index = $from.index(0) - 1; index >= 0; index--) {
       const block = editor.state.doc.child(index);
-      if (block.isTextblock && words(block.textContent).length >= 3) return { paragraph: index + 1, anchor: tail(block.textContent), fresh: true };
+      if (!block.isTextblock || block.textContent.trim() === "") continue;
+      const start = blockStart(index);
+      return { paragraph: index + 1, anchor: tail(markdownOf(start + 1, start + block.nodeSize - 1)), fresh: true };
     }
     return null;
   };
+  const [queuedContinue, setQueuedContinue] = useState<{ kind: "continue" | "describe" | "dialogue"; what?: string; at: number } | null>(null);
   const askContinue = (kind: "continue" | "describe" | "dialogue", what?: string) => {
     setArkePrompt(null);
-    if (locked || asking || draft !== null || saving || stagedDraft !== undefined) return;
+    if (locked || asking || stagedDraft !== undefined) return;
+    // The words before the caret must be on disk before they are quoted (codex on PR 1808): the
+    // editor holds a keystroke for 400ms and the save follows, so the ask waits for both.
+    if (draft !== null || saving || (queuedContinue === null && Date.now() - lastTyped.current < CONTINUE_SETTLE_MS)) {
+      setQueuedContinue({ kind, ...(what !== undefined ? { what } : {}), at: Date.now() });
+      return;
+    }
+    setQueuedContinue(null);
     const at = caretContext();
     if (at === null) return;
     const request = kind === "continue"
@@ -1950,15 +1978,29 @@ export function ChapterWorkspace({
     const line = `${request} Make it one passage change: quote «${at.anchor}» exactly and replace it with those same words followed by the new text${at.fresh ? ", starting a new paragraph" : ""}. Change nothing else.`;
     const subject: WorldChatSubject = { kind: "passage", chapterId: chapter.id, paragraph: at.paragraph, text: at.anchor };
     lastRewrites.set(path, { line, subject });
-    setAsk({ press: crypto.randomUUID(), line, text: `About this passage in ${chapterLabel}, paragraph ${at.paragraph}: «${at.anchor}» ${line}`, subject, quiet: true });
+    const press = crypto.randomUUID();
+    // The answer is known by this ask, not by its shape (codex on PR 1808).
+    awaitedAsks.set(path, { ask: kind, root: null, known: passageRevisions(world.proposals, path).map((entry) => entry.proposal.id), press });
+    setAsk({ press, line, text: `About this passage in ${chapterLabel}, paragraph ${at.paragraph}: «${at.anchor}» ${line}`, subject, quiet: true });
   };
+  // A queued Continue goes once the words are saved; a minute on, it is let go.
+  useEffect(() => {
+    if (queuedContinue === null) return;
+    if (Date.now() - queuedContinue.at > 60_000) {
+      setQueuedContinue(null);
+      return;
+    }
+    if (draft !== null || saving) return;
+    const timer = setTimeout(() => askContinue(queuedContinue.kind, queuedContinue.what), CONTINUE_SETTLE_MS);
+    return () => clearTimeout(timer);
+  });
   const promptAt = (): { top: number; left: number } => {
     const editor = editorRef.current, host = manuscriptRef.current;
     if (editor === null || host === null) return { top: 0, left: 0 };
     try {
       const caret = editor.view.coordsAtPos(editor.state.selection.from);
       const frame = host.getBoundingClientRect();
-      return { top: caret.bottom - frame.top + 8, left: Math.max(0, caret.left - frame.left) };
+      return { top: caret.bottom - frame.top + 8, left: Math.max(0, Math.min(caret.left - frame.left, frame.width - 320)) };
     } catch {
       return { top: 0, left: 0 };
     }
@@ -1967,11 +2009,12 @@ export function ChapterWorkspace({
     { id: "arke-continue", label: "Continue", aliases: ["write", "next", "arke"], group: "Arke", run: () => askContinue("continue") },
     { id: "arke-describe", label: "Describe…", aliases: ["describe", "arke"], group: "Arke", run: () => setArkePrompt({ kind: "describe", at: promptAt() }) },
     { id: "arke-dialogue", label: "Dialogue for…", aliases: ["dialogue", "speech", "lines", "arke"], group: "Arke", run: () => setArkePrompt({ kind: "dialogue", at: promptAt() }) },
-    { id: "scene-break", label: "Scene break", aliases: ["break", "section", "hr"], group: "Blocks", run: (live) => void live.chain().focus().setHorizontalRule().run() },
   ];
   // A continuation waiting (R-26): grey after the caret, Tab keeps it and Esc lets it go.
   // One edit that only adds: the span is widened to whole words, so the insertion is found in the
   // word diff, and placed in the body by the words that stand before it.
+  const shownTag = stagedDraft === undefined ? undefined : askTags.get(askTags.get(stagedDraft.staged.proposal.id)?.root ?? stagedDraft.staged.proposal.id) ?? askTags.get(stagedDraft.staged.proposal.id);
+  const continueAsk = shownTag !== undefined && shownTag.ask !== "rewrite" ? shownTag.ask : null;
   const continuationAt = ((): { start: number; end: number } | null => {
     if (passageChange === null || editCount !== 1) return null;
     let offset = 0;
@@ -1982,11 +2025,9 @@ export function ChapterWorkspace({
       }
       if (segment.before.trim() !== "" || segment.after.trim() === "") return null;
       const start = passageChange.start + offset, end = start + segment.after.length;
-      // Words added inside a sentence are an edit ("the seven bells"). Written on is what the author
-      // asked for here, or words that run to the end of their paragraph.
-      const asked = /^(Continue the chapter|Describe |Write a few lines of dialogue)/.test(lastRewrites.get(path)?.line ?? "");
-      const after = (stagedDraft?.body ?? live).slice(end);
-      return asked || after === "" || after.startsWith("\n") ? { start, end } : null;
+      // Written on is what a Continue, Describe or Dialogue was asked for (codex on PR 1808); words
+      // added by any other ask, or in Chat, are an edit ("the seven bells").
+      return continueAsk !== null ? { start, end } : null;
     }
     return null;
   })();
@@ -1996,6 +2037,11 @@ export function ChapterWorkspace({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target?.closest?.("input, textarea, select, [contenteditable='true'], [role='dialog']")) return;
+      // Typing over it lets it go, and the editor comes back for the next words (R-26).
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey && stagedDraft !== undefined && !pending) {
+        for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id);
+        return;
+      }
       if (event.key === "Tab" && !event.shiftKey && !pending) {
         event.preventDefault();
         discardOtherVersions();
@@ -3574,7 +3620,10 @@ export function ChapterWorkspace({
                   writingAids
                   find={find}
                   onFind={(count, current) => setFound((was) => (was.count === count && was.current === current ? was : { count, current }))}
-                  onCaret={holdCaret}
+                  onCaret={(caret) => {
+                    lastTyped.current = Date.now();
+                    holdCaret(caret);
+                  }}
                   margins={marginItems}
                 />
                 {nameCard}
@@ -3621,7 +3670,11 @@ export function ChapterWorkspace({
                 at={arkePrompt.at}
                 characters={characters}
                 onAsk={(what) => askContinue(arkePrompt.kind, what)}
-                onClose={() => setArkePrompt(null)}
+                onClose={() => {
+                  setArkePrompt(null);
+                  // The caret where it was, so the next keystroke writes on (codex on PR 1808).
+                  editorRef.current?.commands.focus();
+                }}
               />
             )}
             {marked !== null && !locked && !coarse && (
@@ -3664,7 +3717,7 @@ export function ChapterWorkspace({
             {selection !== null && !locked && coarse && !chatBeside && <TouchPassageAsk manuscript={manuscriptRef.current} selectionTop={selection.top} paragraph={selection.paragraph} words={countWords(selection.text)} actions={passageActions(style !== null)} held={draftConflict || saveRefusal !== null ? "not saved" : saving || draft !== null ? "saving…" : asking ? "asking…" : undefined} onClose={() => setSelection(null)} onAsk={askPassage} value={passageLine} onChange={setPassageLine} onSubmit={() => { askPassage({ ...TIGHTEN, line: passageLine.trim(), replyOnly: false }); setPassageLine(""); }} />}
             {decidedOnPage && stagedDraft !== undefined && (passageChange !== null ? (
               <PageHeldBar
-                name={continuation ? "Continue" : stagedDraft.staged.proposal.summary}
+                name={continueAsk === "describe" ? "Describe" : continueAsk === "dialogue" ? "Dialogue" : continuation ? "Continue" : stagedDraft.staged.proposal.summary}
                 detail={continuationAt !== null ? `${countWords((stagedDraft.body ?? live).slice(continuationAt.start, continuationAt.end)).toLocaleString()} words` : `${editCount === 1 ? "1 edit" : `${editCount} edits`} · ${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`}
                 {...(versionControls !== undefined ? { versions: versionControls } : {})}
                 refuse={{ label: continuation ? "Discard" : "Refuse all", onPress: () => { for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id); }, disabled: pending }}

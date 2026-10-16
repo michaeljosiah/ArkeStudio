@@ -3030,6 +3030,8 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
   };
 
   it("what Arke writes on from the caret waits in grey after it, with Continue, its words, Discard and Keep", async () => {
+    // The page asked for it: the answer is tagged as a Continue's when it arrives.
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
     const m = await mount(inkbound([CONTINUED]));
     await answerOpen(m);
     const ghost = q(m, ".fy-ch__draft-passage .fy-ch__ghost");
@@ -3039,6 +3041,7 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
   });
 
   it("Tab keeps it and Esc lets it go (D-7)", async () => {
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
     const m = await mount(inkbound([CONTINUED]));
     await answerOpen(m);
     await act(async () => { dom.document.body.dispatchEvent(key({ key: "Tab" }) as unknown as Event); });
@@ -3046,9 +3049,26 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
     assert.equal(accepted?.proposalId, CONTINUED.proposal.id, "Tab keeps");
     const other = await mount(inkbound([CONTINUED]));
     await answerOpen(other);
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
     await act(async () => { dom.document.body.dispatchEvent(key({ key: "Escape" }) as unknown as Event); });
     const discarded = other.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
     assert.equal(discarded?.proposalId, CONTINUED.proposal.id, "Esc discards");
+  });
+
+  it("words added at a paragraph's end by any other ask stay a tracked edit (codex on PR 1808)", async () => {
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    assert.equal(q(m, ".fy-ch__draft-passage .fy-ch__ghost"), null);
+    assert.doesNotMatch(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue/);
+  });
+
+  it("typing over a waiting continuation lets it go (R-26)", async () => {
+    __tagAskForTest(CONTINUED.proposal.id, { ask: "continue", root: CONTINUED.proposal.id });
+    const m = await mount(inkbound([CONTINUED]));
+    await answerOpen(m);
+    await act(async () => { dom.document.body.dispatchEvent(key({ key: "T" }) as unknown as Event); });
+    const discarded = m.sent.findLast((message) => message.kind === "proposal-discard") as Extract<ClientMessage, { kind: "proposal-discard" }> | undefined;
+    assert.equal(discarded?.proposalId, CONTINUED.proposal.id);
   });
 
   it("Dialogue for… asks whose lines, from the characters, and Enter takes the first that matches", async () => {
