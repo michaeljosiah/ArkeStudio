@@ -391,3 +391,10 @@ describe("comparing past an inserted paragraph (SPEC-056 R-13)", () => {
     assert.deepEqual(diff.map((p) => p.kind), ["same", "added", "changed", "same"]);
   });
 });
+
+describe("comparing a paragraph with repeated words (codex on PR 1802)", () => {
+  it("is alike either way round when most of its distinct words are shared", () => {
+    assert.deepEqual(versionDiff("Kept.\n\nvery very very very cold night", "Kept.\n\nvery very very very warm night").map((p) => p.kind), ["same", "changed"]);
+    assert.deepEqual(versionDiff("Kept.\n\nvery very very very warm night", "Kept.\n\nvery very very very cold night").map((p) => p.kind), ["same", "changed"]);
+  });
+});

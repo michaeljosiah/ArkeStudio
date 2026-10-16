@@ -907,12 +907,14 @@ export function versionDiff(older: string, newer: string): VersionParagraph[] {
 
 /** Half or more of the longer paragraph's words are also the other's. */
 function alike(a: string, b: string): boolean {
-  const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-  const left = words(a), right = new Set(words(b));
-  const longer = Math.max(left.length, right.size);
-  if (longer === 0) return true;
-  const shared = new Set(left.filter((word) => right.has(word))).size;
-  return shared / longer >= 0.5;
+  // Distinct words on both sides, so the measure is the same either way round (codex on PR 1802).
+  const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
+  const left = words(a), right = words(b);
+  const larger = Math.max(left.size, right.size);
+  if (larger === 0) return true;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / larger >= 0.5;
 }
 
 /** Past this many token pairs the diff is not worth its table, and the passage is one edit. */

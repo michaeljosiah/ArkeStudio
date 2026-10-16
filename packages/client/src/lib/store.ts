@@ -1069,6 +1069,8 @@ export type ChapterOpenResult = Extract<DomainEvent, { type: "chapter.open-resul
 const chapterOpenListeners = new Set<(result: ChapterOpenResult) => void>();
 export type ChapterVersionResult = Extract<DomainEvent, { type: "chapter.version-result" }>;
 const chapterVersionListeners = new Set<(result: ChapterVersionResult) => void>();
+/** A file read, so a long wait is a lost answer rather than a slow one. */
+const VERSION_READ_TIMEOUT_MS = 20_000;
 export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult) => void): () => void {
   chapterOpenListeners.add(listener);
   return () => chapterOpenListeners.delete(listener);
@@ -5028,14 +5030,22 @@ export function saveChapter(
 export function readChapterVersion(worldId: string, productionId: string, chapterFile: string, version: number): Promise<string> {
   const requestId = ulid();
   return new Promise((resolve, reject) => {
+    // A connection lost after the send may never answer (codex on PR 1802): give up rather than
+    // leave Compare opening for good.
+    const timer = setTimeout(() => {
+      chapterVersionListeners.delete(listener);
+      reject(new Error("No answer. Try again."));
+    }, VERSION_READ_TIMEOUT_MS);
     const listener = (result: ChapterVersionResult) => {
       if (result.requestId !== requestId) return;
+      clearTimeout(timer);
       chapterVersionListeners.delete(listener);
       if (result.disposition === "read") resolve(result.body ?? "");
       else reject(new Error(result.reason ?? "That version could not be read."));
     };
     chapterVersionListeners.add(listener);
     if (!send({ kind: "read-chapter-version", worldId, productionId, requestId, chapterFile, version })) {
+      clearTimeout(timer);
       chapterVersionListeners.delete(listener);
       reject(new Error("Not connected."));
     }

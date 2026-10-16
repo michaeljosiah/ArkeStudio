@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { versionDiff } from "@arke-studio/contracts";
+import { versionDiff, type VersionParagraph } from "@arke-studio/contracts";
 import { X } from "../components/icons.js";
 import { Button } from "../components/ui.js";
 
@@ -44,15 +44,15 @@ export function CompareVersions({ kept, now, read, locked, onRestore, onClose }:
     document.addEventListener("keydown", key);
     return () => document.removeEventListener("keydown", key);
   }, [onClose]);
-  // The older on the left whichever way the heads were set.
-  const [older, newer] = left <= right ? [left, right] : [right, left];
-  const olderBody = bodies.get(older);
-  const newerBody = bodies.get(newer);
+  const olderBody = bodies.get(left);
+  const newerBody = bodies.get(right);
   const choices = [...kept, now.version];
   const label = (version: number) => (version === now.version ? `Now · v${version}` : `v${version}`);
-  const pick = (value: number, onPick: (version: number) => void) => (
+  // The heads cannot cross (codex on PR 1802): the left offers only what is older than the right,
+  // so the older is always on the left, beside its Restore.
+  const pick = (value: number, offered: readonly number[], onPick: (version: number) => void) => (
     <select className="fy-compare__pick" value={value} onChange={(e) => onPick(Number(e.target.value))}>
-      {choices.map((version) => (
+      {offered.map((version) => (
         <option key={version} value={version}>{label(version)}</option>
       ))}
     </select>
@@ -60,60 +60,56 @@ export function CompareVersions({ kept, now, read, locked, onRestore, onClose }:
   const diff = olderBody !== undefined && newerBody !== undefined ? versionDiff(olderBody, newerBody) : null;
   return (
     <section className="fy-compare" aria-label="Compare versions" data-testid="chapter-compare">
-      <header className="fy-compare__heads">
-        <div className="fy-compare__head">
-          {pick(left, setLeft)}
-          {older !== now.version && <Button variant="ghost" disabled={locked} onClick={() => onRestore(older)}>Restore</Button>}
+      <div className="fy-compare__grid">
+        <div className="fy-compare__head fy-compare__cell--older">
+          {pick(left, choices.filter((version) => version < right), setLeft)}
+          {left !== now.version && <Button variant="ghost" disabled={locked} onClick={() => onRestore(left)}>Restore</Button>}
         </div>
         <div className="fy-compare__head">
-          {pick(right, setRight)}
+          {pick(right, choices.filter((version) => version > left), setRight)}
           <span className="fy-compare__push" />
           <button type="button" className="fy-ch__wbtn" aria-label="Close compare" onClick={onClose}>
             <X size={14} />
           </button>
         </div>
-      </header>
-      {failed !== null ? (
-        <p className="fy-bible__empty">{failed}</p>
-      ) : diff === null ? (
-        <p className="fy-bible__empty">Opening…</p>
-      ) : (
-        <div className="fy-compare__cols">
-          <div className="fy-compare__col fy-compare__col--older" aria-label={label(older)}>
-            {diff.map((paragraph, i) =>
-              paragraph.kind === "added" ? null : (
-                <p key={i}>
-                  {paragraph.kind === "changed" ? paragraph.segments.map((segment) => (segment.kind === "same" ? segment.text : segment.before)).join("") : paragraph.text}
-                </p>
-              ),
-            )}
-          </div>
-          <div className="fy-compare__col" aria-label={label(newer)}>
-            {diff.map((paragraph, i) =>
-              paragraph.kind === "same" ? (
-                <p key={i}>{paragraph.text}</p>
-              ) : paragraph.kind === "added" ? (
-                <p key={i}><ins>{paragraph.text}</ins></p>
-              ) : paragraph.kind === "removed" ? (
-                <p key={i}><del>{paragraph.text}</del></p>
-              ) : (
-                <p key={i}>
-                  {paragraph.segments.map((segment, j) =>
-                    segment.kind === "same" ? (
-                      <span key={j}>{segment.text}</span>
-                    ) : (
-                      <span key={j}>
-                        {segment.before !== "" && <del>{segment.before}</del>}
-                        {segment.after !== "" && <ins>{segment.after}</ins>}
-                      </span>
-                    ),
-                  )}
-                </p>
-              ),
-            )}
-          </div>
-        </div>
-      )}
+        {failed !== null ? (
+          <p className="fy-bible__empty fy-compare__wide">{failed}</p>
+        ) : diff === null ? (
+          <p className="fy-bible__empty fy-compare__wide">Opening…</p>
+        ) : (
+          // One row a paragraph, the older beside the newer, so an added paragraph leaves a space on
+          // the left rather than sliding everything after it out of line (codex on PR 1802).
+          diff.map((paragraph, i) => (
+            <CompareRow key={i} paragraph={paragraph} />
+          ))
+        )}
+      </div>
     </section>
+  );
+}
+
+function CompareRow({ paragraph }: { paragraph: VersionParagraph }) {
+  const older = paragraph.kind === "added" ? null
+    : paragraph.kind === "changed" ? paragraph.segments.map((segment) => (segment.kind === "same" ? segment.text : segment.before)).join("")
+    : paragraph.text;
+  return (
+    <>
+      <p className="fy-compare__cell fy-compare__cell--older">{older}</p>
+      <p className="fy-compare__cell">
+        {paragraph.kind === "same" ? paragraph.text
+          : paragraph.kind === "added" ? <ins>{paragraph.text}</ins>
+          : paragraph.kind === "removed" ? <del>{paragraph.text}</del>
+          : paragraph.segments.map((segment, j) =>
+              segment.kind === "same" ? (
+                <span key={j}>{segment.text}</span>
+              ) : (
+                <span key={j}>
+                  {segment.before !== "" && <del>{segment.before}</del>}
+                  {segment.after !== "" && <ins>{segment.after}</ins>}
+                </span>
+              ),
+            )}
+      </p>
+    </>
   );
 }

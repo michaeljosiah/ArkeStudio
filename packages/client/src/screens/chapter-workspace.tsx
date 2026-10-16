@@ -3139,7 +3139,8 @@ export function ChapterWorkspace({
             {room && findBar}
             {room && comparing && record !== null && (
               <CompareVersions
-                kept={[...history].sort((a, b) => a - b)}
+                // Every kept version, not the sidebar's newest twelve (codex on PR 1802).
+                kept={[...(record.versions ?? [])].sort((a, b) => a - b)}
                 now={{ version: record.version, body: live }}
                 read={readVersion}
                 locked={locked}
