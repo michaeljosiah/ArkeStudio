@@ -67,6 +67,8 @@ import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { CompareVersions } from "./chapter-compare.js";
+import { passageRefusal, SelectionBar, type BarAt } from "./chapter-ask.js";
+import type { Editor } from "@tiptap/core";
 import { BookStrip, CastCards, ChapterOverview, ProgressSteps, type CastCard, type ProgressStep } from "./chapter-overview.js";
 import { NameCard, type NameCardSheet } from "./chapter-names.js";
 import type { LinkedName } from "../components/editor/linked-names.js";
@@ -285,9 +287,10 @@ subscribeWorldChatSendResults((result) => {
     if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
   }
 });
-/** Test hook: asks outlive a screen by design, so each test starts with none. */
+/** Test hook: asks and parked drafts outlive a screen by design, so each test starts with none. */
 export function __clearHeldAsksForTest(): void {
   heldAsks.clear();
+  parkedDrafts.clear();
   heldKeeps.clear();
   heldAccepts.clear();
 }
@@ -421,123 +424,12 @@ export function paragraphAt(text: string, offset: number): number | null {
 }
 
 const TIGHTEN = passageAction("tighten")!;
+const ASK_ELSE = passageAction("other")!;
 const NONE_REFUSED: ReadonlySet<number> = new Set();
 const HOLD_TO_STYLE = passageAction("style")!;
-/** The menu's groups, ruled apart: what rewrites the passage, what only answers, and the rest. */
-const groupOf = (action: PassageAction) => (action.replyOnly ? "reply" : action.id === "other" ? "other" : "rewrite");
 
-/**
- * The press beside a selection (turn 128), opened into what can be asked of it. Mouse-down is
- * swallowed on the press and on every item, so a click does not collapse the selection it is
- * about before it lands; the menu is keyed by the selection, so a new one starts it closed.
- */
-function PassageMenu({
-  words,
-  top,
-  left,
-  end,
-  actions,
-  onAsk,
-  held,
-}: {
-  words: number;
-  top: number;
-  left: number;
-  /** Near the manuscript's right edge: the menu opens leftward. */
-  end: boolean;
-  /** Why nothing can be asked yet — the selected words are not saved — said on the press. */
-  held?: string;
-  actions: readonly PassageAction[];
-  onAsk: (action: PassageAction) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const items = useRef<(HTMLButtonElement | null)[]>([]);
-  const trigger = useRef<HTMLButtonElement | null>(null);
-  const move = (from: number, by: number) => items.current[(from + by + actions.length) % actions.length]?.focus();
-  /*
-   * Opened from the keyboard, the caret goes into the menu (codex on PR 1232), or its arrow keys
-   * could not be reached. Opened with the mouse it stays in the manuscript, whose selection the
-   * menu is about.
-   */
-  const [enter, setEnter] = useState(false);
-  useEffect(() => {
-    if (!open || !enter) return;
-    items.current[0]?.focus();
-    setEnter(false);
-  }, [open, enter]);
-  return (
-    <div
-      className="fy-ch__ask-wrap"
-      style={{ top, left }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && open) {
-          e.stopPropagation();
-          setOpen(false);
-          // Back to the press, so the keyboard keeps its place (codex on PR 1232).
-          trigger.current?.focus();
-        }
-      }}
-    >
-      <button
-        ref={trigger}
-        type="button"
-        className="fy-ch__ask"
-        aria-haspopup="menu"
-        aria-expanded={open && held === undefined}
-        disabled={held !== undefined}
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={(e) => {
-          // A click with no pointer behind it (detail 0) is Enter or Space.
-          if (!open && e.detail === 0) setEnter(true);
-          setOpen((was) => !was);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            setEnter(true);
-            setOpen(true);
-          }
-        }}
-      >
-        Ask Arke · {held ?? `${words.toLocaleString()} words`}
-      </button>
-      {open && held === undefined && (
-        <div className={cx("fy-ch__ask-menu", end && "fy-ch__ask-menu--end")} role="menu" aria-label="Ask about this passage">
-          {actions.map((action, i) => (
-            <button
-              key={action.id}
-              ref={(el) => {
-                items.current[i] = el;
-              }}
-              type="button"
-              role="menuitem"
-              className={cx("fy-ch__ask-item", i > 0 && groupOf(actions[i - 1]!) !== groupOf(action) && "fy-ch__ask-item--rule")}
-              onMouseDown={(e) => e.preventDefault()}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  move(i, 1);
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  move(i, -1);
-                }
-              }}
-              onClick={() => {
-                setOpen(false);
-                onAsk(action);
-              }}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The widest the menu of asks draws, its border and padding included (fidelity.css). */
-const ASK_MENU_WIDTH = 200;
+/** The widest the Ask Arke menu draws, its border and padding included (chapter-room.css). */
+const ASK_MENU_WIDTH = 320;
 
 /**
  * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
@@ -565,6 +457,29 @@ function askAt(host: HTMLElement | null): AskAt {
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return ASK_UNPLACED;
   return askBeside(host, rect.right, rect.bottom);
+}
+
+/** The selection bar's width as drawn (chapter-room.css), for centring it over the selection. */
+const BAR_WIDTH = 260;
+
+/** The bar above the selected words, centred on them, and the menu's top under them (R-22, R-23). */
+function barAt(host: HTMLElement | null, fallback: AskAt): BarAt {
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!host || !selection || selection.rangeCount === 0) return barFromAnchor(fallback);
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return barFromAnchor(fallback);
+  const frame = host.getBoundingClientRect();
+  const left = Math.max(0, Math.min(rect.left + rect.width / 2 - frame.left - BAR_WIDTH / 2, frame.width - BAR_WIDTH));
+  // The tones open beside the menu: 228px more, so they take their own side (codex on PR 1804).
+  return { top: Math.max(0, rect.top - frame.top - 46), left, below: rect.bottom - frame.top + 8, end: left > frame.width - 320, subEnd: left > frame.width - 560 };
+}
+
+/**
+ * The same from the source's anchor, where only the selection's end can be measured: the bar sits
+ * where the press did, in the gutter beside the selection's line (issue 1238), and the menu opens under it.
+ */
+function barFromAnchor(at: AskAt): BarAt {
+  return { top: at.top, left: at.left, below: at.top + 46, end: at.end };
 }
 
 /** What lays text out in a textarea, copied to the mirror that measures where a selection ends. */
@@ -1587,6 +1502,10 @@ export function ChapterWorkspace({
    * them goes into the production's thread, which never sees the editor.
    */
   const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number; end: boolean } | null>(null);
+  // Any selection, passage or not (R-22): the bar formats whatever is selected, and Ask Arke says
+  // in its tooltip why a selection that is not a passage cannot be asked about.
+  const [marked, setMarked] = useState<{ text: string; refused: string | null; at: BarAt } | null>(null);
+  const editorRef = useRef<Editor | null>(null);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
   // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
   // there and only there, so an occurrence elsewhere can never be the one changed.
@@ -1597,6 +1516,8 @@ export function ChapterWorkspace({
     // the bar's field, or the dock's while it is the hinge half and the bar is not drawn (202).
     const inAsk = document.activeElement?.closest(half ? ".fy-passage-ask, .fy-season-arke-sheet" : ".fy-passage-ask");
     if (subject !== null || !coarse || !inAsk) setSelection(subject === null ? null : { text: subject, paragraph, ...at });
+    const words = text?.trim() ?? "";
+    setMarked(words === "" ? null : { text: words, refused: subject === null ? (passageRefusal(words) ?? "Select a passage") : null, at: source === undefined ? barAt(manuscriptRef.current, at) : barFromAnchor(at) });
     // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
     // words the thread hears must be the words the coordinator will find, and an ask sent inside
     // the autosave window would otherwise quote prose the file does not hold yet.
@@ -1629,8 +1550,13 @@ export function ChapterWorkspace({
     return () => { window.removeEventListener("resize", fit); area.style.height = ""; };
   }, [compact, text, view, richMode]);
   useEffect(() => {
-    if (locked) setSelection(null);
+    // Locked, or another chapter: the selection, and the bar over it, are gone (codex on PR 1804).
+    if (locked) {
+      setSelection(null);
+      setMarked(null);
+    }
   }, [locked]);
+  useEffect(() => setMarked(null), [chapter.id]);
   const passage = selection?.text ?? null;
   /*
    * What the dock is about and what it says first: the passage, when one is selected. The dock's
@@ -1684,7 +1610,9 @@ export function ChapterWorkspace({
     setAsk({ press: crypto.randomUUID(), line: DRAWS_ON_LINE, text: `${dockPrefix} ${DRAWS_ON_LINE}`, draft: true });
   };
   const askPassage = (action: PassageAction) => {
-    setDock(true);
+    // A rewrite comes back into the page (R-24), so the app's Chat stays where it is; a reply, a
+    // line to finish, and the page's own dock (no app Chat) open it.
+    if (!globalChat || action.replyOnly || action.draft) setDock(true);
     setAsk({
       press: crypto.randomUUID(),
       line: action.line,
@@ -1692,6 +1620,7 @@ export function ChapterWorkspace({
       subject: dockSubject,
       ...(action.replyOnly ? { replyOnly: true } : {}),
       ...(action.draft ? { draft: true } : {}),
+      ...(!action.replyOnly && !action.draft ? { quiet: true } : {}),
     });
   };
 
@@ -2529,7 +2458,7 @@ export function ChapterWorkspace({
             // A line a menu press started is about the passage it was pressed on, and the dock
             // says that one, not whatever is selected now (codex on PR 1232).
             ...(shownSubject.kind === "passage"
-              ? { subjectLine: `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
+              ? { subjectLine: shownSubject.paragraph !== undefined ? `Chapter ${chapter.order} · paragraph ${shownSubject.paragraph}` : `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
               : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : {}),
           }}
           openingNote="opening…"
@@ -2908,6 +2837,7 @@ export function ChapterWorkspace({
         closeName();
         // The name is what Chat is about now, not a passage still selected (codex on PR 1800).
         setSelection(null);
+        setMarked(null);
         setNameAsk(sheet.name);
         setDock(true);
       }}
@@ -3349,6 +3279,7 @@ export function ChapterWorkspace({
                   onSelect={onSelect}
                   placeholder={PLACEHOLDER}
                   ariaLabel={`Chapter ${chapter.order}`}
+                  onEditor={(live) => { editorRef.current = live; }}
                   linkedNames={linkedNames}
                   {...(namesOn ? { onName } : {})}
                   mentions={mentions}
@@ -3396,15 +3327,30 @@ export function ChapterWorkspace({
             )}
             {/* The press beside a selection (turn 128). Mouse-down is swallowed so the press does
                 not collapse the selection it is about before the click lands. */}
-            {selection !== null && !locked && !coarse && (
-              <PassageMenu
-                key={selection.text}
-                words={countWords(selection.text)}
-                top={selection.top}
-                left={selection.left}
-                end={selection.end}
+            {marked !== null && !locked && !coarse && (
+              <SelectionBar
+                key={marked.text}
+                at={marked.at}
+                format={richMode && editorRef.current !== null && !editorRef.current.isDestroyed ? (() => {
+                  const live = editorRef.current;
+                  return {
+                    bold: live.isActive("bold"),
+                    italic: live.isActive("italic"),
+                    quote: live.isActive("blockquote"),
+                    // Setting the selection again after the mark re-reports it, so the passage the
+                    // bar would ask about is quoted as formatted (codex on PR 1804).
+                    onBold: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleBold().setTextSelection({ from, to }).run(); },
+                    onItalic: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleItalic().setTextSelection({ from, to }).run(); },
+                    onQuote: () => { const { from, to } = live.state.selection; void live.chain().focus().toggleBlockquote().setTextSelection({ from, to }).run(); },
+                  };
+                })() : null}
+                words={countWords(marked.text)}
+                refused={marked.refused}
                 actions={passageActions(style !== null)}
                 onAsk={askPassage}
+                // The passage becomes Chat's subject with the caret in its composer (R-28): the same
+                // line-to-finish ask that Ask something else… was, with nothing written yet.
+                onOpenInArke={() => askPassage(ASK_ELSE)}
                 // Asked only about words on disk (codex on PR 1232): a revision comes back as a
                 // span of the saved chapter, so text still being saved — or refused — has none.
                 {...(draftConflict || saveRefusal !== null

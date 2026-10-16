@@ -642,6 +642,8 @@ export function languageChoiceReason(
 export type DockAsk = {
   line: string;
   text: string;
+  /** A rewrite whose answer lands on the page (SPEC-056 R-24): sent without opening the app's Chat. */
+  quiet?: boolean;
   subject?: WorldChatSubject;
   replyOnly?: boolean;
   draft?: boolean;
