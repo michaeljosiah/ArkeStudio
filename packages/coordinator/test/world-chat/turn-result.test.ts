@@ -892,6 +892,38 @@ describe("a question asked for its answer (issue 1295)", () => {
     if (!open.ok) assert.ok(open.problems.every((p) => p.code === "schema"));
   });
 
+  it("holds the page's rewrite to a revision on its first answer, and not after (issue 1827)", async () => {
+    // What GPT-5.4 returned to the selection menu's Tighten: the new wording in the reply, nothing staged.
+    const prose = turn({ reply: "Best clean option: “The first time it happened, Ade was driving on the Ibadan expressway.”" });
+    const first = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: prose });
+    assert.equal(first.ok, false);
+    if (!first.ok) {
+      assert.deepEqual(first.problems.map((p) => p.code), ["revise"]);
+      assert.match(first.problems[0]!.safeMessage, /"find": the selected words exactly as quoted, "with": your revision, "paragraph": the paragraph the ask named/);
+    }
+    const revision = JSON.stringify({
+      reply: "Cut the loose “it”.",
+      candidateOperations: [],
+      groupOperations: [],
+      actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: ["check_01J8F3K2QW9VZX4N7M0RTYB6H5"] }],
+    });
+    const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: revision });
+    assert.ok(revised.ok || !revised.problems.some((p) => p.code === "revise"), "a revision answers it, whatever else is checked");
+    // One revision, not two alternatives: the page tags only the first to arrive (codex on PR 1830).
+    const twice = JSON.parse(revision) as { actions: unknown[] };
+    twice.actions.push(twice.actions[0]);
+    const two = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: JSON.stringify(twice) });
+    assert.equal(two.ok, false);
+    if (!two.ok) assert.ok(two.problems.some((p) => p.code === "revise-only"), JSON.stringify(two.problems));
+    // The corrective answer is free to say why it could not be revised…
+    assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "only" })), raw: prose }).ok, true);
+    // …but stages nothing else, or the page would wait on a revision that is not coming (codex on PR 1830).
+    const input = await baseInput({ productionThread: true, revise: "only" });
+    const other = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: canonCreateDraft(input.message) }] }) });
+    assert.equal(other.ok, false);
+    if (!other.ok) assert.ok(other.problems.some((p) => p.code === "revise-only"));
+  });
+
   it("tells every corrective turn that a question needs no action at all", () => {
     assert.match(correctiveMessage([{ code: "schema", safeMessage: "actions.0.change is required: expected object" }]), /If the ask needs no change to the world, leave every action and candidate list empty/);
   });
