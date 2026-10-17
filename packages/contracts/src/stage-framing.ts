@@ -1,5 +1,5 @@
 import { STAGE_CAMERA_NEAR, STAGE_FRAMED_HEIGHT, stageFigureAt, stagingFov, type ResolvedShotStaging } from "./staging.js";
-import type { StageFrameWords, StagePose, StagingKey } from "./scene.js";
+import { StageFrameWordsSchema, type StageFrameWords, type StagePose, type StagingKey } from "./scene.js";
 import { stagePoseHeight } from "./stage-pose.js";
 
 /**
@@ -100,6 +100,34 @@ export function stageReframed(staging: ResolvedShotStaging, durationSec: number,
       };
     }),
   };
+}
+
+/**
+ * A draft whose keys were written as words (issue 1820): each worded key gets its position and aim
+ * from the words, through the shot's lens and aspect, before the draft is validated; the words stay.
+ * A key with neither words nor numbers is left as it is, for the schema to refuse by name.
+ */
+export function stageSolveDraftWords(raw: unknown, durationSec: number, aspect: string, lens: string | undefined): unknown {
+  const draft = raw as { staging?: { keys?: unknown[]; performances?: unknown; objectMotions?: unknown }; cast?: unknown; sets?: unknown };
+  const keys = draft?.staging?.keys;
+  if (!Array.isArray(keys) || !keys.some((key) => (key as { frame?: unknown }).frame !== undefined)) return raw;
+  const stage = {
+    version: 1, keys: [],
+    cast: Array.isArray(draft.cast) ? draft.cast : [],
+    sets: Array.isArray(draft.sets) ? draft.sets : [],
+    ...(draft.staging?.performances ? { performances: draft.staging.performances } : {}),
+    ...(draft.staging?.objectMotions ? { objectMotions: draft.staging.objectMotions } : {}),
+  } as unknown as ResolvedShotStaging;
+  const solved = keys.map((key) => {
+    const entry = key as StagingKey;
+    const words = StageFrameWordsSchema.safeParse(entry.frame);
+    if (!words.success) return key;
+    const resolved = stageFrameKey(stage, { ...words.data, aspect: words.data.aspect ?? aspect }, entry.t, durationSec, aspect, lens);
+    if (resolved === null) return key;
+    const { p: _p, l: _l, anchor: _anchor, anchorSpace: _space, track: _track, ...rest } = entry;
+    return { ...rest, ...resolved };
+  });
+  return { ...draft, staging: { ...draft.staging, keys: solved } };
 }
 
 /** Whether a key still is what its words say; a hand edit that moved it drops them. */
