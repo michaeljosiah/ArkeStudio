@@ -12,7 +12,7 @@ import {
 import { Eyebrow, Link, Row, Stepper, Triad } from "./stage-inspector.js";
 
 /**
- * Lights, the scene's Look and what sets are made of (issue 1825, design turn 228e). A light is a
+ * Lights, the scene's Look and what sets are made of (issue 1825, design turn 229e). A light is a
  * practical on the set — a lamp, a neon, a window, the sun — and the Look is the scene's time,
  * sky, haze and shading. Both are the scene's, written with its blocking; neither is a caption,
  * only rows a person sets.
@@ -140,7 +140,7 @@ export function MaterialRow({ set, disabled, onChange }: { set: StagingSet; disa
   return <Row label="material"><MaterialSelect value={set.material} fallback="concrete" aria={`${set.name} material`} disabled={disabled} onChange={onChange} /></Row>;
 }
 
-/** A kit item's surfaces (228e): one row per surface it has, a room's walls by side. */
+/** A kit item's surfaces (229e): one row per surface it has, a room's walls by side. */
 export function SurfaceRows({ set, disabled, onChange }: { set: StagingSet; disabled: boolean; onChange: (surfaces: Record<string, StageMaterial> | undefined) => void }) {
   const parts = expandStageSet(set);
   const keys: Array<{ key: string; fallback: StageMaterial }> = [];

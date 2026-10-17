@@ -2,7 +2,7 @@ import { STAGE_FRAME_ANGLE_LABELS, STAGE_FRAME_SIDE_LABELS, STAGE_FRAME_SIZE_LAB
 import { Link, Row, Stepper, Value } from "./stage-inspector.js";
 
 /**
- * The camera in words (issue 1820, design turn 228a): subject, size, angle, side and lens, then one
+ * The camera in words (issue 1820, design turn 229a): subject, size, angle, side and lens, then one
  * mono line with where they put the camera, and Edit as numbers for the form underneath. Choosing
  * any word writes all of them, solved through the real lens; a hand edit to the numbers drops them.
  */

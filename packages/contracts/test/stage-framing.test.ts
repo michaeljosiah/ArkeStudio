@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { STAGE_FRAMED_HEIGHT, stageFrameKey, stageReframed, stagingFov, sampleStageCamera, type ResolvedShotStaging, type StageFrameWords } from "../src/index.js";
 
-/** The camera in words (issue 1820, design turn 228a). */
+/** The camera in words (issue 1820, design turn 229a). */
 
 const stage = (facing = 0): ResolvedShotStaging => ({
   version: 1, sets: [], keys: [],

@@ -3,7 +3,7 @@ import type { StageFrameWords, StagePose, StagingKey } from "./scene.js";
 import { stagePoseHeight } from "./stage-pose.js";
 
 /**
- * The camera in words (issue 1820, design turn 228a): who the frame is on, how big, from what
+ * The camera in words (issue 1820, design turn 229a): who the frame is on, how big, from what
  * angle and which side, through which lens. The model and the person both direct; this module does
  * the trigonometry — distance from the framed height through the same cropped Super 35 gate the
  * viewport uses, height from the angle, side from the subject's own facing — so a key written as
