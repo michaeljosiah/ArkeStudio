@@ -905,7 +905,7 @@ describe("a question asked for its answer (issue 1295)", () => {
       reply: "Cut the loose “it”.",
       candidateOperations: [],
       groupOperations: [],
-      actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: [] }],
+      actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: ["check_01J8F3K2QW9VZX4N7M0RTYB6H5"] }],
     });
     const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: revision });
     assert.ok(revised.ok || !revised.problems.some((p) => p.code === "revise"), "a revision answers it, whatever else is checked");
@@ -914,7 +914,7 @@ describe("a question asked for its answer (issue 1295)", () => {
     twice.actions.push(twice.actions[0]);
     const two = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: JSON.stringify(twice) });
     assert.equal(two.ok, false);
-    if (!two.ok) assert.ok(two.problems.some((p) => p.code === "revise-only"));
+    if (!two.ok) assert.ok(two.problems.some((p) => p.code === "revise-only"), JSON.stringify(two.problems));
     // The corrective answer is free to say why it could not be revised…
     assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "only" })), raw: prose }).ok, true);
     // …but stages nothing else, or the page would wait on a revision that is not coming (codex on PR 1830).
