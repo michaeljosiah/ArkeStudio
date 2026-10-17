@@ -284,7 +284,12 @@ const MAX_VERSIONS = 3;
 export type AskKind = "rewrite" | "continue" | "describe" | "dialogue";
 export type AskTag = { ask: AskKind; root: string };
 const askTags = new Map<string, AskTag>();
-const awaitedAsks = new Map<string, { ask: AskKind; root: string | null; known: readonly string[]; press: string }>();
+/**
+ * `turn` is the thread's turn the ask became, once it was taken: followed to its end, so a turn
+ * that ends without a revision lets the page stop waiting and shows where the answer went instead
+ * (issue 1827). Before it, a reply-only answer left the page silent, or "Asking…" up for good.
+ */
+const awaitedAsks = new Map<string, { ask: AskKind; root: string | null; known: readonly string[]; press: string; turn?: { conversationId: string; turnId: string } }>();
 /** A version kept and not yet landed, with the ones to let go when it does. */
 const chosenVersions = new Map<string, { kept: string; others: readonly string[] }>();
 
@@ -347,7 +352,14 @@ onWorldChange(() => {
 // answers, and a chapter left for long enough would come back to one it no longer has.
 subscribeWorldChatSendResults((result) => {
   for (const [key, held] of heldAsks) {
-    if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
+    if (held.sent?.requestId !== result.requestId) continue;
+    heldAsks.set(key, { ...held, answered: result.admitted });
+    // A quiet ask's turn is followed to its end (issue 1827). Recorded here, not by the screen, so
+    // an answer that comes while the author is in another chapter is not lost (codex on PR 1830).
+    if (held.quiet !== true || !result.admitted || result.turnId === undefined) continue;
+    for (const [path, awaited] of awaitedAsks) {
+      if (awaited.press === held.press) awaitedAsks.set(path, { ...awaited, turn: { conversationId: held.sent.conversationId, turnId: result.turnId } });
+    }
   }
 });
 /** Test hook: asks and parked drafts outlive a screen by design, so each test starts with none. */
@@ -1413,6 +1425,9 @@ export function ChapterWorkspace({
 
   // The words of the text on screen once it is here; the summary's count only while it is not.
   const words = record === null ? (chapter.words ?? 0) : countWords(text);
+  // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
+  // status stays "planned" until the author sets one, which read as a chapter not yet written.
+  const shownStatus = chapter.status === "planned" && words > 0 ? "drafted" : chapter.status;
   const activeChapters = production.chapters.filter((c) => !c.retired);
   const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength, activeChapters.length);
@@ -1691,21 +1706,49 @@ export function ChapterWorkspace({
   const askKey = parkedKey(worldId, prodId, path);
   const [ask, setAskState] = useState<DockAsk | null>(() => heldAsks.get(askKey) ?? null);
   const setAsk = useCallback((next: DockAsk | null) => {
-    if (next === null) heldAsks.delete(askKey);
-    else heldAsks.set(askKey, next);
-    setAskState(next);
+    // A quiet ask is the page's rewrite (SPEC-056 R-24): said so on its subject, the coordinator
+    // holds the answer to a revision rather than accepting wording in the reply (issue 1827).
+    const said = next?.quiet === true && next.subject?.kind === "passage" && next.subject.intent === undefined
+      ? { ...next, subject: { ...next.subject, intent: "revise" as const } }
+      : next;
+    if (said === null) heldAsks.delete(askKey);
+    else heldAsks.set(askKey, said);
+    setAskState(said);
   }, [askKey]);
   // The screen's own copy takes its answer too, for a dock put away while it came.
   useEffect(() => subscribeWorldChatSendResults((result) => {
     setAskState((held) => (held?.sent?.requestId === result.requestId ? { ...held, answered: result.admitted } : held));
   }), []);
+  /*
+   * A quiet ask whose turn has ended with nothing staged is answered in Chat (issue 1827): words
+   * in the reply, a passage that cannot be revised, or a failure. The page stops waiting and opens
+   * Chat on that answer, as it does for an ask the thread declined. A turn that staged an action
+   * is left to the revision's arrival, which the page already waits for.
+   */
+  const thread = useStore().state?.worldChat ?? null;
+  useEffect(() => {
+    const turn = awaitedAsks.get(path)?.turn;
+    if (turn === undefined || thread === null || thread.conversationId !== turn.conversationId) return;
+    const failed = thread.lastFailure?.turnId === turn.turnId;
+    const answered = thread.messages.some((message) => message.role === "studio" && message.turnId === turn.turnId);
+    // Stopped, it leaves neither a reply nor a failure (codex on PR 1830): its line is in the thread
+    // and nothing runs any more, so it has ended all the same.
+    const stopped = !failed && !answered && thread.runStatus !== "running" && thread.messages.some((message) => message.turnId === turn.turnId);
+    if (!failed && !answered && !stopped) return;
+    if (answered && (thread.actions ?? []).some((action) => action.turnId === turn.turnId)) return;
+    awaitedAsks.delete(path);
+    setTagged((count) => count + 1);
+    setDock(true);
+  }, [thread, path, setDock]);
   // Any ask held is about the passage it was pressed on, waiting, sent or not taken (codex on
   // PR 1232): the dock says so, whatever is selected by then.
   const shownSubject = ask?.subject ?? dockSubject;
   // One ask at a time (codex on PR 1232): a second press would replace one still waiting or
   // being answered, and a refusal or a lost answer would then have nowhere to be shown. A line
   // only started, or one shown as not sent, is the author's to replace.
-  const asking = ask !== null && ask.draft !== true && ask.declined !== true;
+  // A quiet ask taken by the thread is still being answered until its turn ends (issue 1827): the
+  // dock lets go of it on admission, long before the revision or the reply comes.
+  const asking = (ask !== null && ask.draft !== true && ask.declined !== true) || awaitedAsks.get(path)?.turn !== undefined;
   // Draws on is changed in the thread (turn 126): Add only starts the line there, for the author
   // to finish with what the chapter draws on.
   const askDraws = () => {
@@ -3237,7 +3280,7 @@ export function ChapterWorkspace({
       ...(placedPictures.count > 0 ? { meta: `${placedPictures.count} picture${placedPictures.count === 1 ? "" : "s"}` } : {}),
       ...(voicesRecord !== null ? { action: audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : <Button variant="ghost" onClick={() => chooseView("audiobook")}>Open Audiobook</Button> } : {}) },
     // Mixed once the chapter has a timing: playback then uses its mix (SPEC-047 R-179).
-    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : audiobook.counts.made > 0 ? "Audio Studio" : "Not started",
+    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : "Not started",
       ...(audiobook.counts.made > 0 ? { action: <Button variant="ghost" onClick={() => chooseView("timing")}>Open Audio Studio</Button> } : {}) },
   ];
   const overview = view !== "chapter" ? null : (
@@ -3250,7 +3293,7 @@ export function ChapterWorkspace({
         {povSheet !== undefined && <span className="fy-chov__pov">{portraitOf(povSheet.id) !== null && <img src={portraitOf(povSheet.id)!} alt="" />}{povSheet.name}</span>}
         {chapter.when !== undefined && chapter.when !== "" && <span>{chapter.when}</span>}
         <span>{words.toLocaleString()} words</span>
-        <span>{chapter.status}</span>
+        <span>{shownStatus}</span>
       </>}
       actions={<>
         {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
@@ -3406,7 +3449,7 @@ export function ChapterWorkspace({
                 )}
               </span>
             )}
-            <span>{chapter.status}</span>
+            <span>{shownStatus}</span>
             <span>{words.toLocaleString()} words{compact && ` · ${waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}`}</span>
             {!compact && <span>{waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}</span>}
             {stale && (

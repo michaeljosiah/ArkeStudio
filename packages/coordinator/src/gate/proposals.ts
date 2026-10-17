@@ -1034,9 +1034,22 @@ export class ProposalManager {
 
   /** Discard: the directory goes, reservations stay burned, one log line remains (R-4, D9). */
   async discard(proposalId: string, precondition?: WorldStatePrecondition): Promise<void> {
+    /*
+     * A proposal already gone has nothing to discard (issue 1839). Startup settles every denied
+     * World Chat card by discarding its proposal again, and each went through the gate: a full
+     * world rescan and another `discarded` line. Embers of the Fallen ran 7 of them on every
+     * open, 11 scans in all, and its log held 536 lines for 15 proposals. "One log line remains"
+     * is the first discard's; the reservations it burned came from the manifest, which is gone.
+     */
+    if (!(await this.proposalPresent(proposalId))) return;
     await this.store.gateOp(async () => {
+      // Again under the gate: a discard or an accept queued ahead may have taken it (codex on PR 1850).
+      if (!(await this.proposalPresent(proposalId))) return;
       const proposal = await this.readManifest(proposalId).catch(() => null);
-      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
+      // The line before the directory (codex on PR 1850): a folder gone is then always one whose
+      // discard is on record, which is what lets the check above trust its absence. A removal that
+      // fails after the line is written is retried and writes the line again: a rare duplicate,
+      // where the other order could lose the record for good.
       await appendChanges(this.abs("changes.jsonl"), [
         {
           ts: this.store.now(),
@@ -1046,7 +1059,19 @@ export class ProposalManager {
           source: proposal?.source ?? "unknown",
         },
       ]);
+      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
     }, precondition);
+  }
+
+  /** Whether the proposal's directory is there. Only its absence answers no; any other failure to look is thrown (codex on PR 1850). */
+  private async proposalPresent(proposalId: string): Promise<boolean> {
+    try {
+      await stat(toExtendedLength(this.proposalDir(proposalId)));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
   }
 
   // ---- accept --------------------------------------------------------------
