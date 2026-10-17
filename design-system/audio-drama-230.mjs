@@ -60,11 +60,14 @@ ${states.map(f => `<template data-state="${f.state}" data-w="${f.w}" data-h="${f
     document.querySelectorAll('[data-jump]').forEach(b => b.setAttribute('aria-current', b.dataset.jump === name ? 'step' : 'false'));
     document.title = t.dataset.title + ' · Turn 230';
     if (push) history.replaceState(null, '', '#' + name);
-    const focus = box.querySelector('[data-go]'); if (focus && push) focus.focus({ preventScroll: true });
+    // A dialog or sheet is modal: everything behind it goes inert and focus starts inside it.
+    const dlg = box.querySelector('[role="dialog"]');
+    if (dlg) { for (let n = dlg; n && n !== box; n = n.parentElement) for (const sib of n.parentElement.children) if (sib !== n && !sib.classList.contains('scrim')) sib.inert = true; }
+    const focus = (dlg || box).querySelector('button:not([disabled]),[data-go]'); if (focus && push) focus.focus({ preventScroll: true });
   };
   const say = m => { toast.textContent = m; toast.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => toast.classList.remove('on'), 1600); };
   stage.addEventListener('click', e => { const el = e.target.closest('[data-go]'); if (el && el.dataset.go) { e.preventDefault(); show(el.dataset.go); return; } if (e.target.closest('button')) say('Drawn, not wired in this prototype'); });
-  stage.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-go]')) { e.preventDefault(); show(e.target.dataset.go); } if (e.key === 'Escape') { const back = { hear: 'select', hear2: 'select', ask: 'select', cue: 'script', publish: 'episodes', phear: 'pscript', psource: 'pscript', changed: 'map' }[cur]; if (back) show(back); } });
+  stage.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-go]')) { e.preventDefault(); show(e.target.dataset.go); } if (e.key === 'Escape') { const back = { hear: 'select', hear2: 'select', ask: 'select', cue: 'script', publish: 'episodes', phear: 'pscript', psource: 'pscript', changed: 'map', hearquiet: 'quiet' }[cur]; if (back) show(back); } });
   document.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => show(b.dataset.jump)));
   document.getElementById('theme').addEventListener('click', () => document.documentElement.classList.toggle('dark'));
   addEventListener('resize', fit);

@@ -137,7 +137,7 @@ const tkGlyph = (b, mark = {}) => {
  * The score. `from`/`to` bound the rows shown (a frame is a scrolled page). `sel` is a block index
  * or [first, last]; `marks` maps a block index to { tk, lbl, q, sup }; `ghost` greys the drafted rows.
  */
-export const script = (blocks, beds = [], { from = 0, to = blocks.length, sel, marks = {}, ghost = false, top = '', topRows = 1, srcSel, edits = {} } = {}) => {
+export const script = (blocks, beds = [], { from = 0, to = blocks.length, sel, marks = {}, ghost = false, top = '', topRows = 1, srcSel, edits = {}, srcGo = 'source' } = {}) => {
   let out = top, row = top ? topRows + 1 : 1;
   const rows = {};
   const range = Array.isArray(sel) ? sel : sel != null ? [sel, sel] : null;
@@ -148,7 +148,7 @@ export const script = (blocks, beds = [], { from = 0, to = blocks.length, sel, m
     const sup = mk.sup ? `<sup>${mk.sup}</sup>` : '';
     const ed = edits[i];
     if (b.k === 'head') {
-      out += `<div class="hd" style="grid-row:${r}"><span class="n">${b.n}</span><h2>${b.title} <small>${b.time}</small></h2><div class="props"><span class="chip">${b.heard === 'Narrated' ? I.wave : b.heard === 'A recording' ? I.mic : I.cast}${b.heard}</span><span class="chip"${go('source')}>${I.book}${b.src}</span><span class="chip">≈ ${b.est}</span></div></div>`;
+      out += `<div class="hd" style="grid-row:${r}"><span class="n">${b.n}</span><h2>${b.title} <small>${b.time}</small></h2><div class="props"><span class="chip">${b.heard === 'Narrated' ? I.wave : b.heard === 'A recording' ? I.mic : I.cast}${b.heard}</span><span class="chip"${go(srcGo)}>${I.book}${b.src}</span><span class="chip">≈ ${b.est}</span></div></div>`;
       return;
     }
     if (b.k === 'fx' || b.k === 'amb' || b.k === 'mus') {
