@@ -706,7 +706,7 @@ export class WorldChatRunner {
       ...(actionGuide.text ? { actionGuide: actionGuide.text } : {}),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject, view.entryContext !== undefined && "productionId" in view.entryContext ? view.entryContext.productionId : undefined)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -857,6 +857,9 @@ export class WorldChatRunner {
       const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "") + (images?.description ? `\n\n${images.description}` : "");
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused, images?.parts);
 
+      // The page's rewrite (issue 1827): its first answer must be the revision; the corrective one
+      // may instead stage nothing and say why, but never stages anything else (codex on PR 1830).
+      const revising = subject?.kind === "passage" && subject.intent === "revise";
       let outcome = await this.applyResult(
         store,
         conversationId,
@@ -872,6 +875,7 @@ export class WorldChatRunner {
         subject,
         replyOnly,
         view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+        revising ? "required" : undefined,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -915,6 +919,7 @@ export class WorldChatRunner {
           subject,
           replyOnly,
           view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+          revising ? "only" : undefined,
         );
       }
 
@@ -1058,6 +1063,8 @@ export class WorldChatRunner {
     /** The line asked for a reply and nothing else (turn 128); any action is refused. */
     replyOnly = false,
     setupRevision?: number,
+    /** The page's rewrite (issue 1827): see ValidateInput's `revise`. */
+    revise?: "required" | "only",
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -1076,6 +1083,7 @@ export class WorldChatRunner {
       productionThread: folded.entryContext !== undefined && "productionId" in folded.entryContext,
       draftOnly: folded.entryContext?.kind === "production-setup",
       replyOnly,
+      ...(revise !== undefined ? { revise } : {}),
       raw,
       conversationId,
       messages,
@@ -1480,7 +1488,7 @@ ${assembled.actionGuide}`);
  */
 const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each quoting the passage it names. Propose no action this turn; anything you would change, say instead.";
 
-function subjectNarration(subject: WorldChatSubject | undefined): string {
+function subjectNarration(subject: WorldChatSubject | undefined, productionId?: string): string {
   if (subject === undefined) return "";
   if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.`;
   const named = subject.kind === "chapter"
@@ -1500,5 +1508,22 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject, productionId) : ""}`;
+}
+
+/**
+ * A rewrite pressed on the page (SPEC-056 R-24): its answer is drawn in the prose, so wording
+ * offered in the reply instead reaches nobody — the page sent the ask without opening Chat. Said
+ * to the model here, and held after it by the corrective turn (issue 1827).
+ */
+function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>, productionId: string | undefined): string {
+  // The shape named whole (issue 1827, measured): told only "changes.passage", GPT-5.4 sent
+  // { replace } and then left out the paragraph, which the passage guard rightly refuses.
+  const paragraph = subject.paragraph === undefined ? "" : `, "paragraph": ${subject.paragraph}`;
+  // And the reads it must cite (actions.ts, production-chapter): the chapters, the quoted chapter
+  // and the story, each complete and current. Measured, the model found them one refusal at a
+  // time and spent the corrective turn on the second, so all three are named before it starts.
+  const production = productionId === undefined ? "this production" : `productionId ${productionId}`;
+  const read = ` Before the edit, read each to its last page: list_chapters (${production}), get_chapter (${production}, chapterId ${subject.chapterId}, no section) and get_story (${production}; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds.`;
+  return ` They asked for these words rewritten, and the page shows your revision in place.${read} Then answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
 }
