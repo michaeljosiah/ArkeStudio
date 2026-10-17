@@ -657,7 +657,6 @@ const CLIENT_COMMAND_METADATA = {
   "bench-remove-reference": action("world", "command", "bench", "destructive-change", ["bench", "references"]),
   "bench-upload-references": action("world", "host-action", "host", "host-file-access", ["bench", "references", "artifacts"]),
   "bench-enhance-brief": readOnly("Returns an optional draft prompt without changing the Bench composer."),
-  "bible-helper-run": readOnly("Returns transient helper options and never changes the Bible."),
   "bench-draft-lyrics": readOnly("Returns a lyrics draft without changing the Bench composer."),
   "bench-preset-save": globalOnly("Bench presets are application-global rather than world-scoped creative state."),
   "bench-preset-delete": globalOnly("Bench presets are application-global rather than world-scoped creative state."),
