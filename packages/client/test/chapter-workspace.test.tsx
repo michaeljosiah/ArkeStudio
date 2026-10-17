@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
-import { BookStrip } from "../src/screens/chapter-overview.js";
+import { BookStrip, ChapterOverview } from "../src/screens/chapter-overview.js";
 import { ReviewNotes } from "../src/screens/chapter-review-notes.js";
 import { ArkePrompt } from "../src/screens/chapter-ask.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
@@ -684,7 +684,7 @@ describe("the craft loop (turn 128)", () => {
     const sends = () => m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string; replyOnly?: boolean; subject?: unknown }>;
     const expand = sends().find((message) => message.text.includes("Expand this"));
     assert.match(expand?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Expand this/);
-    assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual(expand?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
     assert.equal(expand?.replyOnly, undefined, "a rewrite may stage");
 
     // One ask at a time (codex on PR 1232): the press waits for the first to be answered.
@@ -751,7 +751,7 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(tightened().length, 0, "nothing can go while the connection is down");
     await act(async () => __setStateForTest(state, { connection: "open" }));
     assert.equal(tightened().length, 1, "and it is not lost: it goes when the connection is back");
-    assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual((tightened()[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
   });
 
   it("an ask is done with when the coordinator takes it, and shown to be tried again when it does not (PR 1232)", async () => {
@@ -787,6 +787,65 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(sendsOf("Tighten this").length, 2, "tried again at the author's word");
     await answer(sendsOf("Tighten this")[1]!.requestId, true);
     assert.doesNotMatch(text(m), /Not sent ·/, "taken, it is done with");
+  });
+
+  it("a rewrite is asked as one, and is asked until its turn ends; a turn that staged nothing lets it go (issue 1827)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const m = await mount(state);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(m, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...m.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = m.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")) as { requestId: string; subject?: { intent?: string } };
+    assert.equal(sent.subject?.intent, "revise", "the coordinator is told the answer is a revision");
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_1827" }));
+    const pill = () => q(m, "button.fy-ch__ask")?.textContent ?? "";
+    assert.match(pill(), /asking…/, "taken is not answered: the page asks until the turn ends");
+    await act(async () => (q(m, "button.fy-arke__pin") as HTMLElement).click());
+    assert.equal(q(m, ".fy-arke"), null, "the author puts Arke away while the rewrite is written");
+
+    const said = (turnId: string) => ({ id: `msg_${turnId}`, turnId, role: "studio" as const, text: "Best clean option: “Maren counted.”", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:09Z" });
+    // A turn that staged an action is answered by the revision's arrival, not by its reply.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 6, messages: [said("turn_1827")], actions: [{ actionId: "act_1827", turnId: "turn_1827", dependencies: [], status: "applied", shown: { title: "Revise a passage", consequence: "Changes chapter 02", affectedTargets: [], ripples: [], permissionReason: "authored-change", body: { family: "command", commands: [], expectedResult: "Revised", undoAvailable: true } }, targets: [], availableDecisions: [] }] } } as never, { connection: "open" }));
+    assert.match(pill(), /asking…/, "a staged revision is still on its way");
+    // Another turn's reply is not this ask's.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 7, messages: [said("turn_other")] } } as never, { connection: "open" }));
+    assert.match(pill(), /asking…/);
+    // The words came back in the reply and nothing was staged: the page stops waiting.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 8, messages: [said("turn_1827")] } } as never, { connection: "open" }));
+    assert.doesNotMatch(pill(), /asking…/, "never left asking for a revision that is not coming");
+    assert.ok(q(m, ".fy-arke"), "and Arke opens on the answer it gave instead");
+  });
+
+  it("a rewrite's turn is kept while the chapter is away, and a stopped turn lets it go too (codex on PR 1830)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const first = await mount(state);
+    await answerOpen(first);
+    await keyup(q(first, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(first, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...first.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = first.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")) as { requestId: string };
+    // The author leaves the chapter before the thread takes the ask.
+    await act(async () => first.root.unmount());
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_1830" }));
+    const m = await mount({ ...state, worldChat: { ...workspace, runStatus: "running" as const, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const pill = () => q(m, "button.fy-ch__ask")?.textContent ?? "";
+    assert.match(pill(), /asking…/, "back in the chapter, the ask taken while away is still being answered");
+    // Stopped from Chat: the turn's line is there, nothing runs, and it left no reply and no failure.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, runStatus: null, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never, { connection: "open" }));
+    assert.doesNotMatch(pill(), /asking…/, "a stopped rewrite does not hold the page for the rest of the session");
   });
 
   it("an ask waits for its answer however long it takes, and only a lost connection loses it (codex on PR 1232)", async (t) => {
@@ -880,7 +939,7 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => __setStateForTest(state, { connection: "open" }));
     const sends = m.sent.filter((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this"));
     assert.equal(sends.length, 1, "brought back, the dock says it");
-    assert.deepEqual((sends[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual((sends[0] as { subject?: unknown }).subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
   });
 
   it("an answer that arrives while the dock is put away is found when it comes back (codex on PR 1232)", async () => {
@@ -2601,6 +2660,19 @@ describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
     assert.equal(q(m, ".fy-ch__body")!.hasAttribute("hidden"), true);
   });
 
+  it("a chapter with words reads as drafted, and Mixed says not started until it is (issue 1827)", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: { id: string; status?: string }[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, status: "planned" } : c));
+    const m = await mount(state, `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    const meta = q(m, ".fy-chov__meta")?.textContent ?? "";
+    assert.match(meta, /drafted/, "the stored status is planned, but the chapter has words");
+    assert.doesNotMatch(meta, /planned/);
+    const mixed = [...m.container.querySelectorAll(".fy-chov__step")].find((step) => /Mixed/.test(step.textContent ?? ""));
+    assert.match(mixed?.querySelector("b")?.textContent ?? "", /^(Not started|Mixed)$/, "its state, not the name of the place to mix it");
+  });
+
   it("the hero shows the chapter's chosen picture (D-10)", async () => {
     const state = inkbound();
     const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
@@ -2641,6 +2713,29 @@ describe("the book strip (design turn 227, SPEC-056 R-36)", () => {
     assert.ok(segments.every((segment) => segment.getAttribute("role") === null), "a segment is announced as the button it is");
     await act(async () => (segments[1] as HTMLElement).click());
     assert.deepEqual(chose, ["three"]);
+  });
+});
+
+describe("the Chapter view's pictures (SPEC-056 R-40)", () => {
+  it("hold one row of five: four pictures and the count of the rest (issue 1827)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const pictures = Array.from({ length: 15 }, (_, i) => `artifacts/p${i}.png`);
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    const cells = [...container.querySelectorAll(".fy-chov__pics > *")];
+    assert.equal(cells.length, 5, "a sixth cell wrapped to a row of its own");
+    assert.equal(cells.at(-1)?.textContent, "+11");
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures.slice(0, 5)} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    assert.equal(container.querySelectorAll(".fy-chov__pics > *").length, 5, "five pictures show as five");
+    assert.equal(container.querySelector(".fy-chov__pic--more"), null);
   });
 });
 
@@ -3007,7 +3102,7 @@ describe("versions of an edit (design turn 227e, SPEC-056 R-25, D-6)", () => {
     await act(async () => (q(m, '[aria-label="Another version"]') as HTMLButtonElement).click());
     const asked = m.sent.findLast((message) => message.kind === "world-chat-send") as { text: string; subject?: unknown } | undefined;
     assert.match(asked?.text ?? "", /^About this passage in chapter 02, paragraph 1: «Maren counted the bells\.» Revise this\. Another version, different from the one shown\.$/);
-    assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." });
+    assert.deepEqual(asked?.subject, { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells.", intent: "revise" });
     assert.match(q(m, '[data-testid="page-held-versions"]')?.textContent ?? "", /asking…/);
     const keep = [...(q(m, '[data-testid="page-held-bar"]')?.querySelectorAll("button") ?? [])].at(-1) as HTMLButtonElement;
     assert.equal(keep.disabled, true, "nothing is kept while another version is being written (codex on PR 1807)");

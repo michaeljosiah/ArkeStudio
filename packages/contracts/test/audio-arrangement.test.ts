@@ -259,6 +259,34 @@ describe("legacy arrangement derivation", () => {
     assert.throws(() => migrateAudioArrangement(script, timing, new Map()), /unresolved timing/);
   });
 
+  it("opens a take whose timed length is rounded past its file, and refuses one further out (issue 1827)", () => {
+    // Juju chapter 1, block p61: timed at 41.92 s, decoded to 2,012,142 samples (41.9196 s).
+    const timed = (seconds: number) => timeChapter({ blocks: [{ key: "p0.0", text: "First", lane: "narration", take: { artifactId: "first", file: "artifacts/first.wav", seconds } }], record: {}, reading: "narrator", unmade: "skip" });
+    const file = { ...source("first"), samples: 2_012_142 };
+    const one = { hash: "legacy", passages: [{ key: "p0.0", textHash: audiobookTimingHash("First") }] };
+    const migrated = migrateAudioArrangement(one, timed(41.92), new Map([[file.file, file]]));
+    assert.equal(migrated.clips[0]!.sourceOut, file.samples, "the rounding is the file's end");
+    assert.deepEqual(resolveAudioArrangement(migrated, one).issues, []);
+    assert.throws(() => migrateAudioArrangement(one, timed(41.922), new Map([[file.file, file]])), /The trim is outside this exact source/, "a real disagreement is still refused");
+  });
+
+  it("a take cut to its file's end does not move the passages after it (codex on PR 1832)", () => {
+    const blocks = [
+      { key: "p0.0", text: "First", lane: "narration" as const, take: { artifactId: "first", file: "artifacts/first.wav", seconds: 41.92 } },
+      { key: "p1.0", text: "Second", lane: "narration" as const, take: { artifactId: "second", file: "artifacts/second.wav", seconds: 3 } },
+      { key: "p2.0", text: "Third", lane: "narration" as const, take: { artifactId: "third", file: "artifacts/third.wav", seconds: 2 } },
+    ];
+    const timing = timeChapter({ blocks, record: {}, reading: "narrator", unmade: "skip" });
+    const script = { hash: "legacy", passages: blocks.map(block => ({ key: block.key, textHash: audiobookTimingHash(block.text) })) };
+    const sources = [{ ...source("first"), samples: 2_012_142 }, source("second", 3), source("third", 2)];
+    const resolved = resolveAudioArrangement(migrateAudioArrangement(script, timing, new Map(sources.map(entry => [entry.file, entry]))), script);
+    assert.deepEqual(resolved.issues, []);
+    for (const bar of timing.bars) {
+      const placed = resolved.passages.find(passage => passage.key === bar.key)!;
+      assert.equal(placed.at, audioSamples(bar.at), `${bar.key} starts where the timing put it`);
+    }
+  });
+
   it("rejects unsafe paths, unsupported schemas and fractional sample positions", () => {
     const current = state(); current.clips[0]!.source!.file = "../private.wav";
     assert.throws(() => validateAudioArrangement(current), /audio must belong/);
