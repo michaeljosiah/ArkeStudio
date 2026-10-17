@@ -186,12 +186,19 @@
   .fy-ab__menu { max-width: calc(100vw - 40px); }
 }
 
+/*
+ * The page is the writing surface and the caret shows where focus is: no ring around the whole
+ * document. It was cleared only below 1100, so above it a keyboard shortcut, or Focus and Find
+ * handing the caret back, drew a 3 px box round the manuscript — two rails beside the text in
+ * Focus (issue 1827).
+ */
+[data-screen="chapter"] .fy-rme__doc:focus-visible { box-shadow: none; }
+
 /* Compact reading surfaces use the page's measure and quiet rules from the master. */
 @media (max-width: 1099px) {
   [data-screen="chapter"] .fy-sw__head { padding-top: 0; padding-bottom: 0; }
   [data-screen="chapter"] .fy-sw__breadcrumb { font: 500 12px/1.4 var(--font-sans); letter-spacing: 1.4px; color: var(--muted-foreground); margin-bottom: 2px; }
   [data-screen="chapter"] .fy-sw__title { font: 600 36px/1.2 var(--font-sans); }
-  [data-screen="chapter"] .fy-rme__doc:focus-visible { box-shadow: none; }
   [data-screen="chapter"] .fy-ch__context, [data-screen="chapter"] .fy-ch__mark .fy-mono { color: var(--foreground); }
   [data-screen="chapter"] .fy-ch__viewline { margin-bottom: 16px; }
   .fy-prodrail__chapters { display: grid; gap: 0; padding: 0 0 14px; border-bottom: 1px solid var(--border); margin: 0 12px 8px; }

@@ -28,6 +28,18 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN AUDIO DRAMA 228
+  { group: "Audio Drama · turn 228", screen: "Adapt a story", frame: "228a", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Account for the source", frame: "228b", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Write for the ear", frame: "228c", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Cast an exchange", frame: "228d", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Arrange in Audio Studio", frame: "228e", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Review what was heard", frame: "228f", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Prepare an edition", frame: "228g", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Phone · the same script", frame: "228h", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "A source change stays a decision", frame: "228i", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  // END AUDIO DRAMA 228
+
   // BEGIN CHAPTER PAGE 227
   { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · the writing room, where a chapter opens", frame: "227a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
   { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · a linked name, hovered", frame: "227b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
@@ -768,6 +780,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "audio-drama-228.review.html", what: "Turn 228: source-linked Audio Drama adaptation, typed script, casting, reused Audio Studio, listening review, editions and source changes.", state: "proposed; interactive design fixture" },
   { file: "chapter-page-227.review.html", what: "Turn 227 revision 4: the Manuscript as a writing room (linked names, @ and / menus, compare, focus, Brief), working with Arke (selection menu, versions of an edit, review notes, Continue, Chat about a passage) and a Chapter view with the cast as cards; a new chapter; turn 225’s Chat with voice and upload; desktop, ultrawide, Fold and phone.", state: "approved; implementation tracked in #1791" },
   { file: "audio-studio.review.html", what: "Turn 226 revision 2: existing video editor comparison, script preview, chapter arrangement, replacement review and compact layouts.", state: "approved; implementation starting" },
   { file: "global-chat-224.native-review.html", what: "Turn 225 revision 3: actual Develop page and native composer/model controls compared with the proposed global Chat host. Build using global-chat-224.native-build.mjs.", state: "approved · implementation under validation" },
@@ -927,6 +940,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="audio-studio-226.frames.css">
 <link rel="stylesheet" href="chapter-page-227.css">
 <link rel="stylesheet" href="chapter-page-227.chat.css">
+<link rel="stylesheet" href="audio-drama-228.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

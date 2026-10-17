@@ -283,7 +283,7 @@ export function productionSetups(world: WorldStore): ProductionSetupService {
 
 export async function recoverProductionSetups(world: WorldStore): Promise<void> {
   const service = productionSetups(world);
-  const found = await world.ownedWrite(() => discoverConversations(world.dir));
+  const found = await world.operationalWrite(() => discoverConversations(world.dir));
   const errors: unknown[] = [];
   for (const summary of found.summaries) {
     if (summary.entryContext?.kind !== "production-setup" && summary.setupStatus !== "creating") continue;

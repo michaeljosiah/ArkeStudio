@@ -98,7 +98,7 @@ export function AudioStudioWorkspace(props: {
     playing={player.playing} pending={player.pending} reviewing={review !== null} canPlay={!!plan?.samples && !busy}
     onPlay={play} onStop={player.stop} onBack={props.onBack} onExport={props.onExport} exportDisabled={props.exportDisabled || disabled || !!plan?.issues.length}
     problem={studio.problem ?? player.problem ?? (snapshot ? player.issues.join(" · ") || null : "Opening Audio Studio…")}
-    library={snapshot ? <AudioStudioLibrary snapshot={snapshot} selected={selected} disabled={disabled} replacing={replacing} onAdd={add} onImport={() => importMedia()} onCancelReplace={() => setReplacing(false)} onEdit={edit} /> : <p className="fy-audio-studio__propose">Loading Library…</p>}
+    library={snapshot ? <AudioStudioLibrary snapshot={snapshot} selected={selected} disabled={disabled} replacing={replacing} onAdd={add} onImport={() => importMedia()} onCancelReplace={() => setReplacing(false)} onEdit={edit} /> : <p className="fy-audio-studio__propose">{studio.problem === null ? "Loading Library…" : "Library unavailable"}</p>}
     showInspector inspector={shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}
     proposal={reviewCard} propose={<>{props.propose}{snapshot?.proposals?.filter(entry => entry.status === "pending").map(entry => {
       const version = entry.versions.at(-1)!;
