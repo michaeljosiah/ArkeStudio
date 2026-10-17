@@ -439,7 +439,7 @@ describe("the third view (turn 187a)", () => {
       __applyEventForTest({ at: AT, type: "chapter.open-result", requestId: ask.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", disposition: "opened", body: BODY, version: 4, hash: HASH, versions: [1, 2, 3] });
     });
     const tabs = all(m, "nav[aria-label='Chapter view'] button").map((button) => button.textContent);
-    assert.deepEqual(tabs, ["Manuscript", "Audiobook", "Audio Studio"]);
+    assert.deepEqual(tabs, ["Chapter", "Manuscript", "Audiobook", "Audio Studio"]);
     assert.ok(q(m, "[data-testid=audio-studio]"), "legacy Timing addresses open Audio Studio");
     const params = new URLSearchParams(q(m, "[data-testid=studio-location]")!.textContent!);
     assert.equal(params.get("view"), "audio-studio", "canonical route also selects the editor chrome");

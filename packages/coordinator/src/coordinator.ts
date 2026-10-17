@@ -10501,6 +10501,30 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "read-chapter-version": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { disposition: "read"; body: string } | { disposition: "failed"; reason: string }) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.version-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterFile: msg.chapterFile,
+            version: msg.version,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        try {
+          answer({ disposition: "read", body: await new ProseAuthoringService(store).readVersion(msg.productionId, msg.chapterFile, msg.version) });
+        } catch (err) {
+          answer({ disposition: "failed", reason: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "restore-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -13365,20 +13389,6 @@ export class Coordinator {
           worldId: msg.worldId,
         });
         return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
-      }
-      case "bible-helper-run": {
-        // This frame shipped ahead of its coordinator seam. A correlated refusal is the honest
-        // result until that read-only helper exists; silence leaves the editor waiting forever.
-        this.emit({
-          at: this.nowIso(),
-          type: "bible.helper-answered",
-          worldId: msg.worldId,
-          requestId: msg.requestId,
-          helper: msg.helper,
-          options: null,
-          reason: "Bible helpers are not available in this build.",
-        });
-        return;
       }
       case "bench-draft-lyrics": {
         // The same one-turn harness call the enhancer makes, and the same discipline: the

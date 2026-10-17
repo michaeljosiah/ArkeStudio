@@ -28,6 +28,46 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN AUDIO DRAMA 228
+  { group: "Audio Drama · turn 228", screen: "Adapt a story", frame: "228a", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Account for the source", frame: "228b", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Write for the ear", frame: "228c", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Cast an exchange", frame: "228d", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Arrange in Audio Studio", frame: "228e", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Review what was heard", frame: "228f", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Prepare an edition", frame: "228g", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "Phone · the same script", frame: "228h", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  { group: "Audio Drama · turn 228", screen: "A source change stays a decision", frame: "228i", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
+  // END AUDIO DRAMA 228
+
+  // BEGIN CHAPTER PAGE 227
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · the writing room, where a chapter opens", frame: "227a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · a linked name, hovered", frame: "227b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · @ inserts a name from the world", frame: "227c", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · / commands, Arke first", frame: "227d", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · Arke’s edits in the page, each kept or refused", frame: "227e", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · two versions side by side", frame: "227f", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Focus · the window is the page", frame: "227g", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Ultrawide 2560 · the type steps up, the Brief docked, Chat open", frame: "227h", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Chapter · the production home: picture, cast, progress, pictures", frame: "227i", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Chapter · a face opens its voice", frame: "227j", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Fold 984 · the writing room", frame: "227k", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Phone · writing, the format bar above the keyboard", frame: "227l", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Phone · Chapter, Write and Listen at the foot", frame: "227m", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Phone · a face opens its voice as a sheet", frame: "227n", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · a chapter with no words yet", frame: "227o", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · text selected: format, and Arke’s menu", frame: "227p", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · Change tone, a second level", frame: "227q", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · the chapter review’s notes beside the words they quote", frame: "227r", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · Continue: Arke’s words after the caret, grey until kept", frame: "227s", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Manuscript · talking to Arke about a passage; the answer waits in the page", frame: "227t", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "A new chapter · its brief at the top of the page, Chat open", frame: "227u", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "A new chapter · Arke’s draft waits in the page", frame: "227v", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Chat · a picture attached, dictating, replies read aloud", frame: "227w", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "A new chapter · the Chapter view before anything is made", frame: "227x", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  { group: "Chapter · turn 227 · revision 4", screen: "Phone · a new chapter with Chat as a sheet", frame: "227y", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-16", controls: [], notes: ["Approved 16 October 2026; implementation tracked in #1791."] },
+  // END CHAPTER PAGE 227
+
   // BEGIN AUDIO STUDIO 226
   { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Existing video editor · layout reference", frame: "226a", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["The source-backed Cut drawing from turns 220–223 supplies the existing wordmark, navigation, Library, preview, timeline and Inspector structure. Approved design; implementation tracked separately." ] },
   { group: "Audio Studio · turn 226 · revision 2 · approved", screen: "Chapter studio · script and performance", frame: "226b", route: "Story / Audiobook / Audio Studio", status: "drawn", checked: "2026-10-15", controls: [], notes: ["Script selection locates Mara’s performance. Narrator and cast tracks sit beside Effects, Music and Ambience. The Inspector names the chosen source. Approved design; implementation tracked separately." ] },
@@ -740,6 +780,8 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "audio-drama-228.review.html", what: "Turn 228: source-linked Audio Drama adaptation, typed script, casting, reused Audio Studio, listening review, editions and source changes.", state: "proposed; interactive design fixture" },
+  { file: "chapter-page-227.review.html", what: "Turn 227 revision 4: the Manuscript as a writing room (linked names, @ and / menus, compare, focus, Brief), working with Arke (selection menu, versions of an edit, review notes, Continue, Chat about a passage) and a Chapter view with the cast as cards; a new chapter; turn 225’s Chat with voice and upload; desktop, ultrawide, Fold and phone.", state: "approved; implementation tracked in #1791" },
   { file: "audio-studio.review.html", what: "Turn 226 revision 2: existing video editor comparison, script preview, chapter arrangement, replacement review and compact layouts.", state: "approved; implementation starting" },
   { file: "global-chat-224.native-review.html", what: "Turn 225 revision 3: actual Develop page and native composer/model controls compared with the proposed global Chat host. Build using global-chat-224.native-build.mjs.", state: "approved · implementation under validation" },
   { file: "global-chat-224.review.html", what: "Design turn 225: persistent contextual Chat, navigation, drafts, phone and world boundary. Interactive isolated fixture.", state: "approved · implementation under validation" },
@@ -896,6 +938,9 @@ const page = `<!doctype html>
 <title>Arke Studio · design review</title>
 <link rel="stylesheet" href="global-chat-224.css">
 <link rel="stylesheet" href="audio-studio-226.frames.css">
+<link rel="stylesheet" href="chapter-page-227.css">
+<link rel="stylesheet" href="chapter-page-227.chat.css">
+<link rel="stylesheet" href="audio-drama-228.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

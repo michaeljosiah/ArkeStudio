@@ -37,7 +37,17 @@ export function GlobalConversationEntry({ props, world }: { props: ProductionCon
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current ? owner.register(latest.current, host.current) : undefined, [owner, key]);
   useLayoutEffect(() => { if (host.current) owner.refresh(latest.current, host.current); });
-  useLayoutEffect(() => { if (props.openWith || props.dock?.ask && !props.dock.ask.sent) owner.open(latest.current); }, [owner, props.openWith, props.dock?.ask?.press]);
+  // An ask opens Chat unless it is a quiet one, whose answer comes back on the page (SPEC-056 R-24).
+  // A quiet ask still needs this page's conversation to be the one mounted to send it, so it is
+  // selected without opening (codex on PR 1804); refused, it opens Chat, where it can be tried again.
+  useLayoutEffect(() => {
+    const ask = props.dock?.ask;
+    if (props.openWith || ask && !ask.sent && ask.quiet !== true) owner.open(latest.current);
+    else if (ask && !ask.sent && ask.quiet === true) owner.select(latest.current);
+  }, [owner, props.openWith, props.dock?.ask?.press]);
+  useLayoutEffect(() => {
+    if (props.dock?.ask?.quiet === true && props.dock.ask.declined === true) owner.open(latest.current);
+  }, [owner, props.dock?.ask?.declined, props.dock?.ask?.press]);
   return <div className="fy-global-chat-slot"><ChatExpand owner={owner} surface={surface} /><ChatPageCanvas owner={owner} surface={surface} props={props} /><div ref={host} /></div>;
 }
 

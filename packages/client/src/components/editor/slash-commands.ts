@@ -9,7 +9,7 @@ import type { Editor } from "@tiptap/core";
  * function taking strings, which is most of it.
  */
 
-export type SlashGroup = "Structure" | "Lists" | "Blocks";
+export type SlashGroup = "Arke" | "Structure" | "Lists" | "Blocks";
 
 export interface SlashCommand {
   id: string;

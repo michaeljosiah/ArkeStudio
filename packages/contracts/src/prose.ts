@@ -677,9 +677,19 @@ export function storyProgressDay(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function targetWords(targetLength: string | undefined, chapterCount?: number): number | null {
-  if (!targetLength) return null;
+/**
+ * What a story target states, read once for both the book's band and a chapter's goal: the
+ * first figure that is the book's own total, the per-chapter figure, and an explicit planned
+ * chapter count. A figure is read only when it says it is words (see `targetWords`). The whole
+ * target is read either way: "80,000 words total, about 3,000 words per chapter" states both, and
+ * stopping at the total would have lost the chapter's figure (codex on PR 1795).
+ */
+export function parseStoryTarget(targetLength: string | undefined): { total: number | null; perChapter: number | null; planned: number | null } {
+  if (!targetLength) return { total: null, perChapter: null, planned: null };
+  const plannedMatch = /\b(\d+)\s+chapters?\b/i.exec(targetLength);
+  const planned = plannedMatch ? Number(plannedMatch[1]) : null;
   let perChapter: number | null = null;
+  let total: number | null = null;
   for (const match of targetLength.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/gi)) {
     const figure = Number(match[1]!.replace(/,/g, ""));
     const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
@@ -688,17 +698,70 @@ export function targetWords(targetLength: string | undefined, chapterCount?: num
     const after = targetLength.slice(match.index + match[0].length);
     if (/\b(?:per\s+chapter|each\s+(?:of\s+(?:the\s+)?\d+\s+)?chapters?|chapters?\s*[,;:]?\s*each)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
         /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b|in\s+each\s+chapter\b)/i.test(after)) {
-      perChapter = words;
+      perChapter ??= words;
     } else {
-      return Math.round(words);
+      total ??= Math.round(words);
     }
   }
+  return { total, perChapter, planned };
+}
+
+export function targetWords(targetLength: string | undefined, chapterCount?: number): number | null {
+  const { total: stated, perChapter, planned } = parseStoryTarget(targetLength);
+  if (stated !== null) return stated;
   // A chapter-sized target is not the book's (issue 1002). An explicit planned count wins;
   // otherwise the caller supplies the active chapter count. An explicit total above wins both.
-  const planned = /\b(\d+)\s+chapters?\b/i.exec(targetLength);
-  const count = planned ? Number(planned[1]) : chapterCount;
+  const count = planned ?? chapterCount;
   const total = perChapter === null || count === undefined ? 0 : perChapter * count;
   return Number.isFinite(total) && total >= 100 ? Math.round(total) : null;
+}
+
+/** A chapter's own goal is a whole number of words in this range (SPEC-056 R-49). */
+export const CHAPTER_GOAL_LIMITS = { min: 100, max: 50_000 } as const;
+/** The goal a chapter shows when nothing else states one (SPEC-056 D-2; SPEC-012 R-56's own example). */
+export const DEFAULT_CHAPTER_GOAL = 3_000;
+
+export type ChapterGoalSource = "chapter" | "story" | "median" | "default";
+
+/**
+ * The goal a chapter's writing bar shows, and where it came from (SPEC-056 D-2): the chapter's
+ * own `goal`; else the story target's per-chapter figure, or its total over a stated planned
+ * count; else the median of the book's drafted chapters once three have 500 words; else 3,000.
+ * Derived on every read and never persisted, so changing the story target moves every chapter
+ * that has not set its own. Out-of-range stored goals are ignored here rather than shown.
+ */
+export function chapterGoal(
+  chapter: { goal?: number | undefined },
+  targetLength: string | undefined,
+  chapters: readonly { words?: number | undefined; retired?: boolean | undefined }[],
+): { words: number; source: ChapterGoalSource } {
+  const own = chapter.goal;
+  if (typeof own === "number" && Number.isInteger(own) && own >= CHAPTER_GOAL_LIMITS.min && own <= CHAPTER_GOAL_LIMITS.max) {
+    return { words: own, source: "chapter" };
+  }
+  // A stated per-chapter figure is the author's own and kept to the word; a total shared over a
+  // stated count is arithmetic, so it rounds to the hundred.
+  const stated = parseStoryTarget(targetLength);
+  const fromStory = stated.perChapter !== null
+    ? Math.round(stated.perChapter)
+    : stated.total !== null && stated.planned ? roundToHundred(stated.total / stated.planned) : null;
+  if (fromStory !== null && Number.isFinite(fromStory) && fromStory >= CHAPTER_GOAL_LIMITS.min) {
+    return { words: Math.min(fromStory, CHAPTER_GOAL_LIMITS.max), source: "story" };
+  }
+  const drafted = chapters
+    .filter((c) => !c.retired && typeof c.words === "number" && c.words >= 500)
+    .map((c) => c.words as number)
+    .sort((a, b) => a - b);
+  if (drafted.length >= 3) {
+    const mid = drafted.length >> 1;
+    const median = drafted.length % 2 ? drafted[mid]! : (drafted[mid - 1]! + drafted[mid]!) / 2;
+    return { words: Math.max(CHAPTER_GOAL_LIMITS.min, roundToHundred(median)), source: "median" };
+  }
+  return { words: DEFAULT_CHAPTER_GOAL, source: "default" };
+}
+
+function roundToHundred(words: number): number {
+  return Math.round(words / 100) * 100;
 }
 
 /**
@@ -776,6 +839,116 @@ export function changedSpan(before: string, after: string): ChangedSpan | null {
 export type PassageSegment =
   | { kind: "same"; text: string }
   | { kind: "edit"; index: number; before: string; after: string };
+
+/** One paragraph of a comparison between two versions of a chapter (SPEC-056 R-13). */
+export type VersionParagraph =
+  | { kind: "same"; text: string }
+  | { kind: "changed"; segments: PassageSegment[] }
+  | { kind: "added"; text: string }
+  | { kind: "removed"; text: string };
+
+/**
+ * Two versions of a chapter compared for reading side by side: paragraphs matched first, so a
+ * whole chapter never goes through one word table (past `PASSAGE_DIFF_CELLS` that would be one
+ * edit), then the words of each paragraph that changed. Between two matched paragraphs, the
+ * older and newer ones left over are paired in order as changes; the rest were added or removed.
+ */
+export function versionDiff(older: string, newer: string): VersionParagraph[] {
+  const all = chapterParagraphs(older);
+  const bll = chapterParagraphs(newer);
+  // The opening and closing paragraphs both keep are matched without a table, so the table holds
+  // only the stretch that changed (codex on PR 1802).
+  let head = 0;
+  while (head < all.length && head < bll.length && all[head] === bll[head]) head += 1;
+  let tail = 0;
+  while (tail < all.length - head && tail < bll.length - head && all[all.length - 1 - tail] === bll[bll.length - 1 - tail]) tail += 1;
+  const a = all.slice(head, all.length - tail);
+  const b = bll.slice(head, bll.length - tail);
+  // Past the cap the stretch is not worth its table: its paragraphs are paired by position.
+  const tabled = a.length * b.length <= VERSION_DIFF_CELLS;
+  const width = b.length + 1;
+  const table = new Uint32Array(tabled ? (a.length + 1) * width : 0);
+  if (tabled) {
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+      }
+    }
+  }
+  const out: VersionParagraph[] = all.slice(0, head).map((text) => ({ kind: "same" as const, text }));
+  let removed: string[] = [];
+  let added: string[] = [];
+  const settle = () => {
+    // Each older paragraph left over pairs with the first newer one, in order, that shares most of
+    // its words; otherwise a rewrite would read as a page of struck and marked fragments rather
+    // than one gone and one new. Newer paragraphs it passes over were added before it.
+    let next = 0;
+    for (const before of removed) {
+      // A bounded look ahead (codex on PR 1802): a long stretch rewritten whole would otherwise
+      // compare every paragraph gone with every paragraph new.
+      const at = added.findIndex((after, k) => k >= next && k < next + VERSION_PAIR_WINDOW && alike(before, after));
+      if (at === -1) {
+        out.push({ kind: "removed", text: before });
+        continue;
+      }
+      for (const text of added.slice(next, at)) out.push({ kind: "added", text });
+      out.push({ kind: "changed", segments: passageDiff(before, added[at]!) });
+      next = at + 1;
+    }
+    for (const text of added.slice(next)) out.push({ kind: "added", text });
+    removed = [];
+    added = [];
+  };
+  if (!tabled) {
+    // Past the cap, paired by position: each pair alike or not, and no search at all.
+    const pairs = Math.max(a.length, b.length);
+    for (let k = 0; k < pairs; k++) {
+      const before = a[k], after = b[k];
+      if (before !== undefined && after !== undefined && alike(before, after)) out.push({ kind: "changed", segments: passageDiff(before, after) });
+      else {
+        if (before !== undefined) out.push({ kind: "removed", text: before });
+        if (after !== undefined) out.push({ kind: "added", text: after });
+      }
+    }
+  } else {
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) {
+        settle();
+        out.push({ kind: "same", text: a[i]! });
+        i += 1;
+        j += 1;
+      } else if (j < b.length && (i >= a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) {
+        added.push(b[j]!);
+        j += 1;
+      } else {
+        removed.push(a[i]!);
+        i += 1;
+      }
+    }
+    settle();
+  }
+  for (const text of all.slice(all.length - tail)) out.push({ kind: "same", text });
+  return out;
+}
+
+/** Past this many paragraph pairs the changed stretch is compared by position instead (about 4 MB). */
+const VERSION_DIFF_CELLS = 1_000_000;
+/** How far ahead a paragraph gone looks for its new self among the paragraphs added. */
+const VERSION_PAIR_WINDOW = 50;
+
+/** Half or more of the longer paragraph's words are also the other's. */
+function alike(a: string, b: string): boolean {
+  // Distinct words on both sides, so the measure is the same either way round (codex on PR 1802).
+  const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
+  const left = words(a), right = words(b);
+  const larger = Math.max(left.size, right.size);
+  if (larger === 0) return true;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / larger >= 0.5;
+}
 
 /** Past this many token pairs the diff is not worth its table, and the passage is one edit. */
 const PASSAGE_DIFF_CELLS = 4_000_000;

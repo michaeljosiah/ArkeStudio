@@ -4,7 +4,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ClientMessageSchema } from "@arke-studio/contracts";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
+import { createChapter, createProduction, editChapterPlan, openChapter, readChapterVersion, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -269,6 +269,60 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
   });
 
+  it("a new chapter takes the point of view of the chapter before it (SPEC-056 D-3)", async () => {
+    const { dir, store } = await open();
+    await editChapterPlan(store, LEDGER, "01-neap", { pov: "maren-kest" });
+    const chapters = await chaptersOf(dir, LEDGER);
+    const last = [...chapters].filter((c) => !c.retired).sort((a, b) => b.order - a.order)[0]!;
+    if (last.id !== "neap") await editChapterPlan(store, LEDGER, last.file, { pov: "maren-kest" });
+    const made = await createChapter(store, LEDGER, { title: "Untitled", order: 99 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === made)!.pov, "maren-kest");
+    // A point of view the world no longer holds as a character is not carried.
+    await editChapterPlan(store, LEDGER, made + "", { pov: null });
+    const again = await createChapter(store, LEDGER, { title: "Untitled", order: 100 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === again)!.pov, undefined, "nothing before it to carry");
+  });
+
+  it("the chapter before a new one is found by the ranks on disk, past a legacy chapter with none (codex on PR 1799)", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await createProduction(first, { title: "Inkbound", format: "story" });
+    const anchor = await createChapter(first, "inkbound", { title: "Anchor", order: 10 });
+    await editChapterPlan(first, "inkbound", anchor, { pov: "maren-kest" });
+    await first.close();
+    // No rank: the summaries number it after Anchor, but a new chapter's rank (11) sorts before it.
+    await writeFile(join(dir, "productions", "inkbound", "chapters", "bare.md"), "---\nid: bare\ntitle: bare\npov: perrin-tallow\nstatus: planned\nversion: 1\n---\n\nProse.\n");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    await store.reconcileExternalEdit("productions/inkbound/chapters/bare.md");
+    assert.deepEqual((await chaptersOf(dir, "inkbound")).map((c) => c.file), ["anchor", "bare"]);
+    const made = await createChapter(store, "inkbound", { title: "Untitled", order: 3 });
+    assert.equal((await chaptersOf(dir, "inkbound")).find((c) => c.id === made)!.pov, "maren-kest", "Anchor's, the ranked chapter it follows");
+  });
+
+  it("a chapter's goal and picture save with the plan, ride on the summary and keep the version (SPEC-056 R-49/R-50)", async () => {
+    const { dir, store } = await open();
+    const before = await openChapter(store, LEDGER, "neap");
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: 4500, picture: "world-art.png" });
+    const set = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(set.goal, 4500);
+    assert.equal(set.picture, "world-art.png");
+    assert.equal(set.version, before.version, "a goal or a picture cuts no version");
+
+    // A picture must be an image the world holds now, never a path out of it.
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "missing.png" }), /not in this world/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "../outside.png" }), /not a picture/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "changes.jsonl" }), /not a picture/);
+    // Only what the world's media route serves: an AVIF would be saved and never load (codex on PR 1795).
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "world-art.avif" }), /not a picture/);
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!.picture, "world-art.png", "a refused picture writes nothing");
+
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: null, picture: null });
+    const cleared = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(cleared.goal, undefined);
+    assert.equal(cleared.picture, undefined);
+  });
+
   it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {
     const { dir, store } = await open();
     await createProduction(store, { title: "Inkbound", format: "story" });
@@ -316,6 +370,12 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(back.version, 6);
     assert.equal(back.body.trim(), before.body.trim());
     assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
+
+    // Compare reads a kept version's prose without the front matter (SPEC-056 R-13).
+    assert.equal((await readChapterVersion(store, LEDGER, "01-neap", 4)).trim(), before.body.trim());
+    assert.match(await readChapterVersion(store, LEDGER, "01-neap", 5), /Drafted anew/);
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "01-neap", 99), /not kept/, "a version never written");
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "../01-neap", 4), /no longer in this production/, "only the production's own chapters");
   });
 });
 

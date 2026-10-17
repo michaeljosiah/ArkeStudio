@@ -36,7 +36,6 @@ import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
-import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
@@ -55,7 +54,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
-import { ProseReadSourceSchema } from "./prose.js";
+import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
 import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -2263,6 +2262,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterId: SlugSchema,
     })
     .strict(),
+  /**
+   * Compare versions (SPEC-056 R-13): the prose of one kept version of a chapter, read only. The
+   * answer is `chapter.version-result`, by requestId. Restoring stays `restore-chapter`.
+   */
+  z
+    .object({
+      kind: z.literal("read-chapter-version"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
+    })
+    .strict(),
   /** SPEC-012 R-5: direct authoring saves in place — no proposal, no version cut. */
   z
     .object({
@@ -2302,6 +2315,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
           pov: SlugSchema.nullable().optional(),
           when: z.string().trim().max(CHAPTER_PLAN_LIMITS.when).nullable().optional(),
           implies: ChapterImpliesWriteSchema.nullable().optional(),
+          // The chapter's own goal and chosen picture (SPEC-056 R-50): a whole number of words in
+          // range, and a world-relative image file the coordinator checks exists. null clears.
+          goal: z.number().int().min(CHAPTER_GOAL_LIMITS.min).max(CHAPTER_GOAL_LIMITS.max).nullable().optional(),
+          picture: z.string().trim().min(1).max(400).nullable().optional(),
         })
         .strict()
         .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),
@@ -3997,28 +4014,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The style rides along because a draft written blind to the arrangement is a draft written
    * for a different song, but it is optional: a style is not required to describe a subject.
    */
-  /**
-   * A helper run against a passage of the bible (design turn 90).
-   *
-   * Answered by `bible.helper-answered` under this requestId. The answer opens nothing and
-   * changes nothing — it lands in the rail beside the editor, and only Replace moves it into the
-   * document. The bible has no accept step and gains none here: what stands in for one is the
-   * version and Earlier versions, which is why this may be a plain one-shot rather than a
-   * proposal.
-   *
-   * Only the passage travels. The document itself is read from the store on the other side, so a
-   * long bible is not carried up the socket on every press.
-   */
-  z
-    .object({
-      kind: z.literal("bible-helper-run"),
-      worldId: UlidSchema,
-      requestId: UlidSchema,
-      helper: BibleHelperKindSchema,
-      /** The passage the author highlighted, verbatim. */
-      selection: z.string().min(1).max(BIBLE_HELPER_BOUNDS.selection),
-    })
-    .strict(),
 
   z
     .object({

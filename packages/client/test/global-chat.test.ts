@@ -102,6 +102,17 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.close(); owner.open(); assert.equal(owner.getSnapshot().selected?.conversationId, CHAT_ID);
     owner.close(); owner.setCurrent(cut); owner.open(); assert.equal(owner.getSnapshot().selected?.entry.kind, "cut");
   });
+  it("a chapter's Chat is the production's own thread, named for the chapter it is open beside (SPEC-056 R-42)", () => {
+    const withChapter = structuredClone(state);
+    const prod = withChapter.world!.productions.find(p => p.meta.id === "saltlight")!;
+    prod.chapters = [{ id: "neap", file: "01-neap", order: 1, title: "Neap", status: "drafted", version: 1 }];
+    for (const route of ["neap", "01-neap"]) {
+      const surface = chatSurfaceForPage(withChapter, `${root}/p/saltlight/story/chapters/${route}`)!;
+      assert.deepEqual(surface.entry, { kind: "production", productionId: "saltlight" });
+      assert.equal(surface.key, production.key, "the same thread as the production's");
+      assert.match(surface.label, / \/ Neap$/, "the Chat names the chapter");
+    }
+  });
   it("a workspace registration supplies the exact selection without rebinding an open chat", () => {
     const owner = new GlobalChatController(); owner.setCurrent(cut); owner.open(production);
     const selection: ChatSurface = { ...cut, props: { ...cut.props!, subject: { kind: "timeline-clip", clipId: "cl_one" as never } } };
@@ -121,6 +132,17 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.equal(owner.value(production.key, "draft", ""), "Keep these words");
     assert.equal(owner.forPage()?.props?.subject?.kind, "timeline-clip");
     owner.open(); assert.equal(owner.getSnapshot().selected?.props?.subject?.kind, "timeline-clip");
+  });
+  it("the same mounted page moving its own route carries its prompts along (SPEC-056 R-42)", () => {
+    const owner = new GlobalChatController(); const host = {} as HTMLElement;
+    owner.setCurrent(production); owner.register(production, host); owner.open(production);
+    const audiobook: ChatSurface = { ...production, path: production.path + "?view=audiobook", props: { ...production.props!, placeholder: "Direct this chapter" } };
+    owner.setCurrent(audiobook); owner.refresh(audiobook, host);
+    assert.equal(owner.getSnapshot().selected?.path, audiobook.path, "the view it moved to");
+    assert.equal(owner.getSnapshot().selected?.props?.placeholder, "Direct this chapter", "and that view's prompts");
+    const other: ChatSurface = { ...audiobook, path: production.path + "/elsewhere", props: { ...audiobook.props!, placeholder: "Not mine" } };
+    owner.refresh(other, {} as HTMLElement);
+    assert.equal(owner.getSnapshot().selected?.path, audiobook.path, "another page's host does not move it");
   });
   it("retains a validated structured subject and its send prefix after reload", () => {
     let saved = ""; const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };

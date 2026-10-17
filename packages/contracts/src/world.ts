@@ -642,6 +642,13 @@ export const ChapterFrontmatterSchema = z
     retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131); the first editor save drops it. */
     source: z.string().min(1).optional(),
+    /*
+     * The chapter's own word goal and its chosen picture (SPEC-056 R-49, turn 227). Read like the
+     * rest of the plan — any number, any path — so a hand-edited value never hides the chapter;
+     * the writer (`edit-chapter-plan`) holds the ranges and `chapterGoal` ignores one outside them.
+     */
+    goal: z.number().optional(),
+    picture: z.string().min(1).optional(),
     created: z.string().optional(),
     updated: z.string().optional(),
   })
@@ -934,6 +941,9 @@ export const ChapterSummarySchema = z
     retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131), while it is still the import's. */
     source: z.string().min(1).optional(),
+    /** The chapter's own word goal and chosen picture (SPEC-056 R-49), as the frontmatter holds them. */
+    goal: z.number().optional(),
+    picture: z.string().min(1).optional(),
   })
   .strict();
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;

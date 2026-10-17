@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProseReadSourceSchema, changedSpan, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
+import { ProseReadSourceSchema, changedSpan, chapterGoal, chapterParagraphs, composePassage, countWords, overviewMoved, passageDiff, passageOf, targetWords } from "../src/prose.js";
 import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
-import { occurrencesOf, pinnedLines, pinTarget, voicedBlocks } from "../src/prose.js";
+import { occurrencesOf, pinnedLines, pinTarget, versionDiff, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -102,6 +102,32 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: "What this chapter is for.", pov: null } }).success);
     assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: {} }).success, false, "a plan edit changes something");
     assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: long } }).success, false, "a synopsis is at most 600 characters");
+    // The chapter's own goal and picture (SPEC-056 R-50): a whole number of words in range; null clears.
+    assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 4500, picture: "assets/booth.png" } }).success);
+    assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { goal: null, picture: null } }).success);
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 99 } }).success, false, "a goal is at least 100 words");
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 50_001 } }).success, false, "a goal is at most 50,000 words");
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { goal: 3000.5 } }).success, false, "a goal is whole words");
+  });
+
+  it("a chapter's goal resolves chapter, story, median, default — in that order (SPEC-056 D-2)", () => {
+    const drafted = [{ words: 4000 }, { words: 4400 }, { words: 5000 }];
+    assert.deepEqual(chapterGoal({ goal: 4500 }, "3k words per chapter", drafted), { words: 4500, source: "chapter" });
+    assert.deepEqual(chapterGoal({}, "3,000 words per chapter", drafted), { words: 3000, source: "story" });
+    assert.deepEqual(chapterGoal({}, "Each of 6 chapters is 3,250 words", drafted), { words: 3250, source: "story" });
+    assert.deepEqual(chapterGoal({}, "24 chapters, 80,000 words", drafted), { words: 3300, source: "story" }, "a total over a stated count, to the hundred");
+    assert.deepEqual(chapterGoal({}, "80,000 words", drafted), { words: 4400, source: "median" }, "a total with no count says nothing per chapter");
+    // Both figures are read whichever comes first (codex on PR 1795); the book's band keeps the total.
+    assert.deepEqual(chapterGoal({}, "80,000 words total, 24 chapters, about 3,000 words per chapter", drafted), { words: 3000, source: "story" });
+    assert.equal(targetWords("80,000 words total, 24 chapters, about 3,000 words per chapter", 24), 80_000);
+    assert.deepEqual(chapterGoal({}, undefined, drafted), { words: 4400, source: "median" });
+    assert.deepEqual(chapterGoal({}, undefined, [{ words: 4000 }, { words: 4400 }, { words: 5000 }, { words: 6000 }]), { words: 4700, source: "median" }, "an even count takes the mean of the middle two");
+    // Fewer than three chapters of 500 words, retired ones and drafts too short to count say nothing.
+    assert.deepEqual(chapterGoal({}, undefined, [{ words: 4000 }, { words: 4400 }, { words: 300 }, { words: 9000, retired: true }]), { words: 3000, source: "default" });
+    assert.deepEqual(chapterGoal({}, undefined, []), { words: 3000, source: "default" });
+    // A stored goal outside the writer's range is ignored rather than shown.
+    assert.deepEqual(chapterGoal({ goal: 20 }, undefined, []), { words: 3000, source: "default" });
+    assert.deepEqual(chapterGoal({ goal: 3000.5 }, undefined, []), { words: 3000, source: "default" });
   });
 
   it("the target band draws only when the target says how many words", () => {
@@ -329,4 +355,73 @@ it('episode reads name one saved promise field and reject unknown fields or epis
  assert.deepEqual(ProseReadSourceSchema.parse(source),source);
  assert.equal(ProseReadSourceSchema.safeParse({...source,field:'script'}).success,false);
  assert.equal(ProseReadSourceSchema.safeParse({...source,episodeId:'../other'}).success,false);
+});
+
+describe("comparing two versions of a chapter (SPEC-056 R-13)", () => {
+  it("matches paragraphs first, then marks the words of a changed one", () => {
+    const older = "The ledger is kept.\n\nMaren reads it once.\n\nThe bells are silent.";
+    const newer = "The ledger is kept.\n\nMaren reads it twice.\n\nA new line.\n\nThe bells are silent.";
+    const diff = versionDiff(older, newer);
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "changed", "added", "same"]);
+    const changed = diff[1]!;
+    assert.ok(changed.kind === "changed");
+    assert.deepEqual(changed.segments.filter((s) => s.kind === "edit").map((s) => s.kind === "edit" ? [s.before, s.after] : null), [["once.", "twice."]]);
+  });
+
+  it("says what went, and compares a long chapter without giving up on it", () => {
+    assert.deepEqual(versionDiff("One.\n\nTwo.", "One.").map((p) => p.kind), ["same", "removed"]);
+    const long = Array.from({ length: 400 }, (_, i) => `Paragraph ${i} with some words to make it long enough to matter.`).join("\n\n");
+    const edited = long.replace("Paragraph 200 with", "Paragraph 200, changed, with");
+    const diff = versionDiff(long, edited);
+    assert.equal(diff.filter((p) => p.kind === "changed").length, 1, "one paragraph changed, not the whole chapter as one edit");
+    assert.equal(diff.length, 400);
+  });
+});
+
+describe("comparing a rewritten paragraph (SPEC-056 R-13)", () => {
+  it("a paragraph written anew is one gone and one new, not a page of fragments", () => {
+    const diff = versionDiff("Kept.\n\nThe tide came in slowly over the flats.\n\nKept too.", "Kept.\n\nNobody answered the bell that night.\n\nKept too.");
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "removed", "added", "same"]);
+  });
+});
+
+describe("comparing past an inserted paragraph (SPEC-056 R-13)", () => {
+  it("a paragraph changed after one inserted before it still pairs with its new self", () => {
+    const diff = versionDiff("Kept.\n\nMaren reads that twice and then once more.\n\nEnd.", "Kept.\n\nA new beat arrives here first.\n\nMaren reads that twice and then a third time.\n\nEnd.");
+    assert.deepEqual(diff.map((p) => p.kind), ["same", "added", "changed", "same"]);
+  });
+});
+
+describe("comparing a paragraph with repeated words (codex on PR 1802)", () => {
+  it("is alike either way round when most of its distinct words are shared", () => {
+    assert.deepEqual(versionDiff("Kept.\n\nvery very very very cold night", "Kept.\n\nvery very very very warm night").map((p) => p.kind), ["same", "changed"]);
+    assert.deepEqual(versionDiff("Kept.\n\nvery very very very warm night", "Kept.\n\nvery very very very cold night").map((p) => p.kind), ["same", "changed"]);
+  });
+});
+
+describe("comparing a chapter of very many paragraphs (codex on PR 1802)", () => {
+  it("matches the unchanged ends without a table and stays bounded in the middle", () => {
+    const many = (prefix: string) => Array.from({ length: 3_000 }, (_, i) => `${prefix} ${i} kept words here.`).join("\n\n");
+    const older = many("Para");
+    const newer = many("Line");
+    const started = Date.now();
+    const diff = versionDiff(older, newer);
+    assert.ok(Date.now() - started < 5_000, "no 9M-cell table");
+    assert.equal(diff.length, 3_000, "paired by position, each a change");
+    assert.ok(diff.every((p) => p.kind === "changed"));
+    const ends = versionDiff(`A first.\n\n${older}\n\nZ last.`, `A first.\n\n${newer}\n\nZ last.`);
+    assert.equal(ends[0]?.kind, "same");
+    assert.equal(ends.at(-1)?.kind, "same");
+  });
+});
+
+describe("comparing a whole chapter rewritten (codex on PR 1802)", () => {
+  it("pairs a long unlike stretch by position without searching it", () => {
+    const older = Array.from({ length: 4_000 }, (_, i) => `Old line ${i} about tides.`).join("\n\n");
+    const newer = Array.from({ length: 4_000 }, (_, i) => `Wholly different words number ${i * 7} here.`).join("\n\n");
+    const started = Date.now();
+    const diff = versionDiff(older, newer);
+    assert.ok(Date.now() - started < 3_000, "bounded work");
+    assert.equal(diff.length, 8_000, "each one gone and one new");
+  });
 });

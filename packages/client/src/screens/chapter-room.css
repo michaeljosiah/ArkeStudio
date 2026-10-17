@@ -1,0 +1,438 @@
+/*
+ * The chapter's writing room (design turn 227, SPEC-056 §1.5–§1.6). Loaded after
+ * chapter-responsive.css, whose caps it lifts: the Manuscript fills the centre like Dashboard and
+ * Chapters, and the width goes to the margins and the Brief, never to the line. Everything here is
+ * scoped to the chapter's root (`data-room` on the Manuscript above a phone's width, `data-chat` when
+ * the app's Chat holds the conversation), so the scene workspace's `.fy-sw` is untouched.
+ */
+
+/* No page-owned Arke column while the app's Chat holds the thread (R-3). */
+[data-screen="chapter"][data-chat="global"] { grid-template-columns: minmax(0, 1fr); }
+
+/* The bar (R-7): the only chrome above the page. */
+.fy-ch__wbar { flex: none; position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fy-ch__wbar .fy-ch__viewrow { margin: 0; }
+.fy-ch__wbar .fy-seg__item { white-space: nowrap; }
+/* Where the centre is short of the bar's one line (a Fold beside the production rail), the presses
+   after the goal take a second row rather than squeezing the views or running off the edge. */
+.fy-ch__wbar { flex-wrap: wrap; row-gap: 8px; }
+@container (max-width: 900px) { .fy-ch__wbar { padding-block: 10px; } }
+.fy-ch__wbar-gap { flex: 1; }
+.fy-ch__chapnav { display: inline-flex; gap: 2px; }
+.fy-ch__wbtn { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-ch__wbtn:hover:not(:disabled), .fy-ch__wbtn:focus-visible { background: var(--accent); color: var(--foreground); }
+.fy-ch__wbtn--on { background: var(--muted); color: var(--foreground); }
+.fy-ch__wbtn:disabled { opacity: .35; cursor: default; }
+.fy-ch__goal { display: inline-flex; align-items: center; gap: 8px; font: 500 12px/1 var(--font-sans); color: var(--muted-foreground); white-space: nowrap; }
+.fy-ch__goal b { color: var(--foreground); font-weight: 500; }
+.fy-ch__goal-ring { --p: 0; width: 18px; height: 18px; flex: none; border-radius: 50%;
+  background: conic-gradient(var(--foreground) calc(var(--p) * 1%), color-mix(in srgb, var(--foreground) 18%, transparent) 0);
+  -webkit-mask: radial-gradient(circle, transparent 5.5px, black 6px); mask: radial-gradient(circle, transparent 5.5px, black 6px); }
+
+/* The top of the document (R-8). */
+.fy-ch__dochead { padding: 48px 0 6px; }
+.fy-ch__kick { margin: 0 0 10px; font: 500 12px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-ch__doctitle { margin: 0 0 22px; font: 600 36px/1.1 var(--font-sans); letter-spacing: -0.02em; }
+
+/* The Brief's plan (R-10). */
+.fy-ch__brief { display: grid; gap: 14px; }
+.fy-ch__brief-field { display: grid; gap: 6px; font: 400 13px/1.45 var(--font-sans); }
+.fy-ch__brief-field > span { color: var(--muted-foreground); font-weight: 500; font-size: 12px; }
+.fy-ch__brief-field p { margin: 0; }
+:is(.fy-ch__brief, .fy-ch__props) .fy-ch__pick { min-height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+/* A new chapter's plan at the top of its page (R-32, 227u): label and value rows between rules. */
+.fy-ch__props { display: grid; gap: 10px; margin: -8px 0 34px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.fy-ch__props .fy-ch__brief-field { grid-template-columns: 120px minmax(0, 1fr); align-items: baseline; column-gap: 18px; }
+.fy-ch__props .fy-ch__pick { justify-self: start; }
+/* The plan's fields are one line at rest: the scene script's field box (min-height, padding) is not theirs. */
+:is(.fy-ch__brief, .fy-ch__props) .fy-sbscript { min-height: 0; margin: 0; padding: 2px 4px; margin-inline: -4px; border-radius: 6px; font: inherit; }
+.fy-ch__goal-input { width: 120px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; }
+
+@media (min-width: 600px) {
+  [data-screen="chapter"][data-room="true"] { --room-measure: 660px; }
+  /* The column fills the centre; the bar runs edge to edge over it. */
+  [data-screen="chapter"][data-room="true"] .fy-sw__centre { padding: 0; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-sw__head, .fy-ch__body) { max-width: none; margin-inline: 0; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body { padding: 0 32px; }
+  /* The page keeps its measure in whatever room it has (R-2, D-9). */
+  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript { align-items: center; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > :is(.fy-ch__dochead, .fy-ch__prose, .fy-ch__source, .fy-ch__band, .fy-ch__foot, .fy-ch__draft) { width: min(var(--room-measure), 100%); max-width: none; margin-right: 0; box-sizing: border-box; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font: 400 18px/1.75 var(--font-sans); }
+}
+
+/* A Fold, a tablet or a narrow window: the room at a 600 px measure (R-46, 227k). */
+@media (min-width: 600px) and (max-width: 1099px) {
+  [data-screen="chapter"][data-room="true"] { --room-measure: 600px; }
+}
+
+/* The phone's page (R-46, 227l): the document's head over the prose at the full width. */
+@media (max-width: 599px) {
+  [data-screen="chapter"] .fy-ch__dochead { padding: 20px 0 4px; }
+  [data-screen="chapter"] .fy-ch__doctitle { font-size: 30px; }
+  /* The goal beside the title (R-7): the bar's own rule makes every span a line of its own. */
+  .fy-scene-back .fy-ch__goal { display: inline-flex; flex: none; margin-right: 4px; }
+  .fy-ch__phone-read { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  /* A chapter with no picture has no picture's height to hold. */
+  .fy-chov__hero.fy-chov__hero--bare { min-height: 0; }
+  /* The foot holds Write and Listen; the page scrolls clear of it. */
+  [data-screen="chapter"] .fy-chov__body { padding-bottom: calc(var(--held-bar-height, 0px) + 24px); }
+}
+.fy-chov-held { display: flex; gap: 8px; padding: 10px 16px; }
+.fy-chov-held > * { flex: 1; }
+
+/* The format bar above the keyboard (R-46, 227l). */
+.fy-formatbar-held { padding: 0; }
+.fy-formatbar { flex: 1; width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-top: 1px solid var(--border); background: var(--background); }
+.fy-formatbar__b { min-width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--foreground); font: 500 16px var(--font-sans); }
+.fy-formatbar__b--on { background: var(--muted); }
+.fy-formatbar__arke { font-size: 14px; }
+.fy-formatbar__push { flex: 1; }
+
+/* At desktop widths the Brief is a column at the page's left, put away by its press. */
+@media (min-width: 1100px) {
+  [data-screen="chapter"][data-room="true"] .fy-ch__body { gap: 32px; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body[data-brief="closed"] > .fy-ch__panels { display: none; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__body[data-brief="open"] > .fy-ch__panels { order: -1; width: 320px; padding: 20px 24px 0 0; border-right: 1px solid var(--border); box-sizing: border-box; }
+}
+
+/* From 2000 the type steps up and the measure with it, never the line alone (D-9). */
+@media (min-width: 2000px) {
+  [data-screen="chapter"][data-room="true"] { --room-measure: 760px; }
+  [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font-size: 20px; line-height: 1.72; }
+  [data-screen="chapter"][data-room="true"] .fy-ch__doctitle { font-size: 48px; }
+}
+
+/* ---- The Chapter view (design turn 227, SPEC-056 §1.11) ---------------------------------------
+   The production home: the chapter's picture fading in behind the title, the book strip, the cast
+   as the world overview's polaroids, progress in four steps, the pictures, then continuity and
+   versions. The manuscript stays mounted under it, hidden, as it does under Audiobook. */
+[data-screen="chapter"] .fy-ch__body[hidden] { display: none; }
+[data-screen="chapter"][data-view="chapter"] .fy-sw__centre { padding: 0; overflow-y: auto; }
+/* The Chapter view's centre has no gutter for the phone bar to reach out over (R-46, 227m). */
+[data-screen="chapter"][data-view="chapter"] .fy-sw__centre > .fy-scene-back { margin-inline: 0; }
+.fy-chov { display: flex; flex-direction: column; min-width: 0; }
+.fy-chov__hero { position: relative; min-height: 320px; padding: 24px 48px 28px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; }
+.fy-chov__hero--bare { min-height: 0; padding-top: 32px; }
+.fy-chov__art { position: absolute; top: 0; right: 0; bottom: 0; width: min(64%, 1180px); background-size: cover; background-position: 65% 30%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, black 46%), linear-gradient(180deg, black 55%, transparent 100%); -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(90deg, transparent 0, black 46%), linear-gradient(180deg, black 55%, transparent 100%); mask-composite: intersect; }
+.fy-chov__heroin { position: relative; max-width: 600px; display: flex; flex-direction: column; gap: 14px; }
+.fy-chov__book { display: flex; align-items: center; gap: 10px; font: 500 12px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__book b { color: var(--foreground); font-weight: 500; }
+.fy-chov__nav { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--foreground); cursor: pointer; }
+.fy-chov__nav:disabled { opacity: .35; cursor: default; }
+.fy-chov__strip { display: flex; gap: 2px; width: 300px; height: 6px; }
+.fy-chov__seg { flex-basis: 0; min-width: 3px; height: 6px; padding: 0; border: 0; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 22%, transparent); cursor: pointer; }
+.fy-chov__seg--here { background: var(--foreground); }
+.fy-chov__seg--planned:not(.fy-chov__seg--here) { background: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 22%, transparent); }
+.fy-chov__title { margin: 0; font: 600 48px/1.04 var(--font-sans); letter-spacing: -0.02em; }
+.fy-chov__synopsis { margin: 0; max-width: 540px; font: 400 15px/1.5 var(--font-sans); color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fy-chov__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; font: 400 13px/1.3 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__pov { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px 0 4px; border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); font-weight: 500; }
+.fy-chov__pov img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; object-position: 50% 18%; }
+.fy-chov__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.fy-chov__views { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; min-height: 52px; padding: 0 48px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fy-chov__views .fy-ch__viewrow { margin: 0; }
+.fy-chov__views .fy-seg__item { white-space: nowrap; }
+/* Four views do not fit a 320px phone: the row scrolls sideways rather than widening the page. */
+@media (max-width: 599px) {
+  .fy-chov__views { padding: 0 16px; }
+  .fy-ch__viewrow { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .fy-ch__viewrow::-webkit-scrollbar { display: none; }
+}
+.fy-chov__body { display: flex; flex-direction: column; gap: 34px; padding: 22px 48px 60px; }
+.fy-chov__section h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font: 600 18px/1.3 var(--font-sans); }
+.fy-chov__section h2 small { font: 400 13px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__push { flex: 1; }
+/* The cast: the world overview's card (fidelity.css .fy-polaroid), straightened a degree either way. */
+.fy-chov__cards { display: flex; flex-wrap: wrap; gap: 18px; }
+.fy-chov__card { display: block; text-align: left; color: var(--foreground); font: inherit; }
+.fy-chov__card:nth-child(odd) { transform: rotate(-1.2deg); }
+.fy-chov__card:nth-child(even) { transform: rotate(1deg); }
+.fy-chov__card--open { transform: translateY(-8px) !important; box-shadow: var(--shadow-xl); }
+.fy-chov__frame { position: relative; display: block; overflow: hidden; border-radius: 6px; background: var(--muted); }
+.fy-chov__frame img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; display: block; }
+.fy-chov__initial { display: grid; place-items: center; height: 100%; font: 600 40px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__badge { position: absolute; left: 8px; bottom: 8px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--media-overlay-bg) 60%, transparent); color: var(--media-overlay-fg); }
+.fy-chov__voice { position: relative; max-width: 560px; margin-top: 16px; padding: 16px 16px 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--popover); box-shadow: var(--shadow-pop); }
+.fy-chov__voice-x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.fy-chov__voice-line { margin: 0 0 10px; font: 400 13px var(--font-sans); }
+.fy-chov__voice-open { display: inline-block; margin-top: 10px; font: 500 13px var(--font-sans); color: var(--foreground); }
+/* Progress in four steps (R-39); a step that needs the author marks its number, not its border. */
+.fy-chov__steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.fy-chov__step { display: flex; flex-direction: column; gap: 6px; min-height: 112px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-chov__stepk { display: flex; align-items: center; gap: 8px; font: 500 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__stepk i { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; font-style: normal; font-size: 11px; background: var(--muted); color: var(--foreground); }
+.fy-chov__step--done .fy-chov__stepk i { background: var(--foreground); color: var(--background); }
+.fy-chov__step--need .fy-chov__stepk i { background: color-mix(in srgb, var(--warning) 22%, var(--muted)); }
+.fy-chov__step b { font: 600 15px/1.3 var(--font-sans); }
+.fy-chov__step small { font: 400 11px/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-chov__stepact { margin-top: auto; }
+.fy-chov__pics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.fy-chov__pic { aspect-ratio: 3 / 2; border: 0; border-radius: 10px; background-size: cover; background-position: center; cursor: pointer; }
+.fy-chov__pic--more { display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); font: 500 13px var(--font-sans); cursor: default; }
+.fy-chov__two { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+@media (min-width: 2000px) {
+  .fy-chov__hero { min-height: 420px; padding-inline: 64px; }
+  .fy-chov__views, .fy-chov__body { padding-inline: 64px; }
+  .fy-chov__strip { width: 420px; }
+}
+@media (max-width: 1099px) {
+  .fy-chov__hero, .fy-chov__views, .fy-chov__body { padding-inline: 32px; }
+  .fy-chov__title { font-size: 36px; }
+  .fy-chov__two { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 599px) {
+  .fy-chov__hero { min-height: 300px; padding: 20px; }
+  .fy-chov__art { width: 100%; -webkit-mask-image: linear-gradient(180deg, black 40%, transparent 100%); mask-image: linear-gradient(180deg, black 40%, transparent 100%); }
+  .fy-chov__strip { width: auto; flex: 1; }
+  .fy-chov__title { font-size: 30px; }
+  .fy-chov__views, .fy-chov__body { padding-inline: 20px; }
+  .fy-chov__steps { grid-template-columns: 1fr 1fr; }
+  .fy-chov__pics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fy-chov__cards { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
+  .fy-chov__card { flex: none; width: 124px; }
+}
+
+/* A character made from the point of view, reviewed where the chapter is (D-4). */
+.fy-ch__povreview { margin: 0 0 24px; }
+
+/* The name card (227b, SPEC-056 R-17): over the page, against the name it names. */
+.fy-namecard {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl, 14px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-pop);
+}
+.fy-namecard__sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fy-namecard__sheet + .fy-namecard__sheet {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.fy-namecard__head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.fy-namecard__face {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: 500 18px var(--font-sans);
+}
+.fy-namecard__face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 14%;
+}
+.fy-namecard__face--place {
+  border-radius: 12px;
+}
+.fy-namecard__who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-namecard__who strong {
+  font: 600 var(--text-md, 15px) / 1.3 var(--font-sans);
+}
+.fy-namecard__who span,
+.fy-namecard__facts {
+  font: 400 12px / 1.4 var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-namecard__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+}
+.fy-namecard__voice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  font: 400 13px var(--font-sans);
+}
+.fy-namecard__voice span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-namecard__voice a {
+  color: var(--foreground);
+  text-underline-offset: 3px;
+}
+.fy-namecard__acts {
+  display: flex;
+  gap: 8px;
+}
+.fy-namecard__acts > * {
+  flex: 1;
+  justify-content: center;
+}
+.fy-namecard__hear { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--foreground); cursor: pointer; }
+.fy-namecard__hear:hover, .fy-namecard__hear:focus-visible { background: var(--accent); }
+
+/* ⋯ sits in the bar at the bar's own size. */
+.fy-ch__wbar .fy-ab__ico { width: 34px; height: 34px; }
+
+/* Find (R-7): one line under the bar, at the page's measure. */
+.fy-ch__find { position: sticky; top: 68px; z-index: 2; display: flex; align-items: center; gap: 8px; width: min(var(--room-measure, 660px), 100%); margin: 12px 0 -40px; box-sizing: border-box; padding: 4px 6px 4px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-pop); color: var(--muted-foreground); }
+.fy-ch__find-input { flex: 1; min-width: 0; height: 30px; border: 0; background: transparent; color: var(--foreground); font: 400 14px var(--font-sans); outline: none; }
+.fy-ch__find-count { font-size: 12px; white-space: nowrap; }
+.fy-find { border-radius: 2px; background: color-mix(in srgb, var(--warning) 22%, transparent); }
+.fy-find--here { background: color-mix(in srgb, var(--warning) 55%, transparent); }
+
+/* Focus (R-12, 227g): the window is the page. The chrome stays mounted under it and inert. */
+[data-screen="chapter"][data-focus="true"] .fy-ch__manuscript { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 50vh 24px; overflow-y: auto; background: var(--background); }
+[data-screen="chapter"][data-focus="true"] .fy-ch__manuscript > :is(.fy-ch__dochead, .fy-ch__prose, .fy-ch__source) { width: min(var(--room-measure, 660px), 100%); }
+[data-screen="chapter"][data-focus="true"] :is(.fy-ch__foot, .fy-ch__povreview, .fy-passage-anchor) { display: none; }
+/* Text blocks dim, not their containers: in a list only the caret's own item paragraph is lit. */
+[data-focus="true"] .fy-rme__doc :is(p, h1, h2, h3, h4, h5, h6, pre) { opacity: .26; transition: opacity .24s ease; }
+[data-focus="true"] .fy-rme__doc .fy-rme__here { opacity: 1; }
+[data-focus="true"] .fy-ln { text-decoration: none; }
+.fy-ch__focusfoot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; display: flex; align-items: center; gap: 14px; padding: 0 24px 16px; font: 500 12px var(--font-sans); color: var(--muted-foreground); pointer-events: none; }
+.fy-ch__focustrack { flex: 1; height: 3px; overflow: hidden; border-radius: 2px; background: color-mix(in srgb, var(--foreground) 12%, transparent); }
+.fy-ch__focustrack i { display: block; height: 100%; background: var(--foreground); }
+@media (prefers-reduced-motion: reduce) { [data-focus="true"] .fy-rme__doc :is(p, h1, h2, h3, h4, h5, h6, pre) { transition: none; } }
+
+/* Compare versions (R-13, 227f): two pages side by side in the page's place, the older one quiet,
+   one row a paragraph so the two stay level. */
+[data-screen="chapter"] .fy-ch__manuscript[data-compare="true"] > :not(.fy-compare) { display: none; }
+.fy-compare { width: min(1320px, 100%); margin: 0 auto; padding: 18px 0 48px; }
+.fy-compare__grid { display: grid; grid-template-columns: 1fr 1fr; }
+.fy-compare__head { display: flex; align-items: center; gap: 10px; padding: 8px 40px 18px; }
+.fy-compare__cell { max-width: 560px; margin: 0; padding: 0 40px 16px; font: 400 16px/1.75 var(--font-sans); }
+.fy-compare__grid > :nth-child(2n) { border-left: 1px solid var(--border); }
+.fy-compare__wide { grid-column: 1 / -1; padding: 0 40px; }
+.fy-compare__push { flex: 1; }
+.fy-compare__pick { min-height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 500 13px var(--font-sans); }
+.fy-compare__cell--older { color: var(--muted-foreground); }
+.fy-compare del { color: var(--muted-foreground); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.fy-compare ins { text-decoration: none; border-radius: 3px; background: color-mix(in srgb, var(--success, var(--foreground)) 18%, transparent); }
+/* Narrow, the newer column alone carries both, struck and marked; the older head keeps its Restore. */
+@media (max-width: 899px) {
+  .fy-compare__grid { grid-template-columns: 1fr; }
+  .fy-compare__grid > :nth-child(2n) { border-left: 0; }
+  .fy-compare__cell.fy-compare__cell--older { display: none; }
+  .fy-compare__head, .fy-compare__cell { padding-inline: 0; }
+}
+
+/* The margins (R-14, D-5): faces in the left margin, pictures in the right where the page has
+   room for them; where it does not, pictures sit inside the column after their passage at 16:9.
+   The page is the container, so a Brief or Chat beside it narrows the room the margins have. */
+[data-screen="chapter"][data-room="true"] .fy-ch__manuscript:is([data-margins="true"], [data-notes="true"]) { container: page / inline-size; }
+.fy-ch__manuscript[data-margins="true"] .fy-rme__doc > :is(p, h1, h2, h3, h4, h5, h6) { position: relative; }
+.fy-margin { user-select: none; }
+.fy-margin--face { position: absolute; top: .3em; right: calc(100% + 18px); display: flex; flex-direction: column; align-items: center; gap: 3px; width: 44px; pointer-events: none; }
+.fy-margin--face img, .fy-margin__initial { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; object-position: 50% 14%; }
+.fy-margin__initial { display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); font: 500 11px var(--font-sans); }
+.fy-margin--face b { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10px/1.2 var(--font-sans); color: var(--muted-foreground); }
+.fy-margin--picture { display: block; width: 100%; margin: 14px 0 4px; }
+.fy-margin--picture img { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; object-fit: cover; }
+@container page (min-width: 1260px) {
+  .fy-margin--picture { position: absolute; top: .3em; left: calc(100% + 40px); width: 240px; margin: 0; }
+  .fy-margin--picture img { aspect-ratio: 4 / 3; }
+}
+@container page (min-width: 1560px) {
+  .fy-margin--picture { width: 360px; }
+}
+/* Faces need the left margin; a page too narrow for it keeps the words and drops the faces. */
+@container page (max-width: 760px) { .fy-margin--face { display: none; } }
+/* Focus is the page alone (R-12). */
+[data-focus="true"] .fy-margin { display: none; }
+
+/* The selection bar (R-22, 227p): format at the left, Ask Arke at the right, above the words. */
+.fy-selbar-wrap { position: absolute; z-index: 7; }
+.fy-selbar { display: flex; align-items: center; gap: 2px; height: 40px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }
+.fy-selbar__btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: 500 13px var(--font-sans); cursor: pointer; }
+.fy-selbar__btn:hover, .fy-selbar__btn:focus-visible, .fy-selbar__btn--on { background: var(--muted); }
+.fy-selbar__sep { width: 1px; height: 18px; margin: 0 4px; background: var(--border); }
+/* Ask Arke in the bar is the bar's own press, not the old pill beside the words. */
+.fy-selbar .fy-ch__ask.fy-selbar__ask { height: 30px; padding: 0 10px; border: 0; border-radius: 7px; box-shadow: none; background: transparent; font: 500 13px var(--font-sans); gap: 6px; }
+.fy-selbar .fy-ch__ask.fy-selbar__ask:hover:not(:disabled), .fy-selbar .fy-ch__ask.fy-selbar__ask[aria-expanded="true"] { background: var(--muted); }
+
+/* The Ask Arke menu (R-23, 227q): the author's own words first, then the asks, under the words. */
+.fy-askm { position: absolute; z-index: 8; left: 0; display: flex; flex-direction: column; width: 320px; max-width: calc(100vw - 32px); padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }
+.fy-askm--end { left: auto; right: 0; }
+.fy-askm__field { height: 40px; margin: 0 0 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--background); color: var(--foreground); font: 400 13px var(--font-sans); outline: none; }
+.fy-askm__field:focus { border-color: var(--ring, var(--foreground)); }
+.fy-askm__item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: 400 13px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-askm__item:hover, .fy-askm__item:focus-visible, .fy-askm__item--on { background: var(--muted); outline: none; }
+.fy-askm__item svg { color: var(--muted-foreground); }
+.fy-askm__reply { font: 400 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-askm__rule { height: 1px; margin: 5px 4px; border: 0; background: var(--border); }
+.fy-askm__tone { position: relative; }
+.fy-askm__sub { top: -6px; left: calc(100% + 8px); width: 220px; }
+.fy-askm__sub--end { left: auto; right: calc(100% + 8px); }
+.fy-askm__sub .fy-askm__field { margin: 6px 0 0; }
+
+/* Arke's change, decided on the page (R-21, R-24, R-27): one held bar at the page's foot. */
+.fy-pageheld { position: sticky; bottom: 16px; z-index: 4; display: flex; align-items: center; gap: 10px; width: min(var(--room-measure, 660px), 100%); margin: 16px auto 0; padding: 8px 8px 8px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); box-sizing: border-box; }
+.fy-pageheld strong { font: 600 13px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.fy-pageheld__detail { font: 400 12px var(--font-sans); color: var(--muted-foreground); white-space: nowrap; }
+.fy-pageheld__push { flex: 1; }
+/* A suggestion is grey but readable: 42% of the foreground at the least (R-54). */
+.fy-ch__ghost { color: color-mix(in srgb, var(--foreground) 46%, transparent); }
+.fy-pageheld__versions { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--muted-foreground); }
+.fy-pageheld__versions .fy-ch__wbtn { width: 28px; height: 28px; }
+.fy-pageheld__note { margin-left: 6px; font: 400 12px var(--font-sans); color: var(--muted-foreground); }
+/* Keep and Discard are 44 px under a finger (R-47). */
+@media (pointer: coarse) {
+  .fy-pageheld button, .fy-passage-decision button { min-height: 44px; }
+  .fy-pageheld__versions .fy-ch__wbtn, .fy-passage-decision .fy-ch__wbtn { width: 44px; height: 44px; }
+}
+
+/* Review notes (R-29, R-30, 227r): numbered beside the words they quote, in the right margin where
+   the page has room and above the prose where it does not. The quote is a neutral highlight; the
+   open note's is warning at 22%. */
+.fy-review-quote { border-radius: 3px; background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+.fy-review-quote--here { background: color-mix(in srgb, var(--warning) 22%, transparent); }
+.fy-notes { position: absolute; top: 0; bottom: 0; left: calc(50% + min(var(--room-measure, 660px), 100%) / 2 + 40px); z-index: 2; width: 280px; }
+.fy-notes__head { position: sticky; top: 68px; z-index: 1; display: flex; align-items: center; gap: 4px; padding: 6px 4px 6px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); font: 500 13px var(--font-sans); }
+.fy-notes__push { flex: 1; }
+.fy-notes__lost { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
+.fy-notes__lost-head { margin: 0 0 6px; font: 600 12px var(--font-sans); color: var(--muted-foreground); }
+.fy-notes__column { position: relative; margin-top: 12px; }
+.fy-note { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); cursor: pointer; }
+.fy-note--open { cursor: default; box-shadow: var(--shadow-pop); }
+.fy-note__head { display: flex; align-items: center; gap: 8px; }
+.fy-note__n { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); font: 600 11px var(--font-sans); }
+.fy-note--open .fy-note__n { background: color-mix(in srgb, var(--warning) 30%, transparent); }
+.fy-note__kind { font: 500 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-note__body { margin: 0; font: 400 13px/1.45 var(--font-sans); }
+.fy-notes__line { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-note__acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+/* Review notes win the right margin; pictures go inside the column while they show (§2.3). */
+.fy-ch__manuscript[data-notes="true"] .fy-margin--picture { position: static !important; width: 100% !important; margin: 14px 0 4px !important; }
+.fy-ch__manuscript[data-notes="true"] .fy-margin--picture img { aspect-ratio: 16 / 9; }
+@container page (max-width: 1259px) {
+  .fy-notes { position: static; width: min(var(--room-measure, 660px), 100%); margin: 12px auto 0; }
+  .fy-notes__head { position: static; }
+  .fy-note { position: static; margin-bottom: 8px; top: auto !important; }
+}
+[data-focus="true"] .fy-notes { display: none; }

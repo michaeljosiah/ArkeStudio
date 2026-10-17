@@ -32,7 +32,6 @@ import { ArtifactKindSchema } from "./artifact.js";
 import { BorrowableArtifactSchema } from "./editor-media.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
-import { BibleHelperKindSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
@@ -364,6 +363,22 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
        * press that would make it again (codex on PR 1183).
        */
       audiobookMissing: z.array(ArtifactIdSchema).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** One kept version's prose, for Compare (SPEC-056 R-13). */
+  z
+    .object({
+      ...base,
+      type: z.literal("chapter.version-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
+      disposition: z.enum(["read", "failed"]),
+      body: z.string().optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -2136,25 +2151,6 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       prompt: z.string().nullable(),
-      reason: z.string().optional(),
-    })
-    .strict(),
-  /**
-   * A bible helper's answer: the options, or null with why not (never silence).
-   *
-   * Options rather than an option, because two to compare is what makes this a choice rather
-   * than a suggestion to accept — and `ask` returns exactly one, since an answer has no
-   * alternatives. Nothing here has touched the document: the rail holds these until the author
-   * presses Replace, and an `ask` answer never carries that control at all (design turn 90).
-   */
-  z
-    .object({
-      ...base,
-      type: z.literal("bible.helper-answered"),
-      worldId: UlidSchema,
-      requestId: UlidSchema,
-      helper: BibleHelperKindSchema,
-      options: z.array(z.string()).nullable(),
       reason: z.string().optional(),
     })
     .strict(),

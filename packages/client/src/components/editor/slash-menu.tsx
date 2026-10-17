@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/core";
 import {
+  Sparkle,
   CodeMark,
   Divider,
   Heading,
@@ -29,6 +30,10 @@ const ICONS: Record<string, typeof TextMark> = {
   "code-block": CodeMark,
   table: TableMark,
   divider: Divider,
+  "scene-break": Divider,
+  "arke-continue": Sparkle,
+  "arke-describe": Sparkle,
+  "arke-dialogue": Sparkle,
 };
 
 interface SlashMenuProps {

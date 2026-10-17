@@ -146,7 +146,7 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // as the window lives (turn 152); publication preferences keep only position and caption id,
   // keyed by edition and manifest digest; paired-device notifications keep one on/off preference,
   // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
-  // (turn 194); the model picker remembers the last three models picked on this device (turn 195);
+  // (turn 194), and the books whose linked names are turned off (SPEC-056 D-5); the model picker remembers the last three models picked on this device (turn 195);
   // the audiobook's show page reads back the place the player kept, a chapter and a time (turn 199);
   // effects review retains a validated version/receipt reference, comparison and position (SPEC-053
   // R-38), which convey no authority without the coordinator's matching human review grant.

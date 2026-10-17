@@ -308,14 +308,17 @@ export function SceneTitle({
   title,
   locked = false,
   label = "Scene title",
+  startEditing = false,
   onCommit,
 }: {
   title: string;
   locked?: boolean;
   label?: string;
+  /** Open already editing, the words selected, so typing replaces them (a new chapter's `Untitled`). */
+  startEditing?: boolean;
   onCommit: (title: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing && !locked);
   // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
   // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
   const settled = useRef(false);
@@ -335,6 +338,12 @@ export function SceneTitle({
     openedOn.current = title;
     setEditing(true);
   };
+  // A title that becomes new after the first render (its chapter's body arrived) opens then, and
+  // through `open`, so a second opening is not left settled by the first (codex on PR 1799).
+  useEffect(() => {
+    if (startEditing && !locked) open();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startEditing, locked]);
   if (!editing) {
     return (
       <span

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { containedWorldFilePath } from "../world/contained-file.js";
 import {
   compilePasses,
   normalizeAspect,
@@ -727,12 +728,25 @@ export async function createChapter(
   // The rank the press asks for is the dense count plus one, and the bundle's orders are dense
   // too; the files are not. A legacy production ranked 10, 20 would take a new chapter at 3 and
   // sort it first, so the rank written is at least one past the highest persisted (codex, PR 879).
-  const order = Math.max(input.order, (await highestChapterRank(store, productionId, existing.map((c) => c.file))) + 1);
+  const ranks = await chapterRanks(store, productionId, existing.map((c) => c.file));
+  const order = Math.max(input.order, Math.max(0, ...ranks.values()) + 1);
+  // A new chapter takes the point of view of the chapter before it (SPEC-056 D-3), when that is a
+  // character the world still holds: most books stay with one viewpoint for a run of chapters.
+  // "Before it" by the ranks on disk, not the summaries' dense orders: the new rank is past every
+  // ranked chapter, so a legacy chapter with no rank (sorted last in the summaries) is not before
+  // it (codex, PR 1799). With nothing ranked, the last chapter shown is.
+  const sheets = store.getBundle().sheets;
+  const live = existing.filter((c) => !c.retired);
+  // Ties on a rank go by file name, as the scanner orders them, so the last of a tie is the one before.
+  const ranked = live.filter((c) => (ranks.get(c.file) ?? 0) > 0).sort((a, b) => ranks.get(b.file)! - ranks.get(a.file)! || b.file.localeCompare(a.file));
+  const previous = ranked[0] ?? [...live].sort((a, b) => b.order - a.order)[0];
+  const pov = previous?.pov !== undefined && sheets.some((sheet) => sheet.id === previous.pov && sheet.type === "character" && !sheet.retired) ? previous.pov : undefined;
   const doc = MarkdownFile.create(
     {
       id: slug,
       title: input.title,
       order,
+      ...(pov !== undefined ? { pov } : {}),
       status: "planned",
       version: 1,
       created: store.now().slice(0, 10),
@@ -756,15 +770,20 @@ export async function createChapter(
 
 /** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
 export async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
-  let highest = 0;
+  return Math.max(0, ...(await chapterRanks(store, productionId, files)).values());
+}
+
+/** Each chapter file's persisted rank (`order`, else the legacy `number`); 0 where it has none. */
+export async function chapterRanks(store: WorldStore, productionId: string, files: readonly string[]): Promise<Map<string, number>> {
+  const ranks = new Map<string, number>();
   for (const file of files) {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
     if (raw === null) continue;
     const data = MarkdownFile.parse(raw).data;
     const rank = typeof data["order"] === "number" ? data["order"] : typeof data["number"] === "number" ? data["number"] : 0;
-    if (Number.isFinite(rank) && rank > highest) highest = rank;
+    ranks.set(file, Number.isFinite(rank) && rank > 0 ? rank : 0);
   }
-  return highest;
+  return ranks;
 }
 
 /** Direct authoring: saves in place, no proposal, no version cut (R-5). */
@@ -873,6 +892,9 @@ export async function openChapter(
  * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
  * as a null the read schema would refuse.
  */
+/** The picture formats the world's media route serves (FsWorldProvider.MEDIA_TYPES). */
+const CHAPTER_PICTURE_TYPE = /\.(png|jpe?g|webp|gif)$/i;
+
 export async function editChapterPlan(
   store: WorldStore,
   productionId: string,
@@ -883,9 +905,24 @@ export async function editChapterPlan(
     pov?: string | null;
     when?: string | null;
     implies?: ChapterImplies | null;
+    goal?: number | null;
+    picture?: string | null;
   },
 ): Promise<void> {
   const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  // A chosen chapter picture (SPEC-056 R-49) is a world-owned image that exists now, in a format
+  // the world's media route serves. It resolves through the same symlink-aware check as every
+  // other world file: a link out of an imported world would be saved and then refused by the
+  // media route, leaving a hero that can never load (codex on PR 1795).
+  if (typeof changes.picture === "string" && changes.picture.trim() !== "") {
+    const picture = changes.picture.trim();
+    if (!CHAPTER_PICTURE_TYPE.test(picture)) throw new Error(`${picture} is not a picture in this world`);
+    await containedWorldFilePath(store.dir, picture, false, "chapter-picture").catch((error: unknown) => {
+      const missing = (error as NodeJS.ErrnoException).code === "ENOENT";
+      throw new Error(missing ? `${picture} is not in this world` : `${picture} is not a picture in this world`);
+    });
+    changes = { ...changes, picture };
+  }
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = MarkdownFile.parse(live);
   const next: Record<string, unknown> = { ...doc.data };
@@ -923,6 +960,23 @@ export function withImpliedIds(implies: ChapterImplies): ChapterImplies {
     seen.add(id);
     return { ...fact, id, state: fact.state ?? "open" };
   });
+}
+
+/**
+ * One kept version's prose, for Compare (SPEC-056 R-13): the snapshot on the chapter's history
+ * track (commit.ts writes `v<n>.md` per version), its front matter dropped. Read only. The file
+ * must be one of the production's chapters, so the name can never reach outside its track.
+ */
+export async function readChapterVersion(store: WorldStore, productionId: string, chapterFile: string, version: number): Promise<string> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) throw new Error("That production is no longer in this world.");
+  const summary = production.chapters.find((c) => c.file === chapterFile);
+  if (!summary) throw new Error("That chapter is no longer in this production.");
+  const snapshot = toExtendedLength(join(store.dir, fromPortable(`.history/productions/${productionId}/chapters/${summary.file}/v${version}.md`)));
+  const raw = await readFile(snapshot, "utf8").catch(() => null);
+  if (raw === null) throw new Error(`Version ${version} is not kept for this chapter.`);
+  const body = MarkdownFile.parse(raw).body;
+  return body.trim() === "" ? "" : body;
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */

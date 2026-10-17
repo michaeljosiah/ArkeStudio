@@ -693,6 +693,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
       ...(fm.retired !== undefined ? { retired: fm.retired } : {}),
       ...(fm.source !== undefined ? { source: fm.source } : {}),
+      // The chapter's own goal and picture (SPEC-056 R-49) ride with the plan.
+      ...(fm.goal !== undefined ? { goal: fm.goal } : {}),
+      ...(fm.picture !== undefined ? { picture: fm.picture } : {}),
     }));
 
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
