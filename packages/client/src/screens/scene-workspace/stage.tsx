@@ -222,7 +222,7 @@ export function SceneStage({
   const [lightSelected, setLightSelected] = useState<number | null>(null);
   // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
   // device and never written to the world; the playblast records the look it was exported in.
-  const [look, setLookState] = useState<StageLook>(readStageLook);
+  const [preferredLook, setLookState] = useState<StageLook>(readStageLook);
   const setLook = (next: StageLook) => {
     setLookState(next);
     rememberStageLook(next);
@@ -461,6 +461,10 @@ export function SceneStage({
     const url = platePicture(plate, world);
     return url === null ? null : { url, camera: plate.camera };
   }, [scene.blocking?.plate, world]);
+  // The look on screen and in an export. A remembered Plate with no matched plate here draws Lit
+  // and says so: the control is off, so the viewport and the pin must not claim Plate either. The
+  // preference stays Plate for the next scene that has one.
+  const look: StageLook = preferredLook === "plate" && plateView === null ? "lit" : preferredLook;
   const data: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
     const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
@@ -777,8 +781,11 @@ export function SceneStage({
       const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
       command.blocking = { ...marks, plate: { ...plate, camera: draftPlateCamera } };
     }
-    if (draftLook !== null && (scene.blocking !== undefined || command.blocking !== undefined)) {
-      const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
+    if (draftLook !== null) {
+      // A build's lights and atmosphere are the scene's even when its marks went to this shot (a
+      // scene without blocking builds in shot scope): they land on the scene's own marks, none when
+      // it has none, rather than being dropped with the draft (issue 1825).
+      const marks = command.blocking ?? { cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] };
       command.blocking = { ...marks, ...draftLook };
     }
     if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); setDraftLook(null); }

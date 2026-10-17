@@ -697,6 +697,25 @@ it("offers Greybox · Lit · Plate in the viewport's corner, Plate only once a p
   scene.blocking = { version: 1, cast: [], sets: [], plate: { source: { source: "artifact", artifactId: PLATE_PICTURE.id, hash: PLATE_PICTURE.hash }, label: "Lobby", camera: { p: [0, 1, 5], l: [0, 1, 0], focalMm: 24 } } };
   await render();
   assert.equal(options()[2]!.disabled, false, "a matched plate can be looked through");
+  await click(options()[2]!);
+  assert.equal(options()[2]!.getAttribute("aria-checked"), "true");
+  // The plate goes: Plate is remembered, but what is drawn, and what an export would say, is Lit.
+  scene.blocking = { version: 2, cast: [], sets: [] };
+  await render();
+  assert.deepEqual(options().map((option) => option.getAttribute("aria-checked")), ["false", "true", "false"]);
+});
+
+it("adds a light to a scene without blocking with the scene's marks, never this shot's own (issue 1825)", async () => {
+  const { q, render, scene, sent } = await mount((shot) => {
+    shot.staging = { ...shot.staging!, cast: [{ sheetId: "maren-kest", x: 1, z: 0 }], sets: [{ name: "rail", x: 0, z: -2, w: 4, h: 1, d: .2 }] };
+  });
+  scene.blocking = undefined;
+  await render();
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add light")!);
+  const added = sent.at(-1);
+  const blocking = added?.kind === "edit-stage" ? added.blocking : undefined;
+  assert.equal(blocking?.lights?.length, 1);
+  assert.deepEqual([blocking?.cast, blocking?.sets], [[], []], "this shot's marks stay its own");
 });
 
 it("adds a light, opens its form with the scene's Look beneath, and writes both with the scene's marks", async () => {

@@ -416,7 +416,14 @@ export const ShotStagingSchema = z
         /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
         blocking: z.discriminatedUnion("owner", [
           z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),
-          z.object({ owner: z.literal("shot") }).strict(),
+          z.object({
+            owner: z.literal("shot"),
+            /**
+             * A Lit or Plate playblast of a shot's own marks still shows the scene's lights,
+             * atmosphere and plate: the scene blocking version it was drawn under (issue 1825).
+             */
+            sceneVersion: z.number().int().min(1).nullable().optional(),
+          }).strict(),
         ]).optional(),
       })
       .strict()
