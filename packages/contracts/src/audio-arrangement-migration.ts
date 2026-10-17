@@ -6,6 +6,19 @@ import type { AudioArrangementState, AudioSource, AudioArrangementTrack } from "
  * Derive on open, persist only with the first accepted edit. File measurement/fingerprinting is
  * supplied by the coordinator; a missing legacy source refuses migration instead of losing it.
  */
+/**
+ * The chapter's timing keeps seconds to the millisecond, so a take of 41.9196 s is timed as
+ * 41.92 s: 18 samples past the end of its own file. The arrangement's trim check is exact and
+ * refused the whole chapter for it, which left a read chapter unable to open Audio Studio at all
+ * (issue 1827). An end within a millisecond of the source is that rounding and is the source's
+ * end; one further out is a real disagreement and is still refused.
+ */
+const ROUNDING_SAMPLES = audioSamples(0.001);
+function endOf(seconds: number, source: AudioSource): number {
+  const end = audioSamples(seconds);
+  return end > source.samples && end - source.samples <= ROUNDING_SAMPLES ? source.samples : end;
+}
+
 export function migrateAudioArrangement(script: AudioScript, timing: ChapterTiming, sources: ReadonlyMap<string, AudioSource>): AudioArrangementState {
   if (Object.values(timing.lost).some(entries => entries.length > 0) || timing.beds.some(bed => bed.cut !== null)) {
     throw new AudioArrangementRefusal("Repair the chapter's unresolved timing cues before migrating its arrangement");
@@ -36,7 +49,7 @@ export function migrateAudioArrangement(script: AudioScript, timing: ChapterTimi
       const source = sourceFor(segment.file);
       const clip = newAudioClip(`voice:${bar.key}:${index}`, lane.id, source, source.samples);
       clip.label = source.label; clip.role = "speech"; clip.passageId = passageAt(bar.index);
-      clip.sourceIn = audioSamples(segment.from); clip.sourceOut = audioSamples(segment.to);
+      clip.sourceIn = audioSamples(segment.from); clip.sourceOut = endOf(segment.to, source);
       clip.placement = bar.under === null ? { kind: "sequence", offset: audioSamples(bar.at - previousEnd) + offset }
         : { kind: "passage", anchor: { passageId: passages.find(passage => passage.key === bar.under!.host)?.id ?? `missing:${bar.under.host}`, edge: "start", offset: audioSamples(bar.under.offset) + offset } };
       state.clips.push(clip); offset += clip.sourceOut - clip.sourceIn;
@@ -48,7 +61,7 @@ export function migrateAudioArrangement(script: AudioScript, timing: ChapterTimi
     let offset = 0;
     for (const [index, segment] of bar.segments.entries()) {
       const source = sourceFor(segment.file), clip = newAudioClip(`reaction:${bar.key}:${index}`, lane.id, source, source.samples);
-      clip.role = "speech"; clip.sourceIn = audioSamples(segment.from); clip.sourceOut = audioSamples(segment.to);
+      clip.role = "speech"; clip.sourceIn = audioSamples(segment.from); clip.sourceOut = endOf(segment.to, source);
       clip.placement = { kind: "passage", anchor: { passageId: passageAt(bar.index), edge: "start", offset: audioSamples(bar.under?.offset ?? 0) + offset } };
       state.clips.push(clip); offset += clip.sourceOut - clip.sourceIn;
     }

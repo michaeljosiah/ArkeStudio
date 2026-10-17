@@ -259,6 +259,17 @@ describe("legacy arrangement derivation", () => {
     assert.throws(() => migrateAudioArrangement(script, timing, new Map()), /unresolved timing/);
   });
 
+  it("opens a take whose timed length is rounded past its file, and refuses one further out (issue 1827)", () => {
+    // Juju chapter 1, block p61: timed at 41.92 s, decoded to 2,012,142 samples (41.9196 s).
+    const timed = (seconds: number) => timeChapter({ blocks: [{ key: "p0.0", text: "First", lane: "narration", take: { artifactId: "first", file: "artifacts/first.wav", seconds } }], record: {}, reading: "narrator", unmade: "skip" });
+    const file = { ...source("first"), samples: 2_012_142 };
+    const one = { hash: "legacy", passages: [{ key: "p0.0", textHash: audiobookTimingHash("First") }] };
+    const migrated = migrateAudioArrangement(one, timed(41.92), new Map([[file.file, file]]));
+    assert.equal(migrated.clips[0]!.sourceOut, file.samples, "the rounding is the file's end");
+    assert.deepEqual(resolveAudioArrangement(migrated, one).issues, []);
+    assert.throws(() => migrateAudioArrangement(one, timed(41.922), new Map([[file.file, file]])), /The trim is outside this exact source/, "a real disagreement is still refused");
+  });
+
   it("rejects unsafe paths, unsupported schemas and fractional sample positions", () => {
     const current = state(); current.clips[0]!.source!.file = "../private.wav";
     assert.throws(() => validateAudioArrangement(current), /audio must belong/);
