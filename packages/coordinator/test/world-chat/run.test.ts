@@ -238,6 +238,7 @@ describe("taking a turn", () => {
     const result = await runner.send(store, conversationId, "Tighten", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide", intent: "revise" });
     assert.equal(result.status, "completed", "the second answer is not held to a revision");
     assert.ok(prompts[0]!.includes('answer with one production-chapter edit action for chapter neap whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>, "paragraph": 2 } }'), "the whole shape, with the paragraph the ask named");
+    assert.ok(prompts[0]!.includes("First read the chapter whole with get_chapter (chapterId neap) to its last page, and cite that final receipt in the action's checkReceiptIds."), "and the read the edit must cite");
     assert.match(prompts[1]!, /rewrite of the selected passage, shown in the page, not in the reply/, "the corrective turn asks for the revision");
     assert.ok((await store.read()).events.some((e) => e.event.type === "run.retry-started"));
     assert.equal((await view()).messages.at(-1)?.text, "It is already as tight as it can be without losing the tide.");

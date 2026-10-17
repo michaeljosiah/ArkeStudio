@@ -706,7 +706,7 @@ export class WorldChatRunner {
       ...(actionGuide.text ? { actionGuide: actionGuide.text } : {}),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject, view.entryContext !== undefined && "productionId" in view.entryContext ? view.entryContext.productionId : undefined)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -1484,7 +1484,7 @@ ${assembled.actionGuide}`);
  */
 const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each quoting the passage it names. Propose no action this turn; anything you would change, say instead.";
 
-function subjectNarration(subject: WorldChatSubject | undefined): string {
+function subjectNarration(subject: WorldChatSubject | undefined, productionId?: string): string {
   if (subject === undefined) return "";
   if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.`;
   const named = subject.kind === "chapter"
@@ -1504,7 +1504,7 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject) : ""}`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject, productionId) : ""}`;
 }
 
 /**
@@ -1512,9 +1512,13 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
  * offered in the reply instead reaches nobody — the page sent the ask without opening Chat. Said
  * to the model here, and held after it by the corrective turn (issue 1827).
  */
-function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>): string {
+function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>, productionId: string | undefined): string {
   // The shape named whole (issue 1827, measured): told only "changes.passage", GPT-5.4 sent
   // { replace } and then left out the paragraph, which the passage guard rightly refuses.
   const paragraph = subject.paragraph === undefined ? "" : `, "paragraph": ${subject.paragraph}`;
-  return ` They asked for these words rewritten, and the page shows your revision in place: answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
+  // And the read it must cite: the edit is refused without a complete current read of the chapter,
+  // which the model did not think to make on its own (the second measured refusal).
+  const where = productionId === undefined ? `chapterId ${subject.chapterId}` : `productionId ${productionId}, chapterId ${subject.chapterId}`;
+  const read = ` First read the chapter whole with get_chapter (${where}) to its last page, and cite that final receipt in the action's checkReceiptIds.`;
+  return ` They asked for these words rewritten, and the page shows your revision in place.${read} Then answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
 }

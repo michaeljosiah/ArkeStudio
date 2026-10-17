@@ -921,7 +921,7 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
 }
 
 const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
-const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
+const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, citing the final receipt of a complete get_chapter read of that chapter, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
 
 /** A revision of a selected passage: what a page's rewrite is answered by. */
 function isPassageRevision(action: { kind: string; change?: unknown }): boolean {
