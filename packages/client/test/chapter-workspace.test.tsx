@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { CHAPTER_PLAN_LIMITS, paragraphSpans, type ChapterContinuity, type ChapterSummary, type ChapterVoices, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, __clearHeldAsksForTest, __tagAskForTest, firstPrompt, paragraphAt, passageSubject, passageVersions, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
-import { BookStrip } from "../src/screens/chapter-overview.js";
+import { BookStrip, ChapterOverview } from "../src/screens/chapter-overview.js";
 import { ReviewNotes } from "../src/screens/chapter-review-notes.js";
 import { ArkePrompt } from "../src/screens/chapter-ask.js";
 import { BriefFields, DocHead, NEW_CHARACTER } from "../src/screens/chapter-room.js";
@@ -2601,6 +2601,19 @@ describe("the writing room (design turn 227, SPEC-056 §1.6)", () => {
     assert.equal(q(m, ".fy-ch__body")!.hasAttribute("hidden"), true);
   });
 
+  it("a chapter with words reads as drafted, and Mixed says not started until it is (issue 1827)", async () => {
+    const state = inkbound();
+    const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
+    (production as { chapters: { id: string; status?: string }[] }).chapters = production.chapters.map((c) => (c.id === "neap" ? { ...c, status: "planned" } : c));
+    const m = await mount(state, `${ROUTE}?view=chapter`);
+    await answerOpen(m);
+    const meta = q(m, ".fy-chov__meta")?.textContent ?? "";
+    assert.match(meta, /drafted/, "the stored status is planned, but the chapter has words");
+    assert.doesNotMatch(meta, /planned/);
+    const mixed = [...m.container.querySelectorAll(".fy-chov__step")].find((step) => /Mixed/.test(step.textContent ?? ""));
+    assert.match(mixed?.querySelector("b")?.textContent ?? "", /^(Not started|Mixed)$/, "its state, not the name of the place to mix it");
+  });
+
   it("the hero shows the chapter's chosen picture (D-10)", async () => {
     const state = inkbound();
     const production = state.world!.productions.find((p) => p.meta.id === "inkbound")!;
@@ -2641,6 +2654,29 @@ describe("the book strip (design turn 227, SPEC-056 R-36)", () => {
     assert.ok(segments.every((segment) => segment.getAttribute("role") === null), "a segment is announced as the button it is");
     await act(async () => (segments[1] as HTMLElement).click());
     assert.deepEqual(chose, ["three"]);
+  });
+});
+
+describe("the Chapter view's pictures (SPEC-056 R-40)", () => {
+  it("hold one row of five: four pictures and the count of the rest (issue 1827)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    const root = createRoot(container);
+    const pictures = Array.from({ length: 15 }, (_, i) => `artifacts/p${i}.png`);
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    open.push({ container, root, sent: [], navigate: () => {} });
+    const cells = [...container.querySelectorAll(".fy-chov__pics > *")];
+    assert.equal(cells.length, 5, "a sixth cell wrapped to a row of its own");
+    assert.equal(cells.at(-1)?.textContent, "+11");
+    await act(async () => root.render(
+      <ChapterOverview picture={null} strip={null} title="Gold on Gold" synopsis={undefined} meta={null} actions={null} views={null} cast={null} voiceCard={null}
+        steps={null} pictures={pictures.slice(0, 5)} onPicture={() => {}} illustrate={null} continuity={null} versions={null} more={null} />,
+    ));
+    assert.equal(container.querySelectorAll(".fy-chov__pics > *").length, 5, "five pictures show as five");
+    assert.equal(container.querySelector(".fy-chov__pic--more"), null);
   });
 });
 
