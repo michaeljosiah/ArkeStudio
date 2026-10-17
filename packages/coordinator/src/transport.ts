@@ -1,3 +1,4 @@
+import { SocketWriter } from "./socket-writer.js";
 import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createReadStream } from "node:fs";
@@ -7,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   ClientMessageSchema,
   FrameSchema,
+  jobSummary,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
@@ -20,7 +22,12 @@ import {
  * replay is deliberately not offered (D4).
  */
 
+
 interface Connection {
+  writer: SocketWriter;
+  retainHistory: boolean;
+  jobs?: ClientState["app"]["jobs"];
+  ledger?: ClientState["app"]["ledger"];
   socket: WebSocket;
   seq: number;
   helloed: boolean;
@@ -186,7 +193,8 @@ export class Transport {
   }
 
   private accept(socket: WebSocket, origin: string | undefined): void {
-    const conn: Connection = { socket, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
+    const writer = new SocketWriter(socket, { label: "coordinator", trace: detail => this.opts.log?.(JSON.stringify(detail)) });
+    const conn: Connection = { socket, writer, retainHistory: false, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
@@ -194,8 +202,8 @@ export class Transport {
       socket.close(1008, "session authentication required");
     };
     this.connections.add(conn);
-    socket.on("close", () => this.connections.delete(conn));
-    socket.on("error", () => this.connections.delete(conn));
+    socket.on("close", () => { writer.dispose(); this.connections.delete(conn); });
+    socket.on("error", () => { writer.dispose(); this.connections.delete(conn); });
     if (!this.allowedOrigin(origin)) {
       refuse();
       return;
@@ -233,7 +241,11 @@ export class Transport {
         return;
       }
       if (msg.kind === "hello") {
-        if (conn.initialising) return;
+        // A legacy retry is only for old strict servers. Never downgrade an already
+        // negotiated connection or queue another full snapshot behind a slow first one.
+        if (conn.initialising || (conn.retainHistory && msg.retainHistory !== true)) return;
+        conn.retainHistory = msg.retainHistory === true;
+        conn.jobs = undefined; conn.ledger = undefined;
         const sendInitialState = () => {
           if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
           // Whatever lastSeq the client saw, the answer is a fresh snapshot (D4).
@@ -282,7 +294,21 @@ export class Transport {
 
   private sendFrame(conn: Connection, frame: Frame): void {
     // Validate on the way out — a frame that fails its own schema must never reach a client.
-    conn.socket.send(JSON.stringify(FrameSchema.parse(frame)));
+    let outgoing = frame;
+    if (frame.kind === "snapshot") {
+      const { jobs, ledger } = frame.state.app;
+      const retainedHistory: ("jobs" | "ledger")[] = [];
+      if (conn.retainHistory && conn.jobs === jobs) retainedHistory.push("jobs");
+      if (conn.retainHistory && conn.ledger === ledger) retainedHistory.push("ledger");
+      outgoing = { ...frame, state: { ...frame.state, app: { ...frame.state.app,
+        jobs: retainedHistory.includes("jobs") ? [] : conn.retainHistory ? jobs.map(jobSummary) : jobs,
+        ledger: retainedHistory.includes("ledger") ? [] : ledger,
+      } }, ...(retainedHistory.length ? { retainedHistory } : {}) };
+      conn.jobs = jobs; conn.ledger = ledger;
+    } else if (conn.retainHistory && (frame.event.type === "job.updated" || frame.event.type === "job.ready")) {
+      outgoing = { ...frame, event: { ...frame.event, job: jobSummary(frame.event.job) } };
+    }
+    conn.writer.send(JSON.stringify(FrameSchema.parse(outgoing)));
   }
 
   /** Push one event to every helloed connection, sequenced per connection. */
@@ -315,7 +341,7 @@ export class Transport {
     this.wss = null;
     const http = this.http;
     this.http = null;
-    for (const conn of this.connections) conn.socket.close(1001, "coordinator stopping");
+    for (const conn of this.connections) { conn.writer.dispose({ preserveCloseTimeout: true }); conn.socket.close(1001, "coordinator stopping"); }
     this.connections.clear();
     await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));

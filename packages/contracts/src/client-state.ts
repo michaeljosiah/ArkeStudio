@@ -39,7 +39,8 @@ import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
 import { AccountStateSchema, SIGNED_OUT } from "./account.js";
 import { GenesisIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
-import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
+import { JobSummarySchema } from "./job-summary.js";
+import { LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
 import {
   ProposalSchema,
@@ -407,7 +408,7 @@ export const ClientStateSchema = valueSchema(z
       .object({
         version: z.string(),
         health: AppHealthSchema,
-        jobs: z.array(JobSchema),
+        jobs: z.array(JobSummarySchema),
         audiobookActivity: z.array(AudiobookActivitySchema).optional(),
         ledger: z.array(LedgerEntrySchema),
         /**

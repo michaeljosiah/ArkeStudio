@@ -7,8 +7,7 @@ Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](aud
 [Prototype](audio-drama-230.prototype.html) · [Design master](Arke%20Studio.dc.html#t230) ·
 [Research](../docs/research/audio-drama-adaptation.md).
 
-Turn 229 is left free: open PR 1828 (the Stage uplift) still holds a turn 228 that collides with the
-merged Audio Drama turn 228 and will need the next number.
+Turn 229 is the Stage uplift (PR 1828), renumbered from 228 when it merged; this turn sits above it.
 
 ## How this turn was made
 

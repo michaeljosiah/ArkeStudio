@@ -184,6 +184,12 @@ export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
       chapterId: SlugSchema,
       paragraph: z.number().int().min(1).optional(),
       text: z.string().min(1).max(1_200),
+      /**
+       * The page's own rewrite (SPEC-056 R-24): the answer is a revision of these words, drawn in
+       * the page. Without it a model may answer a Tighten with wording in the reply and stage
+       * nothing, and a page that sent the ask quietly then has nothing to show (issue 1827).
+       */
+      intent: z.literal("revise").optional(),
     })
     .strict(),
 ]);

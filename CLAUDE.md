@@ -123,8 +123,10 @@ npm test            # node --test per workspace
 ```
 
 CI runs lint, typecheck, build, then test, on **both** windows-latest and ubuntu-latest, in four
-shards per platform. A healthy shard is 2m34s–12m14s on Windows and under 3m30s on Linux, against
-a 30-minute ceiling. A step that prints nothing for ten minutes is killed as hung — that, not the
+coordinator shards plus a separate other-workspaces job per platform, each with a 30-minute
+ceiling. The other workspaces outgrew their former place alongside shard 2: on 2026-10-17 that
+combination exhausted the ceiling without a failed test. A step that prints nothing for ten
+minutes is killed as hung — that, not the
 ceiling, is what catches a leaked watcher, so a red check means something failed rather than that
 the runner was busy. The two numbers are coupled: the guard only reports first while pre-Test work
 plus the Test step plus ten minutes fits inside the ceiling, so move them together. Each run prints

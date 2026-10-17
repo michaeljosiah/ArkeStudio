@@ -53,6 +53,17 @@ const SCREENS = [
   { group: "Audio drama · turn 230 · revision 1", screen: "Phone · Cast as a sheet; a voice for Sereth chosen in place", frame: "230v", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },
   // END AUDIO DRAMA 230
 
+  // BEGIN STAGE 229
+  { group: "Stage · turn 229", screen: "Lit. The look the playblast carries: materials, the practical lights, soft shadows and contact shading, a night sky, two strong cast colours. The camera is written in words.", frame: "229a", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "Greybox. The same stage in today’s look, one press away: the light ground, one grey, the grid and the capsules.", frame: "229b", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "Plate. Camera on shot 1 in the Plate look: the set wears the plate, the cast stands in it, and the plate’s form names the shot it matches.", frame: "229c", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "A figure posed. Ife on her last mark: Lean on, her left hand on Ade’s left shoulder, looking at him. The lane names each pose.", frame: "229d", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "The new forms. Add set opens the kit; a Room with its openings and surfaces; a Light, and the production’s Look beneath it.", frame: "229e", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "Build with Arke, working. The build is a log of small steps, each one on the stage as it lands; it renders, compares with the plate and checks before it stops.", frame: "229f", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "Board 1. One action, four cameras, one cut animatic: the track is the cut list, the lanes run across the cuts, and the line check covers the board.", frame: "229g", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  { group: "Stage · turn 229", screen: "The Bench, video. References numbered as they ride, the prompt written as timed cuts, and Follow set to Camera only.", frame: "229h", route: "Scene / shot / Stage (full screen)", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Approved 17 October 2026; implementation tracked in #1826."] },
+  // END STAGE 229
+
   // BEGIN AUDIO DRAMA 228
   { group: "Audio Drama · turn 228", screen: "Adapt a story", frame: "228a", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
   { group: "Audio Drama · turn 228", screen: "Account for the source", frame: "228b", route: "Audio Drama / Episodes / Scene", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed design, not implemented. See audio-drama-228.notes.md."] },
@@ -805,6 +816,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "stage-229.review.html", what: "Turn 229: the Stage with a location plate, the Lit and Plate looks, jointed figures with poses and contacts, the kit and lights, the camera in words, Build with Arke as a working log, Board 1 with a cut animatic, and the Bench prompt written as timed cuts with Follow.", state: "approved; implementation tracked in #1826" },
   { file: "audio-drama-228.review.html", what: "Turn 228: source-linked Audio Drama adaptation, typed script, casting, reused Audio Studio, listening review, editions and source changes.", state: "proposed; interactive design fixture" },
   { file: "chapter-page-227.review.html", what: "Turn 227 revision 4: the Manuscript as a writing room (linked names, @ and / menus, compare, focus, Brief), working with Arke (selection menu, versions of an edit, review notes, Continue, Chat about a passage) and a Chapter view with the cast as cards; a new chapter; turn 225’s Chat with voice and upload; desktop, ultrawide, Fold and phone.", state: "approved; implementation tracked in #1791" },
   { file: "audio-studio.review.html", what: "Turn 226 revision 2: existing video editor comparison, script preview, chapter arrangement, replacement review and compact layouts.", state: "approved; implementation starting" },
@@ -966,6 +978,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="chapter-page-227.css">
 <link rel="stylesheet" href="chapter-page-227.chat.css">
 <link rel="stylesheet" href="audio-drama-228.css">
+<link rel="stylesheet" href="stage-229.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
