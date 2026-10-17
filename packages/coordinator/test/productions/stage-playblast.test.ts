@@ -284,6 +284,9 @@ it("delivers a fresh filed Stage clip through bench admission into the provider 
     const manifest={...SHIPPED_MANIFEST,models:SHIPPED_MANIFEST.models.filter(m=>m.id==="minimax-h3")};
     const prepared=await prepareBenchSubject(bundle(),{productionId:PRODUCTION,sceneId:SCENE,subject:{kind:"shot",shotId:SHOT},mode:"video",settings:null,manifest,sources:{read:async()=>({refused:"No additional sheet images in this transport fixture."}),durationSec:async()=>6}});
     assert.ok(prepared.ok);if(!prepared.ok)return;
+    // The video rides on H3, so the brief cites it and closes by saying how to follow it (issue 1817).
+    assert.match(prepared.prefill.composer.brief, /^References: .*@Video 1 the blockout\.$/m);
+    assert.equal(prepared.prefill.composer.brief.split("\n").at(-1), "Follow @Video 1 precisely for camera position, movement, timing and blocking.");
     const images = prepared.prefill.references.filter(reference => reference.kind === "image");
     assert.equal(images.length, 4);
     assert.ok(images.every(reference => reference.ride === "when-supported"));

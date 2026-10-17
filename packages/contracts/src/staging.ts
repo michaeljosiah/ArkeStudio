@@ -581,7 +581,7 @@ export function stagingMotionWord(staging: ResolvedShotStaging, durationSec: num
  * Where the camera stands relative to what it looks at, in the words a prompt uses. A figure
  * faces +Z until it walks (then it faces its path), and "left" is the subject's left.
  */
-function bearing(ox: number, oz: number, rise: number, facing: readonly [number, number]): string {
+export function stageBearing(ox: number, oz: number, rise: number, facing: readonly [number, number]): string {
   const flat = Math.hypot(ox, oz);
   if (rise > 2.4 && flat < 1.6) return "above";
   if (flat < 0.05) return "on top of";
@@ -615,7 +615,7 @@ export function stagingBeats(
     const flat = Math.hypot(ox,oz).toFixed(1);
     const height = pose.p[1].toFixed(2);
     const angle = (target?.rotation[1]??0)*Math.PI/180;
-    const where = bearing(ox,oz,pose.p[1]-pose.l[1],[Math.sin(angle),Math.cos(angle)]);
+    const where = stageBearing(ox,oz,pose.p[1]-pose.l[1],[Math.sin(angle),Math.cos(angle)]);
     const who = subject === null ? "the aim point" : nameOf(subject);
     const aim = k.track === undefined ? `, aim (${pose.l.map(v=>v.toFixed(2)).join(", ")})m in world space` : `, aimed at ${nameOf(k.track)}`;
     const ease = [
@@ -742,54 +742,6 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number, previo
     if (t < end) interior.push({ ...key, t });
   }
   return { ...staging, keys: [...interior, { ...scaled[last]!, t: end }] };
-}
-
-/** The playblast's own line for a session brief: what it is, and the beats beneath it. */
-export function stagingPromptClause(
-  staging: ResolvedShotStaging,
-  nameOf: (sheetId: string) => string,
-  durationSec: number,
-): string {
-  staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
-  const keys = staging.keys;
-  const walkers = staging.cast
-    .filter((figure) => {
-      if (staging.performances?.some(performance => performance.sheetId === figure.sheetId)) return false;
-      const speed = stageWalkSpeed(figure, durationSec);
-      return speed !== null && speed <= MAX_STAGE_WALK_SPEED_MPS;
-    })
-    .map((figure) => nameOf(figure.sheetId));
-  const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
-  const poses = staging.cast.flatMap((figure) =>
-    figure.pose === "sit"
-      ? [`${nameOf(figure.sheetId)} is seated`]
-      : figure.pose === "lie"
-        ? [`${nameOf(figure.sheetId)} is lying down`]
-        : [],
-  );
-  const posture = poses.length === 0 ? "" : ` ${poses.join("; ")}.`;
-  const sets = staging.sets.length === 0
-    ? []
-    : [`Set massing — ${staging.sets.map((set) => `${set.name}: ${set.w.toFixed(2)}m wide, ${set.h.toFixed(2)}m high, ${set.d.toFixed(2)}m deep at x ${set.x.toFixed(2)}m, z ${set.z.toFixed(2)}m`).join("; ")}.`];
-  return [
-    "Follow the described composition, action and camera motion. Use the authored character, location and style for the finished scene.",
-    `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
-    ...sets,
-    ...(staging.performances ?? []).flatMap(performance => performance.keys.map((key, index) => {
-      const next = performance.keys[index + 1];
-      const departure = next ? stagePerformanceDeparture(key, next) : key.t;
-      const y = staging.cast.find(figure => figure.sheetId === performance.sheetId)?.y ?? 0;
-      const moving = next && Math.hypot(next.x - key.x, next.z - key.z, (next.y ?? y) - (key.y ?? y)) >= .05;
-      return `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}${moving ? `, ${key.gait ?? "walk"}` : ", holds position"}${departure > key.t ? `, hold until ${departure.toFixed(2)}s` : ""}${key.easeIn === undefined ? "" : `, ease in ${Math.round(key.easeIn * 100)}%`}${key.easeOut === undefined ? "" : `, ease out ${Math.round(key.easeOut * 100)}%`}`;
-    })),
-    ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
-    ...stagingBeats(staging, nameOf, durationSec),
-    ...keys.slice(0,-1).map((key,index) => {
-      const at = (key.t + keys[index + 1]!.t) / 2;
-      const pose = sampleStageCamera({ ...staging, keys }, at, durationSec);
-      return `${at.toFixed(2)}s — camera world position (${pose.p.map(v => v.toFixed(2)).join(", ")})m; aim (${pose.l.map(v => v.toFixed(2)).join(", ")})m.`;
-    }),
-  ].join("\n");
 }
 
 /** Shot-local action overrides a shared figure's legacy full-shot walk. Angles use degrees. */

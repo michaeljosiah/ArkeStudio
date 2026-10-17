@@ -24,6 +24,8 @@ import {
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
+  stageBriefForRouting,
+  stageRoutingCitations,
   supportsMode,
   type AppSettings,
   type BenchComposer,
@@ -361,6 +363,24 @@ export function subjectSessionReferenceRouting(
   };
 }
 
+/**
+ * A rerouted subject session's brief (issue 1817). The prefill wrote its References and follow
+ * lines for the route it opened on; when a model switch reroutes the subject's references, those
+ * lines are rewritten for exactly what rides now, so the brief never cites a reference the route
+ * dropped and a video that starts riding is followed as the take records.
+ */
+export function subjectRoutedBrief(
+  session: BenchSession,
+  riding: readonly string[],
+  composer: Pick<BenchComposer, "brief" | "params">,
+  nameOf: (sheetId: string) => string,
+): string {
+  if (session.subject === undefined || session.subject.kind === "production") return composer.brief;
+  const references = session.subjectTokens.flatMap((token) => session.tokenRegistry.find((candidate) => candidate.token === token) ?? []);
+  const follow = composer.params.kind === "video" ? composer.params.follow ?? "camera-action" : "camera-action";
+  return stageBriefForRouting(composer.brief, { ...stageRoutingCitations(references, riding, nameOf), follow });
+}
+
 function boardFor(
   production: ProductionBundle,
   scene: SceneRecord,
@@ -417,6 +437,8 @@ export async function prepareBenchSubject(
     subject: { kind: "shot"; shotId: string } | { kind: "board"; memberShotIds: string[] };
     /** A shot opens in image mode unless the Stage asks for the clip (SPEC-036 R-23). */
     mode?: "image" | "video";
+    /** How closely a staged clip follows its playblast; a rebuild keeps the session's choice. */
+    follow?: "camera-action" | "camera";
     settings: AppSettings | null;
     manifest: ModelManifest | null;
     sources: SubjectSourceReader;
@@ -485,9 +507,29 @@ export async function prepareBenchSubject(
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);
     const prompt = plannedPrompt.text;
+    const routedSubject: BenchSubject = { kind: "shot", ...subjectContext(production, scene), promptSheetVersions: {}, shotId: shot.id, shotNumber: shot.number, shotTitle: shot.title, durationSec: shown.durationSec, aspect };
+    const riding = new Set(subjectReferenceRouting(references, routedSubject, model).activeTokens);
+    // The blockout reaches the model as words it can use (issue 1817): an opening line citing
+    // each picture and the video by the number they ride under, the camera and the action as
+    // timed lines, and — only when the video actually rides — how closely to follow it. A line
+    // citing a reference the route does not carry would be refused at dispatch, so nothing that
+    // is not riding is cited.
+    const follow = input.follow ?? "camera-action";
+    const videoRides = playblast !== null && riding.has(playblast.token);
+    const cited = references
+      .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video"))
+      .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : nameOf(entry.sheetId!)}`);
     const brief = staging === undefined
       ? prompt
-      : `${prompt}\n\n${stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec)}`;
+      : [
+          prompt,
+          cited.length === 0 ? null : `References: ${cited.join(" · ")}.`,
+          stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec, {
+            aspect,
+            ...(shown.lens === undefined ? {} : { lens: shown.lens }),
+            ...(videoRides ? { video: playblast!.token, follow } : {}),
+          }),
+        ].filter((part): part is string => part !== null).join("\n\n");
     const promptSheetVersions = !plannedPrompt.overridden
       ? assembledPromptSheetVersions([shot], scene, world)
       : { ...shot.promptOverride!.sheetVersions };
@@ -514,7 +556,7 @@ export async function prepareBenchSubject(
           model: model?.id ?? "",
           params:
             mode === "video"
-              ? { kind: "video", aspect, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, sound: true }
+              ? { kind: "video", aspect, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, sound: true, ...(playblast !== null ? { follow } : {}) }
               : { kind: "image", aspect, count: 1 },
           brief,
           ...routing,

@@ -65,7 +65,7 @@ describe("the Stage's arithmetic", () => {
     assert.equal(first.rig, "dolly");
     assert.equal(first.seed, stageRigSeed("sh_12"));
     assert.equal(first.rigIntensity, 1);
-    assert.match(stagingPromptClause(first, () => "Maren", 4), /ease out 25%[\s\S]*ease in 25%/);
+    assert.match(stagingPromptClause(first, () => "Maren", 4), /^0\.0–4\.0 s · Close-up on Maren, from the front, eye level, dolly, ending extreme close-up, easing in and out\.$/m);
     assert.ok(first.keys[1]!.p[2] < first.keys[0]!.p[2], "a push-in ends closer");
     assert.ok(ShotStagingSchema.safeParse(first).success, "what staging writes is what the schema reads");
     assert.ok(ShotSchema.safeParse({ ...shot({}), staging: first }).success);
@@ -108,8 +108,9 @@ describe("the Stage's arithmetic", () => {
       cast: [{ sheetId: "maren-kest", x: 0, z: 0, pose: "sit", to: [1, 0] }],
     }).success, false, "a static posture cannot also claim a walk");
     const prompt = stagingPromptClause(staged, (id) => id === "maren-kest" ? "Maren" : "Ivo", 4);
-    assert.match(prompt, /Ivo walks through the shot\. Maren is seated\./);
-    assert.match(prompt, /counter: 2\.00m wide, 0\.90m high, 0\.70m deep at x -2\.25m, z 0\.60m/);
+    assert.match(prompt, /· Maren sits at the counter\./);
+    assert.match(prompt, /· Ivo walks from Maren to the Hall\./, "a person beside the mark names it before furniture does");
+    assert.doesNotMatch(prompt, /\d\.\d\dm (?:wide|high|deep)|at x -?\d/, "set sizes and positions stay on the Stage (#1817)");
   });
 
   it("keeps locations inside a figure's sentence and reads setting text before its first mention", () => {
@@ -193,8 +194,9 @@ describe("the Stage's arithmetic", () => {
     assert.match(beats[2]!, /above Maren/);
     assert.match(beats[3]!, /in front of Maren/);
     const clause = stagingPromptClause(staging, (id) => (id === "maren-kest" ? "Maren" : id), 15);
-    assert.match(clause, /Camera move, orbit, blocked out on the stage \(4 keys\)\. Maren walks through the shot\./);
-    assert.ok(clause.includes(beats[3]!));
+    assert.match(clause, /^0\.0–15\.0 s · Medium on Maren, from behind, eye level, orbit\.$/m);
+    assert.match(clause, /^0\.0–15\.0 s · Maren walks\.$/m);
+    assert.doesNotMatch(clause, /world position|m in world space/, "no coordinates reach the prompt (#1817)");
   });
 
   it("measures a tracked key from where the figure stands, not from the aim point the track overrides", () => {
@@ -245,7 +247,8 @@ describe("the Stage's arithmetic", () => {
     const beats = stagingBeats(staging, () => "Maren", 3);
     assert.match(beats[0]!, /Maren · 20\.0m in 3\.0s · 6\.67m\/s · too fast for a walk/);
     const clause = stagingPromptClause(staging, () => "Maren", 3);
-    assert.doesNotMatch(clause, /Maren walks through the shot/);
+    assert.doesNotMatch(clause, /Maren walks/);
+    assert.match(clause, /Maren moves/, "an implausible path is said without the word walk (R-34)");
     assert.match(clause, /Blocking warning/);
     assert.doesNotMatch(clause, /10\.0s/, "camera beats use the actual shot duration too");
     const limit = { ...staging, cast: [{ ...figure, to: [4.4, 0] as [number, number] }] };
