@@ -16,6 +16,7 @@ import {
 import { parseAspect } from "./manifest.js";
 import type { StagePose, StagingFigure } from "./scene.js";
 import { stagePoseHeight, stagePoseVerb, stageTurnWarnings } from "./stage-pose.js";
+import type { BenchReferenceToken } from "./bench.js";
 
 /**
  * The blockout as a video model reads it: shot size, side and angle in a camera operator's
@@ -269,4 +270,73 @@ const FOLLOW_LINE = /^(?:Use @(Video [1-9][0-9]*) only for camera position and m
  */
 export function stageBriefWithFollow(brief: string, follow: StageFollow): string {
   return brief.replace(FOLLOW_LINE, (_line, a: string | undefined, b: string | undefined) => stagingFollowLine((a ?? b)!, follow));
+}
+
+/** One Stage follow line, matched alone (FOLLOW_LINE is global and keeps its place between calls). */
+const ONE_FOLLOW_LINE = new RegExp(FOLLOW_LINE.source);
+const ANY_FOLLOW_LINE = new RegExp(FOLLOW_LINE.source, "m");
+
+/** Whether the brief still says, in the Stage's own line, how to follow its blockout video. */
+export function stageBriefFollows(brief: string): boolean {
+  return ANY_FOLLOW_LINE.test(brief);
+}
+/** The References paragraph the Stage writes: one line, every entry a cited reference. */
+const REFERENCES_PARAGRAPH = /^References: @[^\n]*\.$/;
+/** A timed Stage line ("0.0–4.0 s · …"): a brief without one has no Stage lines to keep in step. */
+const TIMED_LINE = /^\d+\.\d–\d+\.\d s · /m;
+
+/**
+ * What a staged subject's brief cites on the route its references ride now (issue 1817): the
+ * riding pictures of cast and the blockout video, in the subject's reference order, worded as the
+ * prefill words them, and the video's label when it rides.
+ */
+export function stageRoutingCitations(
+  references: readonly BenchReferenceToken[],
+  riding: readonly string[],
+  nameOf: (sheetId: string) => string,
+): { cited: string[]; video: string | null } {
+  const rides = new Set(riding);
+  const cited = references
+    .filter((entry) => rides.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video"))
+    .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : nameOf(entry.sheetId!)}`);
+  const video = references.find((entry) => entry.kind === "video" && rides.has(entry.token))?.token ?? null;
+  return { cited, video };
+}
+
+/**
+ * The brief's Stage-written lines kept in step with the references riding now (issue 1817).
+ * Switching models reroutes a staged subject's references: a line citing one that no longer
+ * rides is refused at dispatch, and a blockout video that starts riding without its follow line
+ * is followed by nothing. So the References paragraph cites exactly what rides (written before
+ * the timed lines when it was absent, dropped when nothing rides), and the follow line is there
+ * exactly when the video rides, closing the timed lines. A brief with no timed Stage line is the
+ * author's, and an author's own words are never rewritten.
+ */
+export function stageBriefForRouting(
+  brief: string,
+  routing: { cited: readonly string[]; video: string | null; follow: StageFollow },
+): string {
+  if (!TIMED_LINE.test(brief)) return brief;
+  const references = routing.cited.length === 0 ? null : `References: ${routing.cited.join(" · ")}.`;
+  let paragraphs = brief.split("\n\n");
+  const at = paragraphs.findIndex((paragraph) => REFERENCES_PARAGRAPH.test(paragraph));
+  if (at >= 0) {
+    if (references === null) paragraphs.splice(at, 1);
+    else paragraphs[at] = references;
+  } else if (references !== null) {
+    const timed = paragraphs.findIndex((paragraph) => TIMED_LINE.test(paragraph));
+    paragraphs.splice(timed, 0, references);
+  }
+  let followed = false;
+  paragraphs = paragraphs.map((paragraph) => paragraph.split("\n").flatMap((line) => {
+    if (!ONE_FOLLOW_LINE.test(line)) return [line];
+    if (routing.video === null || followed) return [];
+    followed = true;
+    return [stagingFollowLine(routing.video, routing.follow)];
+  }).join("\n")).filter((paragraph) => paragraph !== "");
+  if (routing.video !== null && !followed) {
+    const last = paragraphs.reduce((found, paragraph, index) => (TIMED_LINE.test(paragraph) ? index : found), -1);
+    paragraphs[last] = `${paragraphs[last]}\n${stagingFollowLine(routing.video, routing.follow)}`;
+  }
+  return paragraphs.join("\n\n");
 }

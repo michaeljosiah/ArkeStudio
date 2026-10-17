@@ -310,6 +310,47 @@ it("a build stopped while its configuration is still being decided creates no se
   }
 });
 
+it("refuses a plate whose picture changed after it was chosen, before any session (issue 1818)", async () => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir);
+  try {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(dir, "locations"), { recursive: true });
+    await writeFile(join(dir, "locations", "lobby.png"), encodePng(solidImage(4, 4, [40, 30, 20, 255])));
+    const bundle = structuredClone(store.getBundle());
+    const scene = bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!;
+    const shot = orderedShots(scene)[0]!;
+    // Pinned to other bytes than the file now holds.
+    scene.blocking = { version: 1, cast: [], sets: [], plate: { source: { source: "world-file", path: "locations/lobby.png", hash: `sha256:${"0".repeat(64)}` }, label: "Lobby", shotId: shot.id } };
+    store.getBundle = () => bundle;
+    let created = 0;
+    const adapter: HarnessAdapter = {
+      id: "test",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(["events"]),
+      createSession: async () => { created++; return { sessionId: "test" }; },
+      sendMessage: async () => ({ sessionId: "test", correlationId: "1" }),
+      dispatchAsync: async () => ({ sessionId: "test", correlationId: "1" }),
+      async *streamEvents() {},
+    };
+    let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    await new StageConstructor().run(
+      store,
+      { kind: "stage-construct", worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
+        baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" },
+      {
+        adapter, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+        emit: (event) => { if (event.status === "failed" || event.status === "ready") terminal = event; },
+      },
+    );
+    assert.equal(terminal?.status, "failed");
+    assert.match(terminal?.detail ?? "", /plate's picture changed/);
+    assert.equal(created, 0, "refused before anything is spent");
+  } finally {
+    await store.close();
+  }
+});
+
 for (const mode of ["protected-blocking", "source-changed", "unread-images", "refused-images"] as const)
   it(`refuses ${mode} without applying a model draft`, async () => {
     const dir = await makeTempWorld();

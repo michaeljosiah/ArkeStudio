@@ -258,7 +258,7 @@ export function SceneStage({
   const [numbers, setNumbers] = useState(false);
   // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
   // device and never written to the world; the playblast records the look it was exported in.
-  const [look, setLookState] = useState<StageLook>(readStageLook);
+  const [preferredLook, setLookState] = useState<StageLook>(readStageLook);
   const setLook = (next: StageLook) => {
     setLookState(next);
     rememberStageLook(next);
@@ -537,6 +537,10 @@ export function SceneStage({
     const url = platePicture(plate, world);
     return url === null ? null : { url, camera: plate.camera };
   }, [scene.blocking?.plate, world]);
+  // The look on screen and in an export. A remembered Plate with no matched plate here draws Lit
+  // and says so: the control is off, so the viewport and the pin must not claim Plate either. The
+  // preference stays Plate for the next scene that has one.
+  const look: StageLook = preferredLook === "plate" && plateView === null ? "lit" : preferredLook;
   const shotData: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
     const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
@@ -978,8 +982,11 @@ export function SceneStage({
       const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
       command.blocking = { ...marks, plate: { ...plate, camera: draftPlateCamera } };
     }
-    if (draftLook !== null && (scene.blocking !== undefined || command.blocking !== undefined)) {
-      const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
+    if (draftLook !== null) {
+      // A build's lights and atmosphere are the scene's even when its marks went to this shot (a
+      // scene without blocking builds in shot scope): they land on the scene's own marks, none when
+      // it has none, rather than being dropped with the draft (issue 1825).
+      const marks = command.blocking ?? { cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] };
       command.blocking = { ...marks, ...draftLook };
     }
     if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); setDraftLook(null); }
@@ -1276,11 +1283,13 @@ export function SceneStage({
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
   /**
    * The plate (issue 1818), the lights and the atmosphere (issue 1825) are written with the scene's
-   * own marks, so the write moves nothing else.
+   * own marks, so the write moves nothing else. A scene without blocking has none: the marks on
+   * screen may be this shot's own, and writing them as the scene's would hand them to every shot
+   * that inherits.
    */
   const writeScene = (change: { plate?: ScenePlate | null; lights?: StageLight[] | null; atmosphere?: SceneAtmosphere | null }) => {
     if (shot === null || working === null) return;
-    const marks = scene.blocking ?? { cast: working.cast, sets: working.sets };
+    const marks = scene.blocking ?? { cast: [], sets: [] };
     onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, ...change } });
   };
   const writePlate = (next: ScenePlate | null) => writeScene({ plate: next });
@@ -1481,7 +1490,7 @@ export function SceneStage({
 
       <div className="fy-swstage__construction">
         {head || fullscreen !== null ? null : boardScope}
-        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} disabled={frozen || locked || moved} onPick={pickPlate} />}
+        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} onPick={pickPlate} />}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
         {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
@@ -1753,6 +1762,7 @@ export function SceneStage({
                 <PlateForm
                   plate={scene.blocking.plate}
                   world={world}
+                  productionId={production.meta.id}
                   light={{
                     time: scene.blocking.atmosphere?.time,
                     summary: sceneLights.length === 0 && scene.blocking.atmosphere?.time === undefined ? undefined

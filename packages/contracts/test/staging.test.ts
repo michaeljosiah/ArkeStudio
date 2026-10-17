@@ -16,6 +16,7 @@ import {
   stageFrameCount,
   stageReferenceFrames,
   stagePlayblastIsStale,
+  stageSourceFingerprintInput,
   stagingBeats,
   stagingFov,
   stagingMotionWord,
@@ -312,6 +313,28 @@ describe("the Stage's arithmetic", () => {
     const rigged = { ...staging, rig: "handheld" as const, seed: 42, rigIntensity: 1, playblast: { ...pin, rig: "handheld" as const, seed: 42, rigIntensity: 1 } };
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, rigged, shown), false);
     assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, { ...rigged, seed: 43 }, shown), true);
+  });
+
+  it("makes a Lit playblast of a shot's own marks stale when the scene's look moves (issue 1825)", () => {
+    const pin = {
+      evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
+      artifactId: "ar_01J8G0000000000000000000A1",
+      version: 1,
+      look: "lit" as const,
+      blocking: { owner: "shot" as const, sceneVersion: 4 },
+    };
+    const local = { version: 1, cast: [] as [], sets: [] as [], keys: [], playblast: pin };
+    const shown = { durationSec: 4, aspect: "16:9", lens: undefined };
+    const lit = (version: number) => ({ blocking: { version, cast: [], sets: [], lights: [{ name: "lamp", kind: "point" as const, colour: "#ffb867", strength: 7, x: 0, y: 1.5, z: 0 }] } });
+    assert.equal(stagePlayblastIsStale(lit(4), local, shown), false);
+    assert.equal(stagePlayblastIsStale(lit(5), local, shown), true, "a light edit moves the scene's version, and the Lit render shows that light");
+    const greybox = { ...local, playblast: { ...pin, look: undefined, blocking: { owner: "shot" as const } } };
+    assert.equal(stagePlayblastIsStale(lit(5), greybox, shown), false, "a Greybox render of the shot's own marks shows nothing of the scene");
+    // The fingerprint the Bench and Preview check carries the same look inputs, for a dressed render only.
+    const scene = (version: number, strength: number) => ({ id: "sc_01", blocking: { ...lit(version).blocking, lights: [{ ...lit(version).blocking.lights[0]!, strength }] } }) as never;
+    const shot = { id: "sh_01", staging: local } as never;
+    assert.notEqual(stageSourceFingerprintInput(scene(4, 7), shot, "16:9"), stageSourceFingerprintInput(scene(4, 9), shot, "16:9"));
+    assert.equal(stageSourceFingerprintInput(scene(4, 7), shot, "16:9", "greybox"), stageSourceFingerprintInput(scene(4, 9), shot, "16:9", "greybox"));
   });
 
   it("keeps Stage authorship on the edit-stage wire command", () => {

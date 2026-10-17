@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { scenePlatePath, stagePlateHorizon, type ScenePlate, type Shot, type WorldBundle } from "@arke-studio/contracts";
+import { productionShelf } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
 import { Eyebrow, Link, Row, Stepper, Value } from "./stage-inspector.js";
 
@@ -19,12 +20,15 @@ export interface PlateCandidate {
   location: string | null;
 }
 
-/** Image artifacts a plate can be, location pictures first, newest last-filed first within each. */
-export function plateCandidates(world: WorldBundle): PlateCandidate[] {
-  const superseded = new Set(world.artifacts.flatMap((artifact) => (artifact.supersedes ? [artifact.supersedes] : [])));
+/**
+ * Image artifacts a plate can be, location pictures first, newest last-filed first within each.
+ * Only this production's shelf: another production's scoped pictures are not its to use, and a
+ * retired or superseded one is not offered (the coordinator refuses the first either way).
+ */
+export function plateCandidates(world: WorldBundle, productionId: string): PlateCandidate[] {
   const locations = new Map(world.sheets.filter((sheet) => sheet.type === "location").map((sheet) => [sheet.id, sheet.name]));
-  return world.artifacts
-    .filter((artifact) => artifact.kind === "image" && !superseded.has(artifact.id))
+  return productionShelf(world.artifacts, productionId)
+    .filter((artifact) => artifact.kind === "image")
     .map((artifact) => ({ id: artifact.id, hash: artifact.hash, file: artifact.file, location: artifact.links.map((link) => locations.get(link)).find((name) => name !== undefined) ?? null }))
     .reverse()
     .sort((a, b) => Number(b.location !== null) - Number(a.location !== null))
@@ -37,9 +41,10 @@ export function platePicture(plate: ScenePlate, world: WorldBundle): string | nu
 }
 
 /** The blockout line's first control: the plate's thumbnail and name, or a dashed Add plate. */
-export function PlateChip({ plate, world, disabled, onPick }: {
+export function PlateChip({ plate, world, productionId, disabled, onPick }: {
   plate: ScenePlate | undefined;
   world: WorldBundle;
+  productionId: string;
   disabled: boolean;
   onPick: (candidate: PlateCandidate) => void;
 }) {
@@ -63,15 +68,15 @@ export function PlateChip({ plate, world, disabled, onPick }: {
       {open ? (
         <>
           <div className="fy-swstage__platescrim" onClick={() => setOpen(false)} />
-          <PlatePicker world={world} onPick={(candidate) => { setOpen(false); onPick(candidate); }} />
+          <PlatePicker world={world} productionId={productionId} onPick={(candidate) => { setOpen(false); onPick(candidate); }} />
         </>
       ) : null}
     </span>
   );
 }
 
-function PlatePicker({ world, onPick }: { world: WorldBundle; onPick: (candidate: PlateCandidate) => void }) {
-  const candidates = plateCandidates(world);
+function PlatePicker({ world, productionId, onPick }: { world: WorldBundle; productionId: string; onPick: (candidate: PlateCandidate) => void }) {
+  const candidates = plateCandidates(world, productionId);
   return (
     <div className="fy-swstage__platepicker" role="listbox" aria-label="Choose a location plate" data-testid="stage-plate-picker">
       {candidates.length === 0 ? <p className="fy-swstage__note">No pictures in this world yet.</p> : candidates.map((candidate) => (
@@ -85,9 +90,10 @@ function PlatePicker({ world, onPick }: { world: WorldBundle; onPick: (candidate
 }
 
 /** The plate's form (229c): picture and Replace, the shot it matches, its lens and horizon, whether it rides, Match camera. */
-export function PlateForm({ plate, world, shots, currentShotId, disabled, light, onChange, onReplace, onMatch, onRemove }: {
+export function PlateForm({ plate, world, productionId, shots, currentShotId, disabled, light, onChange, onReplace, onMatch, onRemove }: {
   plate: ScenePlate;
   world: WorldBundle;
+  productionId: string;
   shots: readonly Shot[];
   currentShotId: string;
   disabled: boolean;
@@ -128,7 +134,7 @@ export function PlateForm({ plate, world, shots, currentShotId, disabled, light,
             {replacing ? (
               <>
                 <div className="fy-swstage__platescrim" onClick={() => setReplacing(false)} />
-                <PlatePicker world={world} onPick={(candidate) => { setReplacing(false); onReplace(candidate); }} />
+                <PlatePicker world={world} productionId={productionId} onPick={(candidate) => { setReplacing(false); onReplace(candidate); }} />
               </>
             ) : null}
           </span>

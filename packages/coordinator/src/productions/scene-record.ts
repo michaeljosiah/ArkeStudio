@@ -1,4 +1,4 @@
-import { orderedShots, VISUAL_NOVEL_KIND } from "@arke-studio/contracts";
+import { orderedShots, VISUAL_NOVEL_KIND, type StageConstructionDraft } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -417,6 +417,25 @@ export const STAGE_WORDS_SCHEMA_VERSION = 87;
 export function carriesStageWords(raw: string): boolean {
   try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.keys.some(key => key.frame !== undefined)); }
   catch { return false; }
+}
+
+/**
+ * The schema a retained Stage review's draft needs (issue 1820). The draft is held in
+ * `.staging/stage-reviews` before Keep, in the same strict shapes a scene carries, so it is fenced
+ * as the scene that keeps it would be, before it is durable: otherwise an older build opens the
+ * world and then fails to parse the pending review instead of refusing the world at open.
+ */
+export function stageDraftSchemaVersion(draft: StageConstructionDraft): number | null {
+  const needed = Math.max(
+    draft.plateCamera !== undefined ? STAGE_PLATE_SCHEMA_VERSION : 0,
+    draft.sets.some(set => set.kit !== undefined) ? STAGE_KIT_SCHEMA_VERSION : 0,
+    draft.sets.some(set => set.material !== undefined || set.surfaces !== undefined || set.colour !== undefined)
+      || draft.lights !== undefined || draft.atmosphere !== undefined ? STAGE_LOOK_SCHEMA_VERSION : 0,
+    draft.staging.keys.some(key => key.frame !== undefined) ? STAGE_WORDS_SCHEMA_VERSION : 0,
+    draft.staging.performances?.some(track => track.keys.some(key =>
+      key.hand !== undefined || key.look !== undefined || (key.pose !== undefined && key.pose !== "stand" && key.pose !== "sit" && key.pose !== "lie"))) ? STAGE_POSE_SCHEMA_VERSION : 0,
+  );
+  return needed === 0 ? null : needed;
 }
 
 /** Materials, lights, atmosphere or a look-tagged playblast need schema 86 (issue 1825). */

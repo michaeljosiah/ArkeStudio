@@ -141,7 +141,7 @@ export async function filePlayblast(
       ...shot.staging,
       playblast: {
         evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
-        sourceFingerprint: stageSourceFingerprint(record, shot, input.aspect),
+        sourceFingerprint: stageSourceFingerprint(record, shot, input.aspect, input.look ?? "greybox"),
         artifactId: artifact.id,
         openingFrameArtifactId: openingFrameArtifact.id,
         referenceFrames: expected.map((frame, index) => ({ ...frame, artifactId: references[index]!.id })),
@@ -153,7 +153,13 @@ export async function filePlayblast(
         ...(shot.staging.seed === undefined ? {} : { seed: shot.staging.seed }),
         ...(shot.staging.rigIntensity === undefined ? {} : { rigIntensity: shot.staging.rigIntensity }),
         ...(input.look === undefined || input.look === "greybox" ? {} : { look: input.look }),
-        blocking: effectiveStageBlocking(record, shot.staging).identity,
+        blocking: (() => {
+          const identity = effectiveStageBlocking(record, shot.staging).identity;
+          // A dressed playblast of a shot's own marks records the scene look it was drawn under (issue 1825).
+          return identity.owner === "shot" && (input.look === "lit" || input.look === "plate")
+            ? { ...identity, sceneVersion: record.blocking?.version ?? null }
+            : identity;
+        })(),
       },
     };
     const next = editShot(record, { shotId: input.shotId, change: { staging } });
@@ -171,9 +177,9 @@ export async function filePlayblast(
   });
 }
 
-export function stageSourceFingerprint(scene: SceneRecord, shot: Shot, aspect: string): string {
+export function stageSourceFingerprint(scene: SceneRecord, shot: Shot, aspect: string, look?: "greybox" | "lit" | "plate"): string {
   if (!shot.staging) return "";
-  return createHash("sha256").update(stageSourceFingerprintInput(scene, shot, aspect)).digest("hex");
+  return createHash("sha256").update(stageSourceFingerprintInput(scene, shot, aspect, look ?? shot.staging.playblast?.look)).digest("hex");
 }
 
 /** Recheck Stage references at admission and when the queue reads their bytes. */
