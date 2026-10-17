@@ -1543,6 +1543,9 @@ export class StageViewport {
    * PNG capture stays outside the fixed-frame encoder loop (SPEC-036 R-35; issue 1043).
    */
   async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob; referenceFrames: Array<StageReferenceFrame & { png: Blob }> }> {
+    // Every frame is drawn in the look the pin will name: a Plate export waits for its picture.
+    if (!(await this.lookRig.whenPlateReady())) throw new Error("export stopped — the plate picture did not load");
+    if (this.disposed) throw new Error("export stopped — the shot changed");
     const width = 1280;
     const height = Math.max(2, Math.round((width / this.data.aspect) / 2) * 2);
     const frameCount = stageFrameCount(this.data.durationSec);

@@ -8,6 +8,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { compactSettledStageReviews, discardStageReview, keepStageReview, listStageReviews, readStageReview, retainStageReview, stageReviewKept } from "../../src/productions/stage-review.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { STAGE_POSE_SCHEMA_VERSION, STAGE_WORDS_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 
 function draft(store: WorldStore): StageReview {
   const scene = store.getBundle().productions.find(production => production.meta.id === "saltlight")!.scenes.find(scene => scene.id === "sc_04")!;
@@ -45,6 +46,19 @@ it("reopening preserves a draft; the ordinary Keep commit is its crash-safe, ide
   assert.equal(await readFile(join(dir, "changes.jsonl"), "utf8"), log, "retry cannot apply or commit twice");
   await discardStageReview(store, review.id);
   assert.equal((await readStageReview(store, review.id)).status, "pending", "a later discard cannot replace the kept receipt");
+});
+
+it("fences a retained draft at the schema its shapes need, before it is durable (issue 1820)", async t => {
+  const dir = await makeTempWorld(); const store = await WorldStore.open(dir); t.after(() => store.close());
+  const review = draft(store);
+  const worded = StageReviewSchema.parse({ ...review, draft: { ...review.draft, staging: { ...review.draft.staging, keys: [
+    { ...review.draft.staging.keys[0]!, frame: { subject: "maren-kest", size: "wide", angle: "eye", side: "front" } }, review.draft.staging.keys[1]! ] } } });
+  await retainStageReview(store, worded);
+  assert.equal(store.getBundle().meta.schemaVersion, STAGE_WORDS_SCHEMA_VERSION, "an older build refuses the world rather than failing on the pending review");
+  const posed = StageReviewSchema.parse({ ...review, id: randomUUID(), draft: { ...review.draft, staging: { ...review.draft.staging, performances: [
+    { sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0, pose: "lean-on" }, { t: 4, x: 1, z: 0 }] }] } } });
+  await retainStageReview(store, posed);
+  assert.equal(store.getBundle().meta.schemaVersion, STAGE_POSE_SCHEMA_VERSION, "a named pose in the draft is fenced the same way (issue 1821)");
 });
 
 it("discard and stale Keep use the same gate as scene edits, and retention never resurrects a decided draft", async t => {

@@ -2,7 +2,7 @@ import { benchLineLanguage, benchVoiceDirection, directionSaysAnything, quoteSpe
 import { createHash } from "node:crypto";
 import { compileLine, type CompiledLine } from "../voice/direction.js";
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
-import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
+import { planCastCharacterAudio, planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, stageBriefFollows, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { castNameFor, referenceRouteModel, referenceSheetId, referenceRouteRefusal, referenceSubjectLines, whoFor, REFERENCE_ROUTE } from "@arke-studio/contracts";
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -935,8 +935,9 @@ export function planBenchDispatch(
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
   if (referenceProblem) return { ok: false, reason: referenceProblem };
   // A staged clip's brief already says how to follow its blockout (issue 1817); a second, generic
-  // "motion reference" line would contradict a Camera-only follow.
-  const motionBindings = model.limits.referenceSyntax === "seedance" && !(params.kind === "video" && params.follow !== undefined)
+  // "motion reference" line would contradict a Camera-only follow. Only the line itself counts: a
+  // brief whose author took it out still needs the generic one, whatever Follow the take records.
+  const motionBindings = model.limits.referenceSyntax === "seedance" && !(params.kind === "video" && params.follow !== undefined && stageBriefFollows(body))
     ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
   // On the reference route Arke writes one subject line per picture and translates the brief's
   // citations; nothing else in the brief is rewritten (design turn 179).

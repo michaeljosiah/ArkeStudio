@@ -241,6 +241,28 @@ describe("scene detail owns the workspace", () => {
     assert.equal(write.command.staging?.cast?.[0]?.parent,"vehicle");
   });
 
+  it("keeps a build's lights and atmosphere on a scene that had no blocking, without its marks (issue 1825)",async()=>{
+    const state=structuredClone(FIXTURE_STATE) as ClientState;
+    const scene=state.world!.productions.find(p=>p.meta.id==="saltlight")!.scenes.find(s=>s.id==="sc_04")!;
+    delete (scene as {blocking?:unknown}).blocking;
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mountState(state);
+    await openStage(mounted);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}]};
+    const lights=[{name:"lamp",kind:"point" as const,colour:"#ffb867",strength:7,x:0,y:1.5,z:0}];
+    const atmosphere={time:"night" as const};
+    await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,atmosphere,assumptions:[],assessment:"Inspected",inspected:[]} as never});
+    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
+    assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
+    assert.deepEqual(write.command.blocking?.lights,lights,"the build's lights are kept, not dropped");
+    assert.deepEqual(write.command.blocking?.atmosphere,atmosphere);
+    assert.deepEqual([write.command.blocking?.cast,write.command.blocking?.sets],[[],[]],"the marks stay this shot's own");
+    assert.equal(write.command.staging?.cast?.[0]?.sheetId,"maren-kest");
+  });
+
   for (const entryContext of [
     { kind: "world" },
     { kind: "production", productionId: "saltlight" },
