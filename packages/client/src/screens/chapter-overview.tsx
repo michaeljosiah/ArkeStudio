@@ -121,7 +121,9 @@ export function ChapterOverview({
   versions: ReactNode;
   more: ReactNode;
 }) {
-  const shown = pictures.slice(0, 5);
+  // One row of five (R-40): with more than five, the fifth place is the count of the rest, so it
+  // never wraps to a row of its own (issue 1827).
+  const shown = pictures.length > 5 ? pictures.slice(0, 4) : pictures;
   return (
     <div className="fy-chov" data-testid="chapter-overview">
       <section className={cx("fy-chov__hero", picture === null && "fy-chov__hero--bare")}>

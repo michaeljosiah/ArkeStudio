@@ -988,6 +988,7 @@ export function ProductionConversationBody({
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId, connection, languageModelId, chatVariant]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
+  const setLog = useReadsFromEnd();
   const readReplies = useReadReplies(loaded);
   const turnAttachments = (loaded?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
   const attachRefusals = useWorldChatRefusals(conversationId ?? undefined);
@@ -1449,7 +1450,7 @@ export function ProductionConversationBody({
             </IconButton>
           )}
         </div>
-        <div className="fy-arke__log" aria-live="polite">
+        <div className="fy-arke__log" aria-live="polite" ref={setLog}>
           {transcript}
         </div>
         {strip && <div className="fy-arke__strip"><StudioSidebar /></div>}
@@ -1530,7 +1531,7 @@ export function ProductionConversationBody({
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>
         <span>in context: {contextSummary}</span><ChevronDown size={16} />
       </button>}
-      <div className="fy-story__log">{transcript}</div>
+      <div className="fy-story__log" ref={setLog}>{transcript}</div>
       <HeldBar className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
         {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
@@ -1567,6 +1568,36 @@ export function ProductionConversationBody({
  * The staged rail beside a conversation is therefore for proposals something *else* staged — a
  * dashed episode tile, a hand edit — never for what this button produces.
  */
+/**
+ * A thread reads from its end (issue 1827). Nothing scrolled it, so a long thread opened at its
+ * first line, 41,000 px above the answer a page had just opened Chat to show. It stays at its end
+ * as answers come, unless the author has scrolled back to read, and a thread shown again after
+ * being out of sight is put back at its end.
+ */
+function useReadsFromEnd(): (element: HTMLDivElement | null) => void {
+  const [log, setLog] = useState<HTMLDivElement | null>(null);
+  const atEnd = useRef(true);
+  useLayoutEffect(() => {
+    if (log !== null && atEnd.current) log.scrollTop = log.scrollHeight;
+  });
+  useEffect(() => {
+    if (log === null) return;
+    const onScroll = () => {
+      atEnd.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+    };
+    log.addEventListener("scroll", onScroll, { passive: true });
+    const shown = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
+      if (atEnd.current) log.scrollTop = log.scrollHeight;
+    });
+    shown?.observe(log);
+    return () => {
+      log.removeEventListener("scroll", onScroll);
+      shown?.disconnect();
+    };
+  }, [log]);
+  return setLog;
+}
+
 function WrapUp({
   worldId,
   conversationId,
