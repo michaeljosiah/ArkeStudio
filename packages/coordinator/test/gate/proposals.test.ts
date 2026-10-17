@@ -121,6 +121,26 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     const changes = await readChanges(join(dir, "changes.jsonl"));
     assert.ok(changes.some((c) => c["discarded"] === true && String(c["entity"]).includes(first.id)));
 
+    // Discarded again, as startup settles a denied card each time a world opens (issue 1839): it
+    // is already gone, so it writes no second line and costs no rescan.
+    const rescans = { n: 0 };
+    const live = store as unknown as { rescan: () => Promise<unknown> };
+    const rescan = live.rescan.bind(store);
+    live.rescan = async () => { rescans.n++; return rescan(); };
+    try {
+      await gate.discard(first.id);
+      await gate.discard(first.id);
+      const again = (await readChanges(join(dir, "changes.jsonl"))).filter((c) => c["discarded"] === true && String(c["entity"]).includes(first.id));
+      assert.equal(again.length, 1, "one log line remains (D9)");
+      assert.equal(rescans.n, 0, "nothing to discard, so nothing to rescan");
+    } catch (error) {
+      // A failure here would leave the store's watcher holding the runner open.
+      await store.close();
+      throw error;
+    } finally {
+      live.rescan = rescan;
+    }
+
     const second = await gate.stage({
       kind: "new-canon",
       summary: "reserve again",

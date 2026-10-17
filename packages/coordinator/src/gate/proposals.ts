@@ -1034,6 +1034,14 @@ export class ProposalManager {
 
   /** Discard: the directory goes, reservations stay burned, one log line remains (R-4, D9). */
   async discard(proposalId: string, precondition?: WorldStatePrecondition): Promise<void> {
+    /*
+     * A proposal already gone has nothing to discard (issue 1839). Startup settles every denied
+     * World Chat card by discarding its proposal again, and each went through the gate: a full
+     * world rescan and another `discarded` line. Embers of the Fallen ran 7 of them on every
+     * open, 11 scans in all, and its log held 536 lines for 15 proposals. "One log line remains"
+     * is the first discard's; the reservations it burned came from the manifest, which is gone.
+     */
+    if (await stat(toExtendedLength(this.proposalDir(proposalId))).then(() => false, () => true)) return;
     await this.store.gateOp(async () => {
       const proposal = await this.readManifest(proposalId).catch(() => null);
       await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
