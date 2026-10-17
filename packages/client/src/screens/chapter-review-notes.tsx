@@ -61,7 +61,7 @@ export function ReviewNotes({ host, placed, lost, current, disabled, onCurrent, 
     <aside className="fy-notes" aria-label="Review notes" data-testid="review-notes">
       <header className="fy-notes__head">
         <strong>Review</strong>
-        <small>{placed.length} open</small>
+        <small>{placed.length + lost.length} open</small>
         <span className="fy-notes__push" />
         <button type="button" className="fy-ch__wbtn" aria-label="Previous note" disabled={placed.length < 2} onClick={() => step(-1)}><ChevronLeft size={14} /></button>
         <button type="button" className="fy-ch__wbtn" aria-label="Next note" disabled={placed.length < 2} onClick={() => step(1)}><ChevronRight size={14} /></button>

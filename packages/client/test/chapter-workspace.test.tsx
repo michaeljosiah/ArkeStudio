@@ -3112,7 +3112,7 @@ describe("review notes in the margin (design turn 227r, SPEC-056 R-29 – R-31)"
     ));
     open.push({ container, root, sent: [], navigate: () => {} });
     const notes = container.querySelector('[data-testid="review-notes"]')!;
-    assert.match(notes.textContent ?? "", /^Review2 open/);
+    assert.match(notes.textContent ?? "", /^Review3 open/, "the lost note is open too (codex on PR 1816)");
     assert.match(notes.textContent ?? "", /Quote no longer in the chapterAn old worry\./);
     const cards = [...notes.querySelectorAll(".fy-note")];
     assert.match(cards[0]!.textContent ?? "", /^1Continuity · ContradictionWhich bells, and whose count\?FixIntentionalDismiss$/);
