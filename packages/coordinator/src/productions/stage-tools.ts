@@ -116,7 +116,7 @@ type Thing = { kind: "figure"; index: number } | { kind: "set"; index: number } 
 const round2 = (value: number) => Math.round(value * 100) / 100;
 const text = (value: unknown): StageToolContent => ({ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) });
 /** A patch whose null fields clear the item's: the shape every update takes. */
-function patched<T extends Record<string, unknown>>(item: T, patch: Record<string, unknown>): Record<string, unknown> {
+function patched(item: object, patch: Record<string, unknown>): Record<string, unknown> {
   const next: Record<string, unknown> = { ...item };
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) delete next[key];
