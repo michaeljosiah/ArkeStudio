@@ -293,17 +293,42 @@ export function FindBar({ query, count, current, opened, onQuery, onStep, onClos
  * page while a revision or a draft waits where it will land. It says what was asked, how much it
  * changes, and the two ways out: refuse it, or keep it (in part, when edits are refused one by one).
  */
-export function PageHeldBar({ name, detail, refuse, keep }: {
+export function PageHeldBar({ name, detail, versions, refuse, keep }: {
   name: string;
   detail: string;
+  /**
+   * Versions of a passage revision (R-25, D-6): which is shown of how many, the way between them,
+   * and another asked for at the last, up to three. `note` is a version that failed, in one clause.
+   */
+  versions?: { at: number; count: number; max: number; asking: boolean; note?: string; onPrevious: () => void; onNext: () => void };
   refuse: { label: string; onPress: () => void; disabled?: boolean };
   keep: { label: string; onPress: () => void; blocked?: string };
 }) {
+  const last = versions !== undefined && versions.at === versions.count - 1;
   return (
     <div className="fy-pageheld" role="region" aria-label="Arke's change" data-testid="page-held-bar">
       <Sparkle size={14} />
       <strong>{name}</strong>
       <span className="fy-pageheld__detail">{detail}</span>
+      {versions !== undefined && (
+        <span className="fy-pageheld__versions" data-testid="page-held-versions">
+          <button type="button" className="fy-ch__wbtn" aria-label="Previous version" disabled={versions.at === 0} onClick={versions.onPrevious}>
+            <ChevronLeft size={14} />
+          </button>
+          <span className="fy-mono">{versions.asking ? "asking…" : `${versions.at + 1} of ${versions.count}`}</span>
+          <button
+            type="button"
+            className="fy-ch__wbtn"
+            aria-label={last ? "Another version" : "Next version"}
+            title={last ? (versions.count >= versions.max ? `At most ${versions.max} versions` : "Another version") : undefined}
+            disabled={versions.asking || (last && versions.count >= versions.max)}
+            onClick={versions.onNext}
+          >
+            <ChevronRight size={14} />
+          </button>
+          {versions.note !== undefined && <span className="fy-pageheld__note">{versions.note}</span>}
+        </span>
+      )}
       <span className="fy-pageheld__push" />
       <button type="button" className="ui-btn ui-btn--ghost ui-btn--default" disabled={refuse.disabled} onClick={refuse.onPress}>{refuse.label}</button>
       <button type="button" className="ui-btn ui-btn--primary ui-btn--default" disabled={keep.blocked !== undefined} title={keep.blocked} onClick={keep.onPress}>
