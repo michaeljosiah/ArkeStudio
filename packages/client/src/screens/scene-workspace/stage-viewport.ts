@@ -691,7 +691,10 @@ export class StageViewport {
       }
       walker.scale.setScalar((member.height ?? 1.8) / 1.8);
       walker.position.copy(from);
-      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null } satisfies PickTag & Record<string, unknown>;
+      // The jointed figure rides on the walker's data: replacing that data without it would leave
+      // refresh() posing capsules that are not there and hiding the figure that is.
+      const jointedFigure = walker.userData["mannequin"] as Mannequin | undefined;
+      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null, ...(jointedFigure ? { mannequin: jointedFigure } : {}) } satisfies PickTag & Record<string, unknown>;
       this.castGroup.add(walker);
       this.walkers.push(walker);
       if (this.isSelected({ kind: "cast", sheetId: member.sheetId })) {
