@@ -40,21 +40,30 @@ export function migrateAudioArrangement(script: AudioScript, timing: ChapterTimi
     if (!passage) throw new AudioArrangementRefusal("The chapter's timing no longer matches its script");
     return passage.id;
   };
-  let previousEnd = 0;
+  /*
+   * A clip cut to its file's end (endOf) is up to a millisecond short of its timing. Positions keep
+   * the timing's: a segment follows the ones before it by their timed lengths, and the next
+   * passage, placed from where this one actually ends, carries its shortfall (codex on PR 1832),
+   * or each rounded take would move the rest of the chapter earlier.
+   */
+  let previousEnd = 0, carry = 0;
   for (const bar of timing.bars.filter(bar => bar.kind === "block").sort((a, b) => a.index - b.index)) {
     if (!bar.made) continue;
     const lane = track(`voice:${bar.lane}`, bar.lane === "narration" ? "Narrator" : bar.lane);
-    let offset = 0;
+    let offset = 0, timedEnd = 0, actualEnd = 0;
     for (const [index, segment] of bar.segments.entries()) {
       const source = sourceFor(segment.file);
       const clip = newAudioClip(`voice:${bar.key}:${index}`, lane.id, source, source.samples);
       clip.label = source.label; clip.role = "speech"; clip.passageId = passageAt(bar.index);
       clip.sourceIn = audioSamples(segment.from); clip.sourceOut = endOf(segment.to, source);
-      clip.placement = bar.under === null ? { kind: "sequence", offset: audioSamples(bar.at - previousEnd) + offset }
+      clip.placement = bar.under === null ? { kind: "sequence", offset: audioSamples(bar.at - previousEnd) + carry + offset }
         : { kind: "passage", anchor: { passageId: passages.find(passage => passage.key === bar.under!.host)?.id ?? `missing:${bar.under.host}`, edge: "start", offset: audioSamples(bar.under.offset) + offset } };
-      state.clips.push(clip); offset += clip.sourceOut - clip.sourceIn;
+      state.clips.push(clip);
+      const timed = audioSamples(segment.to) - clip.sourceIn;
+      timedEnd = Math.max(timedEnd, offset + timed); actualEnd = Math.max(actualEnd, offset + clip.sourceOut - clip.sourceIn);
+      offset += timed;
     }
-    if (bar.under === null) previousEnd = bar.at + bar.seconds;
+    if (bar.under === null) { previousEnd = bar.at + bar.seconds; carry = timedEnd - actualEnd; }
   }
   for (const bar of timing.bars.filter(bar => bar.kind === "reaction" && bar.made)) {
     const lane = track(`voice:${bar.lane}`, bar.lane === "narration" ? "Narrator" : bar.lane);
@@ -63,7 +72,7 @@ export function migrateAudioArrangement(script: AudioScript, timing: ChapterTimi
       const source = sourceFor(segment.file), clip = newAudioClip(`reaction:${bar.key}:${index}`, lane.id, source, source.samples);
       clip.role = "speech"; clip.sourceIn = audioSamples(segment.from); clip.sourceOut = endOf(segment.to, source);
       clip.placement = { kind: "passage", anchor: { passageId: passageAt(bar.index), edge: "start", offset: audioSamples(bar.under?.offset ?? 0) + offset } };
-      state.clips.push(clip); offset += clip.sourceOut - clip.sourceIn;
+      state.clips.push(clip); offset += audioSamples(segment.to) - clip.sourceIn;
     }
   }
   for (const bed of timing.beds) {
