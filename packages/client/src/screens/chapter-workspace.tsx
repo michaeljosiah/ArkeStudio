@@ -1425,6 +1425,9 @@ export function ChapterWorkspace({
 
   // The words of the text on screen once it is here; the summary's count only while it is not.
   const words = record === null ? (chapter.words ?? 0) : countWords(text);
+  // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
+  // status stays "planned" until the author sets one, which read as a chapter not yet written.
+  const shownStatus = chapter.status === "planned" && words > 0 ? "drafted" : chapter.status;
   const activeChapters = production.chapters.filter((c) => !c.retired);
   const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength, activeChapters.length);
@@ -3277,7 +3280,7 @@ export function ChapterWorkspace({
       ...(placedPictures.count > 0 ? { meta: `${placedPictures.count} picture${placedPictures.count === 1 ? "" : "s"}` } : {}),
       ...(voicesRecord !== null ? { action: audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : <Button variant="ghost" onClick={() => chooseView("audiobook")}>Open Audiobook</Button> } : {}) },
     // Mixed once the chapter has a timing: playback then uses its mix (SPEC-047 R-179).
-    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : audiobook.counts.made > 0 ? "Audio Studio" : "Not started",
+    { key: "mixed", label: "Mixed", state: audiobook.timed ? "done" : "idle", value: audiobook.timed ? "Mixed" : "Not started",
       ...(audiobook.counts.made > 0 ? { action: <Button variant="ghost" onClick={() => chooseView("timing")}>Open Audio Studio</Button> } : {}) },
   ];
   const overview = view !== "chapter" ? null : (
@@ -3290,7 +3293,7 @@ export function ChapterWorkspace({
         {povSheet !== undefined && <span className="fy-chov__pov">{portraitOf(povSheet.id) !== null && <img src={portraitOf(povSheet.id)!} alt="" />}{povSheet.name}</span>}
         {chapter.when !== undefined && chapter.when !== "" && <span>{chapter.when}</span>}
         <span>{words.toLocaleString()} words</span>
-        <span>{chapter.status}</span>
+        <span>{shownStatus}</span>
       </>}
       actions={<>
         {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
@@ -3446,7 +3449,7 @@ export function ChapterWorkspace({
                 )}
               </span>
             )}
-            <span>{chapter.status}</span>
+            <span>{shownStatus}</span>
             <span>{words.toLocaleString()} words{compact && ` · ${waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}`}</span>
             {!compact && <span>{waiting !== null ? `${waiting} waiting` : saveRefusal !== null ? "not saved" : saving ? "saving" : "saved"}</span>}
             {stale && (
