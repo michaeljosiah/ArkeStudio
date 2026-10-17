@@ -52,7 +52,9 @@ export function stageBoardFingerprintInput(scene: SceneRecord, members: readonly
   const shots = orderedShots(scene);
   const inputs = members.map((id) => {
     const shot = shots.find((candidate) => candidate.id === id);
-    return shot === undefined ? `missing:${id}` : stageSourceFingerprintInput(scene, shot, aspect);
+    // Each member as staged, whatever look its own playblast was last drawn in: the animatic's look
+    // inputs are the scene's blocking, which its pin follows by version (issue 1825).
+    return shot === undefined ? `missing:${id}` : stageSourceFingerprintInput(scene, shot, aspect, "greybox");
   });
   return JSON.stringify([STAGE_CAMERA_EVALUATOR_VERSION, aspect, inputs]);
 }
