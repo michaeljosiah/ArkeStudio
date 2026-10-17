@@ -590,6 +590,18 @@ async function createWindow(): Promise<void> {
   });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
   const permitted = (ask: Parameters<typeof microphoneAllowed>[0]) => microphoneAllowed(ask) || fullscreenAllowed(ask);
+  /*
+   * The page's full screen (Focus) swallows Escape before the page sees it, and Electron does not
+   * leave it either, so Focus would hold the screen with no key out. Escape there leaves the
+   * document's full screen; the page hears that change and leaves Focus (SPEC-056 R-12).
+   */
+  let pageFullScreen = false;
+  window.on("enter-html-full-screen", () => { pageFullScreen = true; });
+  window.on("leave-html-full-screen", () => { pageFullScreen = false; });
+  window.webContents.on("before-input-event", (_event, input) => {
+    if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
+    void window?.webContents.executeJavaScript("document.fullscreenElement && document.exitFullscreen().catch(() => {})").catch(() => {});
+  });
   window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
