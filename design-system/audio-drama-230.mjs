@@ -15,7 +15,7 @@ const STYLE = '<link rel="stylesheet" href="audio-drama-230.css">';
 // Turn 225's chat styles, derived from the master by turn 227's generator; the panel is the approved one.
 const CHAT_STYLE = '<link rel="stylesheet" href="chapter-page-227.chat.css">';
 const HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${CHAT_STYLE}${STYLE}`;
-const REV = 'Revision 1 · proposed';
+const REV = 'Revision 2 · proposed';
 
 // ----- Review page: every frame, in order, light and dark -----
 write('audio-drama-230.review.html', `<!doctype html><html lang="en"><head>${HEAD}<title>Audio drama · Turn 230</title>
@@ -79,7 +79,7 @@ ${states.map(f => `<template data-state="${f.state}" data-w="${f.w}" data-h="${f
 if (process.argv.includes('--preview')) { console.log(`Wrote review (${FRAMES.length} frames) and prototype (${states.length} states).`); process.exit(0); }
 
 export const rules = JSON.parse(read('audio-drama-230.rules.json'));
-const turn = `<section class="dv-turn" id="t230"><div class="dv-thd"><a class="dv-tid" href="#t230">230</a><span class="dv-tname">Audio drama · adapting a novel for the ear</span></div><p class="dv-next">17 October 2026 · ${REV} · ${FRAMES.length} HTML drawings and a prototype. An independent proposal beside turn 228, not a refinement of it. <a href="audio-drama-230.review.html">Review page</a> · <a href="audio-drama-230.prototype.html">Prototype</a> · <a href="audio-drama-230.notes.md">Notes</a></p><div class="dv-opts" style="margin-top:22px">${FRAMES.map(f => `<div class="dv-opt" id="${f.id}"><div class="dv-olabel"><a class="dv-oid" href="#${f.id}">${f.id}</a>${esc(f.title)}</div><div class="dv-card" style="width:${f.w}px;max-width:none">${f.markup}</div></div>`).join('\n')}</div>${rules.map(([title, body], i) => `<p class="dv-rule"><b>${i + 1} · ${esc(title)}.</b> ${esc(body)}</p>`).join('\n')}<p class="dv-next">Try next: the prototype from the door to an edition, then the phone path.</p></section>\n`;
+const turn = `<section class="dv-turn" id="t230"><div class="dv-thd"><a class="dv-tid" href="#t230">230</a><span class="dv-tname">Audio drama · adapting a novel for the ear</span></div><p class="dv-next">18 October 2026 · ${REV} · ${FRAMES.length} HTML drawings and a prototype. An independent proposal beside turn 228, not a refinement of it. <a href="audio-drama-230.review.html">Review page</a> · <a href="audio-drama-230.prototype.html">Prototype</a> · <a href="audio-drama-230.notes.md">Notes</a></p><div class="dv-opts" style="margin-top:22px">${FRAMES.map(f => `<div class="dv-opt" id="${f.id}"><div class="dv-olabel"><a class="dv-oid" href="#${f.id}">${f.id}</a>${esc(f.title)}</div><div class="dv-card" style="width:${f.w}px;max-width:none">${f.markup}</div></div>`).join('\n')}</div>${rules.map(([title, body], i) => `<p class="dv-rule"><b>${i + 1} · ${esc(title)}.</b> ${esc(body)}</p>`).join('\n')}<p class="dv-next">Try next: the prototype from the door to an edition, then the phone path.</p></section>\n`;
 
 let master = read('Arke Studio.dc.html');
 const start = master.indexOf('<section class="dv-turn" id="t230">');
@@ -97,7 +97,7 @@ if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + 
 write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN AUDIO DRAMA 230[\s\S]*?  \/\/ END AUDIO DRAMA 230(?:\r?\n)*/g, '\n');
-const entries = FRAMES.map(f => `  { group: "Audio drama · turn 230 · revision 1", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },`);
+const entries = FRAMES.map(f => `  { group: "Audio drama · turn 230 · revision 2", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Audio drama", status: "drawn", checked: "2026-10-18", controls: [], notes: ["Proposed 17 October 2026, revised 18 October; not approved for implementation."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN AUDIO DRAMA 230\n' + entries.join('\n') + '\n  // END AUDIO DRAMA 230\n');
 write('build-review.mjs', build);
 console.log(`Placed turn 230 (${FRAMES.length} frames, ${rules.length} rules) and registered it with build-review.`);

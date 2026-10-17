@@ -1,6 +1,6 @@
 # Audio drama — adapting a novel for the ear · design turn 230
 
-Status: **Proposed · revision 1 · 17 October 2026.** For the owner's review, not approved for
+Status: **Proposed · revision 2 · 18 October 2026.** For the owner's review, not approved for
 implementation. Nothing here adds a production type to the app, generates audio or changes a novel.
 
 Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](audio-drama-230.review.html) ·
@@ -8,6 +8,13 @@ Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](aud
 [Research](../docs/research/audio-drama-adaptation.md).
 
 Turn 229 is the Stage uplift (PR 1828), renumbered from 228 when it merged; this turn sits above it.
+
+## Revision 2 (18 October 2026)
+
+The owner asked whether audio drama should sit under Story as a kind rather than having its own
+door. It should, and revision 2 makes that change: 230a now shows the three existing doors, with
+Tell a story naming audio drama, and 230b asks What kind of story?. The production is medium
+`story` with kind `audio-drama`, so no new medium is needed. Nothing else in the turn changes.
 
 ## How this turn was made
 
@@ -39,7 +46,7 @@ The design is built around those four jobs, not around the record types.
 | 3 | **Narration is settled by example**, then set per scene as **Heard as**: Narrated, In the room or A recording. | Three named creative approaches offered at setup. | Real dramas mix these scene by scene. Setup shows one moment of the novel both ways. Seeing it beats reading a definition. |
 | 4 | **Pilot before the verdict table.** Setup ends at Target, Spine, Narrator and Pilot. Verdicts and episodes come after, on the Adaptation page. | Coverage verdicts and episodes come before the pilot. | How inner life becomes sound is judged by ear. Verdicts on 18 chapters made before hearing anything would be made blind. Setup still reads the whole book and records the spine and secrets. This changes SPEC-052 R-11's order for this kind. |
 | 5 | **An Adaptation page with a map**: chapters by words, episodes by minutes, one ribbon per decision. Source is also a side column in the script. | An Overview section plus a contextual Source drawer. | "What happened to chapter 5?" and "Where did this scene come from?" need a lasting home. On a map, a move is a crossing ribbon and a cut is a ribbon into Cut. A table hides both. |
-| 6 | **A fourth door: LISTEN · Make an audio drama.** | Admit Audio Drama in Story setup. | The door names what the audience does (turn 113): read, watch, choose. Listening is a fourth. An audiobook stays a reading of a Story. |
+| 6 | **A kind under Tell a story** (revision 2). Step two asks What kind of story?: Novel, Audio drama or Other. | Admit Audio Drama in Story setup. | Revision 1 drew a fourth LISTEN door; the owner asked whether audio drama should sit under Story, and it should. The work is writing first, it builds on Story's writing room, cast and Audio Studio, and a separate listening door would split listening across two doors, because the audiobook already sits under Story. On this point this turn now agrees with turn 228's notes. |
 | 7 | **Kept from the listener**: facts with their reveal episode, produced at setup and used by review, cast labels and transcripts. | Knowledge ceiling inside the specialists' context packet. | A mystery is an authored decision. It should be visible and editable, not hidden in a prompt. |
 | 8 | **Read-through** (script) and **Listen-through** (audio) are named differently and live in different places. | One review flow, labelled "Script reviewed · audio not assessed". | Different names and places make it hard to mistake one for the other. Listen-through states which interval it heard. |
 | 9 | **A missing voice blocks Hear.** The author chooses: a voice, the narrator standing in, or leaving the line out. | Same intent. | This changes SPEC-047 R-12. Today the audiobook shows the substitution on its door and then reads the line in the narrator's voice. |
@@ -64,8 +71,8 @@ Maren and Odile in the lamp room after midnight (episode 2, scene 3).
 
 | Frame | Step |
 |---|---|
-| 230a | Create something new: the LISTEN door beside WRITE, WATCH and CHOOSE. |
-| 230b | What kind of audio?: series, radio play or other, with Adapt from, Episodes and Length. |
+| 230a | Create something new: Tell a story now names audio drama. |
+| 230b | What kind of story?: Novel, Audio drama or Other; for an audio drama, Adapt from, Episodes and Length. |
 | 230c | Setup: Arke has read all 18 chapters and shows the same moment with and without a narrator. Kept from the listener. The pilot is chosen. |
 | 230d | Arke's draft of the pilot scene waits in the page. Chat says what changed and what it read. |
 | 230e | A line opens its source paragraph and the decision behind it: Hear. |
@@ -104,7 +111,7 @@ waiting as a tracked edit, and Cast beside the pilot.
 
 | Built today | Reused here | Proposed addition |
 |---|---|---|
-| The door and step two (`world.tsx`); the setup conversation with Adapt from and Target | 230a–c | The LISTEN door; an audio-drama kind in `ADAPTATION_KINDS`; Narrator and Pilot steps; Kept from the listener |
+| The door and step two (`world.tsx`); the setup conversation with Adapt from and Target | 230a–c | Kinds on Tell a story's step two; an audio-drama kind of Story in `ADAPTATION_KINDS`; Narrator and Pilot steps; Kept from the listener |
 | The chapter writing room: the held bar, tracked edits, review notes with Fix, Intentional and Dismiss, versions | 230d, 230j, prototype Fix | A radio-script document with stable line ids, beds, silence, interruptions, channels and Heard as |
 | Voices, voice direction with Sent as, grouped requests, quotes, Activity, transcript checks, recorded takes | 230h, 230i | A Hear dialog over any selection; a blocking choice for missing voices; a take column in the script |
 | Character narration note, used by the Performed reading | 230k | Actor direction for this production; per-line layered direction |
@@ -117,9 +124,7 @@ waiting as a tracked edit, and Cast beside the pilot.
 
 1. **Should Audio Studio's unit become the episode?** This turn recommends it. The alternative is
    scenes plus an episode sequencer, which this turn argues against.
-2. **Is LISTEN a fourth door, or a kind under WRITE?** A fourth door is clearer to an author. It
-   also reverses the decision recorded in `world.tsx` to keep audio off the door until something
-   ships.
+2. ~~Is LISTEN a fourth door, or a kind under WRITE?~~ Settled in revision 2: a kind under Tell a story.
 3. **Should the pilot come before the verdict table** for audio dramas (an amendment to SPEC-052
    R-11)? Or should micro drama and audio drama share one order?
 4. **Can a published edition keep a narrator stand-in** once the author has accepted it? Or must

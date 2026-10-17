@@ -1,11 +1,11 @@
 [
  [
   "Review status",
-  "17 October 2026. Revision 1, proposed for the owner’s review; not approved for implementation. An independent proposal for the Audio Drama production type. It takes turn 228’s notes and the audio drama research as requirements, not as a layout: none of turn 228’s drawings, prototype, styles or screenshots were opened. Low Water is a novel invented for these drawings and set in The Undersong; durations, voices and prices are fixtures. Nothing is generated, heard or charged, and no novel is modified."
+  "18 October 2026. Revision 2, proposed for the owner’s review; not approved for implementation. Revision 2 follows the owner’s review of revision 1: an audio drama is a kind of Story production, chosen under Tell a story, not a fourth door. An independent proposal for the Audio Drama production type. It takes turn 228’s notes and the audio drama research as requirements, not as a layout: none of turn 228’s drawings, prototype, styles or screenshots were opened. Low Water is a novel invented for these drawings and set in The Undersong; durations, voices and prices are fixtures. Nothing is generated, heard or charged, and no novel is modified."
  ],
  [
-  "A fourth door",
-  "The door names what the audience does with the thing (turn 113). LISTEN · Make an audio drama joins WRITE, WATCH and CHOOSE, on banner-audio, with Begin with a voice (230a). Step two asks What kind of audio?: Audio drama · series, Radio play and Other, then the name and three defaults: Adapt from (the world’s stories, or nothing), Episodes and Length (230b). With Adapt from set, the press is Plan with Arke and opens the existing setup conversation; with nothing set it is Create. A Story’s ⋯ gains Adapt…, which opens step two with that story set. An audiobook stays what it is today: a reading of a Story’s prose, under WRITE. An audio drama is its own production with its own script."
+  "Under Tell a story",
+  "An audio drama is a Story production of its own kind, as a micro drama is a Video production of its own kind: medium story, kind audio-drama, with episodes where a novel has chapters. It is chosen under WRITE · Tell a story, whose line now names it (Novel, novella, episodic fiction, audio drama or audiobook) (230a). Step two asks What kind of story?: Novel, Audio drama or Other, then the name and, for an audio drama, three defaults: Adapt from (the world’s stories, or nothing), Episodes and Length; one episode is a single play (230b). With Adapt from set, the press is Plan with Arke and opens the existing setup conversation; with nothing set it is Create. A Story’s ⋯ gains Adapt…, which opens step two with that story set. The audiobook stays what it is: the novel read aloud, made inside the novel’s production. The audio drama is a separate production with its own script, linked to the novel and never writing to it. The door keeps three cards."
  ],
  [
   "Setup decides by example",
@@ -85,6 +85,6 @@
  ],
  [
   "Built and new",
-  "Built: the door and step two, the setup conversation with Adapt from and the Target card, the chapter writing room’s held bar, review notes and tracked edits, voices and voice direction with Sent as, grouped requests, quotes and Activity, character narration notes, recorded takes, Audio Studio for a chapter, the show page, Builder Chat. New: the LISTEN door and an audio-drama kind; the radio script document with stable line ids, beds, silence, interruptions and channels; Heard as; Kept from the listener; the Adaptation page and source-change compare; production-level actor direction; the Hear dialog’s blocking choice; the listen-through strip; an episode as Audio Studio’s unit; audio-drama editions with transcripts and credits."
+  "Built: the door and step two, the setup conversation with Adapt from and the Target card, the chapter writing room’s held bar, review notes and tracked edits, voices and voice direction with Sent as, grouped requests, quotes and Activity, character narration notes, recorded takes, Audio Studio for a chapter, the show page, Builder Chat. New: an audio-drama kind of Story (no new medium), offered on Tell a story’s step two; the radio script document with stable line ids, beds, silence, interruptions and channels; Heard as; Kept from the listener; the Adaptation page and source-change compare; production-level actor direction; the Hear dialog’s blocking choice; the listen-through strip; an episode as Audio Studio’s unit; audio-drama editions with transcripts and credits."
  ]
 ]
