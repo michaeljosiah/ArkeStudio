@@ -71,8 +71,10 @@ export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbe
           </select>
         </Row>
       ) : null}
-      <Stepper label="lens" value={words?.focalMm} unit="mm" step={1} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={disabled || base === null} clearable
-        onCommit={(focalMm) => { if (base === null) return; const { focalMm: _focal, ...rest } = base; onWords(focalMm === undefined ? rest : { ...rest, focalMm }); }} />
+      <Row label="lens">
+        <Stepper label="lens" value={words?.focalMm} unit="mm" step={1} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={disabled || base === null} clearable
+          onCommit={(focalMm) => { if (base === null) return; const { focalMm: _focal, ...rest } = base; onWords(focalMm === undefined ? rest : { ...rest, focalMm }); }} />
+      </Row>
       <Row label="at"><Value muted><span className="fy-swstage__quietmono">{at}</span></Value></Row>
       <Row label=""><Link disabled={disabled} onClick={onNumbers}>{numbers ? "Hide numbers" : "Edit as numbers"}</Link></Row>
     </div>
