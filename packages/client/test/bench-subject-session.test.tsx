@@ -565,8 +565,10 @@ describe("references (R-23; design 142a)", () => {
 describe("Follow, for a staged clip (issue 1817; design 229h)", () => {
   const staged = (): BenchSession => {
     const session = shotSession("video");
-    const composer = session.composer as unknown as { params: Record<string, unknown>; brief: string };
+    const composer = session.composer as unknown as { params: Record<string, unknown>; brief: string; activeTokens: string[] };
     composer.params = { ...composer.params, follow: "camera-action" };
+    // The playblast rides: a follow line for a video that does not is taken out (issue 1817).
+    composer.activeTokens = ["Image 1", "Video 1"];
     composer.brief = "Maren listens at the rail.\n\n0.0–4.0 s · Medium on Maren, from the front, eye level, locked off.\nFollow @Video 1 precisely for camera position, movement, timing and blocking.";
     return session;
   };

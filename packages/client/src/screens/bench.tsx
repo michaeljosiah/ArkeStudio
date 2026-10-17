@@ -2,7 +2,7 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
-import { STAGE_FOLLOWS, STAGE_FOLLOW_LABELS, stageBriefWithFollow } from "@arke-studio/contracts";
+import { STAGE_FOLLOWS, STAGE_FOLLOW_LABELS, stageBriefForRouting, stageBriefWithFollow, stageRoutingCitations } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { BodyLayer } from "../components/body-layer.js";
@@ -388,6 +388,24 @@ function BenchWorkspace({
       mode,
     });
   };
+  // A model switch reroutes a staged subject's references, and the coordinator rewrites the
+  // brief's References and follow lines for what rides on the new route (issue 1817). The draft
+  // here is those same words still being typed, so it is put in step the same way when the new
+  // routing comes back; otherwise the box would go on citing a playblast that no longer rides.
+  const ridingKey = session.composer.activeTokens.join("|");
+  useEffect(() => {
+    if (subject === undefined) return;
+    const references = session.subjectTokens.flatMap((token) => session.tokenRegistry.find((candidate) => candidate.token === token) ?? []);
+    const nameOf = (sheetId: string) => world?.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const citations = stageRoutingCitations(references, session.composer.activeTokens, nameOf);
+    setDraft((current) => {
+      const follow = current.params.kind === "video" ? current.params.follow ?? "camera-action" : "camera-action";
+      const brief = stageBriefForRouting(current.brief, { ...citations, follow });
+      return brief === current.brief ? current : { ...current, brief };
+    });
+    // The routing is the trigger; the references and names it reads are fixed for a session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ridingKey, session.id]);
   useEffect(() => {
     if (rebuiltSession !== session.id) return;
     // The coordinator broadcasts the rebuilt workspace before its correlated answer. Applying

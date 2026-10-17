@@ -29,6 +29,13 @@ export const STAGE_KIT_SIZES: Record<StageKit["kind"], [number, number, number]>
 };
 
 const WALL = 0.15;
+/**
+ * A facade's windows, at most: a floor every 3 m and a bay every 2.5 m, but a set has no upper
+ * size, and one 300 m facade would otherwise expand into 12,000 meshes past the Stage's object
+ * budget. A larger facade spreads the same windows wider.
+ */
+const MAX_FACADE_FLOORS = 6;
+const MAX_FACADE_BAYS = 8;
 type Box = { name: string; surface: StageKitSurface; x: number; y: number; z: number; w: number; h: number; d: number; shape?: StagingSet["shape"]; solid?: boolean; ry?: number };
 
 /** A wall along its own length, cut by openings: full-height pieces between them, a header above each, a sill below a window. */
@@ -151,9 +158,11 @@ function local(kit: StageKit, w: number, h: number, d: number): Box[] {
     ];
     case "facade": {
       const parts: Box[] = [{ name: "wall", surface: "wall", x: 0, y: 0, z: 0, w, h, d }];
-      const floors = Math.max(1, Math.floor(h / 3)), across = Math.max(1, Math.floor(w / 2.5));
+      const storeys = Math.max(1, Math.floor(h / 3));
+      const floors = Math.min(storeys, MAX_FACADE_FLOORS), across = Math.min(Math.max(1, Math.floor(w / 2.5)), MAX_FACADE_BAYS);
+      const rise = storeys > floors ? h / floors : 3;
       for (let f = 0; f < floors; f++) for (let c = 0; c < across; c++) {
-        parts.push({ name: `window ${f * across + c + 1}`, surface: "glass", x: -w / 2 + (w / across) * (c + .5), y: f * 3 + 1, z: d / 2 + .01, w: 1.1, h: 1.4, d: .02, solid: false });
+        parts.push({ name: `window ${f * across + c + 1}`, surface: "glass", x: -w / 2 + (w / across) * (c + .5), y: f * rise + 1, z: d / 2 + .01, w: 1.1, h: 1.4, d: .02, solid: false });
       }
       return parts;
     }

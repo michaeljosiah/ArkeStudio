@@ -27,6 +27,7 @@ import { sessionMediaDir } from "../../src/bench/store.js";
 import {
   prepareBenchSubject,
   subjectReferenceRouting,
+  subjectRoutedBrief,
   subjectSessionReferenceRouting,
 } from "../../src/bench/subject.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -953,6 +954,18 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
     assert.doesNotMatch(video.prefill.composer.brief, /@Video 1/);
     assert.equal(video.prefill.composer.params.kind === "video" ? video.prefill.composer.params.follow : null, "camera-action");
+    // A switch to a route that carries the playblast rewrites the Stage's lines for what rides then
+    // (issue 1817): the video is cited and followed. Switching back takes both out again.
+    const session = {
+      subject: video.prefill.subject,
+      subjectTokens: video.prefill.references.map((reference) => reference.token),
+      tokenRegistry: video.prefill.references,
+    } as unknown as Parameters<typeof subjectRoutedBrief>[0];
+    const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const withVideo = subjectRoutedBrief(session, [...video.prefill.composer.activeTokens, playblast!.token], video.prefill.composer, nameOf);
+    assert.match(withVideo, /^References: @Image 1 Maren Kest · @Video 1 the blockout\.$/m);
+    assert.equal(withVideo.split("\n").at(-1), "Follow @Video 1 precisely for camera position, movement, timing and blocking.");
+    assert.equal(subjectRoutedBrief(session, video.prefill.composer.activeTokens, { ...video.prefill.composer, brief: withVideo }, nameOf), video.prefill.composer.brief);
 
     delete shot.staging.playblast!.evaluatorVersion;
     const legacy = await prepareBenchSubject(world, {

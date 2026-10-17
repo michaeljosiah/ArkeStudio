@@ -45,6 +45,19 @@ describe("the location plate (issue 1818)", () => {
     assert.equal(store.getBundle().meta.schemaVersion, STAGE_PLATE_SCHEMA_VERSION, "an older build refuses a world it would drop the scene from");
   });
 
+  it("refuses another production's picture, whatever a picker offered (SPEC-020 R-13)", async () => {
+    const store = await open();
+    const before = await sceneOnDisk(store);
+    const shotId = orderedShots(before)[0]!.id;
+    const elsewhere = { id: "ar_01J8G0000000000000000000B7", kind: "image", file: "elsewhere.png", hash: "sha256:0011", production: "another", origin: { by: "user" }, links: [], created: CLOCK() };
+    store.getBundle().artifacts.push(elsewhere as never);
+    await assert.rejects(
+      edit(store, before.version, shotId, { cast: [], sets: [], plate: { ...PLATE, shotId, source: { source: "artifact", artifactId: elsewhere.id, hash: elsewhere.hash } } }),
+      (error: unknown) => /belongs to another production/.test(JSON.stringify((error as { reasons?: unknown }).reasons ?? String(error))),
+    );
+    assert.equal((await sceneOnDisk(store)).blocking?.plate, undefined);
+  });
+
   it("is kept by a blocking edit that does not mention it, and taken off only by null", async () => {
     const store = await open();
     const first = await sceneOnDisk(store);
