@@ -18,6 +18,9 @@ because they share it.
 
 ## What's new
 
+- **A Stage that builds the shot with you.** Arke blocks a scene in small steps you watch land:
+  a room from the kit, lights, posed figures and a camera matched to a photo of the place. It
+  then writes the video prompt as timed cuts, with the blockout attached. [See it →](#block-it-out-with-arke)
 - **A writing room that knows your world.** The chapter editor is rebuilt around the page.
   Names in the prose link to the cast, `@` and `/` reach the world and Arke from the caret, and
   Arke's edits wait in the text itself to be kept or refused. [See it →](#write-in-a-room-that-knows-your-world)
@@ -307,12 +310,13 @@ one frame out of four.
 
 <br>
 
-<img src=".github/assets/readme-stage.webp" alt="The Stage: a shot's camera and cast blocked out in 3D, a push-in key selected, the panel showing move, height, back, lens and easing, a playblast filed." width="100%">
+<img src=".github/assets/readme-stage.webp" alt="The Stage in full screen, lit: a hotel lobby at night with lifts, armchairs, a planter and warm practical lights, Ade seated in blue and Ife crossing in pink, the camera written as Wide, Eye and Front at 18 mm, locked off, and both figures' marks on the timeline below." width="100%">
 
 **The Stage blocks the shot before you spend on it.** Cast and set are placed once per
-scene; the camera is keyed per shot — height, distance, lens, easing — and previewed as a
-playblast. Describe a change in a sentence and Arke rebuilds the camera around it — the
-blocking stays put unless you ask it to revise that too — or move the keys yourself.
+scene, lit, and seen three ways: as greybox, lit, or wearing a photo of the real location.
+The camera is written in words (size, angle, side, lens and move) and worked out in code, so
+"medium, low, from the left" lands where a camera operator would put it. Every shot previews
+as a playblast. Describe a change in a sentence, or move the keys yourself.
 
 <br>
 
@@ -342,6 +346,58 @@ set, and every receipt keeps its estimate's own tilde — nothing is claimed as 
 provider actually reports what it charged.
 
 </div>
+
+### Block it out with Arke
+
+Build with Arke turns a written beat into a staged scene. It works through a set of stage tools
+rather than one long answer, so each step lands where you can see it, and it checks its own
+work before it stops.
+
+<div align="center">
+
+<img src=".github/assets/readme-stage-build.webp" alt="Build with Arke at work on shot 1: a log of finished steps (read the plate, read the sheets, an 8 by 12 by 5 metre room, an armchair, table, planter, palm and lamp from the kit, lights from the plate, Ade sitting, Ife walking 3.3 metres to lean on him, the camera, a render of shot 1 beside the plate, a 0.81 plate match) and a check still running, with the lit lobby filling in behind it." width="100%">
+
+**Every step is on the stage as it lands.** Arke reads the plate and the character sheets,
+builds the room, lights it from the plate, places and poses the cast and sets the camera.
+Then it renders the shot, compares it with the plate, and checks the 180° line, the distances
+between figures and how fast they move.
+
+</div>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-stage-plate.webp" alt="Shot 1 through the camera in the Plate look: the lobby photo projected onto the set, Ade in his armchair, and the plate's settings beside it: 540 by 960, matched to shot 1 at 18 mm with a 1.05 metre horizon, a 0.81 match, and Match camera.">
+<br><b>Build from a location plate.</b> A photo of the place becomes the set's surface and
+its reference. The plate names the shot it matches, with its lens and horizon, and goes into
+the video prompt as Image 1.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-stage-pose.webp" alt="Ife on her last mark in close-up, a jointed pink figure leaning down with her left hand on Ade's left shoulder, and the figure settings beside her: Lean on, Left hand, on Ade's left shoulder, looking at Ade.">
+<br><b>Figures that pose.</b> Jointed figures sit, lean, reach and look at each other. A hand
+rests on a named point, here Ade's left shoulder. A turn too fast to read is flagged with the
+time it needs.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-stage-board.webp" alt="Board 1 from above: four numbered cameras on the lobby floor, a 12-second track cut into Wide, Ade, Ife and Two-shot, both figures' lanes running across the cuts, the 180-degree line clear, and the cut animatic filed.">
+<br><b>One action, four cameras.</b> A board stages the action once across several shots,
+puts a camera on each and cuts them into one animatic. The line check covers every cut.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-stage-prompt.webp" alt="The Bench set to video: the plate, Ade's and Ife's pictures and the board's animatic attached as Image 1, Image 2, Image 3 and Video 1, a prompt written as timed cuts from 0 to 12 seconds, and Follow set to Camera only.">
+<br><b>A prompt the video model can follow.</b> References are numbered as they go in, the
+action is written as timed cuts, and the blockout rides along as Video 1. Follow decides
+whether the model copies only the camera or the action too.
+</td>
+</tr>
+</table>
+
+The set comes from a kit: rooms with doors, windows and surfaces, stairs, counters, booths,
+furniture, cars, streets and trees, each sized with numbers rather than modelled. Point, spot,
+area and sun lights sit under one Look for the production, which sets the time of day, the sky
+and the haze.
 
 ### Atmosphere, crossfades and particles
 
@@ -578,6 +634,10 @@ quotations and typed refusals, proposals staged with ripple computation, referen
 travel into every dispatch, real currency shown before spend with running jobs cancellable
 from the Activity panel, a shot page carrying its frame, its camera and its 3D Stage together,
 and a cut that assembles itself from accepted takes.
+
+**The Stage is built for blocking with Arke.** Location plates, a set kit, lights and a
+production Look, jointed figures that pose, camera framing written in words, boards cut into
+one animatic, and video prompts written as timed cuts with the blockout attached.
 
 **Story mode is built through to a published edition.** The chapter writing room with linked
 names, Ask Arke, Continue, versions, Compare, Focus and margin review notes; `.docx` import;
