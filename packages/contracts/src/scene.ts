@@ -1,6 +1,6 @@
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema, WorldFilePathSchema } from "./ids.js";
 import { FullSha256Schema } from "./audio.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 
@@ -147,12 +147,45 @@ export const StagingSetSchema = z
   .strict();
 export type StagingSet = z.infer<typeof StagingSetSchema>;
 
+/**
+ * The location plate (issue 1818, design turn 228c): a picture of the empty place the set is
+ * built from. The build reads it as the authority on layout, matches one shot's opening camera
+ * to it, and it can ride to the generator as the first image so the blockout and the location
+ * reference agree about where the door is. A world file (a location sheet's picture) or an
+ * artifact, pinned by hash so a replaced picture reads as a different plate.
+ */
+export const ScenePlateSchema = z
+  .object({
+    source: z.discriminatedUnion("source", [
+      z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict(),
+      z.object({ source: z.literal("world-file"), path: WorldFilePathSchema, hash: Sha256Schema }).strict(),
+    ]),
+    /** What the place is called on the Stage and in the prompt ("Lobby"). */
+    label: z.string().trim().min(1).max(80),
+    /** The shot whose opening camera the plate was taken from. */
+    shotId: ShotIdSchema.optional(),
+    /** Where the plate's camera stood, as the build estimated it; the plate form edits lens and horizon. */
+    camera: z
+      .object({
+        p: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        l: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        focalMm: z.number().finite().positive().max(1000),
+      })
+      .strict()
+      .optional(),
+    /** Absent rides: the plate goes to the generator as Image 1. */
+    rides: z.boolean().optional(),
+  })
+  .strict();
+export type ScenePlate = z.infer<typeof ScenePlateSchema>;
+
 /** Cast marks and set massing shared by every camera that covers this scene action. */
 export const SceneBlockingSchema = z
   .object({
     version: z.number().int().min(1),
     cast: z.array(StagingFigureSchema),
     sets: z.array(StagingSetSchema),
+    plate: ScenePlateSchema.optional(),
   })
   .strict();
 export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;

@@ -24,6 +24,8 @@ import {
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
+  STAGE_PLATE_DETAIL,
+  scenePlateName,
   supportsMode,
   type AppSettings,
   type BenchComposer,
@@ -232,6 +234,27 @@ async function voiceTokens(
  * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
  * is. Only current output may ride; compatible routes carry the video alongside the beats.
  */
+/** The scene's location plate as a Bench tile, Image 1; null when there is none, it is set not to ride, or its file is gone. */
+function plateToken(scene: SceneRecord, world: WorldBundle): BenchReferenceToken | null {
+  const plate = scene.blocking?.plate;
+  if (plate === undefined || plate.rides === false) return null;
+  if (plate.source.source === "artifact") {
+    const artifactId = plate.source.artifactId;
+    if (!world.artifacts.some((candidate) => candidate.id === artifactId && candidate.kind === "image")) return null;
+  }
+  return {
+    token: benchTokenFor("image", 1),
+    kind: "image",
+    source: plate.source.source === "artifact"
+      ? { source: "artifact", artifactId: plate.source.artifactId, hash: plate.source.hash }
+      : { source: "world-file", path: plate.source.path, hash: plate.source.hash },
+    label: `${plate.label} · plate`,
+    detail: STAGE_PLATE_DETAIL,
+    ride: "when-supported",
+    subjectRole: "reference",
+  };
+}
+
 function playblastToken(
   staging: ShotStaging,
   scene: SceneRecord,
@@ -438,7 +461,10 @@ export async function prepareBenchSubject(
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
-    const references = await sheetTokens([shot], world, production, scene, input.sources);
+    // A staged clip's location plate rides first (issue 1818, design turn 228h): the picture the
+    // set was built from, so the generator sees the place the blockout moves through.
+    const plate = mode === "video" && shot.staging !== undefined ? plateToken(scene, world) : null;
+    const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, plate === null ? 1 : 2)];
     const staging = mode === "video" ? shot.staging : undefined;
     const shown = {
       durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
@@ -497,8 +523,8 @@ export async function prepareBenchSubject(
     const follow = input.follow ?? "camera-action";
     const videoRides = playblast !== null && riding.has(playblast.token);
     const cited = references
-      .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video"))
-      .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : nameOf(entry.sheetId!)}`);
+      .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video" || entry.detail === STAGE_PLATE_DETAIL))
+      .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : entry.detail === STAGE_PLATE_DETAIL ? scenePlateName(scene.blocking!.plate!) : nameOf(entry.sheetId!)}`);
     const brief = staging === undefined
       ? prompt
       : [

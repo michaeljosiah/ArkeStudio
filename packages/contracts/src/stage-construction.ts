@@ -13,6 +13,18 @@ export const StageConstructionDraftSchema = z
     assumptions: z.array(z.string().max(1000)).max(20),
     assessment: z.string().max(4000),
     inspected: z.array(z.string().max(100)).max(24),
+    /**
+     * Where the location plate's camera stood, as the build estimated it from the picture (issue
+     * 1818). Keep saves it on the plate; Match camera puts the matched shot's opening key there.
+     */
+    plateCamera: z
+      .object({
+        p: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        l: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        focalMm: z.number().finite().min(8).max(300),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type StageConstructionDraft = z.infer<typeof StageConstructionDraftSchema>;

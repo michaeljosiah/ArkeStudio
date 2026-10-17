@@ -48,7 +48,7 @@ async function mount(configure?: (shot: Shot) => void) {
   };
   await render();
   const q = (selector: string) => container.querySelector<HTMLElement>(selector)!;
-  return { q, render, shot, scene, sent };
+  return { q, render, shot, scene, sent, world };
 }
 
 async function key(target: HTMLElement, value: string) {
@@ -579,4 +579,54 @@ it("a list line stands for every pick of its thing, and a line that leaves the l
   assert.equal(stageItem(q, "set 2"), undefined, "the discarded draft takes its set");
   assert.equal(q('.fy-swstage__item[data-selected="true"]'), null, "and the selection that pointed at it");
   assert.ok(q('[aria-label="Camera rig"]'), "the shot's form, not an empty panel");
+});
+
+// The location plate (issue 1818, design turn 228c).
+const PLATE_PICTURE = { id: "ar_01J8G0000000000000000000P1", kind: "image" as const, file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" as const }, links: [], created: "2026-10-17T09:00:00.000Z" };
+
+it("opens the blockout line with a dashed Add plate, and a pick writes the plate with the scene's marks", async () => {
+  const { q, render, world, sent } = await mount();
+  world.artifacts.push(PLATE_PICTURE as never);
+  await render();
+  const chip = q('[data-testid="stage-plate-chip"]');
+  assert.equal(chip.textContent, "Add plate");
+  assert.equal(chip.getAttribute("data-empty"), "true");
+  assert.equal(chip.parentElement?.nextElementSibling?.getAttribute("aria-label"), "Blockout instruction", "the plate opens the line");
+  await click(chip);
+  const options = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')];
+  assert.ok(options.length >= 1);
+  await click(options.find((option) => option.title === "lobby-plate.png") ?? options[0]!);
+  const write = sent.at(-1);
+  assert.equal(write?.kind, "edit-stage");
+  const blocking = write?.kind === "edit-stage" ? write.blocking : undefined;
+  assert.deepEqual(blocking?.plate?.source, { source: "artifact", artifactId: PLATE_PICTURE.id, hash: PLATE_PICTURE.hash });
+  assert.equal(blocking?.plate?.label, "Location");
+  assert.deepEqual(blocking?.cast, [], "the plate rides on the marks it found, and moves none of them");
+});
+
+it("lists the plate second, opens its form, and Match camera puts the opening key where the plate was taken", async () => {
+  const { q, render, scene, world, sent } = await mount();
+  world.artifacts.push(PLATE_PICTURE as never);
+  scene.blocking = { version: 1, cast: [], sets: [], plate: {
+    source: { source: "artifact", artifactId: PLATE_PICTURE.id, hash: PLATE_PICTURE.hash }, label: "Lobby", shotId: "sh_12",
+    camera: { p: [0.5, 1.1, 6], l: [0.9, 0.4, -6], focalMm: 18 },
+  } };
+  await render();
+  assert.equal(q('[data-testid="stage-plate-chip"]').textContent, "Lobby · plate");
+  const items = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")];
+  assert.equal(items[1]?.querySelector("span:nth-child(2)")?.textContent, "plate", "second, under the camera");
+  assert.equal(items[1]?.querySelector("span:nth-child(3)")?.textContent, "Lobby · matched");
+  await click(items[1]!);
+  const form = q('[data-testid="stage-plate-form"]');
+  assert.match(form.textContent ?? "", /Plate/);
+  assert.match(form.textContent ?? "", /Match camera/);
+  const match = [...form.querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Match camera")!;
+  await click(match);
+  assert.ok(q('[data-testid="stage-moved"]'), "matching is an edit to keep or discard");
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const opening = kept?.kind === "edit-stage" ? kept.staging?.keys[0] : undefined;
+  assert.deepEqual(opening?.p, [0.5, 1.1, 6]);
+  assert.deepEqual(opening?.l, [0.9, 0.4, -6]);
+  assert.equal(opening?.focalMm, 18);
 });
