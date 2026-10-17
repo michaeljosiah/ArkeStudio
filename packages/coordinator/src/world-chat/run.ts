@@ -1516,9 +1516,10 @@ function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>
   // The shape named whole (issue 1827, measured): told only "changes.passage", GPT-5.4 sent
   // { replace } and then left out the paragraph, which the passage guard rightly refuses.
   const paragraph = subject.paragraph === undefined ? "" : `, "paragraph": ${subject.paragraph}`;
-  // And the read it must cite: the edit is refused without a complete current read of the chapter,
-  // which the model did not think to make on its own (the second measured refusal).
-  const where = productionId === undefined ? `chapterId ${subject.chapterId}` : `productionId ${productionId}, chapterId ${subject.chapterId}`;
-  const read = ` First read the chapter whole with get_chapter (${where}) to its last page, and cite that final receipt in the action's checkReceiptIds.`;
+  // And the reads it must cite (actions.ts, production-chapter): the chapters, the quoted chapter
+  // and the story, each complete and current. Measured, the model found them one refusal at a
+  // time and spent the corrective turn on the second, so all three are named before it starts.
+  const production = productionId === undefined ? "this production" : `productionId ${productionId}`;
+  const read = ` Before the edit, read each to its last page: list_chapters (${production}), get_chapter (${production}, chapterId ${subject.chapterId}, no section) and get_story (${production}; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds.`;
   return ` They asked for these words rewritten, and the page shows your revision in place.${read} Then answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
 }
