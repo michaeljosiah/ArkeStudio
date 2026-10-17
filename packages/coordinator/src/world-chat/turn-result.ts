@@ -59,12 +59,13 @@ export interface ValidateInput {
   /** The ask was for a reply only (turn 128): nothing structured may come back with it. */
   replyOnly?: boolean;
   /**
-   * The ask was the page's rewrite of a passage (SPEC-056 R-24, issue 1827) and this is its first
-   * answer: one without a passage revision spends the corrective turn on asking for it. The
-   * corrective answer is not held to it, so a passage that cannot be revised as asked can still
-   * be answered by saying why.
+   * The ask was the page's rewrite of a passage (SPEC-056 R-24, issue 1827). `required` on its
+   * first answer: one without a passage revision spends the corrective turn on asking for it.
+   * `only` on the corrective answer, which may stage nothing and say why the passage cannot be
+   * revised as asked. Either way nothing but the revision is staged: an unrelated action would
+   * leave the page waiting for a revision that is not coming (codex on PR 1830).
    */
-  reviseRequired?: boolean;
+  revise?: "required" | "only";
   /** The assistant's entire completed message. */
   raw: string;
   conversationId: ConversationId;
@@ -379,7 +380,12 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const problems: TurnProblem[] = [];
-  if (input.reviseRequired && !result.actions.some(isPassageRevision)) problems.push(problem("revise", REVISE_PROBLEM));
+  if (input.revise === "required" && !result.actions.some(isPassageRevision)) problems.push(problem("revise", REVISE_PROBLEM));
+  if (input.revise !== undefined && (
+    result.actions.some((action) => !isPassageRevision(action)) || result.actions.length > 1 ||
+    result.candidateOperations.length || result.groupOperations.length || result.bibleEdits.length ||
+    result.editorRequests.length || result.sceneEdits.length || result.productionPlan
+  )) problems.push(problem("revise-only", REVISE_ONLY_PROBLEM));
   if (result.productionPlan) {
     if (!input.productionThread) problems.push(problem("production-plan", "A production plan belongs only to a production thread."));
     const cited = result.productionPlan.checkReceiptIds.map(id => input.receiptsThisRun.find(r => r.id === id));
@@ -922,6 +928,8 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
 
 const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
 const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, citing the final receipts of complete list_chapters, get_chapter (that chapter, no section) and get_story reads, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
+
+const REVISE_ONLY_PROBLEM = "This ask was a rewrite of the selected passage. Return only the one production-chapter passage edit, or no action at all with a one-sentence reason; leave every other list empty.";
 
 /** A revision of a selected passage: what a page's rewrite is answered by. */
 function isPassageRevision(action: { kind: string; change?: unknown }): boolean {

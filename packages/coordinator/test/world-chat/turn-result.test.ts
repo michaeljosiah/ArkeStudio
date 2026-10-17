@@ -895,7 +895,7 @@ describe("a question asked for its answer (issue 1295)", () => {
   it("holds the page's rewrite to a revision on its first answer, and not after (issue 1827)", async () => {
     // What GPT-5.4 returned to the selection menu's Tighten: the new wording in the reply, nothing staged.
     const prose = turn({ reply: "Best clean option: “The first time it happened, Ade was driving on the Ibadan expressway.”" });
-    const first = validateTurnResult({ ...(await baseInput({ productionThread: true, reviseRequired: true })), raw: prose });
+    const first = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: prose });
     assert.equal(first.ok, false);
     if (!first.ok) {
       assert.deepEqual(first.problems.map((p) => p.code), ["revise"]);
@@ -907,10 +907,15 @@ describe("a question asked for its answer (issue 1295)", () => {
       groupOperations: [],
       actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: [] }],
     });
-    const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, reviseRequired: true })), raw: revision });
+    const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: revision });
     assert.ok(revised.ok || !revised.problems.some((p) => p.code === "revise"), "a revision answers it, whatever else is checked");
-    // The corrective answer is free to say why it could not be revised.
-    assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true })), raw: prose }).ok, true);
+    // The corrective answer is free to say why it could not be revised…
+    assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "only" })), raw: prose }).ok, true);
+    // …but stages nothing else, or the page would wait on a revision that is not coming (codex on PR 1830).
+    const input = await baseInput({ productionThread: true, revise: "only" });
+    const other = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: canonCreateDraft(input.message) }] }) });
+    assert.equal(other.ok, false);
+    if (!other.ok) assert.ok(other.problems.some((p) => p.code === "revise-only"));
   });
 
   it("tells every corrective turn that a question needs no action at all", () => {

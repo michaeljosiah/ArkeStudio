@@ -822,6 +822,32 @@ describe("the craft loop (turn 128)", () => {
     assert.ok(q(m, ".fy-arke"), "and Arke opens on the answer it gave instead");
   });
 
+  it("a rewrite's turn is kept while the chapter is away, and a stopped turn lets it go too (codex on PR 1830)", async () => {
+    const styled = inkbound([], STYLE);
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const state = { ...styled, world: { ...styled.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState;
+    const first = await mount(state);
+    await answerOpen(first);
+    await keyup(q(first, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    await act(async () => (q(first, "button.fy-ch__ask") as HTMLElement).click());
+    await act(async () => ([...first.container.querySelectorAll("[role=menuitem]")].find((b) => b.textContent === "Tighten") as HTMLElement).click());
+    const sent = first.sent.find((message) => message.kind === "world-chat-send" && (message as { text: string }).text.endsWith("Tighten this")) as { requestId: string };
+    // The author leaves the chapter before the thread takes the ask.
+    await act(async () => first.root.unmount());
+    await act(async () => __applyEventForTest({ at: "2026-09-06T12:00:05Z", type: "world-chat.send-result", conversationId: THREAD.id, requestId: sent.requestId, admitted: true, turnId: "turn_1830" }));
+    const m = await mount({ ...state, worldChat: { ...workspace, runStatus: "running" as const, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never);
+    await answerOpen(m);
+    await keyup(q(m, "textarea.fy-ch__source") as HTMLTextAreaElement, 0, 24);
+    const pill = () => q(m, "button.fy-ch__ask")?.textContent ?? "";
+    assert.match(pill(), /asking…/, "back in the chapter, the ask taken while away is still being answered");
+    // Stopped from Chat: the turn's line is there, nothing runs, and it left no reply and no failure.
+    await act(async () => __setStateForTest({ ...state, worldChat: { ...workspace, seq: 9, runStatus: null, messages: [{ id: "msg_u1830", turnId: "turn_1830", role: "user" as const, text: "Tighten this", receipts: [], refusals: [], createdAt: "2026-09-06T12:00:05Z" }] } } as never, { connection: "open" }));
+    assert.doesNotMatch(pill(), /asking…/, "a stopped rewrite does not hold the page for the rest of the session");
+  });
+
   it("an ask waits for its answer however long it takes, and only a lost connection loses it (codex on PR 1232)", async (t) => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const styled = inkbound([], STYLE);

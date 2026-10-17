@@ -352,7 +352,14 @@ onWorldChange(() => {
 // answers, and a chapter left for long enough would come back to one it no longer has.
 subscribeWorldChatSendResults((result) => {
   for (const [key, held] of heldAsks) {
-    if (held.sent?.requestId === result.requestId) heldAsks.set(key, { ...held, answered: result.admitted });
+    if (held.sent?.requestId !== result.requestId) continue;
+    heldAsks.set(key, { ...held, answered: result.admitted });
+    // A quiet ask's turn is followed to its end (issue 1827). Recorded here, not by the screen, so
+    // an answer that comes while the author is in another chapter is not lost (codex on PR 1830).
+    if (held.quiet !== true || !result.admitted || result.turnId === undefined) continue;
+    for (const [path, awaited] of awaitedAsks) {
+      if (awaited.press === held.press) awaitedAsks.set(path, { ...awaited, turn: { conversationId: held.sent.conversationId, turnId: result.turnId } });
+    }
   }
 });
 /** Test hook: asks and parked drafts outlive a screen by design, so each test starts with none. */
@@ -1705,18 +1712,9 @@ export function ChapterWorkspace({
     else heldAsks.set(askKey, said);
     setAskState(said);
   }, [askKey]);
-  const askKeyNow = useRef(askKey);
-  askKeyNow.current = askKey;
-  const pathNow = useRef(path);
-  pathNow.current = path;
   // The screen's own copy takes its answer too, for a dock put away while it came.
   useEffect(() => subscribeWorldChatSendResults((result) => {
     setAskState((held) => (held?.sent?.requestId === result.requestId ? { ...held, answered: result.admitted } : held));
-    // Read from the held copy, written at the press: the screen's state can trail an answer.
-    const held = heldAsks.get(askKeyNow.current), awaited = awaitedAsks.get(pathNow.current);
-    if (held?.quiet !== true || held.sent?.requestId !== result.requestId || !result.admitted || result.turnId === undefined) return;
-    if (awaited === undefined || awaited.press !== held.press) return;
-    awaitedAsks.set(pathNow.current, { ...awaited, turn: { conversationId: held.sent.conversationId, turnId: result.turnId } });
   }), []);
   /*
    * A quiet ask whose turn has ended with nothing staged is answered in Chat (issue 1827): words
@@ -1730,8 +1728,11 @@ export function ChapterWorkspace({
     if (turn === undefined || thread === null || thread.conversationId !== turn.conversationId) return;
     const failed = thread.lastFailure?.turnId === turn.turnId;
     const answered = thread.messages.some((message) => message.role === "studio" && message.turnId === turn.turnId);
-    if (!failed && !answered) return;
-    if (!failed && (thread.actions ?? []).some((action) => action.turnId === turn.turnId)) return;
+    // Stopped, it leaves neither a reply nor a failure (codex on PR 1830): its line is in the thread
+    // and nothing runs any more, so it has ended all the same.
+    const stopped = !failed && !answered && thread.runStatus !== "running" && thread.messages.some((message) => message.turnId === turn.turnId);
+    if (!failed && !answered && !stopped) return;
+    if (answered && (thread.actions ?? []).some((action) => action.turnId === turn.turnId)) return;
     awaitedAsks.delete(path);
     setTagged((count) => count + 1);
     setDock(true);

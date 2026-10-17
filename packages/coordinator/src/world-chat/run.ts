@@ -857,6 +857,9 @@ export class WorldChatRunner {
       const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "") + (images?.description ? `\n\n${images.description}` : "");
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused, images?.parts);
 
+      // The page's rewrite (issue 1827): its first answer must be the revision; the corrective one
+      // may instead stage nothing and say why, but never stages anything else (codex on PR 1830).
+      const revising = subject?.kind === "passage" && subject.intent === "revise";
       let outcome = await this.applyResult(
         store,
         conversationId,
@@ -872,7 +875,7 @@ export class WorldChatRunner {
         subject,
         replyOnly,
         view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
-        subject?.kind === "passage" && subject.intent === "revise",
+        revising ? "required" : undefined,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -916,6 +919,7 @@ export class WorldChatRunner {
           subject,
           replyOnly,
           view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+          revising ? "only" : undefined,
         );
       }
 
@@ -1059,8 +1063,8 @@ export class WorldChatRunner {
     /** The line asked for a reply and nothing else (turn 128); any action is refused. */
     replyOnly = false,
     setupRevision?: number,
-    /** The page's rewrite on its first answer (issue 1827): a reply without the revision is corrected. */
-    reviseRequired = false,
+    /** The page's rewrite (issue 1827): see ValidateInput's `revise`. */
+    revise?: "required" | "only",
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -1079,7 +1083,7 @@ export class WorldChatRunner {
       productionThread: folded.entryContext !== undefined && "productionId" in folded.entryContext,
       draftOnly: folded.entryContext?.kind === "production-setup",
       replyOnly,
-      reviseRequired,
+      ...(revise !== undefined ? { revise } : {}),
       raw,
       conversationId,
       messages,
