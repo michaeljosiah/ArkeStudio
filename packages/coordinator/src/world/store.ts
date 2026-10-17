@@ -1,4 +1,5 @@
 import { recoverPerformanceStorage } from "../audio/performance-purge.js";
+import { discoverConversations } from "../world-chat/discover.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -286,16 +287,31 @@ export class WorldStore {
   }
 
   /**
-   * App-owned writes confined to operational paths that the watcher ignores and the scan never
-   * reads: conversation logs and their repair (`.conversations`), conversation-action tombstones
-   * (`.history`). They keep `ownedWrite`'s ownership gate and serialisation, which is why these
-   * callers used it, but not its watcher suppression and full rescan: nothing they touch is in
-   * the bundle. On a large world each rescan cost seconds, and opening one ran four of them for
-   * conversation discovery and recovery alone (issue 1840). Authored files use `ownedWrite`.
+   * App-owned writes confined to operational paths that the watcher ignores: conversation logs
+   * and their repair (`.conversations`), conversation-action tombstones (`.history`). They keep
+   * `ownedWrite`'s ownership gate and serialisation, which is why these callers used it, but not
+   * its watcher suppression and full rescan. On a large world each rescan cost seconds, and
+   * opening one ran four of them for conversation discovery and recovery alone (issue 1840).
+   * The one part of the bundle such a write can move, the conversation rows, is read again
+   * alone afterwards, so a later snapshot never restores rows from before the repair (codex on
+   * PR 1853). Authored files use `ownedWrite`.
    */
   async operationalWrite<T>(fn: () => Promise<T>): Promise<T> {
     this.assertWritable();
-    return this.serialise(async () => { await this.verifyOwnership(); return fn(); });
+    return this.serialise(async () => {
+      await this.verifyOwnership();
+      try {
+        return await fn();
+      } finally {
+        await this.refreshConversationRows().catch(() => {});
+      }
+    });
+  }
+
+  /** The bundle's conversation rows, read again on their own: summaries, never transcripts. */
+  private async refreshConversationRows(): Promise<void> {
+    const conversations = (await discoverConversations(this.dir)).summaries;
+    this.scan = { ...this.scan, bundle: { ...this.scan.bundle, conversations } };
   }
 
   /** UI capability only; every actual write still verifies the lock on disk. */

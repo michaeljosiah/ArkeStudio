@@ -13,6 +13,8 @@ import { WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
 import { deleteScanState, WorldStore } from "../../src/world/store.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
+import { newId, type ConversationId } from "@arke-studio/contracts";
+import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -261,8 +263,15 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     try {
       // What conversation discovery and recovery do on every open: write only under paths the
       // scan never reads, and the watcher ignores.
-      await store.operationalWrite(() => writeFile(join(dir, ".conversations-probe.txt"), "x", "utf8"));
-      assert.equal(rescans.n, 0, "nothing it writes is in the bundle");
+      const before = store.getBundle().conversations.length;
+      const conversationId = newId("cv") as ConversationId;
+      await store.operationalWrite(async () => {
+        const log = new WorldChatStore(conversationDir(dir, conversationId));
+        await log.create(conversationId, CLOCK());
+        await log.append({ type: "conversation.created", title: "a talk", entryContext: { kind: "world" } }, { at: CLOCK() });
+      });
+      assert.equal(rescans.n, 0, "no full rescan for a conversation's own write");
+      assert.equal(store.getBundle().conversations.length, before + 1, "but its rows are read again, so a snapshot never shows the old ones (codex on PR 1853)");
       await store.ownedWrite(async () => {});
       assert.equal(rescans.n, 1, "an authored write still rescans");
     } finally {
