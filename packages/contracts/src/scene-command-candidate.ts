@@ -4,6 +4,7 @@ import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import type { SceneBlocking, SceneCastMember, Shot, ShotStageEdit } from "./scene.js";
 import type { WorldBundle } from "./client-state.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 
 export type SemanticSceneCommand =
   | {
@@ -47,6 +48,13 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       const current = orderedShots(record).find((shot) => shot.id === command.shotId);
       if (current === undefined) {
         throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
+      }
+      // A plate is a picture this production may use (SPEC-020 R-13): another production's scoped
+      // image is not its to build from or send, whatever a picker offered (issue 1818).
+      const plateSource = command.blocking?.plate?.source;
+      if (plateSource?.source === "artifact") {
+        const owned = resolveProductionArtifact(bundle.artifacts, plateSource.artifactId, productionId);
+        if (!owned.ok && owned.code === "other-production") throw new SceneOperationRefused([`the plate is ${owned.reason}`]);
       }
       let next = editScene(record, {});
       if (command.blocking !== undefined) {
