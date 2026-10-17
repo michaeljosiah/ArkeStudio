@@ -45,6 +45,8 @@ import {
 import { StageUnderlay } from "./stage-underlay.js";
 import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
 import { PlateChip, PlateForm, type PlateCandidate } from "./stage-plate.js";
+import { AddSetMenu, KitRows, type AddSetChoice } from "./stage-kit-form.js";
+import { STAGE_KIT_SIZES } from "@arke-studio/contracts";
 import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
@@ -939,20 +941,29 @@ export function SceneStage({
       ...current,
       sets: current.sets.map((set, position) => position === which ? { ...set, ...change } : set),
     }));
-  const addSet = () => {
+  const addSet = (choice: AddSetChoice = "box") => {
     if (working === null) return;
     const index = working.sets.length;
     patchBlocking((current) => {
       const figure = current.cast[0];
+      // A kit item (issue 1819) starts at its kit's own size and is named for what it is; a
+      // primitive is the one-metre block it always was.
+      const kit = choice === "box" || choice === "cylinder" || choice === "sphere" ? null : choice;
+      const [w, h, d] = kit === null ? [1, 0.75, 1] : STAGE_KIT_SIZES[kit];
+      const taken = new Set(current.sets.map((set) => set.name));
+      const stem = kit === null ? "set" : kit;
+      let name = kit === null ? `set ${current.sets.length + 1}` : stem;
+      for (let n = 2; taken.has(name); n++) name = `${stem} ${n}`;
       return {
         ...current,
         sets: [...current.sets, {
-          name: `set ${current.sets.length + 1}`,
-          x: figure?.x ?? 0,
-          z: round((figure?.z ?? 0) + 1),
-          w: 1,
-          h: 0.75,
-          d: 1,
+          name,
+          x: kit === "room" || kit === "street" ? 0 : figure?.x ?? 0,
+          z: kit === "room" || kit === "street" ? 0 : round((figure?.z ?? 0) + 1),
+          w,
+          h,
+          d,
+          ...(kit === null ? (choice === "box" ? {} : { shape: choice as "cylinder" | "sphere" }) : { kit: kit === "room" ? { kind: kit, open: ["front" as const] } : { kind: kit }, solid: true }),
         }],
       };
     });
@@ -1265,7 +1276,7 @@ export function SceneStage({
                     <span>{set.shape ?? "box"}{set.solid ? " · solid" : ""}</span>
                   </button>
                 ))}
-                <button type="button" className="fy-swstage__add" disabled={frozen} onClick={addSet}><Plus size={12} />Add set</button>
+                <AddSetMenu disabled={frozen} onPick={addSet} />
               </div>
 
               {plateSelected && scene.blocking?.plate !== undefined ? (
@@ -1472,13 +1483,14 @@ export function SceneStage({
                         }}
                       />
                     </Row>
-                    <Row label="shape">
+                    {set.kit ? <KitRows kit={set.kit} name={set.name} disabled={frozen} onChange={(kit) => patchSet(position, { kit })} /> : null}
+                    {set.kit ? null : <Row label="shape">
                       <select className="fy-swstage__select" aria-label={`${set.name} shape`} value={set.shape ?? "box"} disabled={frozen} onChange={e => patchSet(position, { shape: e.target.value as StagingSet["shape"] })}>
                         <option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option>
                         {/* A mesh is its vertices and triangles, which no primitive has; the choice exists only for a set built as one. */}
                         {set.shape === "mesh" ? <option value="mesh">Mesh</option> : null}
                       </select>
-                    </Row>
+                    </Row>}
                     <Row label="solid">
                       <label className="fy-swstage__check"><input type="checkbox" aria-label={`${set.name} solid`} checked={set.solid ?? false} disabled={frozen} onChange={e => patchSet(position, { solid: e.target.checked })} /></label>
                     </Row>

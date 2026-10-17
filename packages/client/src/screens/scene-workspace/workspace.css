@@ -235,6 +235,18 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead { display: flex; gap: 10px; margin: 4px 0 6px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; flex: 1; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platethumb { width: 40px; height: 71px; flex: none; border-radius: 6px; background: var(--muted) center / cover no-repeat; }
+/* The set kit (issue 1819, design turn 228e): Add set opens the kit, then primitives under a rule;
+   a room's openings are a list of one-line entries with their size and a remove. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitanchor { position: relative; display: flex; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 220px; max-height: 420px; overflow: auto; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu button { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: var(--type-label); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu button:hover { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__openings { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening { display: flex; align-items: center; gap: 6px; min-height: 22px; font: var(--weight-regular) var(--text-xs)/1.3 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening button { width: 18px; height: 18px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__opening button:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add { display: inline-flex; align-items: center; gap: 6px; height: 22px; align-self: flex-start; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); cursor: pointer; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:hover:not(:disabled) { color: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:disabled { opacity: .45; cursor: default; }

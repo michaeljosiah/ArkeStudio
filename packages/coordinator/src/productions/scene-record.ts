@@ -396,6 +396,14 @@ export function carriesStageConstruction(raw: string): boolean {
 
 /** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
 export const STAGE_PLATE_SCHEMA_VERSION = 84;
+/** A kit item on any set entry — the scene's or a shot's override — needs schema 85 (issue 1819). */
+export const STAGE_KIT_SCHEMA_VERSION = 85;
+export function carriesStageKit(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    return [scene.blocking?.sets, ...orderedShots(scene).map(shot => shot.staging?.sets)].some(sets => sets?.some(set => set.kit !== undefined));
+  } catch { return false; }
+}
 export function carriesStagePlate(raw: string): boolean {
   try { return parseSceneRecord(raw).blocking?.plate !== undefined; }
   catch { return false; }

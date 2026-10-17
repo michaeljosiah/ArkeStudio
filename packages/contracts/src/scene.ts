@@ -127,6 +127,39 @@ export const StagingFigureSchema = z
   });
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
+/**
+ * A set kit item (issue 1819, design turn 228e): one entry that expands into primitives
+ * (stage-kit.ts). Its x/z/y/w/h/d/rotation place and size the whole item; these fields say what
+ * it is and, for a room, which sides are open and where its doors and windows are.
+ */
+export const STAGE_KIT_KINDS = ["room", "doorway", "window", "stairs", "counter", "booth", "table", "armchair", "sofa", "bed", "planter", "tree", "lamp", "car", "street", "facade"] as const;
+export const StageKitSchema = z
+  .object({
+    kind: z.enum(STAGE_KIT_KINDS),
+    /** A room's sides with no wall, so the camera can stand outside it. */
+    open: z.array(z.enum(["front", "back", "left", "right"])).max(4).optional(),
+    ceiling: z.boolean().optional(),
+    /** Doors and windows cut into a room's walls; `at` is metres along the wall from its centre. */
+    openings: z
+      .array(
+        z.object({
+          wall: z.enum(["front", "back", "left", "right"]),
+          kind: z.enum(["door", "window", "glass"]),
+          at: z.number().finite(),
+          w: z.number().finite().positive().max(50),
+          h: z.number().finite().positive().max(50),
+          sill: z.number().finite().nonnegative().max(50).optional(),
+        }).strict(),
+      )
+      .max(12)
+      .optional(),
+    /** Chairs around a table. */
+    seats: z.number().int().min(0).max(12).optional(),
+    steps: z.number().int().min(2).max(40).optional(),
+  })
+  .strict();
+export type StageKit = z.infer<typeof StageKitSchema>;
+
 /** Set massing: a translucent box, named so the label reads on the floor. */
 export const StagingSetSchema = z
   .object({
@@ -138,6 +171,7 @@ export const StagingSetSchema = z
     y: z.number().finite().optional(),
     rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
     solid: z.boolean().optional(),
+    kit: StageKitSchema.optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),

@@ -76,6 +76,11 @@ const click = async (target: HTMLElement) => { await act(async () => target.clic
 const stageItem = (q: (selector: string) => HTMLElement, name: string): HTMLElement =>
   [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].find((item) => item.querySelector("span:nth-child(2)")?.textContent === name)!;
 const selectedItem = (q: (selector: string) => HTMLElement): string => q('.fy-swstage__item[data-selected="true"]')?.textContent ?? "";
+/** Add set opens the kit (issue 1819, design turn 228e); a plain box is its first primitive. */
+const addBox = async (q: (selector: string) => HTMLElement) => {
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  await click([...q('[data-testid="stage-kit-menu"]').querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Box")!);
+};
 const tick = async () => {
   const pending = [...frames.values()];
   frames.clear();
@@ -446,7 +451,7 @@ it("a set's form writes its place, size, rotation and group, and Add set selects
   assert.equal(set?.group, "wagon-train", "a group is a slug");
   assert.equal(command.staging?.objectMotions?.[0]?.group, "wagon-train", "the group's motion track follows its last set's new name");
   assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...shot.staging!, ...command.staging! }), 4), [], "what was Kept passes the write boundary");
-  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  await addBox(q);
   assert.match(selectedItem(q), /set 2/, "the new set is the thing to name next");
   assert.ok(q('[aria-label="Set 2 name"]'));
 });
@@ -573,7 +578,7 @@ it("a list line stands for every pick of its thing, and a line that leaves the l
   assert.equal(sameLine(null, { kind: "rig" }), false);
 
   const { q } = await mount(movingShot);
-  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  await addBox(q);
   assert.match(selectedItem(q), /set 2/);
   await click(q('[aria-label="Discard"]'));
   assert.equal(stageItem(q, "set 2"), undefined, "the discarded draft takes its set");
@@ -629,4 +634,28 @@ it("lists the plate second, opens its form, and Match camera puts the opening ke
   assert.deepEqual(opening?.p, [0.5, 1.1, 6]);
   assert.deepEqual(opening?.l, [0.9, 0.4, -6]);
   assert.equal(opening?.focalMm, 18);
+});
+
+// The set kit (issue 1819, design turn 228e).
+it("adds a room from the kit, with its own rows in place of a shape, and keeps it as one entry", async () => {
+  const { q, sent } = await mount();
+  const add = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__add")].find((button) => button.textContent === "Add set")!;
+  await click(add);
+  const menu = q('[data-testid="stage-kit-menu"]');
+  const labels = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent);
+  assert.deepEqual(labels.slice(0, 3), ["Room", "Doorway", "Window"]);
+  assert.deepEqual(labels.slice(-3), ["Box", "Cylinder", "Sphere"], "primitives after the kit");
+  await click([...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Room")!);
+  assert.equal(selectedItem(q).startsWith("room"), true, "the new item is selected");
+  assert.ok(q('[aria-label="room kit"]'), "the kit row");
+  assert.equal(q('[aria-label="room shape"]'), null, "no shape for a kit item");
+  assert.equal(q('[aria-label="room open sides"] [aria-pressed="true"]')?.textContent, "Front", "a room starts open where the camera stands");
+  await click([...q('[data-testid="stage-kit-openings"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Opening")!);
+  assert.match(q('[data-testid="stage-kit-openings"]').textContent ?? "", /door · back wall/);
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const sets = kept?.kind === "edit-stage" ? (kept.staging?.sets ?? kept.blocking?.sets) : undefined;
+  const room = sets?.find((set) => set.name === "room");
+  assert.deepEqual(room?.kit, { kind: "room", open: ["front"], openings: [{ wall: "back", kind: "door", at: 0, w: 1, h: 2.2 }] });
+  assert.deepEqual([room?.w, room?.h, room?.d], [6, 3, 8]);
 });
