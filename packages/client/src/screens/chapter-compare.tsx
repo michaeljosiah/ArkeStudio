@@ -65,7 +65,7 @@ export function CompareVersions({ kept, now, read, locked, onRestore, onClose }:
       <div className="fy-compare__grid">
         <div className="fy-compare__head fy-compare__cell--older">
           {pick(left, choices.filter((version) => version < right), setLeft)}
-          {left !== now.version && <Button variant="ghost" disabled={locked} onClick={() => onRestore(left)}>Restore</Button>}
+          {left !== now.version && <Button variant="ghost" className="fy-compare__restore" disabled={locked} onClick={() => onRestore(left)}>Restore v{left}</Button>}
         </div>
         <div className="fy-compare__head">
           {pick(right, choices.filter((version) => version > left), setRight)}
