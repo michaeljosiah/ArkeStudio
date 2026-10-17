@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import {
+import { stageDesignerBrief,
   orderedShots,
   stageShot,
   type HarnessAdapter,
@@ -126,7 +126,10 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     assert.match(prompts[0]!, /verse, under the water/);
     assert.match(prompts[1]!, /round-1-0-camera.png/);
     assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
-    assert.match(prompts[0]!, /Interior camera keys are passing waypoints/);
+    // The craft moved to the stage-designer's brief (issue 1822); the request keeps the contract.
+    assert.match(prompts[0]!, /easeIn\/easeOut apply at the first departure, the last arrival and holds/);
+    assert.match(stageDesignerBrief(), /interior keys are passing points, not stops/);
+    assert.doesNotMatch(prompts[0]!, /burgundy|ochre/, "the renders' cast colours are the current ones");
     assert.ok(Number(/"screenDirection":\{"total":(\d+)/.exec(prompts[1]!)?.[1]) > 12, "the crowded scene exceeds the old shared warning budget");
     assert.match(prompts[1]!, /Camera approaches moving @maren-kest/, "inspection receives whole-path standoff findings");
     assert.match(prompts[1]!, /frame-observation-39/, "line warnings must not displace any measured frame observations");
