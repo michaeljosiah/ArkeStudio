@@ -746,7 +746,7 @@ export const SceneBaseShape = {
           .array(z.object({ members: z.array(ShotIdSchema).min(1), text: z.string().min(1) }).strict())
           .optional(),
         /**
-         * A board's cut animatic (issue 1824, design turn 228g): its shots' cameras cut together over
+         * A board's cut animatic (issue 1824, design turn 229g): its shots' cameras cut together over
          * the scene's shared action, filed and pinned like a playblast, keyed by the exact member
          * set as a board prompt is. Stale when any member's staging, length, lens or the aspect moved.
          */

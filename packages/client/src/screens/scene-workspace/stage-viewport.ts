@@ -109,7 +109,7 @@ export interface StageData {
   atmosphere?: SceneAtmosphere;
   plate?: StagePlateView | null;
   /**
-   * A board (issue 1824, design turn 228g): this is the member at the playhead, the other members'
+   * A board (issue 1824, design turn 229g): this is the member at the playhead, the other members'
    * cameras stand where they open, numbered, and the lens preview says which cut it is showing.
    */
   board?: StageBoardView | null;

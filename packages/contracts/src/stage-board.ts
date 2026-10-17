@@ -5,7 +5,7 @@ import { stageBasePose } from "./stage-pose.js";
 import { stagingFollowLine, stagingPromptClause, type StageFollow } from "./stage-prompt.js";
 
 /**
- * A board on the Stage (issue 1824, design turn 228g): its shots cut together on one clock over
+ * A board on the Stage (issue 1824, design turn 229g): its shots cut together on one clock over
  * the scene's shared action, each with its own camera. The cut list, the line check across the
  * cuts, the animatic's pin and staleness, and the board's lines for the video model all read the
  * same member list, in the board's order.

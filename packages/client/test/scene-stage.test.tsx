@@ -804,7 +804,7 @@ async function mountBoard(stageSecond = true) {
 const scopeButton = (q: (selector: string) => HTMLElement, label: string) =>
   [...q('[data-testid="stage-scope"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === label)!;
 
-it("opens a board on one clock: the cut list, the line check, the shared action and the animatic (issue 1824, turn 228g)", async () => {
+it("opens a board on one clock: the cut list, the line check, the shared action and the animatic (issue 1824, turn 229g)", async () => {
   const { q, container } = await mountBoard();
   assert.equal(q('[data-testid="stage-board"]'), null, "the Stage opens on This shot");
   await click(scopeButton(q, "Board A"));

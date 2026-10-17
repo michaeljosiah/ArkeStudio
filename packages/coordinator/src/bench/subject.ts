@@ -614,7 +614,7 @@ export async function prepareBenchSubject(
   if (board === null) return { ok: false, reason: "That board no longer matches the current scene." };
   const members = board.memberShotIds.map((id) => shots.find((candidate) => candidate.id === id)!);
   // A board with a current animatic rides it as one reference video, with the plate first, as a
-  // staged shot does with its playblast (issue 1824, design turn 228h).
+  // staged shot does with its playblast (issue 1824, design turn 229h).
   const animatic = animaticToken(scene, world, board.memberShotIds, aspect, board.letter);
   const plate = animatic === null ? null : plateToken(scene, world);
   const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, plate === null ? 1 : 2)];

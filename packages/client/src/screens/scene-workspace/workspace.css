@@ -363,7 +363,7 @@
 :where([data-screen="scene-detail"]) .fy-swvoice__go:hover:not(:disabled) { background: var(--accent); }
 :where([data-screen="scene-detail"]) .fy-swvoice__go:disabled { opacity: .5; cursor: default; }
 :where([data-screen="scene-detail"]) .fy-swvoice__notice { color: var(--foreground); }
-/* A board on the Stage (issue 1824, design turn 228g): This shot · Board A, the cut list as the
+/* A board on the Stage (issue 1824, design turn 229g): This shot · Board A, the cut list as the
    track, the cuts marked on every lane, and the stage list read rather than picked. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope { display: inline-flex; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__scope button { height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
