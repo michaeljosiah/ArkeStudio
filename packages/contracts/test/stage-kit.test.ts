@@ -20,6 +20,15 @@ describe("the set kit (issue 1819)", () => {
     assert.ok(part(lobby, "floor"), "and stands on a floor");
   });
 
+  it("bounds a facade's windows however large the facade, spreading them over it", () => {
+    const facade = (w: number, h: number): StagingSet => ({ name: "block", x: 0, z: 0, w, h, d: 1, kit: { kind: "facade" } } as StagingSet);
+    const windows = (set: StagingSet) => expandStageSet(set).filter((candidate) => candidate.name.startsWith("block · window"));
+    assert.equal(windows(facade(10, 9)).length, 12, "an ordinary facade: a bay every 2.5 m, a floor every 3 m");
+    const huge = windows(facade(300, 300));
+    assert.ok(huge.length <= 48, `a 300 m facade is ${huge.length} windows, not 12,000`);
+    assert.ok(Math.max(...huge.map((candidate) => candidate.y ?? 0)) > 200, "the windows reach up the whole facade");
+  });
+
   it("cuts each opening out of its wall, with a header above a door and glass in a glazed opening", () => {
     const right = expandStageSet(lobby).filter((candidate) => candidate.name.startsWith("lobby · right wall"));
     // The door is 1.2 m wide at -2 m along the wall: no wall piece may stand inside it below its head.
