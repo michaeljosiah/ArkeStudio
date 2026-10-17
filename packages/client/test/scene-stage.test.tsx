@@ -76,7 +76,7 @@ const click = async (target: HTMLElement) => { await act(async () => target.clic
 const stageItem = (q: (selector: string) => HTMLElement, name: string): HTMLElement =>
   [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].find((item) => item.querySelector("span:nth-child(2)")?.textContent === name)!;
 const selectedItem = (q: (selector: string) => HTMLElement): string => q('.fy-swstage__item[data-selected="true"]')?.textContent ?? "";
-/** Add set opens the kit (issue 1819, design turn 228e); a plain box is its first primitive. */
+/** Add set opens the kit (issue 1819, design turn 229e); a plain box is its first primitive. */
 const addBox = async (q: (selector: string) => HTMLElement) => {
   await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
   await click([...q('[data-testid="stage-kit-menu"]').querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Box")!);
@@ -636,7 +636,7 @@ it("lists the plate second, opens its form, and Match camera puts the opening ke
   assert.equal(opening?.focalMm, 18);
 });
 
-// The set kit (issue 1819, design turn 228e).
+// The set kit (issue 1819, design turn 229e).
 it("adds a room from the kit, with its own rows in place of a shape, and keeps it as one entry", async () => {
   const { q, sent } = await mount();
   const add = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__add")].find((button) => button.textContent === "Add set")!;

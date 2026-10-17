@@ -128,7 +128,7 @@ export const StagingFigureSchema = z
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
 /**
- * A set kit item (issue 1819, design turn 228e): one entry that expands into primitives
+ * A set kit item (issue 1819, design turn 229e): one entry that expands into primitives
  * (stage-kit.ts). Its x/z/y/w/h/d/rotation place and size the whole item; these fields say what
  * it is and, for a room, which sides are open and where its doors and windows are.
  */
