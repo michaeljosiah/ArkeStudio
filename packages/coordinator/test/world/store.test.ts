@@ -251,6 +251,31 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  it("an operational write keeps the ownership gate without a world rescan (issue 1840)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const rescans = { n: 0 };
+    const live = store as unknown as { rescan: () => Promise<unknown> };
+    const rescan = live.rescan.bind(store);
+    live.rescan = async () => { rescans.n++; return rescan(); };
+    try {
+      // What conversation discovery and recovery do on every open: write only under paths the
+      // scan never reads, and the watcher ignores.
+      await store.operationalWrite(() => writeFile(join(dir, ".conversations-probe.txt"), "x", "utf8"));
+      assert.equal(rescans.n, 0, "nothing it writes is in the bundle");
+      await store.ownedWrite(async () => {});
+      assert.equal(rescans.n, 1, "an authored write still rescans");
+    } finally {
+      live.rescan = rescan;
+      await store.close();
+    }
+    const readOnly = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
+    let called = false;
+    await assert.rejects(() => readOnly.operationalWrite(async () => { called = true; }), /read-only/, "the ownership gate stays");
+    assert.equal(called, false);
+    await readOnly.close();
+  });
+
   it("opens a world with one malformed sheet, listing the failure (R-2)", async () => {
     const dir = await makeTempWorld();
     await writeFile(join(dir, "characters", "broken.md"), "no frontmatter at all", "utf8");

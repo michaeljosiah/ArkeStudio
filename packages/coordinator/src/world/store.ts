@@ -285,6 +285,19 @@ export class WorldStore {
     return this.serialise(async () => { await this.verifyOwnership(); return fn(); });
   }
 
+  /**
+   * App-owned writes confined to operational paths that the watcher ignores and the scan never
+   * reads: conversation logs and their repair (`.conversations`), conversation-action tombstones
+   * (`.history`). They keep `ownedWrite`'s ownership gate and serialisation, which is why these
+   * callers used it, but not its watcher suppression and full rescan: nothing they touch is in
+   * the bundle. On a large world each rescan cost seconds, and opening one ran four of them for
+   * conversation discovery and recovery alone (issue 1840). Authored files use `ownedWrite`.
+   */
+  async operationalWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
+    return this.serialise(async () => { await this.verifyOwnership(); return fn(); });
+  }
+
   /** UI capability only; every actual write still verifies the lock on disk. */
   canWrite(): boolean {
     try { this.assertWritable(); return true; } catch { return false; }
