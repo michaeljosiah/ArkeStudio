@@ -461,7 +461,7 @@ export async function prepareBenchSubject(
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
-    // A staged clip's location plate rides first (issue 1818, design turn 228h): the picture the
+    // A staged clip's location plate rides first (issue 1818, design turn 229h): the picture the
     // set was built from, so the generator sees the place the blockout moves through.
     const plate = mode === "video" && shot.staging !== undefined ? plateToken(scene, world) : null;
     const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, plate === null ? 1 : 2)];

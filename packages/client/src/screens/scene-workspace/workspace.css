@@ -215,7 +215,7 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
-/* The Stage's look and lights (issue 1825, design turn 228a/228e). The look control sits in the
+/* The Stage's look and lights (issue 1825, design turn 229a/229e). The look control sits in the
    viewport's corner before the ghost toggle and wears the modes' segment; the stage list groups
    set and lights under a mono count; a light's mark is its own colour. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--background) 92%, transparent); box-shadow: var(--shadow-xs); }
@@ -230,7 +230,7 @@
 /* The camera in words (issue 1820): the line saying where the words put the camera is data, in mono. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__quietmono { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
-/* The location plate (issue 1818, design turn 228): the blockout line opens with it, a thumbnail
+/* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
    and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the
    line's own "> span" rule would shrink and fade, so it restores both. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__plateanchor { font: inherit; opacity: 1; }
@@ -252,7 +252,7 @@
 /* The chip is not the reference underlay: sharing .fy-swstage__plate gave it the underlay's
    absolute centring and pointer-events none, so it floated over the line and could not be pressed. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
-/* The set kit (issue 1819, design turn 228e): Add set opens the kit, then primitives under a rule;
+/* The set kit (issue 1819, design turn 229e): Add set opens the kit, then primitives under a rule;
    a room's openings are a list of one-line entries with their size and a remove. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitanchor { position: relative; display: flex; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 220px; max-height: 420px; overflow: auto; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }

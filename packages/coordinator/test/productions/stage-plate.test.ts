@@ -10,7 +10,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
-/** The location plate on the scene's blocking (issue 1818, design turn 228c). */
+/** The location plate on the scene's blocking (issue 1818, design turn 229c). */
 
 const CLOCK = () => "2026-10-17T09:00:00.000Z";
 const PRODUCTION = "saltlight";

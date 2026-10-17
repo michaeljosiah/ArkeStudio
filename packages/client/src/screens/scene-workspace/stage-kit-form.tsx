@@ -4,7 +4,7 @@ import { Plus, X } from "../../components/icons.js";
 import { Row, Stepper, Value } from "./stage-inspector.js";
 
 /**
- * The set kit on the Stage (issue 1819, design turn 228e): Add set opens the kit, and a kit
+ * The set kit on the Stage (issue 1819, design turn 229e): Add set opens the kit, and a kit
  * item's form says what it is and, for a room, which sides are open and where its doors and
  * windows are. Everything else — place, size, turn, group — is the set form it always was.
  */

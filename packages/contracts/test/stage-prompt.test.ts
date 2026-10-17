@@ -9,7 +9,7 @@ import {
   type ResolvedShotStaging,
 } from "../src/index.js";
 
-// The lobby of design turn 228: Ade waits in an armchair, Ife crosses from the lifts and leans in.
+// The lobby of design turn 229: Ade waits in an armchair, Ife crosses from the lifts and leans in.
 const lobby = (): ResolvedShotStaging => ({
   version: 1,
   cast: [{ sheetId: "ade", x: 1.3, z: 0.05, pose: "sit" }, { sheetId: "ife", x: 3.55, z: -2.5 }],
