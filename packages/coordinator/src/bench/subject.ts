@@ -26,6 +26,8 @@ import {
   stagingPromptClause,
   STAGE_PLATE_DETAIL,
   scenePlateName,
+  stageBriefForRouting,
+  stageRoutingCitations,
   supportsMode,
   type AppSettings,
   type BenchComposer,
@@ -382,6 +384,24 @@ export function subjectSessionReferenceRouting(
     activeTokens: mergeLane(session.composer.activeTokens, routed.activeTokens),
     keyframeTokens: mergeLane(session.composer.keyframeTokens, routed.keyframeTokens),
   };
+}
+
+/**
+ * A rerouted subject session's brief (issue 1817). The prefill wrote its References and follow
+ * lines for the route it opened on; when a model switch reroutes the subject's references, those
+ * lines are rewritten for exactly what rides now, so the brief never cites a reference the route
+ * dropped and a video that starts riding is followed as the take records.
+ */
+export function subjectRoutedBrief(
+  session: BenchSession,
+  riding: readonly string[],
+  composer: Pick<BenchComposer, "brief" | "params">,
+  nameOf: (sheetId: string) => string,
+): string {
+  if (session.subject === undefined || session.subject.kind === "production") return composer.brief;
+  const references = session.subjectTokens.flatMap((token) => session.tokenRegistry.find((candidate) => candidate.token === token) ?? []);
+  const follow = composer.params.kind === "video" ? composer.params.follow ?? "camera-action" : "camera-action";
+  return stageBriefForRouting(composer.brief, { ...stageRoutingCitations(references, riding, nameOf), follow });
 }
 
 function boardFor(

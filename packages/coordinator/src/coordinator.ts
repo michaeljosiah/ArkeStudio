@@ -223,7 +223,7 @@ import {
   type BenchRecoveryJobFacts,
   type OpenedBench,
 } from "./bench/service.js";
-import { prepareBenchSubject, subjectSessionReferenceRouting } from "./bench/subject.js";
+import { prepareBenchSubject, subjectRoutedBrief, subjectSessionReferenceRouting } from "./bench/subject.js";
 import {
   chainBenchSubjectBoundary,
   copyBenchSubjectPoster,
@@ -12737,6 +12737,8 @@ export class Coordinator {
           (candidate) => candidate.provider === msg.provider && candidate.id === msg.model,
         ) ?? null;
         const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
+        // The brief's References and follow lines follow the route (issue 1817).
+        const brief = subjectRouting === undefined ? msg.brief : subjectRoutedBrief(bench.session, subjectRouting.activeTokens, { brief: msg.brief, params: msg.params }, this.benchSheetName(msg.worldId));
         // A line's direction (design turn 181) is a field the Bench session log of a build
         // before it cannot parse, and that build drops the line and would number its next event
         // over it: the world is raised first, as the audiobook's direction raises it.
@@ -12750,7 +12752,7 @@ export class Coordinator {
             provider: msg.provider,
             model: msg.model,
             params: msg.params,
-            brief: msg.brief,
+            brief,
             ...(subjectRouting !== undefined ? { subjectRouting } : {}),
           },
           { at: this.nowIso(), requestId: msg.requestId },
@@ -12882,8 +12884,10 @@ export class Coordinator {
               candidate.provider === msg.composer.provider && candidate.id === msg.composer.model,
           ) ?? null;
           const subjectRouting = subjectSessionReferenceRouting(currentSession, model);
+          const brief = subjectRouting === undefined ? msg.composer.brief : subjectRoutedBrief(currentSession, subjectRouting.activeTokens, msg.composer, this.benchSheetName(msg.worldId));
           const composer = {
             ...msg.composer,
+            brief,
             activeTokens: subjectRouting?.activeTokens ?? currentSession.composer.activeTokens,
             keyframeTokens: subjectRouting?.keyframeTokens ?? currentSession.composer.keyframeTokens,
           };
@@ -12892,6 +12896,7 @@ export class Coordinator {
               {
                 type: "composer-set",
                 ...msg.composer,
+                brief,
                 ...(subjectRouting !== undefined ? { subjectRouting } : {}),
               },
               { at: this.nowIso(), requestId: `${msg.requestId}/compose` },
@@ -19924,6 +19929,13 @@ export class Coordinator {
     }
   }
 
+  /** A cast sheet's name for a Bench brief, read from the open world; the id once the sheet is gone. */
+  private benchSheetName(worldId: string): (sheetId: string) => string {
+    const store = this.opts.provider.openStore?.();
+    const sheets = store && store.worldId === worldId ? store.getBundle().sheets : [];
+    return (sheetId) => sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+  }
+
   private async benchFor(worldId: string, sessionId: SessionId): Promise<OpenedBench | null> {
     const store = this.opts.provider.openStore?.();
     if (!store || store.worldId !== worldId) return null;
@@ -20597,6 +20609,7 @@ export class Coordinator {
       ...bench.session,
       composer: {
         ...action.composer,
+        ...(subjectRouting ? { brief: subjectRoutedBrief(bench.session, subjectRouting.activeTokens, action.composer, (sheetId) => store.getBundle().sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId) } : {}),
         activeTokens: subjectRouting?.activeTokens ?? bench.session.composer.activeTokens,
         keyframeTokens: subjectRouting?.keyframeTokens ?? bench.session.composer.keyframeTokens,
       },
