@@ -13,7 +13,7 @@ import {
   type ResolvedShotStaging,
 } from "../src/index.js";
 
-/** Poses, contacts and turns (issue 1821, design turn 228d). */
+/** Poses, contacts and turns (issue 1821, design turn 229d). */
 
 // Ade sits facing +Z; Ife walks up behind him and leans on his left shoulder, looking at him.
 const lobby = (): ResolvedShotStaging => ({

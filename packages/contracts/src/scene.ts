@@ -348,7 +348,7 @@ export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
 export type StageGait = z.infer<typeof StageGaitSchema>;
 
 /**
- * What a figure is doing at a mark (issue 1821, design turn 228d). Stand, sit and lie are the
+ * What a figure is doing at a mark (issue 1821, design turn 229d). Stand, sit and lie are the
  * postures the Stage always had; the rest are the actions scripts ask for. The jointed figure
  * draws each by name; Greybox's capsules fall back to the nearest of the three.
  */

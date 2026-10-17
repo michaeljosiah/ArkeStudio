@@ -3,7 +3,7 @@ import { stageObjectAt } from "./stage-camera.js";
 import type { StageContact, StagePerformanceKey, StagePose } from "./scene.js";
 
 /**
- * Poses, contacts and turns (issue 1821, design turn 228d). A figure holds a named pose at a
+ * Poses, contacts and turns (issue 1821, design turn 229d). A figure holds a named pose at a
  * mark; a hand can be put on someone or something, and the jointed figure's arm reaches it; a
  * head can look at someone. These are the parts every renderer and the prompt read the same way.
  */

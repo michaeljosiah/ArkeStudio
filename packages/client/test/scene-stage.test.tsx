@@ -749,7 +749,7 @@ it("writes the camera in words, hides the numbers behind Edit as numbers, and dr
   assert.equal(edited?.kind === "edit-stage" ? edited.staging?.keys[0]?.frame : "missing", undefined, "a hand edit makes the key numbers again");
 });
 
-// Poses, contacts and turns (issue 1821, design turn 228d).
+// Poses, contacts and turns (issue 1821, design turn 229d).
 it("poses a mark by name, puts a hand on someone, looks at them, and warns of a spin", async () => {
   const { q, sent } = await mount((shot) => {
     shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "ivo-rell", x: 1, z: 0 }];
