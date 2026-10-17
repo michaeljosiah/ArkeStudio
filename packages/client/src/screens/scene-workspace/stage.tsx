@@ -44,6 +44,8 @@ import {
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
 import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
+import { PlateChip, PlateForm, type PlateCandidate } from "./stage-plate.js";
+import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -208,6 +210,10 @@ export function SceneStage({
   const [keyIndex, setKeyIndex] = useState(0);
   const [mode, setMode] = useState<"look" | "camera">("look");
   const [selection, setSelection] = useState<StageSelection>(null);
+  // The plate is the scene's, not a thing in the viewport, so selecting it is the panel's own state.
+  const [plateSelected, setPlateSelected] = useState(false);
+  // Where a build estimated the plate's camera; Keep saves it on the plate (issue 1818).
+  const [draftPlateCamera, setDraftPlateCamera] = useState<ScenePlate["camera"] | null>(null);
   const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
@@ -611,6 +617,7 @@ export function SceneStage({
       aiDraftVersion.current = pending.version;
       setScope("shot");
       setDraft({ ...result.draft.staging, version: persisted?.version ?? 1, cast: result.draft.cast, sets: result.draft.sets });
+      setDraftPlateCamera(result.draft.plateCamera ?? null);
     }
     if (result.status === "inspect") setInspectionRound(result.round);
     if (result.status === "ready" && constructionRequest) retainedReviewId.current = pending.id;
@@ -627,6 +634,7 @@ export function SceneStage({
       cameraDirty.current = true; blockingDirty.current = true; scopeDirty.current = true;
       setScope("shot");
       setDraft({ ...retained.draft.staging, version: persisted?.version ?? 1, cast: retained.draft.cast, sets: retained.draft.sets });
+      setDraftPlateCamera(retained.draft.plateCamera ?? null);
       setNote(retained.draft.assessment);
     } else if (!retained && state?.stageReviews !== undefined && hydratedReviewId.current && retainedReviewId.current && !constructing) {
       retainedReviewId.current = null; hydratedReviewId.current = null; aiDraftVersion.current = null;
@@ -731,7 +739,14 @@ export function SceneStage({
       };
     }
     if (sharedChanged) command.blocking = { cast: working.cast, sets: working.sets };
-    if (onCommand(command, retainedReviewId.current ?? undefined)) aiDraftVersion.current = null;
+    const plate = scene.blocking?.plate;
+    if (draftPlateCamera !== null && plate !== undefined) {
+      // A build that read the plate says where its camera stood; that lands with the Keep, on the
+      // scene's own marks unless this Keep moves those too, so a shot override never leaks into them.
+      const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
+      command.blocking = { ...marks, plate: { ...plate, camera: draftPlateCamera } };
+    }
+    if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); }
   };
   const discard = () => {
     if (retainedReviewId.current && !send({ kind: "stage-review-discard", worldId: world.meta.worldId, reviewId: retainedReviewId.current })) {
@@ -739,6 +754,7 @@ export function SceneStage({
     }
     retainedReviewId.current = null;
     aiDraftVersion.current = null;
+    setDraftPlateCamera(null);
     cameraDirty.current = false;
     blockingDirty.current = false;
     scopeDirty.current = false;
@@ -994,7 +1010,37 @@ export function SceneStage({
     setDraft(edited);
   };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
+  /**
+   * The plate is written with the scene's own marks, so the write moves nothing else (issue 1818).
+   * A scene without blocking has none: the marks on screen may be this shot's own, and writing them
+   * as the scene's would hand them to every shot that inherits.
+   */
+  const writePlate = (next: ScenePlate | null) => {
+    if (shot === null || working === null) return;
+    const marks = scene.blocking ?? { cast: [], sets: [] };
+    onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, plate: next } });
+  };
+  const pickPlate = (candidate: PlateCandidate) => {
+    if (shot === null) return;
+    const plate = scene.blocking?.plate;
+    // Another picture is another view: the old camera estimate does not carry over to it.
+    writePlate({
+      source: { source: "artifact", artifactId: candidate.id, hash: candidate.hash },
+      label: plate?.label ?? candidate.location ?? "Location",
+      shotId: plate?.shotId ?? shot.id,
+      ...(plate?.rides === false ? { rides: false } : {}),
+    });
+  };
+  const matchPlate = () => {
+    const plate = scene.blocking?.plate;
+    if (plate === undefined) return;
+    patchCamera((current) => {
+      const opening = stagePlateKey(plate, current.keys[0]);
+      return opening === null ? current : { ...current, keys: [opening, ...current.keys.slice(1)] };
+    });
+  };
   const pick = (next: Exclude<StageSelection, null>) => {
+    setPlateSelected(false);
     const selected: StageSelection = sameLine(selection, next) ? null : next;
     setSelection(selected);
     setMotionMark(null);
@@ -1082,6 +1128,7 @@ export function SceneStage({
 
       <div className="fy-swstage__construction">
         {cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet">{warning}</p>)}
+        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} onPick={pickPlate} />}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
         {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
@@ -1182,6 +1229,19 @@ export function SceneStage({
                   <span>camera</span>
                   <span>{stagingMotionWord(working, durationSec)} · {keys.length} {keys.length === 1 ? "key" : "keys"}</span>
                 </button>
+                {scene.blocking?.plate === undefined ? null : (
+                  <button
+                    type="button"
+                    className="fy-swstage__item"
+                    data-selected={plateSelected ? "true" : undefined}
+                    data-testid="stage-plate-line"
+                    onClick={() => { setSelection(null); viewport.current?.select(null); setPlateSelected((on) => !on); }}
+                  >
+                    <span className="fy-swstage__mark" data-kind="plate" aria-hidden="true" />
+                    <span>plate</span>
+                    <span>{scene.blocking.plate.label} · {scene.blocking.plate.camera === undefined ? "not matched" : "matched"}</span>
+                  </button>
+                )}
                 {working.cast.map((figure, position) => (
                   <button
                     key={figure.sheetId}
@@ -1212,6 +1272,20 @@ export function SceneStage({
                 <button type="button" className="fy-swstage__add" disabled={frozen} onClick={addSet}><Plus size={12} />Add set</button>
               </div>
 
+              {plateSelected && scene.blocking?.plate !== undefined ? (
+                <PlateForm
+                  plate={scene.blocking.plate}
+                  world={world}
+                  productionId={production.meta.id}
+                  shots={shots}
+                  currentShotId={shot.id}
+                  disabled={frozen || locked || moved}
+                  onChange={writePlate}
+                  onReplace={pickPlate}
+                  onMatch={matchPlate}
+                  onRemove={() => { setPlateSelected(false); writePlate(null); }}
+                />
+              ) : null}
               {(selection?.kind === "rig" || selection?.kind === "aim") && activeKey !== null ? (
                 <div className="fy-swstage__block">
                   <Eyebrow title="Camera" meta={keyName(active, keys.length)} />

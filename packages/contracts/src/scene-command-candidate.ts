@@ -4,6 +4,7 @@ import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import type { SceneBlocking, SceneCastMember, Shot, ShotStageEdit } from "./scene.js";
 import type { WorldBundle } from "./client-state.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 
 export type SemanticSceneCommand =
   | {
@@ -13,7 +14,7 @@ export type SemanticSceneCommand =
       inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
       cast?: Record<string, SceneCastMember | null>;
     }
-  | { kind: "edit-stage"; shotId: string; blocking?: Omit<SceneBlocking, "version"> | null; staging?: ShotStageEdit | null }
+  | { kind: "edit-stage"; shotId: string; blocking?: (Omit<SceneBlocking, "version" | "plate"> & { plate?: SceneBlocking["plate"] | null }) | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
@@ -48,12 +49,25 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       if (current === undefined) {
         throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
       }
+      // A plate is a picture this production may use (SPEC-020 R-13): another production's scoped
+      // image is not its to build from or send, whatever a picker offered (issue 1818).
+      const plateSource = command.blocking?.plate?.source;
+      if (plateSource?.source === "artifact") {
+        const owned = resolveProductionArtifact(bundle.artifacts, plateSource.artifactId, productionId);
+        if (!owned.ok && owned.code === "other-production") throw new SceneOperationRefused([`the plate is ${owned.reason}`]);
+      }
       let next = editScene(record, {});
       if (command.blocking !== undefined) {
         next = editScene(next, {
           blocking: command.blocking === null
             ? undefined
-            : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
+            : (() => {
+                // The plate is the scene's too, but most blocking edits move marks and boxes and never
+                // mention it; leaving it out keeps it, and only an explicit null takes it off (issue 1818).
+                const { plate, ...marks } = command.blocking;
+                const kept = plate === undefined ? record.blocking?.plate : plate ?? undefined;
+                return { ...marks, ...(kept === undefined ? {} : { plate: kept }), version: (record.blocking?.version ?? 0) + 1 };
+              })(),
         });
       }
       if (command.staging) {

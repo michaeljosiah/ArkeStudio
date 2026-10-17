@@ -823,6 +823,41 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
 });
 
 describe("the Stage's handoff to the bench", () => {
+  it("rides the scene's location plate as Image 1 and cites it by its name (issue 1818)", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    world.artifacts.push({ id: "ar_01J8G0000000000000000000A4", kind: "image", file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" }, links: [], created: CLOCK() });
+    shot.staging = {
+      version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [],
+      keys: [{ t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0] }, { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0] }],
+    };
+    scene.blocking = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [],
+      plate: { source: { source: "artifact", artifactId: "ar_01J8G0000000000000000000A4", hash: "sha256:aaaabbbbccccdddd" }, label: "Lobby", shotId: "sh_12" } };
+    const prepare = () => prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    const video = await prepare();
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    const [plate, maren] = video.prefill.references.filter((reference) => reference.kind === "image");
+    assert.equal(plate?.token, "Image 1");
+    assert.equal(plate?.label, "Lobby · plate");
+    assert.deepEqual(plate?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A4", hash: "sha256:aaaabbbbccccdddd" });
+    assert.equal(maren?.token, "Image 2", "the cast follows the place");
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 the lobby · @Image 2 Maren Kest\.$/m);
+
+    scene.blocking.plate!.rides = false;
+    const off = await prepare();
+    assert.ok(off.ok);
+    if (!off.ok) return;
+    assert.equal(off.prefill.references.some((reference) => reference.label === "Lobby · plate"), false, "a plate set to Off does not ride");
+    assert.equal(off.prefill.references.find((reference) => reference.kind === "image")?.token, "Image 1");
+  });
+
   it("opens a staged shot in video mode with its opening frame riding and its move written as beats", async () => {
     const { store } = await openWorld();
     const world = store.getBundle();

@@ -215,6 +215,29 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
+/* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
+   and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the
+   line's own "> span" rule would shrink and fade, so it restores both. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__plateanchor { font: inherit; opacity: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__plateanchor { position: relative; display: inline-flex; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip { display: inline-flex; align-items: center; gap: 8px; height: 30px; box-sizing: border-box; padding: 0 10px 0 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: var(--type-label); cursor: pointer; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip:hover:not(:disabled) { background: var(--accent); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip:disabled { opacity: .55; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip i { width: 18px; height: 24px; border-radius: 3px; background: var(--muted) center / cover no-repeat; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platechip[data-empty="true"] { border-style: dashed; color: var(--muted-foreground); padding-left: 10px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platescrim { position: fixed; inset: 0; z-index: 29; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platepicker { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 344px; max-height: 360px; overflow: auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 10px; box-sizing: border-box; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platepicker button { display: flex; flex-direction: column; gap: 4px; border: 0; background: none; padding: 0; cursor: pointer; color: var(--muted-foreground); font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); text-align: left; min-width: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platepicker button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platepicker button i { aspect-ratio: 9 / 16; border-radius: 6px; border: 1px solid var(--border); background: var(--muted) center / cover no-repeat; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platepicker button:hover i { border-color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead { display: flex; gap: 10px; margin: 4px 0 6px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; flex: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platethumb { width: 40px; height: 71px; flex: none; border-radius: 6px; background: var(--muted) center / cover no-repeat; }
+/* The chip is not the reference underlay: sharing .fy-swstage__plate gave it the underlay's
+   absolute centring and pointer-events none, so it floated over the line and could not be pressed. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add { display: inline-flex; align-items: center; gap: 6px; height: 22px; align-self: flex-start; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); cursor: pointer; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:hover:not(:disabled) { color: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__add:disabled { opacity: .45; cursor: default; }

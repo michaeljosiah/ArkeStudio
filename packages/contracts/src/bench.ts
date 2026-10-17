@@ -228,14 +228,8 @@ export type BenchParams = z.infer<typeof BenchParamsSchema>;
  * schema is where the shape is settled, so a malformed path never reaches code that assumes it
  * is well formed. Forward slashes because a world moves across platforms (R-24).
  */
-export const WorldFilePathSchema = z
-  .string()
-  .min(1)
-  .max(400)
-  .refine((value) => !value.startsWith("/"), "a world path is relative")
-  .refine((value) => !value.includes("\\"), "a world path uses forward slashes")
-  .refine((value) => !/^[a-zA-Z]:/.test(value), "a world path carries no drive letter")
-  .refine((value) => !value.split("/").includes(".."), "a world path cannot climb out of the world");
+export { WorldFilePathSchema } from "./ids.js";
+import { WorldFilePathSchema } from "./ids.js";
 
 export const BenchReferenceSourceSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict(),
