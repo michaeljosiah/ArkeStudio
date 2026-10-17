@@ -59,7 +59,7 @@ import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
-import { ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
+import { Check, ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type MotionLane = { kind: "performance" | "object"; id: string };
@@ -291,6 +291,16 @@ export function SceneStage({
   const [instruction, setInstruction] = useState("");
   const [preserve, setPreserve] = useState<"blocking" | "camera" | "none">("blocking");
   const [inspectionRound, setInspectionRound] = useState<number | null>(null);
+  // Build with Arke's working log (issue 1823, design turn 228f): a line per step as it lands, the
+  // pictures a render looked at, and the build's clock.
+  const [buildLog, setBuildLog] = useState<{ steps: Array<{ label: string; detail?: string; thumbs?: string[] }>; calls: number; round: number; started: number } | null>(null);
+  const renderThumb = useRef<string | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!constructing) return;
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [constructing]);
   const construction = useRef<{ id: string; version: number } | null>(null);
   const inspectionTimes = useRef<number[]>([]);
   const aiDraftVersion = useRef<number | null>(null);
@@ -800,7 +810,17 @@ export function SceneStage({
       send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: pending.id });
       setConstructing(false); setNote("The scene changed. Rebuild the blockout."); return;
     }
-    setNote(result.detail);
+    if (result.step) {
+      const step = result.step;
+      const thumbs = step.label.startsWith("render") && renderThumb.current !== null ? [...(plateView ? [plateView.url] : []), renderThumb.current] : undefined;
+      if (thumbs) renderThumb.current = null;
+      setBuildLog((log) => log === null ? log : {
+        ...log,
+        steps: [...log.steps, { label: step.label, ...(step.detail ? { detail: step.detail } : {}), ...(thumbs ? { thumbs } : {}) }].slice(-16),
+        calls: result.calls ?? log.calls,
+        round: result.round,
+      });
+    } else setNote(result.detail);
     if (result.draft) {
       inspectionTimes.current = result.draft.sampleTimes ?? [];
       cameraDirty.current = true; blockingDirty.current = true; scopeDirty.current = true;
@@ -844,6 +864,8 @@ export function SceneStage({
       if (!pending) return;
       if (!view) { setNote("3D rendering is unavailable. The partial draft is retained."); send({kind:"stage-construct-cancel",worldId:world.meta.worldId,requestId:pending.id}); return; }
       void view.inspectFrames(inspectionTimes.current).then(frames => {
+        const camera = frames.find((frame) => frame.view === "camera");
+        if (camera) renderThumb.current = `data:image/png;base64,${camera.png}`;
         if (live) send({ kind: "stage-inspection", worldId: world.meta.worldId, requestId: pending.id, round, frames });
       }).catch(error => {
         if (live) { setNote(String(error)); send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: pending.id }); }
@@ -862,7 +884,9 @@ export function SceneStage({
     stop();
     const id = crypto.randomUUID();
     if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted || scene.blocking ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
-      construction.current = { id, version: scene.version }; setConstructing(true); setNote("Constructing the scene and camera…");
+      construction.current = { id, version: scene.version }; setConstructing(true); setNote(null);
+      const started = Date.now();
+      setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null;
     }
   };
   const handledConstructions = useRef(new Set<string>());
@@ -1373,7 +1397,7 @@ export function SceneStage({
             <span className="fy-swstage__version">
               {boardOn
                 ? `v${scene.version} · ${boardLines.length === 0 ? "180° clear" : `${boardLines.length} line ${boardLines.length === 1 ? "crossing" : "crossings"}`}`
-                : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec)}`}
+                : constructing ? `building · v${persisted?.version ?? 1}` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec)}`}
             </span>
           )}
           {fullscreen === null ? null : (
@@ -1406,7 +1430,7 @@ export function SceneStage({
           aria-disabled={working?.authorship ? undefined : "true"}
           onToggle={(event) => { if (!working?.authorship && event.currentTarget.open) event.currentTarget.open = false; }}
         >
-          <summary tabIndex={working?.authorship ? undefined : -1} onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />AI inspection and assumptions</summary>
+          <summary tabIndex={working?.authorship ? undefined : -1} onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />{constructing ? "Working" : "AI inspection and assumptions"}</summary>
           {working?.authorship ? <><p>{working.authorship.assessment}</p><ul>{working.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{working.authorship.model} · {working.authorship.inspectedFrames} views inspected</small></> : null}
         </details>
       </div>
@@ -1420,6 +1444,24 @@ export function SceneStage({
             </div>
           ) : null}
           {busy ? <div className="fy-swstage__busy">staging…</div> : null}
+          {constructing && buildLog !== null ? (
+            <div className="fy-swstage__log" data-testid="stage-build-log" aria-live="polite">
+              <div className="fy-swstage__loghead">
+                <span>Working</span>
+                <span>round {buildLog.round} · {buildLog.calls} calls · {(() => { const seconds = Math.max(0, Math.floor((clockNow - buildLog.started) / 1000)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; })()}</span>
+              </div>
+              {buildLog.steps.map((step, position) => (
+                <Fragment key={position}>
+                  <div className="fy-swstage__logstep" data-state={position === buildLog.steps.length - 1 ? "run" : "ok"}>
+                    <span aria-hidden="true">{position === buildLog.steps.length - 1 ? <i /> : <Check size={12} />}</span>
+                    <span>{step.label}</span>
+                    <span>{step.detail ?? ""}</span>
+                  </div>
+                  {step.thumbs ? <div className="fy-swstage__logthumbs">{step.thumbs.map((src) => <i key={src.slice(-24)} style={{ backgroundImage: `url(${src})`, aspectRatio: aspect.replace(":", " / ") }} />)}</div> : null}
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
           {mode === "camera" ? (
             <div className="fy-swstage__safe" aria-hidden="true"><span /><span /><span /></div>
           ) : null}
@@ -1485,7 +1527,7 @@ export function SceneStage({
               {/* The stage list (turn 144): what is on the stage, one line each with its state. A press
                   is the viewport's selection too, and pressing the selected line again clears it. */}
               <div className="fy-swstage__block">
-                <Eyebrow title="Stage" />
+                <Eyebrow title="Stage" meta={constructing ? "building" : scope === "scene" ? "shared · scene" : "this shot"} />
                 <button
                   type="button"
                   className="fy-swstage__item"
@@ -2047,7 +2089,7 @@ export function SceneStage({
               <div className="fy-swstage__block fy-swstage__block--ways">
                 <Row label="playblast">
                   <span className="fy-swstage__value" data-filed={filed === undefined || stale ? undefined : "true"}>
-                    {filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
+                    {constructing ? <span className="fy-swstage__warnstate">building</span> : filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
                   </span>
                 </Row>
                 {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}

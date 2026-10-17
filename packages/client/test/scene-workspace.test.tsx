@@ -241,6 +241,29 @@ describe("scene detail owns the workspace", () => {
     assert.equal(write.command.staging?.cast?.[0]?.parent,"vehicle");
   });
 
+  it("shows a tool build as a working log, a line per step as it lands (issue 1823, turn 228f)",async()=>{
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
+    await openStage(mounted);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    const base={type:"stage.construction" as const,at:"2026-10-17T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working" as const,round:0};
+    const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}]};
+    await apply({...base,detail:"read plate",step:{label:"read plate",detail:"Deck"},calls:0});
+    await apply({...base,detail:"deck · room 8 × 10 × 4",step:{label:"deck · room 8 × 10 × 4",detail:"kit"},calls:2,draft:{staging,cast:[],sets:[{name:"deck",x:0,z:0,w:8,h:4,d:10}],assumptions:[],assessment:"",inspected:[]}});
+    await apply({...base,round:1,detail:"check",step:{label:"check",detail:"180° · standoff · speed · clear"},calls:7});
+    const log=q(mounted,'[data-testid="stage-build-log"]');
+    assert.ok(log,"the log stands over the viewport while the build works");
+    assert.match(log?.textContent??"",/round 1 · 7 calls · 0:0\d/);
+    const lines=all(mounted,".fy-swstage__logstep");
+    assert.deepEqual(lines.map(line=>line.querySelector("span:nth-child(2)")?.textContent),["read plate","deck · room 8 × 10 × 4","check"]);
+    assert.deepEqual(lines.map(line=>line.getAttribute("data-state")),["ok","ok","run"],"the latest step is the one running");
+    assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/building/);
+    assert.match(q(mounted,".fy-swstage__inspection summary")?.textContent??"",/Working/);
+    await apply({...base,status:"ready",round:1,detail:"Ready",draft:{staging,cast:[],sets:[{name:"deck",x:0,z:0,w:8,h:4,d:10}],assumptions:[],assessment:"Deck built.",inspected:[]}});
+    assert.equal(q(mounted,'[data-testid="stage-build-log"]'),null,"the log goes when the build is done");
+  });
+
   for (const entryContext of [
     { kind: "world" },
     { kind: "production", productionId: "saltlight" },
