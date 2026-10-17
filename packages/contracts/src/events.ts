@@ -171,7 +171,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
   /** Unexpected command failures are transient notices, never evidence of rollback (#926). */
   z.object({ ...base, type: z.literal("command.failed"), command: z.string(),
     requestId: z.string().nullable(), reason: z.string() }).strict(),
-  z.object({ type: z.literal("stage.construction"), at: z.string(), worldId: z.string(), requestId: z.string(), sceneId: z.string(), shotId: z.string(), baseVersion: z.number(), status: z.enum(["working", "inspect", "ready", "failed"]), detail: z.string(), round: z.number().int(), draft: StageConstructionDraftSchema.optional() }).strict(),
+  z.object({ type: z.literal("stage.construction"), at: z.string(), worldId: z.string(), requestId: z.string(), sceneId: z.string(), shotId: z.string(), baseVersion: z.number(), status: z.enum(["working", "inspect", "ready", "failed"]), detail: z.string(), round: z.number().int(), draft: StageConstructionDraftSchema.optional(),
+    /** A tool build's step as it lands (issue 1823, design turn 229f): the working log's line, and the calls so far. */
+    step: z.object({ label: z.string().max(200), detail: z.string().max(200).optional() }).strict().optional(), calls: z.number().int().nonnegative().optional() }).strict(),
 
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),

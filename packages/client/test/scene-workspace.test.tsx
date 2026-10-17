@@ -225,9 +225,9 @@ describe("scene detail owns the workspace", () => {
     assert.ok(request);
     const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}],objectMotions:[{group:"vehicle",keys:[{t:0,p:[0,0,0] as [number,number,number]},{t:4,p:[0,0,5] as [number,number,number]}]}],authorship:{model:"test/vision",sourceVersion:request.baseVersion,assumptions:["Vehicle is stationary at opening."],assessment:"Framing inspected.",inspectedFrames:6}};
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working",round:0,detail:"Inspecting next",draft:{staging,cast:[],sets:[],assumptions:[],assessment:"Draft",inspected:[]}});
-    const inspectingKeep = all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!;
-    assert.equal((inspectingKeep as HTMLButtonElement).disabled, true, "Keep waits for construction to finish (issue 1127)");
-    await click(inspectingKeep);
+    // Keep waits for construction to finish (issue 1127): while the build works there is no Keep
+    // to press at all (design turn 229f), so an in-flight draft cannot be presented as saved.
+    assert.equal(q(mounted,'[data-testid="stage-moved"]'), null, "no Keep while the build works");
     assert.equal(sent.some(message=>message.kind==="scene-command"), false, "an in-flight draft cannot be presented as saved");
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:2,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",parent:"vehicle",x:0,z:0}],sets:[{name:"Vehicle",group:"vehicle",x:0,z:0,w:2,h:1,d:4,solid:true}],assumptions:[],assessment:"Inspected",inspected:[]}});
     assert.equal(sent.some(message=>message.kind==="scene-command"),false,"AI construction does not file changes");
@@ -239,6 +239,29 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(write.command.staging?.objectMotions,staging.objectMotions);
     assert.deepEqual(write.command.staging?.authorship,staging.authorship);
     assert.equal(write.command.staging?.cast?.[0]?.parent,"vehicle");
+  });
+
+  it("shows a tool build as a working log, a line per step as it lands (issue 1823, turn 229f)",async()=>{
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
+    await openStage(mounted);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    const base={type:"stage.construction" as const,at:"2026-10-17T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working" as const,round:0};
+    const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}]};
+    await apply({...base,detail:"read plate",step:{label:"read plate",detail:"Deck"},calls:0});
+    await apply({...base,detail:"deck · room 8 × 10 × 4",step:{label:"deck · room 8 × 10 × 4",detail:"kit"},calls:2,draft:{staging,cast:[],sets:[{name:"deck",x:0,z:0,w:8,h:4,d:10}],assumptions:[],assessment:"",inspected:[]}});
+    await apply({...base,round:1,detail:"check",step:{label:"check",detail:"180° · standoff · speed · clear"},calls:7});
+    const log=q(mounted,'[data-testid="stage-build-log"]');
+    assert.ok(log,"the log stands over the viewport while the build works");
+    assert.match(log?.textContent??"",/round 1 · 7 calls · 0:0\d/);
+    const lines=all(mounted,".fy-swstage__logstep");
+    assert.deepEqual(lines.map(line=>line.querySelector("span:nth-child(2)")?.textContent),["read plate","deck · room 8 × 10 × 4","check"]);
+    assert.deepEqual(lines.map(line=>line.getAttribute("data-state")),["ok","ok","run"],"the latest step is the one running");
+    assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/building/);
+    assert.match(q(mounted,".fy-swstage__inspection summary")?.textContent??"",/Working/);
+    await apply({...base,status:"ready",round:1,detail:"Ready",draft:{staging,cast:[],sets:[{name:"deck",x:0,z:0,w:8,h:4,d:10}],assumptions:[],assessment:"Deck built.",inspected:[]}});
+    assert.equal(q(mounted,'[data-testid="stage-build-log"]'),null,"the log goes when the build is done");
   });
 
   it("keeps a build's lights and atmosphere on a scene that had no blocking, without its marks (issue 1825)",async()=>{
@@ -559,7 +582,9 @@ describe("scene detail owns the workspace", () => {
 
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 1);
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
-    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /holds/);
+    // She still stands where she was: the walk pressed while frozen never landed (229a's words).
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /stands$/);
+    assert.doesNotMatch(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
   });
 
   it("rebases the untouched half of a Stage draft when a newer scene snapshot arrives", async () => {

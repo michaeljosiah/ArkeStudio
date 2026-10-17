@@ -33,7 +33,7 @@ test("leased world image reads preserve native image blocks and enforce model an
     request.on("data", chunk => { body += chunk; });
     request.on("end", () => {
       const rpc = JSON.parse(body) as { method: string };
-      const result = rpc.method === "tools/list" ? { tools: ["view_image", "get_sheet"].map(name => ({ name, description: "Read",
+      const result = rpc.method === "tools/list" ? { tools: ["view_image", "stage_render", "get_sheet"].map(name => ({ name, description: "Read",
         inputSchema: { type: "object", properties: { kind: { type: "string" } } } })) }
         : { content: [{ type: "text", text: "Image receipt" }, { type: "image", mimeType: "image/png", data }] };
       response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
@@ -46,6 +46,8 @@ test("leased world image reads preserve native image blocks and enforce model an
   await discoverWorldTools(f.session);
   const read = await f.run("world_view_image", { kind: "artifact" });
   assert.deepEqual(read.result.content[1], { type: "image", mimeType: "image/png", data });
+  const rendered = await f.run("world_stage_render", { kind: "artifact" });
+  assert.deepEqual(rendered.result.content[1], { type: "image", mimeType: "image/png", data }, "a Stage render's frames reach the model (issue 1823)");
   await assert.rejects(f.run("world_get_sheet", { kind: "artifact" }), /unsupported image content/);
   f.session.inputModalities = ["text"];
   await assert.rejects(f.run("world_view_image", { kind: "artifact" }), /unsupported image content/);

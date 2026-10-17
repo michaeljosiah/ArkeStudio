@@ -211,6 +211,16 @@ const WORLD_CHAT_TOOLS = [
   },
 ] as const;
 
+/**
+ * A leased tool set (issue 1823): a run that edits something the coordinator owns — the Stage's
+ * draft — rather than reading the world. Its token lists its own tools and answers its own calls;
+ * nothing else is reachable through it.
+ */
+export interface LeasedTools {
+  tools: ReadonlyArray<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
+  call(name: string, args: Record<string, unknown>): Promise<{ content: Array<Record<string, unknown>>; isError?: boolean }>;
+}
+
 export interface LeasedSurface {
   retrieval: WorldChatRetrieval;
   /** Every call's receipt, including the ones that failed or could not run (§9.3). */
@@ -235,6 +245,7 @@ export class WorldQueryServer {
    * wrong conversation's leases the moment two were open.
    */
   private readonly leasedByToken = new Map<string, LeasedSurface>();
+  private readonly toolsByToken = new Map<string, LeasedTools>();
 
   constructor(
     private readonly getStore: () => WorldStore | null,
@@ -249,6 +260,15 @@ export class WorldQueryServer {
   /** The run is over; its token stops resolving here as well as in the registry that minted it. */
   detachLease(token: string): void {
     this.leasedByToken.delete(token);
+  }
+
+  /** Serve a run's own tool set under its token until it detaches (issue 1823). */
+  attachTools(token: string, tools: LeasedTools): void {
+    this.toolsByToken.set(token, tools);
+  }
+
+  detachTools(token: string): void {
+    this.toolsByToken.delete(token);
   }
 
   url(): string | null {
@@ -284,11 +304,13 @@ export class WorldQueryServer {
         const path = (req.url ?? "/mcp").split("?")[0] ?? "/mcp";
         let token: string | null = null;
         let surface: LeasedSurface | undefined;
+        let tools: LeasedTools | undefined;
         if (path.startsWith("/mcp/")) {
           const match = LEASE_PATH.exec(path);
+          tools = match ? this.toolsByToken.get(match[1]!) : undefined;
           // The run's own surface first; the constructor's is the fallback tests are built on.
-          surface = match ? (this.leasedByToken.get(match[1]!) ?? this.leased) : undefined;
-          if (!match || !surface) {
+          surface = match && tools === undefined ? (this.leasedByToken.get(match[1]!) ?? this.leased) : undefined;
+          if (!match || (!surface && !tools)) {
             res.writeHead(404).end();
             return;
           }
@@ -319,7 +341,7 @@ export class WorldQueryServer {
             reply({});
             return;
           case "tools/list":
-            reply({ tools: token === null ? TOOLS : WORLD_CHAT_TOOLS });
+            reply({ tools: tools?.tools ?? (token === null ? TOOLS : WORLD_CHAT_TOOLS) });
             return;
           case "tools/call": {
             const name = rpc.params?.["name"] as string;
@@ -329,6 +351,11 @@ export class WorldQueryServer {
                 content: [{ type: "text", text: `error: ${err instanceof Error ? err.message : String(err)}` }],
                 isError: true,
               });
+
+            if (tools !== undefined) {
+              void tools.call(name, args).then(reply, asError);
+              return;
+            }
 
             if (token !== null) {
               const leased = surface!;
