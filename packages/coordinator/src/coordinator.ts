@@ -5132,7 +5132,7 @@ export class Coordinator {
     try {
       // Setup transcripts share this recovery path. Repairing a torn tail or interrupted turn
       // writes private world data, so it needs the same ownership gate as a live setup turn.
-      const outcome = await store.ownedWrite(() => recoverConversations(store.dir, now, {
+      const outcome = await store.operationalWrite(() => recoverConversations(store.dir, now, {
         isLive: (conversationId) => this.worldChatRunners.isRunning(store.worldId, conversationId),
       }));
       const gate = this.opts.provider.gate?.();
@@ -21261,9 +21261,9 @@ export class Coordinator {
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
     await compactSettledStageReviews(store);
-    let discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+    let discovery = await store.operationalWrite(() => discoverConversations(store.dir));
     if (await recoverRetainedStageReviews(store, discovery.activeActions, this.conversationActionLifecycle(store))) {
-      discovery = await store.ownedWrite(() => discoverConversations(store.dir));
+      discovery = await store.operationalWrite(() => discoverConversations(store.dir));
     }
     const { summaries, activeActions } = discovery;
     if (!this.stillOpen(store)) return;

@@ -147,6 +147,8 @@
 /* The cast: the world overview's card (fidelity.css .fy-polaroid), straightened a degree either way. */
 .fy-chov__cards { display: flex; flex-wrap: wrap; gap: 18px; }
 .fy-chov__card { display: block; text-align: left; color: var(--foreground); font: inherit; }
+/* Spans in a button, so the name and its line are set as lines: inline, they ran together on one row and clipped mid-word (issue 1827). */
+.fy-chov__card :is(.fy-polaroid__name, .fy-polaroid__role) { display: block; }
 .fy-chov__card:nth-child(odd) { transform: rotate(-1.2deg); }
 .fy-chov__card:nth-child(even) { transform: rotate(1deg); }
 .fy-chov__card--open { transform: translateY(-8px) !important; box-shadow: var(--shadow-xl); }
