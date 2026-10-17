@@ -101,62 +101,62 @@
   "labels": [
    {
     "text": "Ade",
-    "x": 1147,
-    "y": 536,
+    "x": 1089,
+    "y": 446,
     "visible": true
    },
    {
     "text": "Ife",
-    "x": 1266,
-    "y": 373,
+    "x": 1181,
+    "y": 329,
     "visible": true
    },
    {
     "text": "1",
-    "x": 1175,
-    "y": 1310,
-    "visible": false
+    "x": 1075,
+    "y": 911,
+    "visible": true
    },
    {
     "text": "2",
-    "x": 1186,
-    "y": 850,
+    "x": 1100,
+    "y": 651,
     "visible": true
    },
    {
     "text": "3",
-    "x": 1461,
-    "y": 594,
+    "x": 1304,
+    "y": 486,
     "visible": true
    },
    {
     "text": "4",
-    "x": 1249,
-    "y": 811,
+    "x": 1144,
+    "y": 625,
     "visible": true
    },
    {
     "text": "lifts",
-    "x": 1388,
-    "y": 193,
+    "x": 1276,
+    "y": 195,
     "visible": true
    },
    {
     "text": "armchair",
-    "x": 822,
-    "y": 761,
+    "x": 855,
+    "y": 599,
     "visible": true
    },
    {
     "text": "planter",
-    "x": 915,
-    "y": 159,
+    "x": 926,
+    "y": 164,
     "visible": true
    },
    {
     "text": "glass wall",
-    "x": 365,
-    "y": 317,
+    "x": 532,
+    "y": 286,
     "visible": true
    }
   ]

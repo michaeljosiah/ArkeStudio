@@ -26,6 +26,9 @@ export const SHOTS = [
 ];
 const OVERVIEW = { p: V(-1.4, 8.6, 10.8), l: V(0.9, 0.2, -1.3), fov: 36 };
 const TOP = { p: V(0.4, 22, -0.2), l: V(0.4, 0, -0.21), fov: 34 };
+// The board's overview stands further back than the shot's, so every camera, shot 1's at the
+// lobby's open front included, is on the stage and numbered (228g).
+const BOARD = { p: V(-1.6, 10.5, 14.5), l: V(0.9, 0.2, 0.6), fov: 38 };
 
 // ---------- Materials by tag (Lit) and today's single grey (Greybox) ----------
 const TAGS = {
@@ -249,8 +252,10 @@ function rig(shot, { active = true, label = true } = {}) {
   const d = 1.1, h = d * Math.tan(rad(vfov(shot.mm)) / 2), w = h * ASPECT;
   const pts = [];
   const c = [[-w, h], [w, h], [w, -h], [-w, -h]];
-  for (const [x, y] of c) pts.push(V(0, 0, 0), V(x, y, -d));
-  for (let i = 0; i < 4; i++) pts.push(V(c[i][0], c[i][1], -d), V(c[(i + 1) % 4][0], c[(i + 1) % 4][1], -d));
+  // A group's lookAt turns its +Z toward the target (only cameras look down −Z), so the frustum
+  // opens along +Z: the cone points at what the shot records.
+  for (const [x, y] of c) pts.push(V(0, 0, 0), V(x, y, d));
+  for (let i = 0; i < 4; i++) pts.push(V(c[i][0], c[i][1], d), V(c[(i + 1) % 4][0], c[(i + 1) % 4][1], d));
   g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: active ? 0xffffff : 0xbbbbbb, transparent: true, opacity: active ? 0.9 : 0.5 })));
   g.position.copy(shot.p); g.lookAt(shot.l);
   void cam; void label;
@@ -348,7 +353,7 @@ function cameraFor(view, w, h) {
     const sh = view === 'plateview' ? SHOTS[0] : SHOTS[Number(view.slice(4)) - 1];
     const c = new THREE.PerspectiveCamera(vfov(sh.mm), w / h, 0.05, 200); c.position.copy(sh.p); c.lookAt(sh.l); return c;
   }
-  const v = view === 'top' ? TOP : OVERVIEW;
+  const v = view === 'top' ? TOP : view === 'board' ? BOARD : OVERVIEW;
   const c = new THREE.PerspectiveCamera(v.fov, w / h, 0.1, 200); c.position.copy(v.p); c.lookAt(v.l); return c;
 }
 

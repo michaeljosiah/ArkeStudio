@@ -178,7 +178,7 @@ ${row('size', 'wide')}${row('lens', '18 mm')}${row('movement', 'locked off')}${r
 
 const CUTS = [[1, 0, 2, 'wide', false], [2, 2, 4, 'Ade', false], [3, 4, 8, 'Ife', true], [4, 8, 12, 'two · push in', false]];
 const frameBoard = () => stage(`${head({ shot: 3, title: '4 shots', dur: '12.0s', meta: 'v6 · 180° clear', board: true })}${line()}${main(
-  vpLook({ img: 'board-lit', render: 'board-lit', pip: 'shot3-lit', pipLabel: '3 · 6.4s', tagOpts: { only: ['Ade', 'Ife', '2', '3', '4', 'lifts'] } }),
+  vpLook({ img: 'board-lit', render: 'board-lit', pip: 'shot3-lit', pipLabel: '3 · 6.4s', tagOpts: { only: ['Ade', 'Ife', '1', '2', '3', '4', 'lifts'] } }),
   panel(stageList('board'), `<div class="eyebrow">Board 1<span class="mono">12.0 of 15 s</span></div>
 ${li('', '1 · Wide · Ade waits', '2.0 s')}
 ${li('', '2 · Ade · checks the time', '2.0 s')}
