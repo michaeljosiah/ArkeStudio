@@ -227,6 +227,8 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__swatch { width: 14px; height: 14px; flex: none; box-sizing: border-box; border: 1px solid var(--border); border-radius: 3px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__materialrow, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour > :last-child { flex: 1; min-width: 0; }
+/* The camera in words (issue 1820): the line saying where the words put the camera is data, in mono. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__quietmono { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
 /* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
    and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the

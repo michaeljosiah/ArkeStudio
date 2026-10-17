@@ -82,6 +82,28 @@ export type ShotFraming = z.infer<typeof ShotFramingSchema>;
  * Nothing here is required beyond identity: this is the read path, and a `.min()` on the key
  * list would delete a hand-edited scene from a world on disk.
  */
+/**
+ * A camera key in words (issue 1820, design turn 229a): who the frame is on, how big, from what
+ * angle and which side, through which lens. stage-framing.ts resolves them to p/l; the words are
+ * kept so a retime or a new lens resolves them again, and a hand edit that moves the key drops them.
+ */
+export const STAGE_FRAME_SIZES = ["extreme wide", "wide", "medium", "medium close-up", "close-up", "extreme close-up"] as const;
+export const StageFrameWordsSchema = z
+  .object({
+    subject: SlugSchema,
+    size: z.enum(STAGE_FRAME_SIZES),
+    angle: z.enum(["eye", "low", "high", "top"]),
+    side: z.enum(["front", "behind", "left", "right", "over"]),
+    /** Over whose shoulder, for side "over". */
+    over: SlugSchema.optional(),
+    /** The lens the framing is solved through; absent is the shot's. */
+    focalMm: z.number().finite().positive().max(1000).optional(),
+    /** The aspect it was solved at, so a retime solves it the same way. */
+    aspect: z.string().min(1).max(20).optional(),
+  })
+  .strict();
+export type StageFrameWords = z.infer<typeof StageFrameWordsSchema>;
+
 export const StagingKeySchema = z
   .object({
     /** Seconds from the shot's start. */
@@ -101,6 +123,7 @@ export const StagingKeySchema = z
     easeIn: z.number().min(0).max(1).optional().describe("Decelerating into a camera rest; ignored at passing keys."),
     /** Ease away from a camera rest; ignored at passing keys. */
     easeOut: z.number().min(0).max(1).optional().describe("Accelerating away from a camera rest; ignored at passing keys."),
+    frame: StageFrameWordsSchema.optional(),
   })
   .strict();
 export type StagingKey = z.infer<typeof StagingKeySchema>;

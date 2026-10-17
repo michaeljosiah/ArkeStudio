@@ -194,13 +194,14 @@ export function stagingFocalForFov(fov: number, aspect: number): number {
 }
 
 /** Frame height as a fraction of a standing subject, retaining the first pass's size ranges (#1047). */
-export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
+export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, "medium close-up": .7, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
 
 /** Solve the subject-plane height through the same cropped Super 35 lens as the viewport. */
 function distanceFor(size: string | undefined, camera: string | undefined, lens: string | undefined, aspect: string, subjectHeight: number): number {
   const words = `${size ?? ""} ${camera ?? ""}`.toLowerCase();
   const fraction = /extreme close|ecu/.test(words) ? STAGE_FRAMED_HEIGHT["extreme close-up"]
-    : /close|mcu|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
+    : /medium close|mcu/.test(words) ? STAGE_FRAMED_HEIGHT["medium close-up"]
+    : /close|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
     : /extreme wide|ews/.test(words) ? STAGE_FRAMED_HEIGHT["extreme wide"]
     : /wide|\bws\b/.test(words) ? STAGE_FRAMED_HEIGHT.wide : STAGE_FRAMED_HEIGHT.medium;
   return subjectHeight * fraction / (2 * Math.tan(stagingFov(lens, aspect) * Math.PI / 360));

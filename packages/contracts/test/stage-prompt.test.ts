@@ -25,7 +25,7 @@ const nameOf = (id: string) => names[id] ?? id;
 describe("the blockout written for a video model (issue 1817)", () => {
   it("names the shot size from the band its framed height falls in", () => {
     for (const [size, fraction] of Object.entries(STAGE_FRAMED_HEIGHT)) assert.equal(stageShotSize(fraction * 1.8, 1.8), size);
-    assert.equal(stageShotSize(.7 * 1.8, 1.8), "close-up", "between two bands, the nearer on a log scale");
+    assert.equal(stageShotSize(.6 * 1.8, 1.8), "close-up", "between two bands, the nearer on a log scale");
   });
 
   it("says the camera, then the action in time order, with no coordinates", () => {

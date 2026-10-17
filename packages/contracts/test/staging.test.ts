@@ -66,7 +66,7 @@ describe("the Stage's arithmetic", () => {
     assert.equal(first.rig, "dolly");
     assert.equal(first.seed, stageRigSeed("sh_12"));
     assert.equal(first.rigIntensity, 1);
-    assert.match(stagingPromptClause(first, () => "Maren", 4), /^0\.0–4\.0 s · Close-up on Maren, from the front, eye level, dolly, ending extreme close-up, easing in and out\.$/m);
+    assert.match(stagingPromptClause(first, () => "Maren", 4), /^0\.0–4\.0 s · Medium close-up on Maren, from the front, eye level, dolly, ending extreme close-up, easing in and out\.$/m);
     assert.ok(first.keys[1]!.p[2] < first.keys[0]!.p[2], "a push-in ends closer");
     assert.ok(ShotStagingSchema.safeParse(first).success, "what staging writes is what the schema reads");
     assert.ok(ShotSchema.safeParse({ ...shot({}), staging: first }).success);
