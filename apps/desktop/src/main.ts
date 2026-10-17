@@ -1,7 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
-import { microphoneAllowed } from "./microphone-permission.js";
+import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
+import { LEAVE_PAGE_FULL_SCREEN } from "./focus-escape.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
@@ -589,11 +590,26 @@ async function createWindow(): Promise<void> {
     if (window && !window.isDestroyed()) window.show();
   });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
-  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
+  const permitted = (ask: Parameters<typeof microphoneAllowed>[0]) => microphoneAllowed(ask) || fullscreenAllowed(ask);
+  /*
+   * The page's full screen (Focus) swallows Escape before the page sees it, and Electron does not
+   * leave it either, so Focus would hold the screen with no key out. Escape there leaves the
+   * document's full screen; the page hears that change and leaves Focus (SPEC-056 R-12). Not while
+   * a menu, list or dialog is showing: that Escape is the overlay's, as the page's own rule says,
+   * and taking it here would close the `@` or `/` menu and Focus with one key (codex on PR 1835).
+   */
+  let pageFullScreen = false;
+  window.on("enter-html-full-screen", () => { pageFullScreen = true; });
+  window.on("leave-html-full-screen", () => { pageFullScreen = false; });
+  window.webContents.on("before-input-event", (_event, input) => {
+    if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
+    void window?.webContents.executeJavaScript(LEAVE_PAGE_FULL_SCREEN).catch(() => {});
+  });
+  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
   }));
-  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(microphoneAllowed({
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl, rendererUrl, mediaTypes: "mediaTypes" in details ? details.mediaTypes ?? [] : [],
   })));
