@@ -76,6 +76,13 @@ const click = async (target: HTMLElement) => { await act(async () => target.clic
 const stageItem = (q: (selector: string) => HTMLElement, name: string): HTMLElement =>
   [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].find((item) => item.querySelector("span:nth-child(2)")?.textContent === name)!;
 const selectedItem = (q: (selector: string) => HTMLElement): string => q('.fy-swstage__item[data-selected="true"]')?.textContent ?? "";
+/** linkedom's select has no value setter: mark the option chosen, then say so. */
+const choose = async (select: HTMLElement, value: string) => {
+  for (const option of select.querySelectorAll("option")) {
+    if (option.getAttribute("value") === value) option.setAttribute("selected", ""); else option.removeAttribute("selected");
+  }
+  await act(async () => { select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
+};
 /** Add set opens the kit (issue 1819, design turn 228e); a plain box is its first primitive. */
 const addBox = async (q: (selector: string) => HTMLElement) => {
   await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
@@ -191,7 +198,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   const object = q('[data-key-track="object"]');
   assert.equal(performance.querySelectorAll("button").length, 2);
   assert.equal(object.querySelectorAll("button").length, 3);
-  assert.match(performance.getAttribute("style") ?? "", /7a2e43/, "the viewport's cast colour");
+  assert.match(performance.getAttribute("style") ?? "", /2f7fd8/i, "the viewport's cast colour (design turn 228 rule 3)");
   const first = performance.querySelector<HTMLElement>("button")!;
   await click(first);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
@@ -658,4 +665,59 @@ it("adds a room from the kit, with its own rows in place of a shape, and keeps i
   const room = sets?.find((set) => set.name === "room");
   assert.deepEqual(room?.kit, { kind: "room", open: ["front"], openings: [{ wall: "back", kind: "door", at: 0, w: 1, h: 2.2 }] });
   assert.deepEqual([room?.w, room?.h, room?.d], [6, 3, 8]);
+});
+
+// The Stage's look and lights (issue 1825, design turn 228a/228e).
+it("offers Greybox · Lit · Plate in the viewport's corner, Plate only once a plate is matched", async () => {
+  const { q, render, scene, world } = await mount();
+  const options = () => [...q('[data-testid="stage-look"]').querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+  assert.deepEqual(options().map((option) => option.textContent), ["Greybox", "Lit", "Plate"]);
+  assert.equal(options()[2]!.disabled, true, "no plate, no Plate look");
+  assert.equal(q('[data-testid="stage-look"]').nextElementSibling?.className.includes("fy-swstage__ghost"), true, "before the ghost toggle");
+  await click(options()[0]!);
+  assert.equal(options()[0]!.getAttribute("aria-checked"), "true");
+  world.artifacts.push(PLATE_PICTURE as never);
+  scene.blocking = { version: 1, cast: [], sets: [], plate: { source: { source: "artifact", artifactId: PLATE_PICTURE.id, hash: PLATE_PICTURE.hash }, label: "Lobby", camera: { p: [0, 1, 5], l: [0, 1, 0], focalMm: 24 } } };
+  await render();
+  assert.equal(options()[2]!.disabled, false, "a matched plate can be looked through");
+});
+
+it("adds a light, opens its form with the scene's Look beneath, and writes both with the scene's marks", async () => {
+  const { q, render, scene, sent } = await mount();
+  scene.blocking = { version: 1, cast: [], sets: [{ name: "planter", x: 0, z: -5, w: .6, h: 1.4, d: .6 }] };
+  await render();
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add light")!);
+  const added = sent.at(-1);
+  const lights = added?.kind === "edit-stage" ? added.blocking?.lights : undefined;
+  assert.equal(lights?.length, 1);
+  assert.equal(lights?.[0]?.name, "light");
+  assert.equal(lights?.[0]?.kelvin, 3200);
+  assert.deepEqual(added?.kind === "edit-stage" ? added.blocking?.sets : undefined, scene.blocking.sets, "the scene's marks ride along unchanged");
+  scene.blocking = { ...scene.blocking, lights: lights! };
+  await render();
+  assert.equal(q('[data-testid="stage-light-line"]').getAttribute("data-selected"), "true", "a new light is the thing to set next");
+  const form = q('[data-testid="stage-light-form"]');
+  assert.match(form.textContent ?? "", /Light/);
+  assert.ok(q('[data-testid="stage-atmosphere"]'), "the scene's Look sits under the light");
+  await click([...form.querySelectorAll<HTMLElement>('[role="radio"]')].find((option) => option.textContent === "Spot")!);
+  const spot = sent.at(-1);
+  assert.equal(spot?.kind === "edit-stage" ? spot.blocking?.lights?.[0]?.kind : undefined, "spot");
+  await click([...q('[data-testid="stage-atmosphere"]').querySelectorAll<HTMLElement>('[role="radio"]')].find((option) => option.textContent === "Off")!);
+  const shading = sent.at(-1);
+  assert.deepEqual(shading?.kind === "edit-stage" ? shading.blocking?.atmosphere : undefined, { shading: "off" });
+});
+
+it("gives a plain set a material and a room its surfaces, kept with the set", async () => {
+  const { q, sent } = await mount();
+  await addBox(q);
+  await choose(q('[aria-label="set 1 material"]'), "wood");
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  await click([...q('[data-testid="stage-kit-menu"]').querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Room")!);
+  assert.ok(q('[aria-label="room right wall"]'), "a room names its walls by side");
+  await choose(q('[aria-label="room right wall"]'), "wood");
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const sets = kept?.kind === "edit-stage" ? (kept.staging?.sets ?? kept.blocking?.sets) : undefined;
+  assert.equal(sets?.find((set) => set.name === "set 1")?.material, "wood");
+  assert.deepEqual(sets?.find((set) => set.name === "room")?.surfaces, { "right wall": "wood" });
 });

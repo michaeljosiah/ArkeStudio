@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, SceneRecordSchema, type ScenePlate, type SceneRecord } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
-import { STAGE_KIT_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { STAGE_KIT_SCHEMA_VERSION, STAGE_LOOK_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -70,5 +70,28 @@ describe("the set kit (issue 1819)", () => {
     await edit(store, before.version, shotId, { cast: [], sets: [room] });
     assert.deepEqual((await sceneOnDisk(store)).blocking?.sets, [room], "the item is one entry; its walls are derived, never stored");
     assert.ok(store.getBundle().meta.schemaVersion >= STAGE_KIT_SCHEMA_VERSION);
+  });
+});
+
+describe("the scene's lights and atmosphere (issue 1825)", () => {
+  it("are kept by a blocking edit that does not mention them, taken off by null, and fence the world", async () => {
+    const store = await open();
+    const first = await sceneOnDisk(store);
+    const shotId = orderedShots(first)[0]!.id;
+    const lights = [{ name: "niche wash", kind: "spot", colour: "#ffb35c", kelvin: 3200, strength: 14, reach: 8, x: 0.3, y: 3.6, z: -5.2, aim: "planter" }];
+    const atmosphere = { time: "night", haze: 0.02 };
+    await edit(store, first.version, shotId, { cast: [], sets: [], lights, atmosphere });
+    const lit = await sceneOnDisk(store);
+    assert.deepEqual(lit.blocking?.lights, lights);
+    assert.deepEqual(lit.blocking?.atmosphere, atmosphere);
+    assert.ok(store.getBundle().meta.schemaVersion >= STAGE_LOOK_SCHEMA_VERSION);
+    await edit(store, lit.version, shotId, { cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] });
+    const moved = await sceneOnDisk(store);
+    assert.deepEqual(moved.blocking?.lights, lights, "moving marks keeps the lights");
+    assert.deepEqual(moved.blocking?.atmosphere, atmosphere);
+    await edit(store, moved.version, shotId, { cast: moved.blocking!.cast, sets: [], lights: null, atmosphere: null });
+    const dark = await sceneOnDisk(store);
+    assert.equal(dark.blocking?.lights, undefined);
+    assert.equal(dark.blocking?.atmosphere, undefined);
   });
 });

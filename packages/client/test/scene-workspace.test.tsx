@@ -797,7 +797,9 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await openStage(mounted);
 
+    // Add set opens the kit (issue 1819, design turn 228e); a plain box is its first primitive.
     await click(all(mounted, "button").find((button) => button.textContent === "Add set")!);
+    await click(all(mounted, '[data-testid="stage-kit-menu"] [role="menuitem"]').find((item) => item.textContent === "Box")!);
     await editInput(q(mounted, '[aria-label="Set 1 name"]') as HTMLInputElement, "counter");
     await editInput(q(mounted, '[aria-label="Set 1 x"]') as HTMLInputElement, "1.5");
     await editInput(q(mounted, '[aria-label="Set 1 width"]') as HTMLInputElement, "2");

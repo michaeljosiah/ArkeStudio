@@ -215,6 +215,18 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
+/* The Stage's look and lights (issue 1825, design turn 228a/228e). The look control sits in the
+   viewport's corner before the ghost toggle and wears the modes' segment; the stage list groups
+   set and lights under a mono count; a light's mark is its own colour. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--background) 92%, transparent); box-shadow: var(--shadow-xs); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button[data-on="true"] { background: var(--foreground); color: var(--background); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks button:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__group { padding: 4px 6px 1px; font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="light"] { border-radius: 50%; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__swatch { width: 14px; height: 14px; flex: none; box-sizing: border-box; border: 1px solid var(--border); border-radius: 3px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__materialrow, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour > :last-child { flex: 1; min-width: 0; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
 /* The location plate (issue 1818, design turn 228): the blockout line opens with it, a thumbnail
    and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the

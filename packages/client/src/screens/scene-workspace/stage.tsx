@@ -44,8 +44,11 @@ import {
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
 import { Eyebrow, Link, Row, Stepper, Triad, Value, StageEditContext, fieldEscape, sameLine } from "./stage-inspector.js";
-import { PlateChip, PlateForm, type PlateCandidate } from "./stage-plate.js";
+import { PlateChip, PlateForm, platePicture, type PlateCandidate } from "./stage-plate.js";
+import { STAGE_LOOKS, STAGE_LOOK_LABELS, type StageLook } from "@arke-studio/contracts";
 import { AddSetMenu, KitRows, type AddSetChoice } from "./stage-kit-form.js";
+import { AtmosphereRows, LightForm, MaterialRow, SurfaceRows } from "./stage-light-form.js";
+import { stageLightDefault, type SceneAtmosphere, type StageLight } from "@arke-studio/contracts";
 import { STAGE_KIT_SIZES } from "@arke-studio/contracts";
 import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
@@ -214,8 +217,24 @@ export function SceneStage({
   const [selection, setSelection] = useState<StageSelection>(null);
   // The plate is the scene's, not a thing in the viewport, so selecting it is the panel's own state.
   const [plateSelected, setPlateSelected] = useState(false);
+  // A light is the scene's too, selected in the panel (issue 1825).
+  const [lightSelected, setLightSelected] = useState<number | null>(null);
+  // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
+  // device and never written to the world; the playblast records the look it was exported in.
+  const [look, setLookState] = useState<StageLook>(() => {
+    try {
+      const saved = window.localStorage.getItem("arke.stage.look");
+      return (STAGE_LOOKS as readonly string[]).includes(saved ?? "") ? saved as StageLook : "lit";
+    } catch { return "lit"; }
+  });
+  const setLook = (next: StageLook) => {
+    setLookState(next);
+    try { window.localStorage.setItem("arke.stage.look", next); } catch { /* the choice still holds for this visit */ }
+  };
   // Where a build estimated the plate's camera; Keep saves it on the plate (issue 1818).
   const [draftPlateCamera, setDraftPlateCamera] = useState<ScenePlate["camera"] | null>(null);
+  // A build's lights and atmosphere (issue 1825), kept with the blocking.
+  const [draftLook, setDraftLook] = useState<{ lights?: StageLight[]; atmosphere?: SceneAtmosphere } | null>(null);
   const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
@@ -440,6 +459,12 @@ export function SceneStage({
   const patchKey = (which: number, change: Partial<StagingKey>) =>
     patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...key, ...change } : key)) }));
 
+  const plateView = useMemo(() => {
+    const plate = scene.blocking?.plate;
+    if (plate === undefined || plate.camera === undefined) return null;
+    const url = platePicture(plate, world);
+    return url === null ? null : { url, camera: plate.camera };
+  }, [scene.blocking?.plate, world]);
   const data: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
     const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
@@ -475,8 +500,12 @@ export function SceneStage({
       rig: working.rig,
       seed: working.seed,
       rigIntensity: working.rigIntensity,
+      look,
+      lights: scene.blocking?.lights ?? [],
+      ...(scene.blocking?.atmosphere === undefined ? {} : { atmosphere: scene.blocking.atmosphere }),
+      plate: plateView,
     };
-  }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets]);
+  }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets, look, scene.blocking?.lights, scene.blocking?.atmosphere, plateView]);
 
   useEffect(() => {
     const element = host.current;
@@ -571,6 +600,8 @@ export function SceneStage({
         aspect,
         // An unset lens is recorded as the empty string, so setting one later reads as a change.
         lens: framing.lens ?? "",
+        // The recording is drawn in the look on screen, and the pin says which (issue 1825).
+        look,
       };
       const target = request
         ? {
@@ -620,6 +651,7 @@ export function SceneStage({
       setScope("shot");
       setDraft({ ...result.draft.staging, version: persisted?.version ?? 1, cast: result.draft.cast, sets: result.draft.sets });
       setDraftPlateCamera(result.draft.plateCamera ?? null);
+      setDraftLook(result.draft.lights || result.draft.atmosphere ? { ...(result.draft.lights ? { lights: result.draft.lights } : {}), ...(result.draft.atmosphere ? { atmosphere: result.draft.atmosphere } : {}) } : null);
     }
     if (result.status === "inspect") setInspectionRound(result.round);
     if (result.status === "ready" && constructionRequest) retainedReviewId.current = pending.id;
@@ -637,6 +669,7 @@ export function SceneStage({
       setScope("shot");
       setDraft({ ...retained.draft.staging, version: persisted?.version ?? 1, cast: retained.draft.cast, sets: retained.draft.sets });
       setDraftPlateCamera(retained.draft.plateCamera ?? null);
+      setDraftLook(retained.draft.lights || retained.draft.atmosphere ? { ...(retained.draft.lights ? { lights: retained.draft.lights } : {}), ...(retained.draft.atmosphere ? { atmosphere: retained.draft.atmosphere } : {}) } : null);
       setNote(retained.draft.assessment);
     } else if (!retained && state?.stageReviews !== undefined && hydratedReviewId.current && retainedReviewId.current && !constructing) {
       retainedReviewId.current = null; hydratedReviewId.current = null; aiDraftVersion.current = null;
@@ -748,7 +781,11 @@ export function SceneStage({
       const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
       command.blocking = { ...marks, plate: { ...plate, camera: draftPlateCamera } };
     }
-    if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); }
+    if (draftLook !== null && (scene.blocking !== undefined || command.blocking !== undefined)) {
+      const marks = command.blocking ?? { cast: scene.blocking!.cast, sets: scene.blocking!.sets };
+      command.blocking = { ...marks, ...draftLook };
+    }
+    if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); setDraftLook(null); }
   };
   const discard = () => {
     if (retainedReviewId.current && !send({ kind: "stage-review-discard", worldId: world.meta.worldId, reviewId: retainedReviewId.current })) {
@@ -757,6 +794,7 @@ export function SceneStage({
     retainedReviewId.current = null;
     aiDraftVersion.current = null;
     setDraftPlateCamera(null);
+    setDraftLook(null);
     cameraDirty.current = false;
     blockingDirty.current = false;
     scopeDirty.current = false;
@@ -1021,11 +1059,30 @@ export function SceneStage({
     setDraft(edited);
   };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
-  /** The plate is written with the scene's own marks, so the write moves nothing else (issue 1818). */
-  const writePlate = (next: ScenePlate | null) => {
+  /**
+   * The plate (issue 1818), the lights and the atmosphere (issue 1825) are written with the scene's
+   * own marks, so the write moves nothing else.
+   */
+  const writeScene = (change: { plate?: ScenePlate | null; lights?: StageLight[] | null; atmosphere?: SceneAtmosphere | null }) => {
     if (shot === null || working === null) return;
     const marks = scene.blocking ?? { cast: working.cast, sets: working.sets };
-    onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, plate: next } });
+    onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, ...change } });
+  };
+  const writePlate = (next: ScenePlate | null) => writeScene({ plate: next });
+  const sceneLights = scene.blocking?.lights ?? [];
+  const writeLight = (index: number, next: StageLight | null) => {
+    const lights = next === null ? sceneLights.filter((_, at) => at !== index) : sceneLights.map((light, at) => (at === index ? next : light));
+    writeScene({ lights: lights.length === 0 ? null : lights });
+  };
+  const addLight = () => {
+    if (working === null) return;
+    const taken = new Set(sceneLights.map((light) => light.name));
+    let name = "light";
+    for (let n = 2; taken.has(name); n++) name = `light ${n}`;
+    const figure = working.cast[0];
+    writeScene({ lights: [...sceneLights, stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 })] });
+    setSelection(null); viewport.current?.select(null); setPlateSelected(false);
+    setLightSelected(sceneLights.length);
   };
   const pickPlate = (candidate: PlateCandidate) => {
     if (shot === null) return;
@@ -1048,6 +1105,7 @@ export function SceneStage({
   };
   const pick = (next: Exclude<StageSelection, null>) => {
     setPlateSelected(false);
+    setLightSelected(null);
     const selected: StageSelection = sameLine(selection, next) ? null : next;
     setSelection(selected);
     setMotionMark(null);
@@ -1201,6 +1259,14 @@ export function SceneStage({
                     <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>
                 ) : null}
+                <div className="fy-swstage__looks" role="radiogroup" aria-label="Look" data-testid="stage-look">
+                  {STAGE_LOOKS.map((candidate) => (
+                    <button key={candidate} type="button" role="radio" aria-checked={look === candidate} data-on={look === candidate ? "true" : undefined}
+                      disabled={candidate === "plate" && plateView === null}
+                      title={candidate === "plate" && plateView === null ? (scene.blocking?.plate === undefined ? "Add a plate first" : "Match the plate's camera first") : undefined}
+                      onClick={() => setLook(candidate)}>{STAGE_LOOK_LABELS[candidate]}</button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className="fy-swstage__ghost"
@@ -1242,7 +1308,7 @@ export function SceneStage({
                     className="fy-swstage__item"
                     data-selected={plateSelected ? "true" : undefined}
                     data-testid="stage-plate-line"
-                    onClick={() => { setSelection(null); viewport.current?.select(null); setPlateSelected((on) => !on); }}
+                    onClick={() => { setSelection(null); viewport.current?.select(null); setLightSelected(null); setPlateSelected((on) => !on); }}
                   >
                     <span className="fy-swstage__mark" data-kind="plate" aria-hidden="true" />
                     <span>plate</span>
@@ -1263,6 +1329,7 @@ export function SceneStage({
                     <span>{movementWord(figure)} · {poseWord(figure.pose)}</span>
                   </button>
                 ))}
+                {working.sets.length === 0 ? null : <div className="fy-swstage__group">set · {working.sets.length}</div>}
                 {working.sets.map((set, position) => (
                   <button
                     key={position}
@@ -1277,8 +1344,36 @@ export function SceneStage({
                   </button>
                 ))}
                 <AddSetMenu disabled={frozen} onPick={addSet} />
+                {sceneLights.length === 0 ? null : <div className="fy-swstage__group">lights · {sceneLights.length}</div>}
+                {sceneLights.map((light, position) => (
+                  <button
+                    key={`${light.name}:${position}`}
+                    type="button"
+                    className="fy-swstage__item"
+                    data-selected={lightSelected === position ? "true" : undefined}
+                    data-testid="stage-light-line"
+                    onClick={() => { setSelection(null); viewport.current?.select(null); setPlateSelected(false); setLightSelected((current) => (current === position ? null : position)); }}
+                  >
+                    <span className="fy-swstage__mark" data-kind="light" style={{ background: light.colour }} aria-hidden="true" />
+                    <span>{light.name}</span>
+                    <span>{light.kind} · {light.strength}</span>
+                  </button>
+                ))}
+                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || sceneLights.length >= 24} onClick={addLight}><Plus size={12} />Add light</button>
               </div>
 
+              {lightSelected !== null && sceneLights[lightSelected] !== undefined ? (
+                <>
+                  <LightForm
+                    light={sceneLights[lightSelected]!}
+                    sets={working.sets}
+                    disabled={frozen || locked || moved}
+                    onChange={(next) => writeLight(lightSelected, next)}
+                    onRemove={() => { const index = lightSelected; setLightSelected(null); writeLight(index, null); }}
+                  />
+                  <AtmosphereRows atmosphere={scene.blocking?.atmosphere} disabled={frozen || locked || moved} onChange={(atmosphere) => writeScene({ atmosphere })} />
+                </>
+              ) : null}
               {plateSelected && scene.blocking?.plate !== undefined ? (
                 <PlateForm
                   plate={scene.blocking.plate}
@@ -1484,6 +1579,7 @@ export function SceneStage({
                       />
                     </Row>
                     {set.kit ? <KitRows kit={set.kit} name={set.name} disabled={frozen} onChange={(kit) => patchSet(position, { kit })} /> : null}
+                    {set.kit ? <SurfaceRows set={set} disabled={frozen} onChange={(surfaces) => patchSet(position, surfaces === undefined ? { surfaces: undefined } : { surfaces })} /> : <MaterialRow set={set} disabled={frozen} onChange={(material) => patchSet(position, { material })} />}
                     {set.kit ? null : <Row label="shape">
                       <select className="fy-swstage__select" aria-label={`${set.name} shape`} value={set.shape ?? "box"} disabled={frozen} onChange={e => patchSet(position, { shape: e.target.value as StagingSet["shape"] })}>
                         <option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option>

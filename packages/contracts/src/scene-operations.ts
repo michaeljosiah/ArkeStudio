@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema, SlugSchema } from "./ids.js";
-import { SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ShotSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
+import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -118,7 +118,11 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
       kind: z.literal("edit-stage"),
       shotId: ShotIdSchema,
       // A blocking edit that leaves the plate out keeps the scene's; null takes it off (issue 1818).
-      blocking: SceneBlockingSchema.omit({ version: true, plate: true }).extend({ plate: ScenePlateSchema.nullable().optional() }).nullable().optional(),
+      blocking: SceneBlockingSchema.omit({ version: true, plate: true, lights: true, atmosphere: true }).extend({
+        plate: ScenePlateSchema.nullable().optional(),
+        lights: z.array(StageLightSchema).max(24).nullable().optional(),
+        atmosphere: SceneAtmosphereSchema.nullable().optional(),
+      }).nullable().optional(),
       staging: ShotStageEditSchema.nullable().optional(),
     })
     .strict(),

@@ -1,5 +1,6 @@
 import { STAGE_CAMERA_NEAR, stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
+  ConeGeometry,
   BoxGeometry,
   Color,
   CylinderGeometry,
@@ -43,8 +44,13 @@ import {
   Box3,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { StageLookRig, type StagePlateView } from "./stage-look.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, expandStageSet, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, expandStageSet, STAGE_CAST_COLOURS, type SceneAtmosphere, type StageLight, type StageLook, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -95,6 +101,11 @@ export interface StageData {
   rig: StageRig | undefined;
   seed: number | undefined;
   rigIntensity: number | undefined;
+  /** Greybox · Lit · Plate (issue 1825); absent is Greybox, the look the Stage always had. */
+  look?: StageLook;
+  lights?: readonly StageLight[];
+  atmosphere?: SceneAtmosphere;
+  plate?: StagePlateView | null;
 }
 
 export type StageSelection =
@@ -126,7 +137,7 @@ export interface StageEvents {
 
 const PALETTE = [0x7a2e43, 0xb08c2e, 0x5f6b7a, 0x3f4a5a, 0x8a6a4f];
 export function figureColour(index: number): number {
-  return PALETTE[index % PALETTE.length]!;
+  return STAGE_CAST_COLOURS[index % STAGE_CAST_COLOURS.length]!;
 }
 
 const INK = 0x0a0a0a;
@@ -165,6 +176,20 @@ function lineBetween(a: Vector3, b: Vector3, material: LineBasicMaterial): Line 
   return line;
 }
 
+/** Render pass, contact shading and output, for a renderer drawing the Lit look (issue 1825). */
+function stageComposer(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera, width: number, height: number): { composer: EffectComposer; ao: GTAOPass } {
+  const composer = new EffectComposer(renderer);
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(width, height);
+  composer.addPass(new RenderPass(scene, camera));
+  const ao = new GTAOPass(scene, camera, width, height);
+  ao.updateGtaoMaterial({ radius: 0.5, distanceExponent: 1, thickness: 1, scale: 1.2 });
+  ao.blendIntensity = 0.85;
+  composer.addPass(ao);
+  composer.addPass(new OutputPass());
+  return { composer, ao };
+}
+
 /** A neutral capsule figure: head, torso, arms, legs. Greybox, never a render. */
 function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Group {
   const group = new Group();
@@ -181,6 +206,12 @@ function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Gro
   const head = new Mesh(new SphereGeometry(0.14, 24, 18), skin);
   head.position.y = 1.62;
   body.add(head);
+  // A nose (design turn 228 rule 3): a sphere has no front, and the lens and a video model both
+  // need to see which way a figure faces.
+  const nose = new Mesh(new ConeGeometry(0.035, 0.09, 12), new MeshStandardMaterial({ color: 0x15171c, roughness: 0.4, transparent: ghost, opacity: ghost ? 0.18 : 1 }));
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, 0, 0.16);
+  head.add(nose);
   const torso = new Mesh(new CapsuleGeometry(0.17, 0.46, 6, 18), cloth);
   torso.position.y = 1.16;
   body.add(torso);
@@ -315,6 +346,8 @@ export class StageViewport {
   private walkers: Group[] = [];
   private aids: Object3D[] = [];
   private setMeshes: Mesh[] = [];
+  private lookRig!: StageLookRig;
+  private composer: { composer: EffectComposer; ao: GTAOPass; width: number; height: number } | null = null;
   private objectGroups = new Map<string, Group>();
   private cam: CamRefs | null = null;
   private aim: AimRefs | null = null;
@@ -366,7 +399,8 @@ export class StageViewport {
     controls.maxDistance = 22;
     this.controls = controls;
 
-    this.scene.add(new HemisphereLight(0xffffff, 0xc9c3b8, 1.5));
+    const hemisphere = new HemisphereLight(0xffffff, 0xc9c3b8, 1.5);
+    this.scene.add(hemisphere);
     const key = new DirectionalLight(0xffffff, 1.9);
     key.position.set(4.5, 7.5, 4);
     key.castShadow = true;
@@ -384,6 +418,8 @@ export class StageViewport {
     (grid.material as LineBasicMaterial).opacity = 0.5;
     this.scene.add(grid);
     this.scene.add(this.castGroup, this.setGroup, this.rigGroup, this.proxy);
+    // Greybox's own rig: shown only in Greybox; Lit and Plate bring their own sky and lights (issue 1825).
+    this.lookRig = new StageLookRig(this.scene, [hemisphere, key, floor, grid], () => { if (!this.disposed) this.build(); });
 
     this.ray.params.Line.threshold = 0.02;
 
@@ -487,7 +523,7 @@ export class StageViewport {
       this.shot.aspect = data.aspect;
       this.shot.updateProjectionMatrix();
     }
-    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect]);
+    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate]);
     if (this.transform.dragging) return;
     if (structure !== this.structure) {
       const castChanged = previous.cast.map((c) => c.sheetId).join("|") !== data.cast.map((c) => c.sheetId).join("|");
@@ -555,7 +591,7 @@ export class StageViewport {
 
   private build(): void {
     const data = this.data;
-    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect]);
+    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate]);
     this.clear(this.castGroup);
     this.clear(this.setGroup);
     this.clear(this.rigGroup);
@@ -567,6 +603,7 @@ export class StageViewport {
     this.cam = null;
     this.aim = null;
     this.path = null;
+    this.lookRig.apply({ look: data.look ?? "greybox", lights: data.lights ?? [], atmosphere: data.atmosphere, plate: data.plate ?? null });
 
     // A kit item (issue 1819) is drawn as its parts; each part picks as the item it belongs to, and
     // only the first carries the floor label, so a room reads "lobby" once rather than per wall.
@@ -586,16 +623,14 @@ export class StageViewport {
         geometry.setIndex(set.triangles);
         geometry.computeVertexNormals();
       }
-      const box = new Mesh(
-        geometry,
-        new MeshStandardMaterial({ color: 0xa79e93, roughness: 0.95, side: DoubleSide, transparent: true, opacity: set.solid ? 1 : 0.22 }),
-      );
+      const box = new Mesh(geometry, this.lookRig.material(item, set, data.aspect));
       box.scale.set(set.w, set.h, set.d);
       box.position.set(set.x, (set.y ?? 0) + set.h / 2, set.z);
       if (set.rotation) box.rotation.set(...set.rotation.map(v => v * Math.PI / 180) as [number, number, number]);
       box.receiveShadow = true;
-      box.castShadow = set.solid ?? false;
-      box.userData = { label: item.name, labelled: partIndex === 0, up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
+      // Glass, leaves and lampshades are not solid in any look: they neither shadow nor block a sightline.
+      box.castShadow = (set.solid ?? false) && (this.lookRig.look === "greybox" || (box.material as MeshStandardMaterial).opacity === undefined || (box.material as MeshStandardMaterial).opacity === 1);
+      box.userData = { solid: set.solid ?? false, label: item.name, labelled: partIndex === 0, up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
       parent.add(box);
       this.setMeshes.push(box);
       // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
@@ -608,6 +643,16 @@ export class StageViewport {
       edges.rotation.copy(box.rotation);
       edges.scale.copy(box.scale);
       parent.add(edges);
+    }
+
+    if (this.lookRig.look !== "greybox") {
+      const bounds = new Box3();
+      for (const mesh of this.setMeshes) bounds.expandByObject(mesh);
+      this.lookRig.fitShadow(bounds);
+      this.lookRig.aimAt((name) => {
+        const mesh = this.setMeshes.find((candidate) => candidate.userData["label"] === name);
+        return mesh ? new Box3().setFromObject(mesh).getCenter(new Vector3()) : null;
+      });
     }
 
     for (const member of data.cast) {
@@ -1257,9 +1302,26 @@ export class StageViewport {
     return { w, h };
   }
 
+  /** The orbit view; Lit with soft shading draws contact shading through a composer sized to the canvas. */
+  private renderView(): void {
+    if (!this.lookRig.shading) {
+      this.renderer.render(this.scene, this.view);
+      return;
+    }
+    const ratio = this.renderer.getPixelRatio();
+    const width = Math.max(1, Math.round(this.renderer.domElement.width / ratio));
+    const height = Math.max(1, Math.round(this.renderer.domElement.height / ratio));
+    if (this.composer === null || this.composer.width !== width || this.composer.height !== height) {
+      this.composer?.composer.dispose();
+      this.composer = { ...stageComposer(this.renderer, this.scene, this.view, width, height), width, height };
+    }
+    this.composer.composer.render();
+  }
+
   private frameBody(): void {
     const data = this.data;
     const lens = data.mode === "camera";
+    this.lookRig.prepare(this.renderer);
     this.hideStaging(lens);
     const at = this.recordingAt ?? this.clampAt(data.at);
     this.refresh(at);
@@ -1286,7 +1348,7 @@ export class StageViewport {
       }
       this.pip.style.opacity = "0";
     } else {
-      this.renderer.render(this.scene, this.view);
+      this.renderView();
       // A live lens preview, always on screen while blocking. Staging aids stay out of the lens.
       const pipWidth = Math.max(150 * ratio, Math.min(238 * ratio, canvasWidth * 0.3));
       const box = this.letterbox(pipWidth, canvasHeight);
@@ -1381,6 +1443,7 @@ export class StageViewport {
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFShadowMap;
+    this.lookRig.prepare(renderer);
     const times = [...new Set([0,this.data.durationSec/2,Math.max(0,this.data.durationSec-1/30),this.data.durationSec,...this.data.keys.map(k=>k.t),...(this.data.performances??[]).flatMap(p=>p.keys.map(k=>k.t)),...(this.data.objectMotions??[]).flatMap(p=>p.keys.map(k=>k.t))])].sort((a,b)=>a-b);
     const essential = [...new Set([0,this.data.durationSec,Math.max(0,this.data.durationSec-1/30),...requested.filter(t=>t>=0&&t<=this.data.durationSec)])];
     const slots = 7-essential.length;
@@ -1403,11 +1466,11 @@ export class StageViewport {
           const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,(state.pose==="sit"?1.28:state.pose==="lie"?.18:1.62)*(member.height??1.8)/1.8,0));
           const headScreen=head.clone().project(this.shot);
           const headRay=new Raycaster(eye,head.clone().sub(eye).normalize(),0,eye.distanceTo(head)-.1);
-          const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>mesh.userData["solid"]===true),false)[0];
           observations.push(`${member.sheetId} head: screen (${headScreen.x.toFixed(2)}, ${headScreen.y.toFixed(2)})${headBlocked?`; sightline intersects ${headBlocked.object.userData["label"]}`:""}.`);
           const distance=eye.distanceTo(target);
           const ray=new Raycaster(eye,target.clone().sub(eye).normalize(),0,distance-.15);
-          const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
+          const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>mesh.userData["solid"]===true),false)[0];
           observations.push(`${walker.userData["sheetId"]}: screen (${projected.x.toFixed(2)}, ${projected.y.toFixed(2)}) where -1..1 is inside frame, distance ${distance.toFixed(2)}m${Math.abs(projected.x)>1||Math.abs(projected.y)>1||projected.z>1?"; outside frame":""}${blocked?`; sightline intersects ${blocked.object.userData["label"]}`:""}.`);
         }
         observations.push(...stageSpeedWarnings({
@@ -1445,6 +1508,10 @@ export class StageViewport {
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFShadowMap;
+    // The playblast is drawn in the look on screen, and says which (issue 1825); contact shading is
+    // deterministic (a fixed noise square), so the same time still renders the same pixels.
+    this.lookRig.prepare(renderer);
+    const shaded = this.lookRig.shading ? stageComposer(renderer, this.scene, this.shot, width, height) : null;
     let jobId: string | null = null;
     let complete = false;
     let gizmoDetached = false;
@@ -1460,7 +1527,7 @@ export class StageViewport {
         this.refresh(at);
         this.hideStaging(true);
         try {
-          renderer.render(this.scene, this.shot);
+          if (shaded) shaded.composer.render(); else renderer.render(this.scene, this.shot);
         } finally {
           this.hideStaging(this.data.mode === "camera");
         }

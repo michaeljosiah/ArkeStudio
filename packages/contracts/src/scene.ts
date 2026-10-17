@@ -160,6 +160,47 @@ export const StageKitSchema = z
   .strict();
 export type StageKit = z.infer<typeof StageKitSchema>;
 
+/**
+ * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 228a/228e). The
+ * renderer owns how each one looks; the world records only the word.
+ */
+export const STAGE_MATERIALS = ["plaster", "concrete", "stone", "marble", "wood", "metal", "glass", "fabric", "leather", "foliage", "pot", "lamp", "screen", "neon", "road", "paint", "grass", "water"] as const;
+export const StageMaterialSchema = z.enum(STAGE_MATERIALS);
+export type StageMaterial = z.infer<typeof StageMaterialSchema>;
+const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/i, "a colour is #rrggbb");
+
+/** A practical light on the set (issue 1825, design turn 228e): a lamp, a neon, a window, the sun. */
+export const StageLightSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    kind: z.enum(["point", "spot", "area", "sun"]),
+    colour: HexColourSchema,
+    /** Colour temperature the colour was chosen from, kept so the form can say it. */
+    kelvin: z.number().int().min(1000).max(20000).optional(),
+    strength: z.number().finite().min(0).max(500),
+    /** How far the light carries, metres; absent is unlimited. */
+    reach: z.number().finite().positive().max(500).optional(),
+    shadow: z.boolean().optional(),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    z: z.number().finite(),
+    /** Where a spot, area light or the sun points; a set's name or a point. */
+    aim: z.union([z.string().min(1).max(80), z.tuple([z.number().finite(), z.number().finite(), z.number().finite()])]).optional(),
+  })
+  .strict();
+export type StageLight = z.infer<typeof StageLightSchema>;
+
+/** The scene's time, sky, haze and shading for the Lit look (issue 1825). */
+export const SceneAtmosphereSchema = z
+  .object({
+    time: z.enum(["day", "dusk", "night", "interior"]).optional(),
+    sky: z.enum(["clear", "overcast", "night-city", "studio"]).optional(),
+    haze: z.number().finite().min(0).max(0.2).optional(),
+    shading: z.enum(["soft", "off"]).optional(),
+  })
+  .strict();
+export type SceneAtmosphere = z.infer<typeof SceneAtmosphereSchema>;
+
 /** Set massing: a translucent box, named so the label reads on the floor. */
 export const StagingSetSchema = z
   .object({
@@ -172,6 +213,11 @@ export const StagingSetSchema = z
     rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
     solid: z.boolean().optional(),
     kit: StageKitSchema.optional(),
+    /** A plain set's material, or a kit item's default for parts its surfaces do not name (issue 1825). */
+    material: StageMaterialSchema.optional(),
+    /** A kit item's materials by part surface ("floor", "glass") or wall ("right wall"). */
+    surfaces: z.record(z.string().min(1).max(40), StageMaterialSchema).refine((value) => Object.keys(value).length <= 16, "at most 16 surfaces").optional(),
+    colour: HexColourSchema.optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),
@@ -220,6 +266,8 @@ export const SceneBlockingSchema = z
     cast: z.array(StagingFigureSchema),
     sets: z.array(StagingSetSchema),
     plate: ScenePlateSchema.optional(),
+    lights: z.array(StageLightSchema).max(24).optional(),
+    atmosphere: SceneAtmosphereSchema.optional(),
   })
   .strict();
 export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
@@ -317,6 +365,8 @@ export const ShotStagingSchema = z
         rig: StageRigSchema.optional(),
         seed: z.number().int().min(0).optional(),
         rigIntensity: z.number().min(0).max(2).optional(),
+        /** The look the playblast was exported in (issue 1825); absent is Greybox, as every older one was. */
+        look: z.enum(["greybox", "lit", "plate"]).optional(),
         /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
         blocking: z.discriminatedUnion("owner", [
           z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),

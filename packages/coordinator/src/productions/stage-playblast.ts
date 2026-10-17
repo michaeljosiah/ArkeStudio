@@ -43,6 +43,8 @@ export interface PlayblastFiling {
   durationSec: number;
   aspect: string;
   lens?: string;
+  /** The look the playblast was drawn in (issue 1825); only Lit and Plate are recorded. */
+  look?: "greybox" | "lit" | "plate";
 }
 
 export type PlayblastOutcome =
@@ -149,6 +151,7 @@ export async function filePlayblast(
         ...(shot.staging.rig === undefined ? {} : { rig: shot.staging.rig }),
         ...(shot.staging.seed === undefined ? {} : { seed: shot.staging.seed }),
         ...(shot.staging.rigIntensity === undefined ? {} : { rigIntensity: shot.staging.rigIntensity }),
+        ...(input.look === undefined || input.look === "greybox" ? {} : { look: input.look }),
         blocking: effectiveStageBlocking(record, shot.staging).identity,
       },
     };

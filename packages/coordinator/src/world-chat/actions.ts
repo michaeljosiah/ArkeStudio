@@ -5069,6 +5069,7 @@ export function worldChatActionAdapters(
                   durationSec: message.durationSec,
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),
+                  ...(message.look !== undefined ? { look: message.look } : {}),
                 }, {
                   ...(deps.mediaProbe ? { mediaProbe: deps.mediaProbe } : {}),
                   source: `world-chat:${action.conversationId}:${action.actionId}`,

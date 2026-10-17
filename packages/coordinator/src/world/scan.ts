@@ -175,7 +175,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 82: expanded provider vocal events in persisted cadence plans and reactions.
 // 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 228c).
 // 85: a Stage set kit item on a strict set entry (issue 1819, design turn 228e).
-export const SUPPORTED_SCHEMA_VERSION = 85;
+// 86: the Stage's look — set materials and surfaces, lights and atmosphere on the blocking, and the
+// look a playblast pin was drawn in (issue 1825, design turn 228a).
+export const SUPPORTED_SCHEMA_VERSION = 86;
 
 export class WorldOpenError extends Error {
   constructor(

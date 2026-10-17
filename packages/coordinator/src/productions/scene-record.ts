@@ -396,6 +396,19 @@ export function carriesStageConstruction(raw: string): boolean {
 
 /** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
 export const STAGE_PLATE_SCHEMA_VERSION = 84;
+/** Materials, lights, atmosphere or a look-tagged playblast need schema 86 (issue 1825). */
+export const STAGE_LOOK_SCHEMA_VERSION = 86;
+export function carriesStageLook(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    const shots = orderedShots(scene);
+    const sets = [scene.blocking?.sets, ...shots.map(shot => shot.staging?.sets)].flatMap(list => list ?? []);
+    return sets.some(set => set.material !== undefined || set.surfaces !== undefined || set.colour !== undefined)
+      || scene.blocking?.lights !== undefined || scene.blocking?.atmosphere !== undefined
+      || shots.some(shot => shot.staging?.playblast?.look !== undefined);
+  } catch { return false; }
+}
+
 /** A kit item on any set entry — the scene's or a shot's override — needs schema 85 (issue 1819). */
 export const STAGE_KIT_SCHEMA_VERSION = 85;
 export function carriesStageKit(raw: string): boolean {
