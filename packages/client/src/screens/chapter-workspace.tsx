@@ -63,7 +63,7 @@ import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
 import { chapterView, rememberChapterView } from "../lib/chapter-view.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
-import { BriefFields, DocHead, FindBar, GoalField, GoalRing, NEW_CHARACTER, PageHeldBar, WritingBar } from "./chapter-room.js";
+import { BriefFields, DocHead, FindBar, FormatBar, GoalField, GoalRing, NEW_CHARACTER, PageHeldBar, WritingBar } from "./chapter-room.js";
 import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -1594,6 +1594,19 @@ export function ChapterWorkspace({
   // in its tooltip why a selection that is not a passage cannot be asked about.
   const [marked, setMarked] = useState<{ text: string; refused: string | null; at: BarAt } | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  // Whether the page holds the caret: the phone's format bar stands only while it does (R-46).
+  const [writing, setWriting] = useState(false);
+  // The bar reads the marks at the caret, so it follows each transaction while it stands.
+  const [, setMarksAt] = useState(0);
+  // Only where the bar is drawn (codex on PR 1814): elsewhere each caret move would redraw the page.
+  const formatBarShown = phone && view === "manuscript";
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!writing || !formatBarShown || editor === null) return;
+    const follow = () => setMarksAt((count) => count + 1);
+    editor.on("transaction", follow);
+    return () => void editor.off("transaction", follow);
+  }, [writing, formatBarShown]);
   // When the editor last moved, so a Continue can wait for its words to be handed on.
   const lastTyped = useRef(0);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
@@ -2693,6 +2706,9 @@ export function ChapterWorkspace({
   // The writing room (design turn 227, SPEC-056 §1.6): the Manuscript above a phone's width is one
   // bar over the page, the chapter's number and title the top of the document.
   const room = view === "manuscript" && !phone;
+  // On a phone the Manuscript is the page under the phone bar (SPEC-056 R-46, 227l): the document's
+  // head and the page's own flow, without the old header's chips and view row.
+  const phoneRoom = view === "manuscript" && phone;
   const viewNav = (
     <nav className="fy-seg fy-ch__viewrow" aria-label="Chapter view">
       <button type="button" className={cx("fy-seg__item", view === "chapter" && "fy-seg__item--active")} onClick={() => chooseView("chapter")}>
@@ -3237,7 +3253,7 @@ export function ChapterWorkspace({
         <span>{chapter.status}</span>
       </>}
       actions={<>
-        {audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
+        {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
         {reviewControl}
       </>}
       views={viewNav}
@@ -3272,9 +3288,22 @@ export function ChapterWorkspace({
       <main className="fy-sw__centre" ref={chapterCentre} hidden={view === "timing"}>
         {/* 194h: one line, the chevron back to Chapters and the chapter's title, in every view, so
             the bar stays put when the switch below it changes view (the master draws Audiobook). */}
-        {phone && <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>}
+        {phone && (phoneRoom ? (
+          // R-7 on a phone: back, title, goal and ⋯; the ⋯ carries the views, Brief and the read.
+          <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} beside={<GoalRing words={words} goal={goal.words} source={goal.source} />}>
+            <Button onClick={() => setNotesOpen(true)}>Brief</Button>
+            <Button onClick={() => setDock(true)}>Ask Arke</Button>
+            {paragraphs.length > 0 && stagedDraft === undefined && !pageRead.reading && !voicedRead.reading && <Button onClick={read.begin}>Read the chapter</Button>}
+            {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && !voicedRead.reading && <Button onClick={readVoiced.begin}>Read voiced chapter</Button>}
+            <Button onClick={() => chooseView("chapter")}>Chapter</Button>
+            <Button onClick={() => chooseView("audiobook")}>Audiobook</Button>
+            <Button onClick={() => chooseView("timing")}>Audio Studio</Button>
+            {!locked && richRefusal === null && <Button onClick={() => setPreferSource((on) => !on)}>{preferSource ? "Rich text" : "Markdown source"}</Button>}
+          </SceneBackRow>
+        ) : <SceneBackRow back="Chapters" title={chapter.title} onBack={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters`)} {...(barArke !== null ? { press: barArke } : {})}><Button onClick={() => setNotesOpen(true)}>Notes</Button><Button onClick={() => setDock(true)}>Ask Arke</Button></SceneBackRow>)}
+        {phoneRoom && (pageRead.reading || voicedRead.reading) && <div className="fy-ch__phone-read">{readControl}</div>}
         {overview}
-        {view === "chapter" ? null : room ? (
+        {view === "chapter" || phoneRoom ? null : room ? (
           <WritingBar
             brief={compact ? notesOpen : brief}
             onBrief={() => (compact ? setNotesOpen((open) => !open) : setBriefChoice(!brief))}
@@ -3521,7 +3550,7 @@ export function ChapterWorkspace({
                 onClose={() => setComparing(false)}
               />
             )}
-            {room && (
+            {(room || phoneRoom) && (
               <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
                 {emptyChapter && (
                   <BriefFields page synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
@@ -3683,7 +3712,16 @@ export function ChapterWorkspace({
                   onSelect={onSelect}
                   placeholder={PLACEHOLDER}
                   ariaLabel={`Chapter ${chapter.order}`}
-                  onEditor={(live) => { editorRef.current = live; }}
+                  onEditor={(live) => {
+                    editorRef.current = live;
+                    setWriting(live !== null && live.isFocused);
+                    live?.on("focus", () => setWriting(true));
+                    // Focus moving into the format bar is still writing (codex on PR 1814): a keyboard
+                    // user tabs from the page to Bold, and the bar must not go from under them.
+                    live?.on("blur", ({ event }) => {
+                      if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest(".fy-formatbar"))) setWriting(false);
+                    });
+                  }}
                   extraCommands={arkeCommands}
                   reviewMarks={notesShown ? { marks: reviewPlaced.placed.map((note) => ({ n: note.n, text: quoteText(note.finding.quote), nth: note.nth })), current: noteOpen } : { marks: [], current: null }}
                   onContinue={() => askContinue("continue")}
@@ -4006,6 +4044,41 @@ export function ChapterWorkspace({
         />
       )}
 
+      {phoneRoom && richMode && !locked && writing && stagedDraft === undefined && editorRef.current !== null && (() => {
+        const live = editorRef.current;
+        return (
+          <HeldBar className="fy-formatbar-held">
+            <FormatBar
+              bold={live.isActive("bold")}
+              italic={live.isActive("italic")}
+              onBold={() => void live.chain().focus().toggleBold().run()}
+              onItalic={() => void live.chain().focus().toggleItalic().run()}
+              onMention={() => void live.chain().focus().insertContent("@").run()}
+              // The menu opens only at a line's start: anywhere else the press starts a new line.
+              onSlash={() => {
+                const { $from, empty } = live.state.selection;
+                const chain = live.chain().focus();
+                if (!empty || $from.parentOffset > 0) chain.splitBlock();
+                void chain.insertContent("/").run();
+              }}
+              onArke={() => setDock(true)}
+              onHide={() => {
+                setWriting(false);
+                void live.commands.blur();
+              }}
+              onLeave={() => setWriting(false)}
+            />
+          </HeldBar>
+        );
+      })()}
+      {/* Not under a passage decision, which holds the same foot (codex on PR 1814). */}
+      {phone && view === "chapter" && !(stagedDraft !== undefined && passageChange !== null) && (
+        // Write and Listen held at the foot of the phone's Chapter view (R-46, 227n).
+        <HeldBar className="fy-chov-held">
+          <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>
+          {audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : pageReadControl}
+        </HeldBar>
+      )}
       {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
       {compact && view !== "timing" && stagedDraft !== undefined && passageChange !== null && <HeldBar className="fy-passage-decision"><span>{keptCount} of {editCount} kept</span>{versionControls !== undefined && (
         // Versions on a phone too (codex on PR 1807): the way between them, Another version at the

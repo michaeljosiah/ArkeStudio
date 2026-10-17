@@ -2214,7 +2214,9 @@ describe("the Audiobook toolbar below 1100 (design turn 194, rule 15)", () => {
       if (view !== "manuscript") await answerOpen(m);
       const bar = q(m, ".fy-scene-back")!;
       assert.ok(bar.classList.contains("fy-scene-back--line"), "the one-line bar");
-      assert.equal(bar.querySelector("span"), null, "no context line over the title");
+      // The goal stands beside the title in the Manuscript (SPEC-056 R-7); no context line sits over it.
+      assert.ok(bar.querySelector(":scope > div > span") === null, "no context line over the title");
+      assert.ok((bar.querySelector('[data-testid="chapter-goal"]') !== null) === (view === "manuscript"), "the goal beside the title in the Manuscript only");
       assert.equal(bar.querySelector("h1")!.textContent, "The counting of bells", "the chapter's title, without its number");
       const presses = [...bar.querySelectorAll(":scope > button")];
       assert.equal(presses.length, 2, "back and one press at the end");
