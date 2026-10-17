@@ -1010,10 +1010,14 @@ export function SceneStage({
     setDraft(edited);
   };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
-  /** The plate is written with the scene's own marks, so the write moves nothing else (issue 1818). */
+  /**
+   * The plate is written with the scene's own marks, so the write moves nothing else (issue 1818).
+   * A scene without blocking has none: the marks on screen may be this shot's own, and writing them
+   * as the scene's would hand them to every shot that inherits.
+   */
   const writePlate = (next: ScenePlate | null) => {
     if (shot === null || working === null) return;
-    const marks = scene.blocking ?? { cast: working.cast, sets: working.sets };
+    const marks = scene.blocking ?? { cast: [], sets: [] };
     onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, plate: next } });
   };
   const pickPlate = (candidate: PlateCandidate) => {
@@ -1124,7 +1128,7 @@ export function SceneStage({
 
       <div className="fy-swstage__construction">
         {cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet">{warning}</p>)}
-        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} disabled={frozen || locked || moved} onPick={pickPlate} />}
+        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} onPick={pickPlate} />}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
         {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
@@ -1272,6 +1276,7 @@ export function SceneStage({
                 <PlateForm
                   plate={scene.blocking.plate}
                   world={world}
+                  productionId={production.meta.id}
                   shots={shots}
                   currentShotId={shot.id}
                   disabled={frozen || locked || moved}
