@@ -1,4 +1,5 @@
 import { stageSourceFingerprint } from "../productions/stage-playblast.js";
+import { stageBoardFingerprint } from "../productions/stage-animatic.js";
 import {
   DEFAULT_SHOT_SEC,
   admitReference,
@@ -24,6 +25,10 @@ import {
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
+  stageBoardAnimatic,
+  stageBoardAnimaticIsStale,
+  stageBoardStagings,
+  stagingBoardClause,
   STAGE_PLATE_DETAIL,
   scenePlateName,
   supportsMode,
@@ -276,6 +281,24 @@ function playblastToken(
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
     detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}`,
+    ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
+    ride: "when-supported",
+    subjectRole: "reference",
+  };
+}
+
+/** A board's cut animatic (issue 1824) rides as its Video 1 while every member still shows as recorded. */
+function animaticToken(scene: SceneRecord, world: WorldBundle, members: readonly string[], aspect: string, letter: string): BenchReferenceToken | null {
+  const pin = stageBoardAnimatic(scene, members);
+  if (pin === null || stageBoardAnimaticIsStale(scene, pin, aspect) || pin.sourceFingerprint !== stageBoardFingerprint(scene, members, aspect)) return null;
+  const artifact = world.artifacts.find((candidate) => candidate.id === pin.artifactId);
+  if (artifact === undefined || artifact.kind !== "video") return null;
+  return {
+    token: benchTokenFor("video", 1),
+    kind: "video",
+    source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
+    label: `Board ${letter} · animatic`,
+    detail: `${members.length} cuts · ${pin.durationSec.toFixed(1)} s`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
@@ -588,7 +611,11 @@ export async function prepareBenchSubject(
   );
   if (board === null) return { ok: false, reason: "That board no longer matches the current scene." };
   const members = board.memberShotIds.map((id) => shots.find((candidate) => candidate.id === id)!);
-  const sheets = await sheetTokens(members, world, production, scene, input.sources);
+  // A board with a current animatic rides it as one reference video, with the plate first, as a
+  // staged shot does with its playblast (issue 1824, design turn 228h).
+  const animatic = animaticToken(scene, world, board.memberShotIds, aspect, board.letter);
+  const plate = animatic === null ? null : plateToken(scene, world);
+  const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, plate === null ? 1 : 2)];
   const frames: BenchReferenceToken[] = [];
   let nextImage = sheets.length + 1;
   for (const shot of members) {
@@ -648,13 +675,40 @@ export async function prepareBenchSubject(
       durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
     })),
   };
-  const routing = subjectReferenceRouting([...ordinary, ...frames], subject, model);
+  const references = [...ordinary, ...frames, ...(animatic === null ? [] : [animatic])];
+  const routing = subjectReferenceRouting(references, subject, model);
+  const written = authoredPrompt ??
+    assembleBoardPrompt({
+      world: world.meta,
+      sheets: world.sheets,
+      scene,
+      shots: members,
+      aspect,
+      ...(style !== undefined ? { artDirection: style } : {}),
+    });
+  // A staged board reads out as one timed cut list on the board's clock (issue 1824), with the
+  // same opening citation and follow line a staged shot has, and nothing cited that is not riding.
+  const follow = input.follow ?? "camera-action";
+  const riding = new Set(routing.activeTokens);
+  const videoRides = animatic !== null && riding.has(animatic.token);
+  const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+  const staged = stageBoardStagings(scene, board.memberShotIds) !== null;
+  const cited = references
+    .filter((entry) => riding.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video" || entry.detail === STAGE_PLATE_DETAIL))
+    .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : entry.detail === STAGE_PLATE_DETAIL ? scenePlateName(scene.blocking!.plate!) : nameOf(entry.sheetId!)}`);
+  const brief = !staged
+    ? written
+    : [
+        written,
+        cited.length === 0 ? null : `References: ${cited.join(" · ")}.`,
+        stagingBoardClause(scene, board.memberShotIds, nameOf, aspect, videoRides ? { video: animatic!.token, follow } : {}),
+      ].filter((part): part is string => part !== null && part.length > 0).join("\n\n");
   return {
     ok: true,
     prefill: {
       subject,
       title: benchSubjectTitle(subject),
-      references: [...ordinary, ...frames],
+      references,
       composer: {
         mode: "video",
         provider: model?.provider ?? "",
@@ -664,17 +718,9 @@ export async function prepareBenchSubject(
             aspect,
             durationSec: board.durationSec,
             sound: true,
+            ...(animatic !== null ? { follow } : {}),
           },
-        brief:
-          authoredPrompt ??
-          assembleBoardPrompt({
-            world: world.meta,
-            sheets: world.sheets,
-            scene,
-            shots: members,
-            aspect,
-            ...(style !== undefined ? { artDirection: style } : {}),
-          }),
+        brief,
         ...routing,
       },
     },

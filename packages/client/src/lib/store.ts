@@ -5210,7 +5210,7 @@ export async function cancelStageExport(jobId: string): Promise<void> {
 }
 
 export async function stagePlayblast(
-  target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
+  target: Extract<AttachTarget, { kind: "stage-playblast" | "stage-animatic" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
   referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,

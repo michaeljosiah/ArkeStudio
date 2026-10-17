@@ -774,3 +774,66 @@ it("poses a mark by name, puts a hand on someone, looks at them, and warns of a 
   assert.deepEqual(mark?.hand, { side: "left", on: "maren-kest", part: "left shoulder" });
   assert.equal(mark?.look, "maren-kest");
 });
+
+/** Shots 12 and 13 as Board A, each with its own camera, Maren crossing in the first (issue 1824). */
+async function mountBoard(stageSecond = true) {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const production = world.productions.find(p => p.meta.id === "saltlight")!;
+  const scene = production.scenes.find(s => s.id === "sc_04")!;
+  const [first, second] = ["sh_12", "sh_13"].map(id => orderedShots(scene).find(s => s.id === id)!);
+  first!.durationSec = 4;
+  second!.durationSec = 6;
+  first!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys: [0, 4].map(t => ({ t, p: [0, 1.5, 3], l: [0, 1, 0] })),
+    performances: [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 4, x: 2, z: 0 }] }] };
+  if (stageSecond) second!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys: [0, 6].map(t => ({ t, p: [1, 1.6, 2.5], l: [0, 1, 0] })) };
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  const rendered: string[][] = [];
+  await act(async () => root!.render(
+    <MemoryRouter><SelectionProvider value={{ subject: { kind: "shot", shotId: "sh_12" }, select: () => {} }}>
+      <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined}
+        locked={false} generatorPending={false} refusalVersion={0} onCommand={() => true} onRenderShot={() => {}}
+        board={{ letter: "A", memberShotIds: ["sh_12", "sh_13"], capSec: 10 }} onRenderBoard={members => rendered.push(members)} />
+    </SelectionProvider></MemoryRouter>,
+  ));
+  return { q: (selector: string) => container.querySelector<HTMLElement>(selector)!, container, rendered };
+}
+const scopeButton = (q: (selector: string) => HTMLElement, label: string) =>
+  [...q('[data-testid="stage-scope"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === label)!;
+
+it("opens a board on one clock: the cut list, the line check, the shared action and the animatic (issue 1824, turn 228g)", async () => {
+  const { q, container } = await mountBoard();
+  assert.equal(q('[data-testid="stage-board"]'), null, "the Stage opens on This shot");
+  await click(scopeButton(q, "Board A"));
+  const form = q('[data-testid="stage-board"]');
+  assert.match(form.textContent ?? "", /Board A/);
+  assert.match(form.textContent ?? "", /10\.0 of 10 s/);
+  const members = [...form.querySelectorAll(".fy-swstage__item")].map(item => item.textContent);
+  assert.deepEqual(members, ["12 · Maren at the rail, listening4.0 s", "13 · The lamps answer6.0 s"]);
+  assert.match(form.textContent ?? "", /180° · clear/);
+  // Maren ends the first shot two metres from where the second starts her: a jump at the cut.
+  assert.match(form.textContent ?? "", /jumps 2\.0 m at the cut to 13/);
+  const perShot = [...form.querySelectorAll<HTMLButtonElement>('[aria-label="Board action"] button')].find(button => button.textContent === "Per shot")!;
+  await click(perShot);
+  assert.doesNotMatch(q('[data-testid="stage-board"]').textContent ?? "", /jumps/, "per-shot action is not held to continuity");
+  // The track is the cut list on the board's clock, and the stage list reads rather than picks.
+  const cuts = [...q('[data-testid="stage-cuts"]').querySelectorAll(".fy-swstage__cut")];
+  assert.deepEqual(cuts.map(cut => cut.getAttribute("style")), ["left:0%;width:calc(40% - 3px)", "left:40%;width:calc(60% - 3px)"]);
+  assert.match(q(".fy-swstage__time").textContent ?? "", /\/ 10\.0s/);
+  assert.equal(stageItem(q, "camera").textContent, "camera2 cameras");
+  assert.equal((stageItem(q, "camera") as HTMLButtonElement).disabled, true);
+  assert.match(container.textContent ?? "", /animatic/);
+  assert.match(container.textContent ?? "", /not filed/);
+  const render = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Render with this")!;
+  assert.equal(render.disabled, true, "a board renders with its animatic once one is filed");
+  await click(scopeButton(q, "This shot"));
+  assert.equal(q('[data-testid="stage-board"]'), null);
+});
+
+it("keeps the board shut until every member is staged (issue 1824)", async () => {
+  const { q } = await mountBoard(false);
+  const board = scopeButton(q, "Board A");
+  assert.equal(board.disabled, true);
+  assert.equal(board.getAttribute("title"), "Stage every shot of the board first");
+});

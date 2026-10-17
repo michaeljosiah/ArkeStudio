@@ -108,6 +108,19 @@ export interface StageData {
   lights?: readonly StageLight[];
   atmosphere?: SceneAtmosphere;
   plate?: StagePlateView | null;
+  /**
+   * A board (issue 1824, design turn 228g): this is the member at the playhead, the other members'
+   * cameras stand where they open, numbered, and the lens preview says which cut it is showing.
+   */
+  board?: StageBoardView | null;
+}
+
+export interface StageBoardView {
+  /** This member's number on the board. */
+  number: number;
+  rigs: ReadonlyArray<{ number: number; p: readonly [number, number, number]; l: readonly [number, number, number] }>;
+  /** The lens preview's caption: the cut and the time on the board's clock. */
+  caption: string;
 }
 
 export type StageSelection =
@@ -351,6 +364,7 @@ export class StageViewport {
   private lookRig!: StageLookRig;
   private composer: { composer: EffectComposer; ao: GTAOPass; width: number; height: number } | null = null;
   private objectGroups = new Map<string, Group>();
+  private boardRigs: Array<{ object: Object3D; number: number }> = [];
   private cam: CamRefs | null = null;
   private aim: AimRefs | null = null;
   private path: Line | null = null;
@@ -525,7 +539,7 @@ export class StageViewport {
       this.shot.aspect = data.aspect;
       this.shot.updateProjectionMatrix();
     }
-    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate]);
+    const structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate, data.board?.number, data.board?.rigs]);
     if (this.transform.dragging) return;
     if (structure !== this.structure) {
       const castChanged = previous.cast.map((c) => c.sheetId).join("|") !== data.cast.map((c) => c.sheetId).join("|");
@@ -593,7 +607,8 @@ export class StageViewport {
 
   private build(): void {
     const data = this.data;
-    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate]);
+    this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate, data.board?.number, data.board?.rigs]);
+    this.boardRigs = [];
     this.clear(this.castGroup);
     this.clear(this.setGroup);
     this.clear(this.rigGroup);
@@ -783,6 +798,24 @@ export class StageViewport {
       const sight = lineBetween(position, look, new LineBasicMaterial({ color: INK, transparent: true, opacity: 0.28 }));
       this.rigGroup.add(sight);
       this.aim = { marker, sight, ring: aimRing };
+    }
+
+    // The board's other cameras (issue 1824): where each opens, quieter than the live one and out
+    // of every lens, so the overview reads as one set covered by numbered cameras.
+    for (const other of data.board?.rigs ?? []) {
+      const body = rig(data.fov, data.aspect);
+      body.position.set(...other.p);
+      aimAt(body, new Vector3(...other.l));
+      body.traverse((object) => {
+        object.raycast = noPick;
+        const material = (object as Mesh).material as MeshStandardMaterial | LineBasicMaterial | undefined;
+        if (material !== undefined && !Array.isArray(material)) { material.transparent = true; material.opacity = 0.45; }
+      });
+      this.rigGroup.add(body);
+      const stem = lineBetween(new Vector3(other.p[0], 0, other.p[2]), new Vector3(...other.p), new LineBasicMaterial({ color: INK, transparent: true, opacity: 0.2 }));
+      stem.raycast = noPick;
+      this.rigGroup.add(stem);
+      this.boardRigs.push({ object: body, number: other.number });
     }
 
     if (data.keys.length > 1) {
@@ -1130,7 +1163,8 @@ export class StageViewport {
       if (mesh.userData["labelled"] === false) continue;
       this.labels.push({ element: this.label(mesh.userData["label"] as string, false), object: mesh, up: mesh.userData["up"] as number });
     }
-    if (this.cam !== null) this.labels.push({ element: this.label("CAMERA", true), object: this.cam.rig, up: 0.34 });
+    if (this.cam !== null) this.labels.push({ element: this.label(this.data.board ? String(this.data.board.number) : "CAMERA", true), object: this.cam.rig, up: 0.34 });
+    for (const other of this.boardRigs) this.labels.push({ element: this.label(String(other.number), true), object: other.object, up: 0.34 });
   }
 
   private drawLabels(lens: boolean): void {
@@ -1418,7 +1452,7 @@ export class StageViewport {
       this.pip.style.top = `${(canvasHeight - y - box.h) / ratio}px`;
       this.pip.style.width = `${box.w / ratio}px`;
       this.pip.style.height = `${box.h / ratio}px`;
-      this.pipCaption.textContent = `camera · ${data.lensLabel}`;
+      this.pipCaption.textContent = data.board?.caption ?? `camera · ${data.lensLabel}`;
     }
     this.drawLabels(lens);
     this.gizmo.camera.position.copy(this.view.position).sub(this.controls.target).normalize().multiplyScalar(4);
@@ -1532,6 +1566,93 @@ export class StageViewport {
       this.refresh(this.data.at);
       renderer.dispose();
       renderer.forceContextLoss();
+    }
+  }
+
+  /**
+   * A board's cut animatic (issue 1824): each member drawn in turn from its own camera into one
+   * encoder job, each for its own whole frames, so every cut lands on a shot boundary to the frame.
+   * The opening frame is the first member's; a board files no other stills.
+   */
+  async recordBoard(parts: readonly StageData[], sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob }> {
+    if (parts.length === 0) throw new Error("the board has no shots to record");
+    const width = 1280;
+    const height = Math.max(2, Math.round((width / parts[0]!.aspect) / 2) * 2);
+    const counts = parts.map((part) => stageFrameCount(part.durationSec));
+    const frameCount = counts.reduce((sum, count) => sum + count, 0);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+    renderer.setPixelRatio(1);
+    renderer.setSize(width, height, false);
+    renderer.setClearColor(0xe6e3dd, 1);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFShadowMap;
+    const original = this.data;
+    let shaded: ReturnType<typeof stageComposer> | null = null;
+    let jobId: string | null = null;
+    let complete = false;
+    try {
+      this.recordingAt = 0;
+      this.transform.detach();
+      this.transformHelper.visible = false;
+      jobId = await sink.start({ width, height, frameRate: STAGE_FRAME_RATE, frameCount });
+      const gl = renderer.getContext();
+      const pixels = new Uint8Array(width * height * 4);
+      let openingFrame: Blob | null = null;
+      let written = 0;
+      for (const [index, part] of parts.entries()) {
+        if (this.disposed) throw new Error("export stopped — the shot changed");
+        this.load(part);
+        this.lookRig.prepare(renderer);
+        shaded?.composer.dispose();
+        shaded = this.lookRig.shading ? stageComposer(renderer, this.scene, this.shot, width, height) : null;
+        for (let frame = 0; frame < counts[index]!; frame += 1) {
+          if (this.disposed) throw new Error("export stopped — the shot changed");
+          const at = frame / STAGE_FRAME_RATE;
+          this.recordingAt = at;
+          this.refresh(at);
+          this.hideStaging(true);
+          if (shaded) shaded.composer.render(); else renderer.render(this.scene, this.shot);
+          if (openingFrame === null) {
+            openingFrame = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("the Stage frame could not be captured")), "image/png");
+            });
+          }
+          gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          await sink.write(jobId, written, pixels.slice());
+          written += 1;
+          onProgress(written / frameCount);
+        }
+      }
+      complete = true;
+      return { jobId, openingFrame: openingFrame! };
+    } finally {
+      this.recordingAt = null;
+      shaded?.composer.dispose();
+      if (jobId !== null && !complete) await sink.cancel(jobId).catch(() => {});
+      const pending = this.pendingData;
+      this.pendingData = null;
+      if (!this.disposed) {
+        this.load(pending ?? original);
+        this.hideStaging(this.data.mode === "camera");
+      }
+      renderer.dispose();
+      renderer.forceContextLoss();
+    }
+  }
+
+  /** Swap in another member's data and rebuild, whatever is on the stage now. */
+  private load(data: StageData): void {
+    this.data = data;
+    this.shot.fov = data.fov;
+    this.shot.aspect = data.aspect;
+    this.shot.updateProjectionMatrix();
+    this.build();
+    if (this.recordingAt !== null) {
+      this.transform.detach();
+      this.transformHelper.visible = false;
     }
   }
 

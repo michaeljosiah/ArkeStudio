@@ -11,6 +11,7 @@ import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } fr
 import { parseSceneRecord } from "./scene-record.js";
 import { stemOrThrow } from "./scene-commands.js";
 import { readChanges } from "../world/change-writer.js";
+import { stageBoardArtifactProblem } from "./stage-animatic.js";
 
 /** Recover the immutable video filed by this action, even after the shot acquires a newer pin. */
 export async function conversationStagePlayblastArtifact(store: WorldStore, actionId: string, productionId: string | undefined, shotId: string | undefined): Promise<string | null> {
@@ -177,6 +178,7 @@ export function stageSourceFingerprint(scene: SceneRecord, shot: Shot, aspect: s
 
 /** Recheck Stage references at admission and when the queue reads their bytes. */
 export function stageArtifactProblem(bundle: WorldBundle, artifact: ArtifactSidecar): string | null {
+  if(artifact.origin.by === "system" && artifact.origin.producedBy.startsWith("stage-board:")) return stageBoardArtifactProblem(bundle, artifact);
   if(artifact.origin.by !== "system" || !artifact.origin.producedBy.startsWith("stage:")) return null;
   const shotId=artifact.origin.producedBy.slice(6);
   const production=bundle.productions.find(p=>p.meta.id===artifact.production);

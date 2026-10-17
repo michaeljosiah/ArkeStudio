@@ -30,7 +30,7 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, sendBenchOpenSubject, subscribeBenchSubjectOpened, useClientState, useStore } from "../../lib/store.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../../lib/selectors.js";
 import { useBlockDigests } from "../storyboard.js";
-import { shotFramePath } from "./boards.js";
+import { boardsForScene, shotFramePath } from "./boards.js";
 import { CharacterDialog } from "./character-dialog.js";
 import { FrameActions } from "./frame-actions.js";
 import { frameRunShotState, GenerateFramesDialog } from "./frame-run.js";
@@ -229,6 +229,15 @@ function ShotWorkspace({
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
   const resolvedModel = resolveModel(state, "video", undefined, productionModel(state, production.meta.id, "video"));
   const videoModel = resolvedModel.stranded ?? resolvedModel.model;
+  // The board this shot cuts into (issue 1824): the same packing the scene's boards use, so the
+  // Stage's Board view and the Bench's board session are one board.
+  const boardCap = videoModel?.limits.maxDurationSec ?? 10;
+  const boardPanels = videoModel?.limits.storyboardPanels;
+  const stageBoard = useMemo(() => {
+    const pack = boardsForScene({ scene: pageScene, production, artifacts, sheets: world.sheets, capSec: boardCap, ...(boardPanels !== undefined ? { panelCap: boardPanels } : {}) });
+    const board = pack.ok ? pack.boards.find((candidate) => candidate.memberShotIds.includes(shot.id)) : undefined;
+    return board === undefined || board.memberShotIds.length < 2 ? null : { letter: board.letter, memberShotIds: board.memberShotIds, capSec: boardCap };
+  }, [pageScene, production, artifacts, world.sheets, boardCap, boardPanels, shot.id]);
   const sceneRuns = [...(state?.frameRuns ?? [])]
     .filter((candidate) => candidate.worldId === world.meta.worldId && candidate.productionId === production.meta.id && candidate.run.sceneId === scene.id && candidate.run.dismissed !== true)
     .sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt));
@@ -289,13 +298,13 @@ function ShotWorkspace({
     setGeneratorPending(false);
     setGeneratorError("Connection lost - try again.");
   }, [connection]);
-  const openGenerator = (mode?: "image" | "video") => {
+  const openGenerator = (mode?: "image" | "video", memberShotIds?: string[]) => {
     if (pendingGenerator.current !== null) return;
     const requestId = sendBenchOpenSubject({
       worldId: world.meta.worldId,
       productionId: production.meta.id,
       sceneId: scene.id,
-      subject: { kind: "shot", shotId: shot.id },
+      subject: memberShotIds === undefined ? { kind: "shot", shotId: shot.id } : { kind: "board", memberShotIds },
       ...(mode === undefined ? {} : { mode }),
     });
     if (requestId !== null) {
@@ -577,6 +586,8 @@ function ShotWorkspace({
               refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={() => openGenerator("video")}
+              board={stageBoard}
+              onRenderBoard={(memberShotIds) => openGenerator("video", memberShotIds)}
               {...(constructionRequest ? { constructionRequest } : {})}
               {...(playblastRequest ? { playblastRequest } : {})}
             />

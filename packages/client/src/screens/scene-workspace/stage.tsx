@@ -54,6 +54,7 @@ import { stageFrameKey, type StageFrameWords } from "@arke-studio/contracts";
 import { stageLightDefault, type SceneAtmosphere, type StageLight } from "@arke-studio/contracts";
 import { STAGE_KIT_SIZES } from "@arke-studio/contracts";
 import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
+import { stageBoardAnimatic, stageBoardAnimaticIsStale, stageBoardAt, stageBoardCuts, stageBoardJumps, stageBoardLineFindings, stageBoardStagings } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -109,6 +110,20 @@ function withKeyAt(staging: ResolvedShotStaging, at: number, patch: Partial<Stag
   return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
 }
 
+/** A lane's words (design turn 228d): the pose at each mark where it changes, and a walk where one starts. */
+function lanePoses(keys: readonly StagePerformanceKey[]): Array<{ t: number; word: string }> {
+  const words: Array<{ t: number; word: string }> = [];
+  let pose: string | null = null;
+  keys.forEach((key, index) => {
+    const next = keys[index + 1];
+    const walks = next !== undefined && Math.hypot(next.x - key.x, next.z - key.z) > 0.3;
+    const word = walks ? (key.gait ?? "walk") : STAGE_POSE_LABELS[key.pose ?? "stand"].toLowerCase();
+    if (word !== pose) words.push({ t: key.t, word });
+    pose = word;
+  });
+  return words;
+}
+
 function keyName(index: number, count: number): string {
   return index === 0 ? "start" : index === count - 1 ? "end" : `key ${index}`;
 }
@@ -145,6 +160,8 @@ export function SceneStage({
   frozenScene = false,
   fullscreen = null,
   head = true,
+  board = null,
+  onRenderBoard,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -170,6 +187,9 @@ export function SceneStage({
    * back for the way out alone, which 144 put on this row.
    */
   head?: boolean;
+  /** The board this shot cuts into (issue 1824, design turn 228g); null when it stands alone. */
+  board?: { letter: string; memberShotIds: string[]; capSec: number } | null;
+  onRenderBoard?: (memberShotIds: string[]) => void;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -283,6 +303,18 @@ export function SceneStage({
   const playStart = useRef<{ wall: number; from: number } | null>(null);
   const handledPlayblastActions = useRef(new Set<string>());
   const frozen = locked || exporting !== null || constructing;
+  // A board (issue 1824, design turn 228g): the shots the scene's packing cuts this one into, on
+  // one clock, each with its own camera. The view is for watching, checking and recording the
+  // board; editing stays on This shot, where each shot's own staging is.
+  const [boardView, setBoardView] = useState(false);
+  const [boardAction, setBoardAction] = useState<"shared" | "shot">("shared");
+  const boardCuts = useMemo(() => (board === null ? [] : stageBoardCuts(scene, board.memberShotIds)), [scene, board]);
+  const boardStaged = board !== null && boardCuts.length >= 2 && stageBoardStagings(scene, board.memberShotIds) !== null;
+  const boardOn = boardView && boardStaged;
+  const boardTotal = boardCuts.at(-1)?.to ?? 0;
+  const clock = boardOn ? boardTotal : durationSec;
+  const boardHere = boardOn ? stageBoardAt(boardCuts, at) : null;
+  useEffect(() => { if (boardView && !boardStaged) setBoardView(false); }, [boardView, boardStaged]);
 
   // The end key is the end pose, so it always sits at the shot's length: a staging kept before
   // the shot was retimed plays to its end pose here and is repaired by the next Keep.
@@ -317,8 +349,8 @@ export function SceneStage({
   const activeKey = keys[active] ?? null;
   // The viewport outlives many renders and its callbacks must see the current draft, not the
   // one standing when it was created.
-  const latest = useRef({ working, active, frozen, at, framing, aspect });
-  latest.current = { working, active, frozen, at, framing, aspect };
+  const latest = useRef({ working, active, frozen, at, framing, aspect, board: boardOn });
+  latest.current = { working, active, frozen, at, framing, aspect, board: boardOn };
 
   // A new snapshot that carries the draft's move retires the draft; one that does not — an edit
   // from elsewhere — rebases any half the person did not touch and leaves their own half standing.
@@ -435,35 +467,35 @@ export function SceneStage({
       if (start === null) return;
       const wall = Date.now();
       const next = start.from + (wall - start.wall) / 1000;
-      if (next >= durationSec && !loop) {
-        setAt(durationSec);
+      if (next >= clock && !loop) {
+        setAt(clock);
         setPlaying(false);
         playStart.current = null;
         return;
       }
-      const time = loop ? next % durationSec : next;
-      if (next >= durationSec) playStart.current = { wall, from: time };
+      const time = loop ? next % clock : next;
+      if (next >= clock) playStart.current = { wall, from: time };
       setAt(time);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, durationSec, loop, frozen]);
+  }, [playing, clock, loop, frozen]);
 
   const stop = () => {
     setPlaying(false);
     playStart.current = null;
   };
   const patchCamera = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
-    const { working: current, frozen: editingFrozen } = latest.current;
-    if (current === null || editingFrozen) return;
+    const { working: current, frozen: editingFrozen, board: watching } = latest.current;
+    if (current === null || editingFrozen || watching) return;
     cameraDirty.current = true;
     const {authorship: _authorship, ...edited} = change(current);
     setDraft(edited);
   };
   const patchBlocking = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
-    const { working: current, frozen: editingFrozen } = latest.current;
-    if (current === null || editingFrozen) return;
+    const { working: current, frozen: editingFrozen, board: watching } = latest.current;
+    if (current === null || editingFrozen || watching) return;
     blockingDirty.current = true;
     const {authorship: _authorship, ...edited} = change(current);
     setDraft(edited);
@@ -479,7 +511,7 @@ export function SceneStage({
     const url = platePicture(plate, world);
     return url === null ? null : { url, camera: plate.camera };
   }, [scene.blocking?.plate, world]);
-  const data: StageData | null = useMemo(() => {
+  const shotData: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
     const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
     return {
@@ -520,6 +552,71 @@ export function SceneStage({
       plate: plateView,
     };
   }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets, look, scene.blocking?.lights, scene.blocking?.atmosphere, plateView]);
+  // Each member's staging and where its camera opens, for the board's view and its animatic.
+  const boardMembers = useMemo(() => {
+    if (!boardStaged) return [];
+    const ordered = orderedShots(scene);
+    return boardCuts.map((cut) => {
+      const member = ordered.find((candidate) => candidate.id === cut.shotId)!;
+      const length = cut.to - cut.from;
+      const resolved = stagingRetimed(resolvedShotStaging(scene, member.staging!), length) as ResolvedShotStaging;
+      const opening = sampleStageCamera(resolved, 0, length);
+      return { cut, resolved, length, lens: effectiveFraming(scene, member).lens, p: opening.p as [number, number, number], l: opening.l as [number, number, number] };
+    });
+  }, [boardStaged, boardCuts, scene]);
+  const memberData = (index: number, local: number, overview: boolean): StageData | null => {
+    const member = boardMembers[index];
+    if (member === undefined) return null;
+    const { resolved } = member;
+    return {
+      cast: resolved.cast.map((figure, position) => ({
+        sheetId: figure.sheetId,
+        name: nameOf(figure.sheetId),
+        colour: figureColour(position),
+        x: figure.x,
+        ...(figure.facing === undefined ? {} : { facing: figure.facing }),
+        ...(figure.y === undefined ? {} : { y: figure.y }),
+        ...(figure.parent === undefined ? {} : { parent: figure.parent }),
+        ...(figure.height === undefined ? {} : { height: figure.height }),
+        z: figure.z,
+        pose: figure.pose ?? null,
+        to: figure.to ?? null,
+        ghost: null,
+      })),
+      ...(resolved.performances ? { performances: resolved.performances } : {}),
+      ...(resolved.objectMotions ? { objectMotions: resolved.objectMotions } : {}),
+      sets: resolved.sets,
+      keys: resolved.keys,
+      durationSec: member.length,
+      active: 0,
+      mode,
+      at: local,
+      fov: stagingFov(member.lens, aspect),
+      aspect: aspectNumber(aspect),
+      lensLabel: member.lens ?? "lens unset",
+      rig: resolved.rig,
+      seed: resolved.seed,
+      rigIntensity: resolved.rigIntensity,
+      look,
+      lights: scene.blocking?.lights ?? [],
+      ...(scene.blocking?.atmosphere === undefined ? {} : { atmosphere: scene.blocking.atmosphere }),
+      plate: plateView,
+      board: overview
+        ? {
+            number: member.cut.number,
+            rigs: boardMembers.filter((_, position) => position !== index).map((other) => ({ number: other.cut.number, p: other.p, l: other.l })),
+            caption: `${member.cut.number} · ${(member.cut.from + local).toFixed(1)}s`,
+          }
+        : null,
+    };
+  };
+  const boardIndex = boardHere?.index ?? -1;
+  const boardLocal = boardHere?.local ?? 0;
+  const boardData = useMemo(
+    () => (boardOn && boardIndex >= 0 ? memberData(boardIndex, boardLocal, true) : null),
+    [boardOn, boardIndex, boardLocal, boardMembers, mode, aspect, look, sheets, scene.blocking?.lights, scene.blocking?.atmosphere, plateView],
+  );
+  const data = boardOn ? boardData : shotData;
 
   useEffect(() => {
     const element = host.current;
@@ -631,6 +728,52 @@ export function SceneStage({
       if (!outcome.ok) fail(outcome.reason);
     } catch (error) {
       fail(error instanceof Error ? error.message : "the playblast could not be recorded");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportAnimatic = async () => {
+    const view = viewport.current;
+    if (view === null || board === null || sceneFile === undefined || exporting !== null) return;
+    const stagings = stageBoardStagings(scene, board.memberShotIds);
+    if (stagings === null) return;
+    const parts = boardMembers.map((_, index) => memberData(index, 0, false)).filter((part): part is StageData => part !== null);
+    stop();
+    setNote(null);
+    setExporting(0);
+    try {
+      const { jobId, openingFrame } = await view.recordBoard(parts, {
+        start: beginStageExport,
+        write: writeStageExportFrame,
+        cancel: cancelStageExport,
+      }, setExporting);
+      if (viewport.current !== view) {
+        await cancelStageExport(jobId);
+        setNote("export stopped - the shot changed");
+        return;
+      }
+      if (openingFrame.size === 0) {
+        await cancelStageExport(jobId);
+        setNote("the Stage export came back empty - export it again");
+        return;
+      }
+      const outcome = await stagePlayblast({
+        kind: "stage-animatic",
+        worldId: world.meta.worldId,
+        productionId: production.meta.id,
+        sceneFile,
+        sceneId: scene.id,
+        baseVersion: scene.version,
+        members: [...board.memberShotIds],
+        stagings,
+        durationSec: boardTotal,
+        aspect,
+        look,
+      }, jobId, new Uint8Array(await openingFrame.arrayBuffer()), []);
+      if (!outcome.ok) setNote(outcome.reason);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "the animatic could not be recorded");
     } finally {
       setExporting(null);
     }
@@ -828,13 +971,30 @@ export function SceneStage({
     });
     setScope(next);
   };
+  // Into the board at this shot's cut; out at the shot the playhead is on.
+  const chooseBoard = (on: boolean) => {
+    if (on === boardOn || moved || frozen) return;
+    stop();
+    if (on) {
+      setBoardView(true);
+      setAt(boardCuts.find((cut) => cut.shotId === shot?.id)?.from ?? 0);
+      setSelection(null);
+      setMotionMark(null);
+      viewport.current?.select(null);
+      return;
+    }
+    const here = stageBoardAt(boardCuts, at);
+    setBoardView(false);
+    if (here !== null && here.cut.shotId !== shot?.id) select({ kind: "shot", shotId: here.cut.shotId });
+    else setAt(here?.local ?? 0);
+  };
   const toggle = () => {
     if (frozen) return;
     if (playing) {
       stop();
       return;
     }
-    const from = at >= durationSec ? 0 : at;
+    const from = at >= clock ? 0 : at;
     playStart.current = { wall: Date.now(), from };
     setAt(from);
     setPlaying(true);
@@ -854,7 +1014,7 @@ export function SceneStage({
   const seekTime = (time: number) => {
     if (latest.current.frozen) return;
     stop();
-    setAt(Math.max(0, Math.min(durationSec, time)));
+    setAt(Math.max(0, Math.min(clock, time)));
   };
   // Shortcuts belong to this Stage, leaving text entry and native button activation alone.
   const timelineKey = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -866,7 +1026,8 @@ export function SceneStage({
     else if (event.key === "ArrowLeft") seekTime(at - 1 / STAGE_FRAME_RATE);
     else if (event.key === "ArrowRight") seekTime(at + 1 / STAGE_FRAME_RATE);
     else if (event.key === "Home") seekTime(0);
-    else if (event.key === "End") seekTime(durationSec);
+    else if (event.key === "End") seekTime(clock);
+    else if (/^[1-9]$/.test(event.key) && boardOn) { const cut = boardCuts[Number(event.key) - 1]; if (cut === undefined) return; seekTime(cut.from); }
     else if (/^[1-9]$/.test(event.key) && keys[Number(event.key) - 1]) seek(Number(event.key) - 1);
     else return;
     event.preventDefault();
@@ -875,7 +1036,7 @@ export function SceneStage({
   const scrub = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (latest.current.frozen) return;
     const bounds = event.currentTarget.getBoundingClientRect();
-    seekTime((event.clientX - bounds.left) / Math.max(1, bounds.width) * durationSec);
+    seekTime((event.clientX - bounds.left) / Math.max(1, bounds.width) * clock);
   };
   const addKey = () => {
     if (working === null) return;
@@ -1118,6 +1279,7 @@ export function SceneStage({
     });
   };
   const pick = (next: Exclude<StageSelection, null>) => {
+    if (boardOn) return;
     setPlateSelected(false);
     setLightSelected(null);
     const selected: StageSelection = sameLine(selection, next) ? null : next;
@@ -1161,6 +1323,19 @@ export function SceneStage({
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
+  const boardPin = board === null ? null : stageBoardAnimatic(scene, board.memberShotIds);
+  const boardStale = boardPin !== null && stageBoardAnimaticIsStale(scene, boardPin, aspect);
+  const boardLines = boardOn && board !== null ? stageBoardLineFindings(scene, board.memberShotIds, aspect) : [];
+  const boardJumps = boardOn && board !== null && boardAction === "shared" ? stageBoardJumps(scene, board.memberShotIds) : [];
+  const boardScope = board === null ? null : (
+    <span className="fy-swstage__scope" role="radiogroup" aria-label="Stage scope" data-testid="stage-scope">
+      <button type="button" role="radio" aria-checked={!boardOn} data-on={!boardOn ? "true" : undefined} onClick={() => chooseBoard(false)}>This shot</button>
+      <button type="button" role="radio" aria-checked={boardOn} data-on={boardOn ? "true" : undefined}
+        disabled={!boardStaged || moved || frozen}
+        title={!boardStaged ? "Stage every shot of the board first" : moved ? "Keep the move first" : undefined}
+        onClick={() => chooseBoard(true)}>Board {board.letter}</button>
+    </span>
+  );
   return (
     <StageEditContext.Provider value={() => {
       const original = draft, cameraWasDirty = cameraDirty.current, blockingWasDirty = blockingDirty.current;
@@ -1180,7 +1355,7 @@ export function SceneStage({
               >
                 <ChevronLeft size={12} />
               </button>
-              <strong>Shot {shot.number}</strong>
+              <strong>{boardOn ? `Board ${board!.letter}` : `Shot ${shot.number}`}</strong>
               <button
                 type="button"
                 className="fy-swstage__step"
@@ -1192,10 +1367,13 @@ export function SceneStage({
               </button>
             </>
           ) : null}
-          <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
+          <span className="fy-swstage__meta">{boardOn ? `${boardCuts.length} shots · ${boardTotal.toFixed(1)}s` : `${shot.title} · ${durationSec.toFixed(1)}s`}</span>
+          {boardScope}
           {working === null ? null : (
             <span className="fy-swstage__version">
-              v{persisted?.version ?? 1} · {keys.length} keys · {stagingMotionWord(working,durationSec)}
+              {boardOn
+                ? `v${scene.version} · ${boardLines.length === 0 ? "180° clear" : `${boardLines.length} line ${boardLines.length === 1 ? "crossing" : "crossings"}`}`
+                : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec)}`}
             </span>
           )}
           {fullscreen === null ? null : (
@@ -1207,6 +1385,7 @@ export function SceneStage({
       ) : null}
 
       <div className="fy-swstage__construction">
+        {head || fullscreen !== null ? null : boardScope}
         {cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet">{warning}</p>)}
         {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} disabled={frozen || locked || moved} onPick={pickPlate} />}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
@@ -1311,11 +1490,12 @@ export function SceneStage({
                   type="button"
                   className="fy-swstage__item"
                   data-selected={selection?.kind === "rig" || selection?.kind === "aim" ? "true" : undefined}
+                  disabled={boardOn}
                   onClick={() => pick({ kind: "rig" })}
                 >
                   <span className="fy-swstage__mark" data-kind="camera" aria-hidden="true" />
                   <span>camera</span>
-                  <span>{stagingMotionWord(working, durationSec)} · {keys.length} {keys.length === 1 ? "key" : "keys"}</span>
+                  <span>{boardOn ? `${boardCuts.length} cameras` : `${stagingMotionWord(working, durationSec)} · ${keys.length} ${keys.length === 1 ? "key" : "keys"}`}</span>
                 </button>
                 {scene.blocking?.plate === undefined ? null : (
                   <button
@@ -1323,6 +1503,7 @@ export function SceneStage({
                     className="fy-swstage__item"
                     data-selected={plateSelected ? "true" : undefined}
                     data-testid="stage-plate-line"
+                    disabled={boardOn}
                     onClick={() => { setSelection(null); viewport.current?.select(null); setLightSelected(null); setPlateSelected((on) => !on); }}
                   >
                     <span className="fy-swstage__mark" data-kind="plate" aria-hidden="true" />
@@ -1337,6 +1518,7 @@ export function SceneStage({
                     className="fy-swstage__item"
                     data-selected={(selection?.kind === "cast" || selection?.kind === "walkend") && selection.sheetId === figure.sheetId ? "true" : undefined}
                     title={figureLegs(figure.sheetId).map((leg) => stageSpeedWarning(leg, nameOf)).filter(Boolean).join("\n") || undefined}
+                    disabled={boardOn}
                     onClick={() => pick({ kind: "cast", sheetId: figure.sheetId })}
                   >
                     <span className="fy-swstage__mark" style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
@@ -1356,6 +1538,7 @@ export function SceneStage({
                     type="button"
                     className="fy-swstage__item"
                     data-selected={selection?.kind === "set" && selection.index === position ? "true" : undefined}
+                    disabled={boardOn}
                     onClick={() => pick({ kind: "set", index: position })}
                   >
                     <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />
@@ -1363,7 +1546,7 @@ export function SceneStage({
                     <span>{set.shape ?? "box"}{set.solid ? " · solid" : ""}</span>
                   </button>
                 ))}
-                <AddSetMenu disabled={frozen} onPick={addSet} />
+                <AddSetMenu disabled={frozen || boardOn} onPick={addSet} />
                 {sceneLights.length === 0 ? null : <div className="fy-swstage__group">lights · {sceneLights.length}</div>}
                 {sceneLights.map((light, position) => (
                   <button
@@ -1372,6 +1555,7 @@ export function SceneStage({
                     className="fy-swstage__item"
                     data-selected={lightSelected === position ? "true" : undefined}
                     data-testid="stage-light-line"
+                    disabled={boardOn}
                     onClick={() => { setSelection(null); viewport.current?.select(null); setPlateSelected(false); setLightSelected((current) => (current === position ? null : position)); }}
                   >
                     <span className="fy-swstage__mark" data-kind="light" style={{ background: light.colour }} aria-hidden="true" />
@@ -1379,9 +1563,42 @@ export function SceneStage({
                     <span>{light.kind} · {light.strength}</span>
                   </button>
                 ))}
-                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || sceneLights.length >= 24} onClick={addLight}><Plus size={12} />Add light</button>
+                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || boardOn || sceneLights.length >= 24} onClick={addLight}><Plus size={12} />Add light</button>
               </div>
 
+              {boardOn && board !== null ? (
+                <div className="fy-swstage__block" data-testid="stage-board">
+                  <Eyebrow title={`Board ${board.letter}`} meta={`${boardTotal.toFixed(1)} of ${board.capSec} s`} />
+                  {boardCuts.map((cut, position) => (
+                    <button key={cut.shotId} type="button" className="fy-swstage__item" data-selected={position === boardIndex ? "true" : undefined}
+                      onClick={() => seekTime(cut.from)}>
+                      <span className="fy-swstage__mark" data-kind="camera" aria-hidden="true" />
+                      <span>{cut.number} · {cut.title}</span>
+                      <span>{(cut.to - cut.from).toFixed(1)} s</span>
+                    </button>
+                  ))}
+                  <Row label="line">
+                    {boardLines.length === 0
+                      ? <Value><span className="fy-swstage__ok">180° · clear</span></Value>
+                      : <Value><span className="fy-swstage__warnstate">{boardLines.length} {boardLines.length === 1 ? "crossing" : "crossings"}</span></Value>}
+                  </Row>
+                  {boardLines.map((finding) => <span key={`${finding.pair.join("|")}:${finding.at}`} className="fy-swstage__quiet">{finding.message}</span>)}
+                  <Row label="action" top>
+                    <span className="fy-swstage__chips" role="radiogroup" aria-label="Board action">
+                      {(["shared", "shot"] as const).map((candidate) => (
+                        <button key={candidate} type="button" role="radio" aria-checked={boardAction === candidate} data-on={boardAction === candidate ? "true" : undefined}
+                          onClick={() => setBoardAction(candidate)}>{candidate === "shared" ? "Shared" : "Per shot"}</button>
+                      ))}
+                    </span>
+                  </Row>
+                  {boardJumps.map((jump) => (
+                    <span key={`${jump.sheetId}:${jump.shotId}`} className="fy-swstage__quiet">
+                      {nameOf(jump.sheetId)} {jump.posture ? "changes posture" : `jumps ${jump.distance.toFixed(1)} m`} at the cut to {jump.number}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {boardOn ? null : <>
               {lightSelected !== null && sceneLights[lightSelected] !== undefined ? (
                 <>
                   <LightForm
@@ -1801,9 +2018,32 @@ export function SceneStage({
                 </div>
               ) : null}
 
+              </>}
               {/* The ways on are the shot's whatever is selected (140a's foot, kept by 144): the
-                  playblast's state, then Export and Render, pinned under the forms. */}
+                  playblast's state, then Export and Render, pinned under the forms. On a board they
+                  are the animatic's (issue 1824). */}
               <span className="fy-swstage__spacer" />
+              {boardOn && board !== null ? (
+                <div className="fy-swstage__block fy-swstage__block--ways">
+                  <Row label="animatic">
+                    <span className="fy-swstage__value" data-filed={boardPin === null || boardStale ? undefined : "true"}>
+                      {boardPin === null ? "not filed" : boardStale ? "filed · stale" : "filed"}
+                    </span>
+                  </Row>
+                  {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}
+                  <div className="fy-swstage__ways">
+                    <Button variant="outline" size="sm" disabled={locked || exporting !== null || sceneFile === undefined} onClick={() => void exportAnimatic()}>
+                      {exporting === null ? "Export animatic" : `exporting… ${Math.round(exporting * 100)}%`}
+                    </Button>
+                    {onRenderBoard && <Button variant="primary" size="sm"
+                      disabled={generatorPending || frozen || boardPin === null || boardStale}
+                      title={boardPin === null || boardStale ? "Export the current animatic first" : undefined}
+                      onClick={() => onRenderBoard(board.memberShotIds)}>
+                      {generatorPending ? "Opening…" : "Render with this"}
+                    </Button>}
+                  </div>
+                </div>
+              ) : (
               <div className="fy-swstage__block fy-swstage__block--ways">
                 <Row label="playblast">
                   <span className="fy-swstage__value" data-filed={filed === undefined || stale ? undefined : "true"}>
@@ -1833,6 +2073,7 @@ export function SceneStage({
                   </Button>}
                 </div>
               </div>
+              )}
 
               {/* Mounted whatever is selected: the reference plate lives in the viewport and its choice
                   must survive a change of form; only its rows belong to the shot's form. */}
@@ -1853,8 +2094,56 @@ export function SceneStage({
             {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
           </button>
           <button type="button" className="fy-swstage__loop" aria-pressed={loop} disabled={frozen} onClick={() => { if (!frozen) setLoop(!loop); }}>Loop</button>
-          <span className="fy-swstage__time">{Math.min(at, durationSec).toFixed(1)}s / {durationSec.toFixed(1)}s</span>
+          <span className="fy-swstage__time">{Math.min(at, clock).toFixed(1)}s / {clock.toFixed(1)}s</span>
           </div>
+          {boardOn ? <>
+          <div className="fy-swstage__track fy-swstage__cuts" data-testid="stage-cuts">
+            <div className="fy-swstage__scrubber" role="slider" tabIndex={0}
+              aria-label="Board playhead" aria-valuemin={0} aria-valuemax={boardTotal} aria-valuenow={at} aria-valuetext={`${at.toFixed(2)} seconds`}
+              onPointerDown={event => {
+                if (event.button !== 0 || frozen) return;
+                event.preventDefault();
+                event.currentTarget.focus();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                scrub(event);
+              }}
+              onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event); }}
+              onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+            />
+            {boardCuts.map((cut, position) => (
+              <button key={cut.shotId} type="button" className="fy-swstage__cut" data-on={position === boardIndex ? "true" : undefined}
+                style={{ left: `${cut.from / boardTotal * 100}%`, width: `calc(${(cut.to - cut.from) / boardTotal * 100}% - 3px)` }}
+                aria-label={`Shot ${cut.number} from ${cut.from.toFixed(1)} to ${cut.to.toFixed(1)} seconds`}
+                onClick={() => seekTime(cut.from)}>
+                <b>{cut.number}</b><em>{cut.title}</em>
+              </button>
+            ))}
+            <span className="fy-swstage__cut-head" style={{ left: `${at / Math.max(0.01, boardTotal) * 100}%` }} aria-hidden="true" />
+          </div>
+          <span className="fy-swstage__keytools"><span className="fy-swstage__count">{boardCuts.length} shots</span></span>
+          {(working?.cast ?? []).flatMap((figure, position) => {
+            // A figure's action across the cuts: each member's marks on the board's clock.
+            const marks = boardMembers.flatMap((member) => (member.resolved.performances?.find((track) => track.sheetId === figure.sheetId)?.keys ?? []).map((key) => ({ ...key, t: key.t + member.cut.from })));
+            if (marks.length === 0) return [];
+            const colour = `#${figureColour(position).toString(16).padStart(6, "0")}`;
+            const name = nameOf(figure.sheetId);
+            return [(
+              <Fragment key={`board:${figure.sheetId}`}>
+                <span className="fy-swstage__lane-label"><i style={{ background: colour }} />{name}</span>
+                <div className="fy-swstage__track fy-swstage__motion-track" aria-label={`${name} action`} style={{ color: colour }}>
+                  <span className="fy-swstage__rail" aria-hidden="true" />
+                  <span className="fy-swstage__lane-head" style={{ left: `${at / Math.max(0.01, boardTotal) * 100}%` }} aria-hidden="true" />
+                  {boardCuts.slice(1).map((cut) => <span key={cut.shotId} className="fy-swstage__lane-cut" style={{ left: `${cut.from / boardTotal * 100}%` }} aria-hidden="true" />)}
+                  {marks.map((key, index) => (
+                    <span key={index} className="fy-swstage__key" data-mid="true" style={{ left: `${key.t / boardTotal * 100}%`, transform: "translateX(-50%)" }} aria-hidden="true"><span /></span>
+                  ))}
+                  {lanePoses(marks).map((label) => <span key={`${label.t}`} className="fy-swstage__lane-pose" style={{ left: `${label.t / boardTotal * 100}%` }}>{label.word}</span>)}
+                </div>
+                <span className="fy-swstage__count">{marks.length} marks</span>
+              </Fragment>
+            )];
+          })}
+          </> : <>
           <div className="fy-swstage__track" data-key-track="1">
             <div className="fy-swstage__scrubber" role="slider" tabIndex={0}
             aria-label="Stage playhead" aria-valuemin={0} aria-valuemax={durationSec} aria-valuenow={at} aria-valuetext={`${at.toFixed(2)} seconds`} aria-disabled={frozen}
@@ -1933,6 +2222,9 @@ export function SceneStage({
                   const end = stagePerformanceDeparture(key, next);
                   return end > key.t ? <span key={index} className="fy-swstage__hold" aria-label={`${lane.name} hold from ${key.t.toFixed(2)} to ${end.toFixed(2)} seconds`} style={{ left: `${key.t / durationSec * 100}%`, width: `${(end - key.t) / durationSec * 100}%` }}><span>Hold</span></span> : null;
                 }) : null}
+                {lane.kind === "performance" ? lanePoses(lane.keys as readonly StagePerformanceKey[]).map((label) => (
+                  <span key={`${label.t}`} className="fy-swstage__lane-pose" style={{ left: `${label.t / durationSec * 100}%` }}>{label.word}</span>
+                )) : null}
                 {lane.keys.map((key, i) => (
                   <button type="button" key={i} className="fy-swstage__key" data-mid="true" disabled={frozen}
                     data-on={motionMark?.kind === lane.kind && motionMark.id === lane.id && motionMark.index === i ? "true" : undefined}
@@ -1947,6 +2239,7 @@ export function SceneStage({
               <span className="fy-swstage__count">{lane.keys.length} marks</span>
             </Fragment>
           ))}
+          </>}
         </div>
       )}
     </section>

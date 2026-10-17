@@ -2752,6 +2752,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       look: z.enum(["greybox", "lit", "plate"]).optional(),
     })
     .strict(),
+  /** A board's cut animatic the Stage rendered (issue 1824, design turn 228g), filed and pinned on the scene's boards. */
+  z
+    .object({
+      kind: z.literal("stage-animatic"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      sceneId: SceneIdSchema,
+      baseVersion: z.number().int().min(1),
+      members: z.array(ShotIdSchema).min(2).max(24),
+      stagings: z.array(z.object({ shotId: ShotIdSchema, version: z.number().int().min(1), durationSec: z.number().positive(), lens: z.string().max(80) }).strict()).min(2).max(24),
+      durationSec: z.number().positive(),
+      aspect: z.string().min(1).max(20),
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
+      sourcePath: z.string().min(1),
+      openingFrameSourcePath: z.string().min(1),
+      /** The desktop's finishing step always adds this list; a board files no extra stills. */
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).max(0).optional(),
+    })
+    .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
   z
     .object({
