@@ -88,6 +88,13 @@ interface RichMarkdownEditorProps {
   margins?: readonly MarginItem[];
   /** The live editor, for a selection bar that formats in place (R-22); null once it is gone. */
   onEditor?: (editor: Editor | null) => void;
+  /**
+   * Commands the screen adds to `/`, before the editor's own (SPEC-056 R-19: Arke's group, and a
+   * chapter's Scene break). Read on every open of the menu.
+   */
+  extraCommands?: readonly SlashCommand[];
+  /** Ctrl+Enter with nothing selected (D-7): Continue at the caret. */
+  onContinue?: () => void;
 }
 
 /**
@@ -133,6 +140,8 @@ export function RichMarkdownEditor({
   onCaret,
   margins,
   onEditor,
+  extraCommands,
+  onContinue,
 }: RichMarkdownEditorProps) {
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -156,6 +165,15 @@ export function RichMarkdownEditor({
   readOnlyRef.current = readOnly;
 
   const [menu, setMenu] = useState<SlashMenuState | null>(null);
+  const extraRef = useRef(extraCommands);
+  extraRef.current = extraCommands;
+  const onContinueRef = useRef(onContinue);
+  onContinueRef.current = onContinue;
+  // Arke's group heads the menu (R-19); anything else the screen adds follows the editor's own.
+  const allCommands = (): SlashCommand[] => {
+    const extra = extraRef.current ?? [];
+    return [...extra.filter((command) => command.group === "Arke"), ...SLASH_COMMANDS, ...extra.filter((command) => command.group !== "Arke")];
+  };
   const [commands, setCommands] = useState<SlashCommand[]>(SLASH_COMMANDS);
   const [selected, setSelected] = useState(0);
   /*
@@ -234,7 +252,7 @@ export function RichMarkdownEditor({
     const next = readSlashMenuState(instance, shellRef.current);
     setMenu(next);
     if (!next) return;
-    const filtered = filterSlashCommands(SLASH_COMMANDS, next.query);
+    const filtered = filterSlashCommands(allCommands(), next.query);
     setCommands(filtered);
     // Reset rather than clamp: one more letter means a different set of rows, and running whichever
     // command inherited the old index would insert a block nobody pointed at.
@@ -291,6 +309,13 @@ export function RichMarkdownEditor({
         ...(readOnly ? { "aria-readonly": "true" } : {}),
       },
       handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
+        // Ctrl+Enter writes on from the caret (D-7), when nothing is selected and no menu is open.
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !menuRef.current && !mentionRef.current
+          && editorRef.current?.state.selection.empty && onContinueRef.current) {
+          event.preventDefault();
+          onContinueRef.current();
+          return true;
+        }
         const at = mentionRef.current;
         if (at) {
           if (event.key === "Escape") {
