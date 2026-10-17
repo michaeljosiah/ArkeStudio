@@ -251,6 +251,9 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead { display: flex; gap: 10px; margin: 4px 0 6px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; flex: 1; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platethumb { width: 40px; height: 71px; flex: none; border-radius: 6px; background: var(--muted) center / cover no-repeat; }
+/* The chip is not the reference underlay: sharing .fy-swstage__plate gave it the underlay's
+   absolute centring and pointer-events none, so it floated over the line and could not be pressed. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
 /* The set kit (issue 1819, design turn 228e): Add set opens the kit, then primitives under a rule;
    a room's openings are a list of one-line entries with their size and a remove. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitanchor { position: relative; display: flex; }
@@ -402,7 +405,6 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-mode="camera"] { background: #0b0b0e; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips { position: absolute; left: 12px; bottom: 12px; z-index: 5; display: flex; gap: 6px; pointer-events: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips > span { padding: 3px 8px; border-radius: 6px; background: rgba(0, 0, 0, .72); color: #fff; font: var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans); }
-:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__linewarning { flex-basis: 100%; margin: 0; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu em { margin-left: auto; padding-left: 12px; font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); font-style: normal; color: var(--muted-foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-building="true"] .fy-swstage__modes { left: min(444px, calc(100% - 180px)); }
