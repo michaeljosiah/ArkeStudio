@@ -83,7 +83,7 @@ export type ShotFraming = z.infer<typeof ShotFramingSchema>;
  * list would delete a hand-edited scene from a world on disk.
  */
 /**
- * A camera key in words (issue 1820, design turn 228a): who the frame is on, how big, from what
+ * A camera key in words (issue 1820, design turn 229a): who the frame is on, how big, from what
  * angle and which side, through which lens. stage-framing.ts resolves them to p/l; the words are
  * kept so a retime or a new lens resolves them again, and a hand edit that moves the key drops them.
  */
@@ -151,7 +151,7 @@ export const StagingFigureSchema = z
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
 /**
- * A set kit item (issue 1819, design turn 228e): one entry that expands into primitives
+ * A set kit item (issue 1819, design turn 229e): one entry that expands into primitives
  * (stage-kit.ts). Its x/z/y/w/h/d/rotation place and size the whole item; these fields say what
  * it is and, for a room, which sides are open and where its doors and windows are.
  */
@@ -195,7 +195,7 @@ export const StageKitSchema: z.ZodType<StageKit, z.ZodTypeDef, unknown> = z
   .strict();
 
 /**
- * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 228a/228e). The
+ * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 229a/229e). The
  * renderer owns how each one looks; the world records only the word.
  */
 export const STAGE_MATERIALS = ["plaster", "concrete", "stone", "marble", "wood", "metal", "glass", "fabric", "leather", "foliage", "pot", "lamp", "screen", "neon", "road", "paint", "grass", "water"] as const;
@@ -203,7 +203,7 @@ export const StageMaterialSchema = z.enum(STAGE_MATERIALS);
 export type StageMaterial = z.infer<typeof StageMaterialSchema>;
 const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/i, "a colour is #rrggbb");
 
-/** A practical light on the set (issue 1825, design turn 228e): a lamp, a neon, a window, the sun. */
+/** A practical light on the set (issue 1825, design turn 229e): a lamp, a neon, a window, the sun. */
 export interface StageLight {
   name: string;
   kind: "point" | "spot" | "area" | "sun";
@@ -297,7 +297,7 @@ export const StagingSetSchema: z.ZodType<StagingSet, z.ZodTypeDef, unknown> = z
   .strict();
 
 /**
- * The location plate (issue 1818, design turn 228c): a picture of the empty place the set is
+ * The location plate (issue 1818, design turn 229c): a picture of the empty place the set is
  * built from. The build reads it as the authority on layout, matches one shot's opening camera
  * to it, and it can ride to the generator as the first image so the blockout and the location
  * reference agree about where the door is. A world file (a location sheet's picture) or an
@@ -348,7 +348,7 @@ export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
 export type StageGait = z.infer<typeof StageGaitSchema>;
 
 /**
- * What a figure is doing at a mark (issue 1821, design turn 228d). Stand, sit and lie are the
+ * What a figure is doing at a mark (issue 1821, design turn 229d). Stand, sit and lie are the
  * postures the Stage always had; the rest are the actions scripts ask for. The jointed figure
  * draws each by name; Greybox's capsules fall back to the nearest of the three.
  */

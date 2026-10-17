@@ -1553,7 +1553,7 @@ export function SceneStage({
                             {STAGE_POSES.map((pose) => <option key={pose} value={pose}>{STAGE_POSE_LABELS[pose]}</option>)}
                           </select>
                         </Row>
-                        {/* A hand on someone or something, and where the figure looks (issue 1821, design turn 228d). */}
+                        {/* A hand on someone or something, and where the figure looks (issue 1821, design turn 229d). */}
                         <Row label="hand">
                           <span className="fy-swstage__chips" role="radiogroup" aria-label={`${name} ${chosen.t}s hand`}>
                             {([["none", "None"], ["left", "Left"], ["right", "Right"], ["both", "Both"]] as const).map(([side, label]) => {

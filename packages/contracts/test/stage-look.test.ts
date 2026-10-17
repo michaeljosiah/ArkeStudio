@@ -12,7 +12,7 @@ import {
   type StagingSet,
 } from "../src/index.js";
 
-/** The Stage's looks (issue 1825, design turn 228a/228e). */
+/** The Stage's looks (issue 1825, design turn 229a/229e). */
 
 describe("the Lit look's materials", () => {
   it("draws every material it can be given", () => {

@@ -2,7 +2,7 @@ import { BoxGeometry, CapsuleGeometry, Color, ConeGeometry, Group, MathUtils, Me
 import type { StagePose } from "@arke-studio/contracts";
 
 /**
- * The jointed figure (issue 1821, design turn 228 rule 3): about fifteen joints, a nose so its
+ * The jointed figure (issue 1821, design turn 229 rule 3): about fifteen joints, a nose so its
  * facing reads, posed by name and with two-bone IK for a hand put on someone or something. It is
  * the figure the Lit and Plate looks draw; Greybox keeps its capsules. Built for 1.8 m and scaled
  * by the walker like the capsules were. Deterministic: a pose is a table, a stride is a sine of the
