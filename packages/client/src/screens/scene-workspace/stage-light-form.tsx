@@ -53,9 +53,13 @@ export function LightForm({ light, sets, disabled, onChange, onRemove }: {
             onCommit={(kelvin) => { if (kelvin !== undefined) onChange({ ...light, kelvin, colour: stageKelvinColour(kelvin) }); }} />
         </span>
       </Row>
-      <Stepper label="strength" value={light.strength} step={1} min={0} max={500} decimals={0} disabled={disabled} onCommit={(strength) => { if (strength !== undefined) onChange({ ...light, strength }); }} />
-      <Stepper label="reach" value={light.reach} placeholder="any" unit="m" step={0.5} min={0.5} max={500} decimals={1} disabled={disabled} clearable
-        onCommit={(reach) => { const { reach: _reach, ...rest } = light; onChange(reach === undefined ? rest : { ...rest, reach }); }} />
+      <Row label="strength">
+        <Stepper label="strength" value={light.strength} step={1} min={0} max={500} decimals={0} disabled={disabled} onCommit={(strength) => { if (strength !== undefined) onChange({ ...light, strength }); }} />
+      </Row>
+      <Row label="reach">
+        <Stepper label="reach" value={light.reach} placeholder="any" unit="m" step={0.5} min={0.5} max={500} decimals={1} disabled={disabled} clearable
+          onCommit={(reach) => { const { reach: _reach, ...rest } = light; onChange(reach === undefined ? rest : { ...rest, reach }); }} />
+      </Row>
       <Row label="shadow">
         <label className="fy-swstage__check"><input type="checkbox" aria-label="Light casts shadow" checked={light.shadow ?? false} disabled={disabled}
           onChange={(event) => { const { shadow: _shadow, ...rest } = light; onChange(event.target.checked ? { ...rest, shadow: true } : rest); }} /></label>
@@ -103,8 +107,10 @@ export function AtmosphereRows({ atmosphere, disabled, onChange }: { atmosphere:
           {SKIES.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
         </select>
       </Row>
-      <Stepper label="haze" value={current.haze} placeholder="for the time" step={0.005} min={0} max={0.2} decimals={3} disabled={disabled} clearable
-        onCommit={(haze) => { const { haze: _haze, ...rest } = current; onChange(haze === undefined ? rest : { ...rest, haze }); }} />
+      <Row label="haze">
+        <Stepper label="haze" value={current.haze} placeholder="for the time" step={0.005} min={0} max={0.2} decimals={3} disabled={disabled} clearable
+          onCommit={(haze) => { const { haze: _haze, ...rest } = current; onChange(haze === undefined ? rest : { ...rest, haze }); }} />
+      </Row>
       <Row label="shading">
         <span className="fy-swstage__chips" role="radiogroup" aria-label="Shading">
           {([["soft", "Soft"], ["off", "Off"]] as const).map(([value, text]) => (

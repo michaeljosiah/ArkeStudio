@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { STAGE_FRAME_ANGLE_LABELS, STAGE_FRAME_SIDE_LABELS, STAGE_FRAME_SIZE_LABELS, type StageFrameWords } from "@arke-studio/contracts";
 import { Link, Row, Stepper, Value } from "./stage-inspector.js";
 
@@ -6,7 +7,7 @@ import { Link, Row, Stepper, Value } from "./stage-inspector.js";
  * mono line with where they put the camera, and Edit as numbers for the form underneath. Choosing
  * any word writes all of them, solved through the real lens; a hand edit to the numbers drops them.
  */
-export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbers, disabled, onWords, onNumbers }: {
+export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbers, disabled, onWords, onNumbers, move }: {
   words: StageFrameWords | undefined;
   cast: ReadonlyArray<{ sheetId: string; name: string }>;
   defaultSubject: string | undefined;
@@ -17,6 +18,8 @@ export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbe
   disabled: boolean;
   onWords: (next: StageFrameWords) => void;
   onNumbers: () => void;
+  /** The move row, drawn under the lens as 228a orders the form. */
+  move?: ReactNode;
 }) {
   const subject = words?.subject ?? defaultSubject ?? cast[0]?.sheetId;
   const base: StageFrameWords | null = subject === undefined ? null : words ?? { subject, size: "medium", angle: "eye", side: "front" };
@@ -71,8 +74,11 @@ export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbe
           </select>
         </Row>
       ) : null}
-      <Stepper label="lens" value={words?.focalMm} unit="mm" step={1} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={disabled || base === null} clearable
-        onCommit={(focalMm) => { if (base === null) return; const { focalMm: _focal, ...rest } = base; onWords(focalMm === undefined ? rest : { ...rest, focalMm }); }} />
+      <Row label="lens">
+        <Stepper label="lens" value={words?.focalMm} unit="mm" step={1} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={disabled || base === null} clearable
+          onCommit={(focalMm) => { if (base === null) return; const { focalMm: _focal, ...rest } = base; onWords(focalMm === undefined ? rest : { ...rest, focalMm }); }} />
+      </Row>
+      {move}
       <Row label="at"><Value muted><span className="fy-swstage__quietmono">{at}</span></Value></Row>
       <Row label=""><Link disabled={disabled} onClick={onNumbers}>{numbers ? "Hide numbers" : "Edit as numbers"}</Link></Row>
     </div>

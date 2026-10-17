@@ -153,6 +153,11 @@ function placeNear(staging: ResolvedShotStaging, self: string, x: number, z: num
   return best?.name ?? null;
 }
 
+/** Where a figure is, in the Stage list's words (design turn 228a: "sits · armchair"). */
+export function stagePlaceNear(staging: ResolvedShotStaging, sheetId: string, x: number, z: number, at: number, durationSec: number, nameOf: (sheetId: string) => string): string | null {
+  return placeNear(staging, sheetId, x, z, at, durationSec, nameOf)?.replace(/^the /, "") ?? null;
+}
+
 /** One line per thing that happens, timed: walks with where from and to, then each change of pose. */
 export function stageActionLines(staging: ResolvedShotStaging, nameOf: (sheetId: string) => string, durationSec: number, offset = 0): Array<{ at: number; line: string }> {
   const lines: Array<{ at: number; line: string }> = [];

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { STAGE_KIT_KINDS, STAGE_KIT_LABELS, type StageKit } from "@arke-studio/contracts";
 import { Plus, X } from "../../components/icons.js";
 import { Row, Stepper, Value } from "./stage-inspector.js";
@@ -27,6 +27,8 @@ export function AddSetMenu({ disabled, onPick }: { disabled: boolean; onPick: (c
             {STAGE_KIT_KINDS.map((kind) => (
               <button key={kind} type="button" role="menuitem" onClick={() => { setOpen(false); onPick(kind); }}>
                 <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />{STAGE_KIT_LABELS[kind]}
+                {/* A room is the only kit that is more than one thing (228e): its walls and their openings. */}
+                {kind === "room" ? <em>walls · openings</em> : null}
               </button>
             ))}
             <hr />
@@ -43,7 +45,8 @@ export function AddSetMenu({ disabled, onPick }: { disabled: boolean; onPick: (c
 }
 
 /** A kit item's own rows, under the set's name. */
-export function KitRows({ kit, name, disabled, onChange }: { kit: StageKit; name: string; disabled: boolean; onChange: (next: StageKit) => void }) {
+/** A kit item's rows; its size sits under the kit, as 228e orders the form. */
+export function KitRows({ kit, name, disabled, onChange, size }: { kit: StageKit; name: string; disabled: boolean; onChange: (next: StageKit) => void; size?: ReactNode }) {
   const toggleSide = (side: (typeof SIDES)[number]) => {
     const open = new Set(kit.open ?? []);
     if (open.has(side)) open.delete(side); else open.add(side);
@@ -63,6 +66,7 @@ export function KitRows({ kit, name, disabled, onChange }: { kit: StageKit; name
           {STAGE_KIT_KINDS.map((kind) => <option key={kind} value={kind}>{STAGE_KIT_LABELS[kind]}</option>)}
         </select>
       </Row>
+      {size}
       {kit.kind === "room" ? (
         <>
           <Row label="open">
