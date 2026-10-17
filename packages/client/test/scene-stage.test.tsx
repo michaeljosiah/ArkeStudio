@@ -609,6 +609,23 @@ it("opens the blockout line with a dashed Add plate, and a pick writes the plate
   assert.deepEqual(blocking?.cast, [], "the plate rides on the marks it found, and moves none of them");
 });
 
+it("writes a first plate with the scene's marks, never this shot's own, from this production's pictures (issue 1818)", async () => {
+  const { q, render, scene, world, sent } = await mount((shot) => {
+    shot.staging = { ...shot.staging!, cast: [{ sheetId: "maren-kest", x: 1, z: 0 }], sets: [{ name: "rail", x: 0, z: -2, w: 4, h: 1, d: .2 }] };
+  });
+  scene.blocking = undefined;
+  world.artifacts.push(PLATE_PICTURE as never, { ...PLATE_PICTURE, id: "ar_01J8G0000000000000000000P2", file: "elsewhere.png", production: "another" } as never);
+  await render();
+  await click(q('[data-testid="stage-plate-chip"]'));
+  const titles = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.title);
+  assert.ok(titles.includes("lobby-plate.png"));
+  assert.equal(titles.includes("elsewhere.png"), false, "another production's picture is not this one's to use");
+  await click([...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')].find((option) => option.title === "lobby-plate.png")!);
+  const write = sent.at(-1);
+  const blocking = write?.kind === "edit-stage" ? write.blocking : undefined;
+  assert.deepEqual([blocking?.cast, blocking?.sets], [[], []], "this shot's marks stay its own: every inheriting shot would get them");
+});
+
 it("lists the plate second, opens its form, and Match camera puts the opening key where the plate was taken", async () => {
   const { q, render, scene, world, sent } = await mount();
   world.artifacts.push(PLATE_PICTURE as never);
