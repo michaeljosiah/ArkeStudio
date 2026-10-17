@@ -425,6 +425,8 @@ export function stageDraftSchemaVersion(draft: StageConstructionDraft): number |
     draft.sets.some(set => set.material !== undefined || set.surfaces !== undefined || set.colour !== undefined)
       || draft.lights !== undefined || draft.atmosphere !== undefined ? STAGE_LOOK_SCHEMA_VERSION : 0,
     draft.staging.keys.some(key => key.frame !== undefined) ? STAGE_WORDS_SCHEMA_VERSION : 0,
+    draft.staging.performances?.some(track => track.keys.some(key =>
+      key.hand !== undefined || key.look !== undefined || (key.pose !== undefined && key.pose !== "stand" && key.pose !== "sit" && key.pose !== "lie"))) ? STAGE_POSE_SCHEMA_VERSION : 0,
   );
   return needed === 0 ? null : needed;
 }
