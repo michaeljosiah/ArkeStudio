@@ -49,7 +49,7 @@ export function PlateChip({ plate, world, disabled, onPick }: {
     <span className="fy-swstage__plateanchor">
       <button
         type="button"
-        className="fy-swstage__plate"
+        className="fy-swstage__platechip"
         data-empty={plate === undefined ? "true" : undefined}
         data-testid="stage-plate-chip"
         disabled={disabled}
@@ -151,8 +151,11 @@ export function PlateForm({ plate, world, shots, currentShotId, disabled, onChan
         <Row label="camera"><Value muted>not estimated</Value></Row>
       ) : (
         <>
+          <Row label="lens">
           <Stepper label="lens" value={plate.camera.focalMm} unit="mm" step={1} min={8} max={300} decimals={0} disabled={disabled}
             onCommit={(value) => { if (value !== undefined) onChange({ ...plate, camera: { ...plate.camera!, focalMm: value } }); }} />
+          </Row>
+          <Row label="horizon">
           <Stepper label="horizon" value={horizon ?? undefined} unit="m" step={0.05} min={0.1} max={30} decimals={2} disabled={disabled}
             onCommit={(value) => {
               if (value === undefined) return;
@@ -161,6 +164,7 @@ export function PlateForm({ plate, world, shots, currentShotId, disabled, onChan
               const lift = value - camera.p[1];
               onChange({ ...plate, camera: { ...camera, p: [camera.p[0], value, camera.p[2]], l: [camera.l[0], camera.l[1] + lift, camera.l[2]] } });
             }} />
+          </Row>
         </>
       )}
       <Row label="rides">
