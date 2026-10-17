@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
-import { microphoneAllowed } from "./microphone-permission.js";
+import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
@@ -589,11 +589,12 @@ async function createWindow(): Promise<void> {
     if (window && !window.isDestroyed()) window.show();
   });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
-  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
+  const permitted = (ask: Parameters<typeof microphoneAllowed>[0]) => microphoneAllowed(ask) || fullscreenAllowed(ask);
+  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
   }));
-  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(microphoneAllowed({
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl, rendererUrl, mediaTypes: "mediaTypes" in details ? details.mediaTypes ?? [] : [],
   })));
