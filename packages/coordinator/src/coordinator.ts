@@ -12681,6 +12681,8 @@ export class Coordinator {
             // A shot session the Stage opened for the clip rebuilds as the clip, playblast and beats
             // included; without this a Rebuild would quietly hand it back an image composer.
             ...(subject.kind === "shot" && bench.session.composer.mode === "video" ? { mode: "video" as const } : {}),
+            ...(bench.session.composer.params.kind === "video" && bench.session.composer.params.follow !== undefined
+              ? { follow: bench.session.composer.params.follow } : {}),
             settings,
             manifest: this.opts.manifest ?? null,
             sources: {

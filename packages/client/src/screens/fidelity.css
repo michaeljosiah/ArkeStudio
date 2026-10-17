@@ -5681,6 +5681,15 @@ span.fy-bench__who { border-bottom: 0; }
    here would stay light grey on a dark surface. */
 .fy-bench__sound[aria-pressed="true"] { color: var(--foreground); border-color: var(--ring); }
 .fy-bench__sound--off { color: var(--muted-foreground); }
+/* Follow (issue 1817, design turn 228h): a mono label, then a two-way segment in the chip row's
+   height; the chosen value is filled the way the Stage's segments are. */
+.fy-bench__follow { display: inline-flex; align-items: center; gap: 8px; }
+.fy-bench__followlabel { font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__follow > button:first-of-type { margin-left: 0; }
+.fy-bench__followopt { height: 28px; padding: 0 10px; border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); font: var(--type-label); cursor: pointer; }
+.fy-bench__followopt:first-of-type { border-radius: 8px 0 0 8px; }
+.fy-bench__followopt:last-of-type { border-radius: 0 8px 8px 0; border-left: 0; }
+.fy-bench__followopt--on { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
 
 /* The length, as a track (the shape Runway uses). The stops are the route's own, and a length
    this model cannot reach is struck through rather than hidden. */

@@ -906,11 +906,18 @@ describe("the Stage's handoff to the bench", () => {
     assert.deepEqual(openingFrame?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A2", hash: "sha256:fedcba9876543210" });
     assert.ok(video.prefill.composer.activeTokens.includes(openingFrame!.token), "the Stage frame rides on an image-reference route");
     assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the Stage opening replaces the storyboard frame for this handoff");
-    assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
-    // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
-    assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
-    // This test route takes images but no video; the tile remains inactive.
+    // The blockout is written for the video model (issue 1817): the references it can see, then
+    // the camera in a camera operator's words — a figure that holds still faces the lens, so a
+    // camera out along +Z is in front of her — then the action, with no coordinates anywhere.
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 Maren Kest\.$/m);
+    assert.match(video.prefill.composer.brief, /^0\.0–4\.0 s · Medium on Maren Kest, from the front, eye level, dolly, ending close-up\.$/m);
+    assert.match(video.prefill.composer.brief, /^0\.0–4\.0 s · Maren Kest stands\.$/m);
+    assert.doesNotMatch(video.prefill.composer.brief, /\(-?\d+\.\d+, -?\d+\.\d+|world space|\dm (?:in front|behind|high)/);
+    // This test route takes images but no video; the tile remains inactive, so nothing cites it
+    // (a cited reference that does not ride is refused at dispatch), while Follow is still offered.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+    assert.doesNotMatch(video.prefill.composer.brief, /@Video 1/);
+    assert.equal(video.prefill.composer.params.kind === "video" ? video.prefill.composer.params.follow : null, "camera-action");
 
     delete shot.staging.playblast!.evaluatorVersion;
     const legacy = await prepareBenchSubject(world, {
@@ -938,7 +945,8 @@ describe("the Stage's handoff to the bench", () => {
     assert.ok(implausible.ok);
     if (!implausible.ok) return;
     assert.match(implausible.prefill.composer.brief, /20\.0m in 4\.0s · 5\.00m\/s · too fast for a walk/);
-    assert.doesNotMatch(implausible.prefill.composer.brief, /Maren Kest walks through the shot/);
+    assert.doesNotMatch(implausible.prefill.composer.brief, /Maren Kest walks/);
+    assert.match(implausible.prefill.composer.brief, /Maren Kest moves/, "a path no one could walk is not called a walk (R-34)");
 
     shot.staging.playblast = { ...shot.staging.playblast!, version: 1 };
     const stale = await prepareBenchSubject(world, {

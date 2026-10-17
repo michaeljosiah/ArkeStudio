@@ -934,7 +934,9 @@ export function planBenchDispatch(
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
   if (referenceProblem) return { ok: false, reason: referenceProblem };
-  const motionBindings = model.limits.referenceSyntax === "seedance"
+  // A staged clip's brief already says how to follow its blockout (issue 1817); a second, generic
+  // "motion reference" line would contradict a Camera-only follow.
+  const motionBindings = model.limits.referenceSyntax === "seedance" && !(params.kind === "video" && params.follow !== undefined)
     ? videoPaths.map((_, index) => `Use @Video${index + 1} as a motion reference.`).join("\n") : "";
   // On the reference route Arke writes one subject line per picture and translates the brief's
   // citations; nothing else in the brief is rewritten (design turn 179).
