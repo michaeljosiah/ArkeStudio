@@ -1504,7 +1504,7 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? REVISE_NARRATION : ""}`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject) : ""}`;
 }
 
 /**
@@ -1512,4 +1512,9 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
  * offered in the reply instead reaches nobody — the page sent the ask without opening Chat. Said
  * to the model here, and held after it by the corrective turn (issue 1827).
  */
-const REVISE_NARRATION = " They asked for these words rewritten, and the page shows your revision in place: answer with one production-chapter edit whose changes.passage replaces exactly the selected words, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.";
+function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>): string {
+  // The shape named whole (issue 1827, measured): told only "changes.passage", GPT-5.4 sent
+  // { replace } and then left out the paragraph, which the passage guard rightly refuses.
+  const paragraph = subject.paragraph === undefined ? "" : `, "paragraph": ${subject.paragraph}`;
+  return ` They asked for these words rewritten, and the page shows your revision in place: answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
+}

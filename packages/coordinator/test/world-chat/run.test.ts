@@ -237,7 +237,7 @@ describe("taking a turn", () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter([prose, why], { prompts }), { describeEntry: true });
     const result = await runner.send(store, conversationId, "Tighten", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide", intent: "revise" });
     assert.equal(result.status, "completed", "the second answer is not held to a revision");
-    assert.match(prompts[0]!, /answer with one production-chapter edit whose changes\.passage replaces exactly the selected words/);
+    assert.ok(prompts[0]!.includes('answer with one production-chapter edit action for chapter neap whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>, "paragraph": 2 } }'), "the whole shape, with the paragraph the ask named");
     assert.match(prompts[1]!, /rewrite of the selected passage, shown in the page, not in the reply/, "the corrective turn asks for the revision");
     assert.ok((await store.read()).events.some((e) => e.event.type === "run.retry-started"));
     assert.equal((await view()).messages.at(-1)?.text, "It is already as tight as it can be without losing the tide.");
@@ -247,7 +247,7 @@ describe("taking a turn", () => {
     const plain = await setup(fakeAdapter([prose], { prompts }), { describeEntry: true });
     assert.equal((await plain.runner.send(plain.store, plain.conversationId, "What is this?", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" })).status, "completed");
     assert.equal(prompts.length, 1);
-    assert.doesNotMatch(prompts[0]!, /production-chapter edit whose changes\.passage/);
+    assert.doesNotMatch(prompts[0]!, /production-chapter edit action for chapter/);
   });
 
   it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {

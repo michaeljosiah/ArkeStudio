@@ -899,7 +899,7 @@ describe("a question asked for its answer (issue 1295)", () => {
     assert.equal(first.ok, false);
     if (!first.ok) {
       assert.deepEqual(first.problems.map((p) => p.code), ["revise"]);
-      assert.match(first.problems[0]!.safeMessage, /production-chapter edit action whose changes\.passage replaces exactly the selected words/);
+      assert.match(first.problems[0]!.safeMessage, /"find": the selected words exactly as quoted, "with": your revision, "paragraph": the paragraph the ask named/);
     }
     const revision = JSON.stringify({
       reply: "Cut the loose “it”.",
