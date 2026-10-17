@@ -722,7 +722,7 @@ it("gives a plain set a material and a room its surfaces, kept with the set", as
   assert.deepEqual(sets?.find((set) => set.name === "room")?.surfaces, { "right wall": "wood" });
 });
 
-// The camera in words (issue 1820, design turn 228a).
+// The camera in words (issue 1820, design turn 229a).
 it("writes the camera in words, hides the numbers behind Edit as numbers, and drops the words on a hand edit", async () => {
   const { q, sent } = await mount((shot) => { shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }]; });
   await click(stageItem(q, "camera"));

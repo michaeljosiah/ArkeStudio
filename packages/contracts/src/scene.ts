@@ -83,7 +83,7 @@ export type ShotFraming = z.infer<typeof ShotFramingSchema>;
  * list would delete a hand-edited scene from a world on disk.
  */
 /**
- * A camera key in words (issue 1820, design turn 228a): who the frame is on, how big, from what
+ * A camera key in words (issue 1820, design turn 229a): who the frame is on, how big, from what
  * angle and which side, through which lens. stage-framing.ts resolves them to p/l; the words are
  * kept so a retime or a new lens resolves them again, and a hand edit that moves the key drops them.
  */
