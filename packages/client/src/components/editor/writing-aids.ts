@@ -52,8 +52,8 @@ export const findKey = new PluginKey<FindPluginState>("find");
  * inline node is one run of the block's text, mapped back to its document position; a leaf that
  * is not text (a break, an image) stands as one character nothing typed can match.
  */
-export function findMatches(doc: ProseNode, query: string): FindMatch[] {
-  const needle = query.trim().toLowerCase();
+export function findMatches(doc: ProseNode, query: string, caseSensitive = false): FindMatch[] {
+  const needle = caseSensitive ? query.trim() : query.trim().toLowerCase();
   if (needle === "") return [];
   const out: FindMatch[] = [];
   doc.descendants((node, pos) => {
@@ -69,7 +69,7 @@ export function findMatches(doc: ProseNode, query: string): FindMatch[] {
       for (const candidate of runs) if (candidate.at <= index) run = candidate;
       return run.pos + (index - run.at);
     };
-    const hay = text.toLowerCase();
+    const hay = caseSensitive ? text : text.toLowerCase();
     for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) {
       out.push({ from: toPos(at), to: toPos(at + needle.length) });
     }
@@ -111,9 +111,48 @@ export function currentMatch(find: FindState, count: number): number {
   return ((find.index % count) + count) % count;
 }
 
+/*
+ * A review's notes, marked in the prose (SPEC-056 R-29): each quote a neutral highlight numbered
+ * for its note, the open one in warning. Found by the quote's words in the text the editor shows,
+ * the same appearance the body's offset named, so a repeated phrase marks the right one.
+ */
+export interface ReviewMark {
+  n: number;
+  text: string;
+  nth: number;
+}
+type ReviewMarksState = { marks: readonly ReviewMark[]; current: number | null };
+export const reviewMarksKey = new PluginKey<ReviewMarksState>("reviewMarks");
+
+export function reviewMarksPlugin(): Plugin<ReviewMarksState> {
+  return new Plugin<ReviewMarksState>({
+    key: reviewMarksKey,
+    state: {
+      init: (): ReviewMarksState => ({ marks: [], current: null }),
+      apply: (tr, old): ReviewMarksState => (tr.getMeta(reviewMarksKey) as ReviewMarksState | undefined) ?? old,
+    },
+    props: {
+      decorations(state: EditorState) {
+        const own = reviewMarksKey.getState(state);
+        if (own === undefined || own.marks.length === 0) return DecorationSet.empty;
+        const out: Decoration[] = [];
+        for (const mark of own.marks) {
+          const match = findMatches(state.doc, mark.text, true)[mark.nth];
+          if (match === undefined) continue;
+          out.push(Decoration.inline(match.from, match.to, {
+            class: mark.n === own.current ? "fy-review-quote fy-review-quote--here" : "fy-review-quote",
+            "data-note": String(mark.n),
+          }));
+        }
+        return DecorationSet.create(state.doc, out);
+      },
+    },
+  });
+}
+
 export const WritingAids = Extension.create({
   name: "writingAids",
   addProseMirrorPlugins() {
-    return [caretBlockPlugin(), findPlugin(), marginsPlugin()];
+    return [caretBlockPlugin(), findPlugin(), marginsPlugin(), reviewMarksPlugin()];
   },
 });
