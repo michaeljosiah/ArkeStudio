@@ -284,7 +284,12 @@ const MAX_VERSIONS = 3;
 export type AskKind = "rewrite" | "continue" | "describe" | "dialogue";
 export type AskTag = { ask: AskKind; root: string };
 const askTags = new Map<string, AskTag>();
-const awaitedAsks = new Map<string, { ask: AskKind; root: string | null; known: readonly string[]; press: string }>();
+/**
+ * `turn` is the thread's turn the ask became, once it was taken: followed to its end, so a turn
+ * that ends without a revision lets the page stop waiting and shows where the answer went instead
+ * (issue 1827). Before it, a reply-only answer left the page silent, or "Asking…" up for good.
+ */
+const awaitedAsks = new Map<string, { ask: AskKind; root: string | null; known: readonly string[]; press: string; turn?: { conversationId: string; turnId: string } }>();
 /** A version kept and not yet landed, with the ones to let go when it does. */
 const chosenVersions = new Map<string, { kept: string; others: readonly string[] }>();
 
@@ -1691,21 +1696,55 @@ export function ChapterWorkspace({
   const askKey = parkedKey(worldId, prodId, path);
   const [ask, setAskState] = useState<DockAsk | null>(() => heldAsks.get(askKey) ?? null);
   const setAsk = useCallback((next: DockAsk | null) => {
-    if (next === null) heldAsks.delete(askKey);
-    else heldAsks.set(askKey, next);
-    setAskState(next);
+    // A quiet ask is the page's rewrite (SPEC-056 R-24): said so on its subject, the coordinator
+    // holds the answer to a revision rather than accepting wording in the reply (issue 1827).
+    const said = next?.quiet === true && next.subject?.kind === "passage" && next.subject.intent === undefined
+      ? { ...next, subject: { ...next.subject, intent: "revise" as const } }
+      : next;
+    if (said === null) heldAsks.delete(askKey);
+    else heldAsks.set(askKey, said);
+    setAskState(said);
   }, [askKey]);
+  const askKeyNow = useRef(askKey);
+  askKeyNow.current = askKey;
+  const pathNow = useRef(path);
+  pathNow.current = path;
   // The screen's own copy takes its answer too, for a dock put away while it came.
   useEffect(() => subscribeWorldChatSendResults((result) => {
     setAskState((held) => (held?.sent?.requestId === result.requestId ? { ...held, answered: result.admitted } : held));
+    // Read from the held copy, written at the press: the screen's state can trail an answer.
+    const held = heldAsks.get(askKeyNow.current), awaited = awaitedAsks.get(pathNow.current);
+    if (held?.quiet !== true || held.sent?.requestId !== result.requestId || !result.admitted || result.turnId === undefined) return;
+    if (awaited === undefined || awaited.press !== held.press) return;
+    awaitedAsks.set(pathNow.current, { ...awaited, turn: { conversationId: held.sent.conversationId, turnId: result.turnId } });
   }), []);
+  /*
+   * A quiet ask whose turn has ended with nothing staged is answered in Chat (issue 1827): words
+   * in the reply, a passage that cannot be revised, or a failure. The page stops waiting and opens
+   * Chat on that answer, as it does for an ask the thread declined. A turn that staged an action
+   * is left to the revision's arrival, which the page already waits for.
+   */
+  const thread = useStore().state?.worldChat ?? null;
+  useEffect(() => {
+    const turn = awaitedAsks.get(path)?.turn;
+    if (turn === undefined || thread === null || thread.conversationId !== turn.conversationId) return;
+    const failed = thread.lastFailure?.turnId === turn.turnId;
+    const answered = thread.messages.some((message) => message.role === "studio" && message.turnId === turn.turnId);
+    if (!failed && !answered) return;
+    if (!failed && (thread.actions ?? []).some((action) => action.turnId === turn.turnId)) return;
+    awaitedAsks.delete(path);
+    setTagged((count) => count + 1);
+    setDock(true);
+  }, [thread, path, setDock]);
   // Any ask held is about the passage it was pressed on, waiting, sent or not taken (codex on
   // PR 1232): the dock says so, whatever is selected by then.
   const shownSubject = ask?.subject ?? dockSubject;
   // One ask at a time (codex on PR 1232): a second press would replace one still waiting or
   // being answered, and a refusal or a lost answer would then have nowhere to be shown. A line
   // only started, or one shown as not sent, is the author's to replace.
-  const asking = ask !== null && ask.draft !== true && ask.declined !== true;
+  // A quiet ask taken by the thread is still being answered until its turn ends (issue 1827): the
+  // dock lets go of it on admission, long before the revision or the reply comes.
+  const asking = (ask !== null && ask.draft !== true && ask.declined !== true) || awaitedAsks.get(path)?.turn !== undefined;
   // Draws on is changed in the thread (turn 126): Add only starts the line there, for the author
   // to finish with what the chapter draws on.
   const askDraws = () => {

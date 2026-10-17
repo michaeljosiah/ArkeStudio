@@ -872,6 +872,7 @@ export class WorldChatRunner {
         subject,
         replyOnly,
         view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+        subject?.kind === "passage" && subject.intent === "revise",
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -1058,6 +1059,8 @@ export class WorldChatRunner {
     /** The line asked for a reply and nothing else (turn 128); any action is refused. */
     replyOnly = false,
     setupRevision?: number,
+    /** The page's rewrite on its first answer (issue 1827): a reply without the revision is corrected. */
+    reviseRequired = false,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -1076,6 +1079,7 @@ export class WorldChatRunner {
       productionThread: folded.entryContext !== undefined && "productionId" in folded.entryContext,
       draftOnly: folded.entryContext?.kind === "production-setup",
       replyOnly,
+      reviseRequired,
       raw,
       conversationId,
       messages,
@@ -1500,5 +1504,12 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? REVISE_NARRATION : ""}`;
 }
+
+/**
+ * A rewrite pressed on the page (SPEC-056 R-24): its answer is drawn in the prose, so wording
+ * offered in the reply instead reaches nobody — the page sent the ask without opening Chat. Said
+ * to the model here, and held after it by the corrective turn (issue 1827).
+ */
+const REVISE_NARRATION = " They asked for these words rewritten, and the page shows your revision in place: answer with one production-chapter edit whose changes.passage replaces exactly the selected words, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.";

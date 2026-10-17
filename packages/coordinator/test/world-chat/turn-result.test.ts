@@ -892,6 +892,27 @@ describe("a question asked for its answer (issue 1295)", () => {
     if (!open.ok) assert.ok(open.problems.every((p) => p.code === "schema"));
   });
 
+  it("holds the page's rewrite to a revision on its first answer, and not after (issue 1827)", async () => {
+    // What GPT-5.4 returned to the selection menu's Tighten: the new wording in the reply, nothing staged.
+    const prose = turn({ reply: "Best clean option: “The first time it happened, Ade was driving on the Ibadan expressway.”" });
+    const first = validateTurnResult({ ...(await baseInput({ productionThread: true, reviseRequired: true })), raw: prose });
+    assert.equal(first.ok, false);
+    if (!first.ok) {
+      assert.deepEqual(first.problems.map((p) => p.code), ["revise"]);
+      assert.match(first.problems[0]!.safeMessage, /production-chapter edit action whose changes\.passage replaces exactly the selected words/);
+    }
+    const revision = JSON.stringify({
+      reply: "Cut the loose “it”.",
+      candidateOperations: [],
+      groupOperations: [],
+      actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: [] }],
+    });
+    const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, reviseRequired: true })), raw: revision });
+    assert.ok(revised.ok || !revised.problems.some((p) => p.code === "revise"), "a revision answers it, whatever else is checked");
+    // The corrective answer is free to say why it could not be revised.
+    assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true })), raw: prose }).ok, true);
+  });
+
   it("tells every corrective turn that a question needs no action at all", () => {
     assert.match(correctiveMessage([{ code: "schema", safeMessage: "actions.0.change is required: expected object" }]), /If the ask needs no change to the world, leave every action and candidate list empty/);
   });

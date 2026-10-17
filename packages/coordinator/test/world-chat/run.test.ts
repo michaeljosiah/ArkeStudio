@@ -230,6 +230,26 @@ describe("taking a turn", () => {
     assert.deepEqual(raised, [12, 12]);
   });
 
+  it("the page's rewrite spends the corrective turn on a revision, and keeps a reply that says why not (issue 1827)", async () => {
+    const prompts: string[] = [];
+    const prose = JSON.stringify({ reply: "Best clean option: “Six, and the tide was out.”", candidateOperations: [], groupOperations: [] });
+    const why = JSON.stringify({ reply: "It is already as tight as it can be without losing the tide.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId, view } = await setup(fakeAdapter([prose, why], { prompts }), { describeEntry: true });
+    const result = await runner.send(store, conversationId, "Tighten", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide", intent: "revise" });
+    assert.equal(result.status, "completed", "the second answer is not held to a revision");
+    assert.match(prompts[0]!, /answer with one production-chapter edit whose changes\.passage replaces exactly the selected words/);
+    assert.match(prompts[1]!, /rewrite of the selected passage, shown in the page, not in the reply/, "the corrective turn asks for the revision");
+    assert.ok((await store.read()).events.some((e) => e.event.type === "run.retry-started"));
+    assert.equal((await view()).messages.at(-1)?.text, "It is already as tight as it can be without losing the tide.");
+
+    // An ordinary passage subject is narrated as before and answered by a reply.
+    prompts.length = 0;
+    const plain = await setup(fakeAdapter([prose], { prompts }), { describeEntry: true });
+    assert.equal((await plain.runner.send(plain.store, plain.conversationId, "What is this?", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" })).status, "completed");
+    assert.equal(prompts.length, 1);
+    assert.doesNotMatch(prompts[0]!, /production-chapter edit whose changes\.passage/);
+  });
+
   it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {
     const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
     const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply]), {

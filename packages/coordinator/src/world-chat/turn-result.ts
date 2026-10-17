@@ -58,6 +58,13 @@ export interface ValidateInput {
   draftOnly?: boolean;
   /** The ask was for a reply only (turn 128): nothing structured may come back with it. */
   replyOnly?: boolean;
+  /**
+   * The ask was the page's rewrite of a passage (SPEC-056 R-24, issue 1827) and this is its first
+   * answer: one without a passage revision spends the corrective turn on asking for it. The
+   * corrective answer is not held to it, so a passage that cannot be revised as asked can still
+   * be answered by saying why.
+   */
+  reviseRequired?: boolean;
   /** The assistant's entire completed message. */
   raw: string;
   conversationId: ConversationId;
@@ -372,6 +379,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const problems: TurnProblem[] = [];
+  if (input.reviseRequired && !result.actions.some(isPassageRevision)) problems.push(problem("revise", REVISE_PROBLEM));
   if (result.productionPlan) {
     if (!input.productionThread) problems.push(problem("production-plan", "A production plan belongs only to a production thread."));
     const cited = result.productionPlan.checkReceiptIds.map(id => input.receiptsThisRun.find(r => r.id === id));
@@ -913,6 +921,13 @@ export function correctiveMessage(problems: readonly TurnProblem[]): string {
 }
 
 const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
+const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes.passage replaces exactly the selected words, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
+
+/** A revision of a selected passage: what a page's rewrite is answered by. */
+function isPassageRevision(action: { kind: string; change?: unknown }): boolean {
+  const change = action.change as { operation?: unknown; changes?: { passage?: unknown } } | undefined;
+  return action.kind === "production-chapter" && change?.operation === "edit" && change.changes?.passage !== undefined;
+}
 
 /** Whether a result names anything but its reply, read before its shape is checked. */
 function structuredChannelsIn(raw: string): boolean {
