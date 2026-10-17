@@ -248,8 +248,10 @@ export function stagingPromptClause(
   return [
     stageCameraLine(staging, nameOf, durationSec, options.aspect ?? "16:9", options.lens, offset),
     ...stageActionLines(staging, nameOf, durationSec, offset).map(entry => entry.line),
-    ...stageSpeedWarnings(staging, nameOf, durationSec),
-    ...stageTurnWarnings(staging, nameOf),
+    // Warnings name their seconds on the same clock as the lines above them: a board's later cut
+    // says 4.00–5.00 s, not the 0.00–1.00 s of its own shot.
+    ...stageSpeedWarnings(staging, nameOf, durationSec, offset),
+    ...stageTurnWarnings(staging, nameOf, offset),
     ...(options.video ? [stagingFollowLine(options.video, options.follow ?? "camera-action")] : []),
   ].join("\n");
 }

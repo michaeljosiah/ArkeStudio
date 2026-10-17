@@ -57,6 +57,7 @@ import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
 import { stageBoardAnimatic, stageBoardAnimaticIsStale, stageBoardAt, stageBoardCuts, stageBoardJumps, stageBoardLineFindings, stageBoardStagings } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
+import { readStageLook, rememberStageLook } from "../../lib/stage-look-preference.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
 import { Check, ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
@@ -257,15 +258,10 @@ export function SceneStage({
   const [numbers, setNumbers] = useState(false);
   // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
   // device and never written to the world; the playblast records the look it was exported in.
-  const [look, setLookState] = useState<StageLook>(() => {
-    try {
-      const saved = window.localStorage.getItem("arke.stage.look");
-      return (STAGE_LOOKS as readonly string[]).includes(saved ?? "") ? saved as StageLook : "lit";
-    } catch { return "lit"; }
-  });
+  const [look, setLookState] = useState<StageLook>(readStageLook);
   const setLook = (next: StageLook) => {
     setLookState(next);
-    try { window.localStorage.setItem("arke.stage.look", next); } catch { /* the choice still holds for this visit */ }
+    rememberStageLook(next);
   };
   // Where a build estimated the plate's camera; Keep saves it on the plate (issue 1818).
   const [draftPlateCamera, setDraftPlateCamera] = useState<ScenePlate["camera"] | null>(null);
@@ -2240,7 +2236,7 @@ export function SceneStage({
               {/* Mounted whatever is selected: the reference plate lives in the viewport and its choice
                   must survive a change of form; only its rows belong to the shot's form. */}
               <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
-                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
+                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing && !boardOn}
                 disabled={frozen} onChoose={() => setMode("camera")} slot={referenceSlot} />
             </>
           )}
@@ -2283,7 +2279,8 @@ export function SceneStage({
             <span className="fy-swstage__cut-head" style={{ left: `${at / Math.max(0.01, boardTotal) * 100}%` }} aria-hidden="true" />
           </div>
           <span className="fy-swstage__keytools"><span className="fy-swstage__count">{boardCuts.length} shots</span></span>
-          {(working?.cast ?? []).flatMap((figure, position) => {
+          {/* Every member's cast, in order of first appearance: a figure only a later cut has still gets its lane. */}
+          {boardMembers.flatMap((member) => member.resolved.cast).filter((figure, index, all) => all.findIndex((other) => other.sheetId === figure.sheetId) === index).flatMap((figure, position) => {
             // A figure's action across the cuts: each member's marks on the board's clock.
             // A shot's last mark and the next shot's first meet at the cut: the incoming one stands for both.
             const marks = boardMembers

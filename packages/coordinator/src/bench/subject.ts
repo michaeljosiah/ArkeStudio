@@ -358,7 +358,9 @@ export function subjectReferenceRouting(
   // Stage motion is the primary structural reference on routes that can receive it.
   const motion = ordinary.filter(reference=>reference.kind === "video");
   const motionTokens = admittedTokens([...motion,...(subject.kind === "shot" ? references : [...ordinary,...frames]).filter(reference=>reference.kind!=="video")],model);
-  if(subject.kind === "shot" && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
+  // An admitted blockout video leads: a shot's playblast, or a board's cut animatic (issue 1824),
+  // which carries the cuts and the camera that a sequence of stills cannot.
+  if((subject.kind === "shot" || subject.kind === "board") && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
   if (
     subject.kind === "shot" &&
     model.capability === "video" &&

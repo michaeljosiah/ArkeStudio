@@ -121,6 +121,6 @@ export function stageFastTurns(staging: ResolvedShotStaging): StageTurn[] {
   return turns;
 }
 
-export function stageTurnWarnings(staging: ResolvedShotStaging, nameOf: (sheetId: string) => string): string[] {
-  return stageFastTurns(staging).map((turn) => `Turning warning — ${nameOf(turn.sheetId)} · ${Math.round(turn.degrees)}° in ${(turn.to - turn.from).toFixed(1)}s · ${Math.round(turn.rate)}°/s · too fast to read (${turn.from.toFixed(2)}–${turn.to.toFixed(2)}s); add time`);
+export function stageTurnWarnings(staging: ResolvedShotStaging, nameOf: (sheetId: string) => string, offset = 0): string[] {
+  return stageFastTurns(staging).map((turn) => `Turning warning — ${nameOf(turn.sheetId)} · ${Math.round(turn.degrees)}° in ${(turn.to - turn.from).toFixed(1)}s · ${Math.round(turn.rate)}°/s · too fast to read (${(turn.from + offset).toFixed(2)}–${(turn.to + offset).toFixed(2)}s); add time`);
 }

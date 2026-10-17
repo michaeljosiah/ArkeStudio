@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { orderedShots, stageBoardStagings, stageShot, type ClientMessage, type DomainEvent, type SceneRecord } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { prepareBenchSubject } from "../../src/bench/subject.js";
+import { prepareBenchSubject, subjectReferenceRouting } from "../../src/bench/subject.js";
 import { stageArtifactProblem } from "../../src/productions/stage-playblast.js";
 import { STAGE_ANIMATIC_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
@@ -95,6 +95,16 @@ describe("a board's cut animatic (issue 1824)", () => {
       await send(await message());
       assert.equal(scene().boards?.animatics?.length, 1);
 
+      // A light added to the scene's blocking leaves every shot's staging alone and still makes the
+      // animatic a picture of another scene.
+      const filed = scene().boards!.animatics![0]!;
+      await send({ kind: "scene-command", worldId: WORLD_ID, productionId: PRODUCTION, sceneFile: SCENE_FILE, sceneId: SCENE, baseVersion: scene().version,
+        command: { kind: "edit-stage", shotId: "sh_12", blocking: { cast: [], sets: [], lights: [{ name: "lamp", kind: "point", colour: "#ffc27a", strength: 10, x: 0, y: 1.5, z: 0 }] } } });
+      assert.deepEqual(refusals(), []);
+      assert.match(stageArtifactProblem(bundle(), bundle().artifacts.find((artifact) => artifact.id === filed.artifactId)!) ?? "", /stale/, "a shared blocking edit stales it");
+      await send(await message());
+      assert.equal(scene().boards?.animatics?.[0]?.blockingVersion, scene().blocking?.version, "a fresh filing records the blocking it was drawn over");
+
       // A shot edit marks the board's animatic stale, and its files stop riding.
       const pinned = scene().boards!.animatics![0]!;
       await stageShotNamed("sh_13", 0.4);
@@ -149,6 +159,12 @@ describe("a board's cut animatic (issue 1824)", () => {
       assert.match(brief, /^References: .*@Video 1 the blockout\.$/m);
       assert.equal(brief.split("\n").at(-1), "Use @Video 1 only for camera position and movement. The figures in it are placeholders; do not copy their poses or body mechanics.");
       assert.equal(prepared.prefill.composer.params.kind === "video" ? prepared.prefill.composer.params.follow : undefined, "camera");
+      // Every member storyboarded: the frame sequence would claim the keyframe lane, but an admitted
+      // animatic carries the cuts and the camera, so it leads as a playblast does for a shot.
+      const frames = MEMBERS.map((shotId, index) => ({ token: `Image ${9 + index}`, kind: "image" as const, source: { source: "artifact" as const, artifactId: video!.source.source === "artifact" ? video!.source.artifactId : "", hash: "sha256:0000000000000000" as const }, label: `Shot ${shotId} · accepted frame`, detail: "visual keyframe", ride: "when-supported" as const, subjectRole: "board-frame" as const }));
+      const routed = subjectReferenceRouting([...prepared.prefill.references, ...frames], prepared.prefill.subject, manifest.models[0]!);
+      assert.deepEqual(routed.keyframeTokens, []);
+      assert.ok(routed.activeTokens.includes("Video 1"));
     } finally {
       await provider.close();
     }

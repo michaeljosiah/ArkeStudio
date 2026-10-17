@@ -118,6 +118,7 @@ export async function fileBoardAnimatic(
       openingFrameArtifactId: still.id,
       sourceFingerprint: stageBoardFingerprint(record, input.members, input.aspect),
       stagings,
+      blockingVersion: record.blocking?.version ?? null,
       evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION,
       durationSec: input.durationSec,
       aspect: input.aspect,
