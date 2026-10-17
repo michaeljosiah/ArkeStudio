@@ -25,6 +25,7 @@ export * from "./audiobook.js";
 export * from "./audiobook-activity.js";
 export * from "./proposal.js";
 export * from "./job.js";
+export * from "./job-summary.js";
 export * from "./frame-run.js";
 export * from "./change.js";
 export * from "./genesis.js";

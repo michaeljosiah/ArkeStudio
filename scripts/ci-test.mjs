@@ -12,8 +12,9 @@
 // have let a new folder be silently untested, which is the same failure this script's assertion
 // exists to prevent.
 //
-// Every other workspace together is 50s, so they ride on one shard whole rather than being split
-// into pieces smaller than their own start-up cost.
+// The other workspaces now run in their own job. On 2026-10-17 the Windows coordinator shard
+// took 15m54s and the client alone took 7m55s; stacking all workspaces on shard 2 exhausted
+// the 30-minute ceiling with no failed tests. Keep discovery automatic in both jobs.
 //
 // The other half of the job is telling a hung shard from a slow one. That is why the child's
 // output is relayed here rather than inherited — see SILENCE_LIMIT_MS.
@@ -22,11 +23,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { testPlan, COORDINATOR as SHARDED } from "./ci-test-plan.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** The workspace whose suite is large enough to be worth splitting. */
-const SHARDED = "@arke-studio/coordinator";
 
 /**
  * How long a step may print nothing before it is called hung rather than slow.
@@ -53,13 +52,6 @@ let longestSilence = 0;
 
 /** The step the silence guard gave up on, if one stopped printing. */
 let hungStep = null;
-
-const shardArg = process.argv[2] ?? "1/1";
-const [index, total] = shardArg.split("/").map(Number);
-if (!Number.isInteger(index) || !Number.isInteger(total) || index < 1 || total < 1 || index > total) {
-  console.error(`ci-test: expected a shard like 2/4, got "${shardArg}"`);
-  process.exit(2);
-}
 
 /** Every workspace that carries a test script, as {name, dir}. */
 function workspacesWithTests() {
@@ -94,7 +86,9 @@ if (!all.some((w) => w.name === SHARDED)) {
   process.exit(2);
 }
 
-const others = all.filter((w) => w.name !== SHARDED);
+let plan;
+try { plan = testPlan(all, process.argv[2] ?? "1/1"); }
+catch (error) { console.error(`ci-test: ${error.message}`); process.exit(2); }
 
 /**
  * Kill a child and everything below it, reporting what stopped it or null.
@@ -213,35 +207,32 @@ const failures = [];
 // The shard of the big suite. `--test-shard` needs its flags before the pattern, and the pattern
 // stays quoted so node expands it identically on both platforms rather than the shell doing it
 // on one of them.
-const coordinator = all.find((w) => w.name === SHARDED);
-if (!(await run(
-  `${SHARDED} shard ${index}/${total}`,
+const coordinator = plan.coordinator;
+if (coordinator && !(await run(
+  `${SHARDED} shard ${coordinator.shard}`,
   "node",
-  ["--import", "tsx", "--test", `--test-shard=${index}/${total}`, "test/**/*.test.ts"],
+  ["--import", "tsx", "--test", `--test-shard=${coordinator.shard}`, "test/**/*.test.ts"],
   coordinator.dir,
 ))) {
-  failures.push(`${SHARDED} shard ${index}/${total}`);
+  failures.push(`${SHARDED} shard ${coordinator.shard}`);
 }
 
-// Everything else, once. On the second shard where there is one, because the first also carries
-// lint, types and build in CI — piling the other workspaces there too would make shard 1 the long
-// pole and waste the parallelism. With a single shard it has nowhere else to go.
-const othersShard = Math.min(2, total);
 let othersRan = 0;
 // A hang is terminal. Whatever leaked is still leaking, and the next workspace would only spend
-// another eight minutes finding that out.
-if (index === othersShard && hungStep === null) {
-  for (const workspace of others) {
+// another ten minutes finding that out.
+if (hungStep === null) {
+  for (const workspace of plan.others) {
     if (!(await run(workspace.name, "npm", ["test"], workspace.dir))) failures.push(workspace.name);
     if (hungStep !== null) break;
     othersRan += 1;
   }
 }
 
-console.log(`\n=== shard ${index}/${total} summary`);
+console.log(`\n=== ${plan.label} summary`);
 // Counted rather than assumed: a shard that stopped early must not claim the workspaces it never
 // reached, or its summary becomes one more line that reads like a healthy run.
-console.log(`ran: ${SHARDED} shard ${index}/${total}${othersRan > 0 ? `, plus ${othersRan} other workspaces` : ""}`);
+console.log(`ran: ${[...(coordinator ? [`${SHARDED} shard ${coordinator.shard}`] : []),
+  ...(othersRan > 0 ? [`${othersRan} other workspaces`] : [])].join(", ") || "none"}`);
 console.log(
   `quietest moment: ${Math.round(longestSilence / 1000)}s without output, against a limit of ${SILENCE_LIMIT_MS / 1000}s`,
 );

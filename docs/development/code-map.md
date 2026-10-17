@@ -389,7 +389,7 @@ cover actual Chromium layout and the sandboxed desktop/remote-browser journey.
 |---|---|
 | World files and versioned authored records | `world/store.ts`, `world/commit.ts`, domain operations and the proposal gate; consult [filesystem operations](../filesystem-operations.md) for each write |
 | Jobs, spend, provider call records | `queue/journal.ts`, `spend/ledger.ts`, `providers/call-store.ts`; operational records with explicit flush/recovery rules |
-| Server projection | `read-model.ts` folds shared state; Coordinator supplies additional live-session data in outgoing snapshots |
+| Server projection | `read-model.ts` folds full shared state; Coordinator supplies live-session data. `transport.ts` projects contracts `job-summary.ts` onto the wire and negotiates unchanged history retention; client `lib/store.ts` restores those arrays. `socket-writer.ts` bounds ordered delivery for Transport and the remote gateway. |
 | Wire state | `transport.ts` authenticates and sends sequenced snapshots/events defined by contracts |
 | Client projection/request state | `client/src/lib/store.ts` validates frames, folds domain events and holds request/transient state; inspect both reducers for shared-state changes |
 | Derived UI and local interaction | `lib/selectors.ts` and component state; local panel state need not become a persisted fact |

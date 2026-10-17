@@ -38,6 +38,9 @@ docs/system/
 # Story bibles written by hand for reference — working documents, not shipped.
 docs/example/
 
+# Local editorial reports for manuscripts — working documents, not shipped.
+docs/story-analysis/
+
 # The specification set and the design record it rests on. These live in the private
 # document set, a sibling git repository (github.com/michaeljosiah/arke-studio-specs) that
 # nothing links into a checkout. The paths stay ignored so that a stray copy at the old

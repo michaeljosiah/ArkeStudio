@@ -1248,6 +1248,7 @@ let lastSeq = 0;
 let rejoining = false;
 let reconnectAttempts = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let helloFallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 const worldListeners = new Set<(worldId: string | null) => void>();
 /**
@@ -1516,6 +1517,13 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
+    if (frame.retainedHistory?.length) {
+      if (!current.state || rejoining) { send({ kind: "hello", lastSeq, retainHistory: true }); return; }
+      if (frame.retainedHistory.includes("jobs")) frame.state.app.jobs = current.state.app.jobs;
+      if (frame.retainedHistory.includes("ledger")) frame.state.app.ledger = current.state.app.ledger;
+    }
+    if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
+    helloFallbackTimer = null;
     frameRunQuoteListeners.clear();
     frameRunStartResultListeners.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
@@ -2811,12 +2819,20 @@ function handleFrame(json: string): void {
 }
 
 function handleStatus(status: ConnectionStatus): void {
+  if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
+  helloFallbackTimer = null;
   if (status !== "open") pendingQueueRequests.clear();
   emitChange({ ...current, connection: status, ...(status !== "open" ? { genesis: Object.fromEntries(Object.entries(current.genesis).map(([id, draft]) => [id, { ...draft, chatPending: false, readinessPending: false, reviewPending: false, decisionPending: undefined }])) } : {}) });
   if (status === "open") {
     reconnectAttempts = 0;
     rejoining = true;
-    send({ kind: "hello", lastSeq });
+    send({ kind: "hello", lastSeq, retainHistory: true });
+    // An older strict coordinator drops the new hello field without closing the socket.
+    // One legacy hello restores startup after renderer HMR or a mixed-version restart.
+    helloFallbackTimer = setTimeout(() => {
+      helloFallbackTimer = null;
+      if (current.connection === "open" && rejoining) send({ kind: "hello", lastSeq });
+    }, 15_000);
   }
   if (status === "closed") {
     const delay = Math.min(10_000, 500 * 2 ** reconnectAttempts++);

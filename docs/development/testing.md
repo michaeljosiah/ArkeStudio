@@ -316,7 +316,7 @@ A test holds onto behaviour: it renders a component or a route and reads the DOM
 
 Client tests use workspace-relative paths and must run with `packages/client` as cwd. Workspace npm scripts set that cwd for you. Check worktree-local package resolution before trusting cross-package results; see [worktree rules](../../CLAUDE.md#worktrees).
 
-Windows CI shard 2 first checks the Codex file helper's private pipe and independent junction-mutation fixture with the Unicode/binary transfer and reparse regressions. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
+The Windows CI other-workspaces job first checks the Codex file helper's private pipe and independent junction-mutation fixture with the Unicode/binary transfer and reparse regressions. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
 
 Windows shard 3 likewise runs `test/harness/owned-child.test.ts` first to verify native process inspection and abrupt-exit cleanup before the full coordinator shard. These preflights retain the ordinary test assertions and remain part of the later full suites.
 
@@ -352,6 +352,10 @@ preservation. Quota refusal is fixture/protocol coverage, not a deliberately exh
 Standalone host changes also run coordinator `test/studio-server.test.ts`, existing
 `test/transport.test.ts` and Studio host lifecycle tests. The Node journey uses a copied
 world, disables paid AI, exercises authenticated manuscript download and reopens saved prose.
+Its response waits allow 30 seconds for filesystem-backed operations on shared runners, with
+a 120-second bound on the complete journey. A socket close fails immediately; a missing reply
+names the phase and recent frame types/sequences without logging payloads. These are correctness
+bounds, not an application latency target.
 Run client `test/manuscript.test.tsx`, `test/image-download.test.tsx`,
 `test/dev-session.test.ts` and `test/dev-session-server.test.ts` for the browser path.
 Desktop composition changes still require the desktop checks below.
@@ -884,7 +888,7 @@ inspection and removes its temporary profile/package. The same variables enable 
 real encode/ZIP/decode test. The smoke requires a desktop display (or an appropriate Linux display
 environment); ordinary CI unit tests do not replace it.
 
-[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.
+[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four coordinator shards and a separate other-workspaces job per platform. Shard 1 runs lint, typecheck, build and the CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks that the job plans cover every discovered workspace without duplication or omission.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.
 
@@ -1088,3 +1092,16 @@ native Stop/output bounds, lease/source revocation, MCP and schema-81 replay. Ac
 perceived-emotion and voice-delivery accuracy requires an installed-model smoke and human review.
 
 Chapter review: run the contract evidence tests, coordinator production and harness review tests, and client review tests described in [chapter-review.md](chapter-review.md). Include action registry and picture-brief tests when changing orchestration or camera guidance. Fixture tests do not establish live-model judgment quality.
+
+
+### Snapshot size and slow remote delivery
+
+Run contracts `test/job-summary.test.ts`, coordinator `test/socket-writer.test.ts`,
+`test/transport.test.ts` and `test/remote-access.test.ts`, plus client
+`test/snapshot-history.test.ts` from the client directory. These cover payload projection without
+journal mutation, recovery metadata, byte/frame queue bounds, stalled sends, event ordering,
+negotiated history retention and fresh history on reconnect. Keep the transport-auth,
+preload-auth and both dev-session regressions listed in CLAUDE.md. After building, run
+`node --import tsx apps/desktop/scripts/smoke-transport-flow.mjs` for the real sandboxed file-page
+hello, compact/repeated snapshots and authenticated media range. This disposable local check
+uses no generation and does not establish performance on a physical phone or through Tailscale.

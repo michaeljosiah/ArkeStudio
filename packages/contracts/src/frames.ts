@@ -86,7 +86,7 @@ export const PASSAGE_SPAN_MAX = 20_000;
 export const PASSAGE_KEPT_MAX = 2_400;
 
 export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
+  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional() }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
 ]));
 export type Frame = z.infer<typeof FrameSchema>;
@@ -128,7 +128,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
 
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z
