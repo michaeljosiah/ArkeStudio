@@ -1,6 +1,6 @@
 # Turn 228 · the Stage, uplifted
 
-Drawn 17 October 2026 for epic #1826 (issues #1817–#1825). Not yet approved.
+Drawn and approved by the owner on 17 October 2026. Implementation is tracked in epic #1826 (issues #1817–#1825).
 
 ## What is drawn
 
