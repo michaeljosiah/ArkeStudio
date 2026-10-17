@@ -1,0 +1,153 @@
+/* Turn 228 · the Stage, uplifted. Scoped to .st228 so nothing reaches another turn. Type is set
+   through the tokens only (check-master's rule from turn 139). The chrome is 144b's full-screen
+   Stage; what is new is the plate, the look, the kit and lights, poses, framing words, the board
+   and the build's working log. */
+.st228{box-sizing:border-box;position:relative;overflow:hidden;width:1360px;height:850px;background:var(--background);color:var(--foreground);font:var(--type-ui);text-align:left;display:flex;flex-direction:column;padding:14px 12px 10px}
+.st228 *{box-sizing:border-box}
+.st228 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.st228 svg{width:14px;height:14px;flex:none}
+.st228 .mono{font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono);color:var(--muted-foreground)}
+
+/* Head: the place pill, then the shot's own row with the way out at its right end (144). */
+.st228 .pill{align-self:flex-start;display:flex;align-items:center;gap:10px;height:32px;padding:0 14px;border:1px solid var(--border);border-radius:999px;box-shadow:var(--shadow-xs);color:var(--muted-foreground)}
+.st228 .pill b{color:var(--foreground);font-weight:var(--weight-semibold);padding-left:10px;border-left:1px solid var(--border)}
+.st228 .head{display:flex;align-items:center;gap:10px;height:40px;margin-top:6px}
+.st228 .head .nav{color:var(--muted-foreground);width:18px;display:grid;place-items:center}
+.st228 .head .t{font-weight:var(--weight-semibold)}
+.st228 .head .gap{flex:1}
+.st228 .scope{display:flex;border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;margin-left:8px}
+.st228 .scope button{height:24px;padding:0 10px;border-radius:6px;font:var(--type-label);color:var(--muted-foreground)}
+.st228 .scope button.on{background:var(--foreground);color:var(--background)}
+.st228 .exit{width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--secondary);display:grid;place-items:center}
+
+/* The blockout line: plate, instruction, what to keep, Build with Arke, the disclosure. */
+.st228 .line{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-top:4px}
+.st228 .plate{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px 0 4px;border:1px solid var(--border);border-radius:8px;flex:none}
+.st228 .plate i{width:20px;height:28px;border-radius:3px;background-size:cover;background-position:center;flex:none}
+.st228 .plate.empty{border-style:dashed;color:var(--muted-foreground);padding-left:10px}
+.st228 .field{flex:1;height:36px;display:flex;align-items:center;padding:0 12px;border:1px solid var(--border);border-radius:8px;color:var(--text-placeholder);min-width:0;white-space:nowrap;overflow:hidden}
+.st228 .field.typed{color:var(--foreground)}
+.st228 .btn{height:36px;padding:0 14px;border:1px solid var(--border);border-radius:8px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none}
+.st228 .btn.primary{background:var(--primary);color:var(--primary-foreground);border-color:var(--primary)}
+.st228 .disc{display:flex;align-items:center;gap:6px;color:var(--muted-foreground);padding:0 4px;white-space:nowrap}
+.st228 .disc.open{color:var(--foreground)}
+
+/* Body: the viewport and the 264px inspector (144). */
+.st228 .main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 264px;gap:12px;margin-top:12px}
+.st228 .vp{position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0c0d12 center/cover no-repeat}
+.st228 .vp.ground{background-color:#eeece8}
+.st228 .vp .tools{position:absolute;top:12px;left:12px;right:12px;display:flex;align-items:center;gap:8px;z-index:3}
+.st228 .vp .tools .gap{flex:1}
+.st228 .seg{display:flex;background:color-mix(in srgb,var(--background) 92%,transparent);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;box-shadow:var(--shadow-xs)}
+.st228 .seg button{height:26px;padding:0 10px;border-radius:6px;font:var(--type-label);color:var(--muted-foreground)}
+.st228 .seg button.on{background:var(--foreground);color:var(--background)}
+.st228 .chipbtn{height:30px;width:30px;display:grid;place-items:center;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--background) 92%,transparent)}
+.st228 .tag{position:absolute;transform:translate(-50%,-100%);padding:2px 7px;border-radius:5px;background:#fff;color:#111;font:var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans);white-space:nowrap;z-index:2;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.st228 .tag.ink{background:#111;color:#fff;letter-spacing:.04em}
+.st228 .tag.c1{box-shadow:inset 3px 0 0 #2f7fd8,0 1px 2px rgba(0,0,0,.25);padding-left:9px}
+.st228 .tag.c2{box-shadow:inset 3px 0 0 #d6336c,0 1px 2px rgba(0,0,0,.25);padding-left:9px}
+.st228 .pip{position:absolute;right:12px;bottom:12px;width:96px;height:171px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.4);background:#000 center/cover;box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:2}
+.st228 .pip span{position:absolute;left:6px;top:4px;color:#fff;font:var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans);text-shadow:0 1px 2px #000}
+/* Camera mode: the lens at the production's aspect, centred, with its safe area. */
+.st228 .lens{position:absolute;top:10px;bottom:10px;left:50%;transform:translateX(-50%);aspect-ratio:9/16;background:#000 center/cover;border-radius:2px}
+.st228 .lens::after{content:'';position:absolute;inset:5%;border:1px dashed rgba(255,255,255,.35)}
+.st228 .wipe{position:absolute;top:0;bottom:0;width:2px;background:#fff;z-index:2}
+.st228 .wipe::before{content:'';position:absolute;top:50%;left:50%;width:26px;height:26px;border-radius:50%;background:#fff;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.st228 .wipe b{position:absolute;top:10px;font:var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans);color:#fff;text-shadow:0 1px 2px #000;white-space:nowrap}
+.st228 .score{position:absolute;left:12px;bottom:12px;z-index:3;display:flex;gap:6px}
+.st228 .score span{padding:4px 8px;border-radius:6px;background:rgba(0,0,0,.6);color:#fff;font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono)}
+
+/* The inspector: the stage list, one form, the playblast pinned at the foot. */
+.st228 .panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.st228 .eyebrow{display:flex;justify-content:space-between;align-items:baseline;font:var(--weight-semibold) var(--text-2xs)/1.3 var(--font-sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);padding:6px 0 2px}
+.st228 .eyebrow .mono{text-transform:none;letter-spacing:0}
+.st228 .rule{border-top:1px solid var(--border);margin-top:6px}
+.st228 .li{display:flex;align-items:center;gap:8px;height:22px;padding:0 4px;border-radius:4px}
+.st228 .li.on{background:var(--muted)}
+.st228 .li .mk{width:8px;height:8px;border-radius:2px;flex:none;background:#111}
+.st228 .li .mk.o{background:none;border:1px solid var(--muted-foreground)}
+.st228 .li .mk.l{border-radius:50%;background:#f2a54a}
+.st228 .li .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st228 .li .warn{color:var(--warning)}
+.st228 .grp{font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono);color:var(--muted-foreground);padding:4px 4px 1px}
+.st228 .add{display:flex;align-items:center;gap:6px;height:22px;padding:0 4px;color:var(--muted-foreground);font:var(--type-label)}
+.st228 .row{display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;min-height:24px;gap:0;margin:1px 0}
+.st228 .row>.k{font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono);color:var(--muted-foreground)}
+.st228 .row>.v{display:flex;align-items:center;gap:6px;min-width:0;font:var(--weight-regular) var(--text-xs)/1.3 var(--font-sans)}
+.st228 .sel{flex:1;height:24px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;min-width:0;white-space:nowrap;overflow:hidden}
+.st228 .num{flex:1;display:flex;justify-content:space-between;align-items:center}
+.st228 .num i{font-style:normal;color:var(--muted-foreground);letter-spacing:.3em}
+.st228 .chips{display:flex;gap:4px;flex-wrap:wrap}
+.st228 .chips span{height:22px;padding:0 8px;border:1px solid var(--border);border-radius:6px;display:inline-flex;align-items:center;font:var(--type-label);color:var(--muted-foreground)}
+.st228 .chips span.on{background:var(--foreground);color:var(--background);border-color:var(--foreground)}
+.st228 .three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;flex:1}
+.st228 .three span{height:24px;border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:4px;padding:0 6px;font:var(--weight-regular) var(--text-xs)/1 var(--font-sans);white-space:nowrap;overflow:hidden}
+.st228 .three span b{font:var(--weight-regular) var(--text-2xs)/1 var(--font-mono);color:var(--muted-foreground)}
+.st228 .swatch{width:14px;height:14px;border-radius:3px;border:1px solid var(--border);flex:none}
+.st228 .way{text-decoration:underline;text-underline-offset:3px;font:var(--type-label)}
+.st228 .foot{margin-top:auto;padding-top:8px;border-top:1px solid var(--border)}
+.st228 .foot .row .v.ok{color:var(--success)}
+.st228 .foot .btns{display:flex;gap:6px;margin-top:6px}
+.st228 .foot .btn{height:30px;padding:0 12px}
+.st228 .foot .btn[disabled]{opacity:.45}
+.st228 .find{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:var(--warning-bg);color:var(--foreground);font:var(--type-label);margin:4px 0}
+.st228 .find .way{margin-left:auto}
+
+/* Transport: one camera track, a lane per figure (140), and for a board, a cut at each shot. */
+.st228 .tl{display:grid;grid-template-columns:150px minmax(0,1fr) 80px;align-items:center;column-gap:12px;row-gap:4px;margin-top:10px}
+.st228 .play{display:flex;align-items:center;gap:10px}
+.st228 .play i{width:30px;height:30px;border-radius:50%;background:var(--foreground);color:var(--background);display:grid;place-items:center;font-style:normal}
+.st228 .track{position:relative;height:30px}
+.st228 .track .rail{position:absolute;left:0;right:0;top:14px;height:2px;background:var(--border)}
+.st228 .track .done{position:absolute;left:0;top:13px;height:4px;background:var(--foreground)}
+.st228 .track .k{position:absolute;top:15px;width:11px;height:11px;transform:translate(-50%,-50%) rotate(45deg);background:var(--foreground)}
+.st228 .track .k.end{border-radius:50%;transform:translate(-50%,-50%);background:var(--background);border:1.5px solid var(--foreground)}
+.st228 .track .cut{position:absolute;top:2px;bottom:2px;width:2px;background:var(--foreground)}
+.st228 .track .seg{position:absolute;top:0;height:30px;border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;padding:0 8px;gap:6px;font:var(--type-label);background:var(--background);box-shadow:none}
+.st228 .track .seg.on{border-color:var(--foreground)}
+.st228 .track .seg em{font-style:normal;font:var(--weight-regular) var(--text-2xs)/1 var(--font-mono);color:var(--muted-foreground)}
+.st228 .track .head{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--foreground);margin:0;height:auto}
+.st228 .lane{position:relative;height:22px}
+.st228 .lane .rail{position:absolute;left:0;right:0;top:10px;height:1px;background:var(--border)}
+.st228 .lane .m{position:absolute;top:11px;transform:translate(-50%,-50%) rotate(45deg);width:9px;height:9px}
+.st228 .lane .p{position:absolute;top:0;transform:translateX(-50%);font:var(--weight-regular) var(--text-2xs)/1 var(--font-mono);color:var(--muted-foreground);white-space:nowrap;padding-top:0}
+.st228 .lane .bar{position:absolute;top:8px;height:5px;border-radius:3px;opacity:.35}
+.st228 .who{display:flex;align-items:center;gap:8px;font:var(--type-label)}
+.st228 .who i{width:8px;height:8px;border-radius:50%}
+
+/* Build with Arke, while it works: the working log under the line. */
+.st228 .log{position:absolute;left:12px;top:12px;width:420px;max-height:calc(100% - 24px);z-index:4;border:1px solid var(--border);border-radius:10px;background:var(--popover);box-shadow:var(--shadow-md);padding:10px 12px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.st228 .log .st{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:8px;align-items:center;min-height:24px}
+.st228 .log .st .ic{color:var(--success)}
+.st228 .log .st.run .ic{color:var(--foreground)}
+.st228 .log .st.wait{color:var(--muted-foreground)}
+.st228 .log .thumbs{display:flex;gap:6px;padding:4px 0 6px 24px}
+.st228 .log .thumbs i{width:44px;height:78px;border-radius:4px;background:#000 center/cover;border:1px solid var(--border)}
+.st228 .busy{position:absolute;inset:0;background:rgba(10,10,14,.25);z-index:1}
+
+/* The Bench, video: references numbered as they ride, Follow, and the prompt written for the model. */
+.st228.bench{padding:0}
+.st228 .tb{height:44px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:relative;color:var(--muted-foreground);font:var(--type-label);flex:none}
+.st228 .tb>b{position:absolute;left:50%;transform:translateX(-50%);font:var(--type-ui);color:var(--foreground)}
+.st228 .bwrap{flex:1;display:grid;grid-template-columns:42px minmax(0,1fr);min-height:0}
+.st228 .crail{border-right:1px solid var(--border)}
+.st228 .bmain{padding:26px 34px;display:flex;flex-direction:column;gap:18px;min-height:0}
+.st228 .card{border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.st228 .tabs{display:flex;gap:4px}
+.st228 .tabs span{height:28px;padding:0 12px;border-radius:999px;display:inline-flex;align-items:center;color:var(--muted-foreground)}
+.st228 .tabs span.on{background:var(--muted);color:var(--foreground)}
+.st228 .refs{display:flex;gap:10px;align-items:stretch}
+.st228 .ref{display:flex;gap:10px;align-items:center;border:1px solid var(--border);border-radius:10px;padding:6px 12px 6px 6px;min-width:0}
+.st228 .ref i{width:40px;height:52px;border-radius:6px;background:#222 center/cover;flex:none;position:relative}
+.st228 .ref i.v::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-30%,-50%);border:7px solid transparent;border-left:11px solid #fff}
+.st228 .ref b{display:block;font:var(--type-ui)}
+.st228 .ref .mono{display:block}
+.st228 .ref .who2{display:block;font:var(--weight-regular) var(--text-xs)/1.3 var(--font-sans)}
+.st228 .prompt{border:1px solid var(--border);border-radius:10px;padding:12px 14px;font:var(--weight-regular) var(--text-sm)/1.6 var(--font-sans);min-height:150px}
+.st228 .prompt .at{background:var(--muted);border-radius:4px;padding:0 4px}
+.st228 .prompt p{margin:0 0 6px}
+.st228 .prompt .cue{font:var(--weight-regular) var(--text-xs)/1.4 var(--font-mono);color:var(--muted-foreground);margin-right:6px}
+.st228 .opts{display:flex;align-items:center;gap:8px}
+.st228 .opts .btn{height:32px;border-radius:8px}
+.st228 .opts .gap{flex:1}
+.st228 .opts .lbl{font:var(--weight-regular) var(--text-2xs)/1 var(--font-mono);color:var(--muted-foreground)}
