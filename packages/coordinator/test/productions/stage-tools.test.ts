@@ -38,6 +38,8 @@ async function build(input: {
   turns: Array<(call: (name: string, args?: Record<string, unknown>) => Promise<{ text: string; isError: boolean }>) => Promise<void>>;
   preserve?: "blocking" | "camera" | "none";
   staged?: boolean;
+  /** Frames the client returns for each render; three by default. */
+  frames?: number;
 }) {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir);
@@ -55,7 +57,7 @@ async function build(input: {
     id: "test",
     readiness: () => ({ ready: true }),
     capabilities: () => new Set(["events"]),
-    createSession: async () => ({ sessionId: "stage-tools" }),
+    createSession: async () => { servedAtCreate = attached !== null; return { sessionId: "stage-tools" }; },
     sendMessage: async () => ({ sessionId: "stage-tools", correlationId: "unused" }),
     streamEvents: (signal) => events.stream(signal),
     dispatchAsync: async (message) => {
@@ -85,6 +87,7 @@ async function build(input: {
   };
   const png = Buffer.from(encodePng(solidImage(64, 36, [20, 30, 40, 255]))).toString("base64");
   let attached: string | null = null;
+  let servedAtCreate = false;
   try {
     await constructor.run(store, request, {
       adapter,
@@ -100,21 +103,21 @@ async function build(input: {
       emit: (event) => {
         emitted.push(event);
         if (event.status === "inspect")
-          constructor.inspect(store.worldId, request.requestId, event.round, [
+          constructor.inspect(store.worldId, request.requestId, event.round, input.frames === undefined ? [
             { at: 0, view: "camera", png, observations: ["maren-kest: screen (0.00, 0.10)"] },
             { at: 4, view: "camera", png },
             { at: 0, view: "overview", png },
-          ]);
+          ] : Array.from({ length: input.frames }, (_, index) => ({ at: index * 0.5, view: "camera" as const, png })));
       },
     });
   } finally {
     await store.close();
   }
-  return { emitted, results, terminal: emitted.at(-1)!, turns: turn, detached: attached === null, original: shot.staging };
+  return { emitted, results, terminal: emitted.at(-1)!, turns: turn, detached: attached === null, original: shot.staging, servedAtCreate };
 }
 
 it("builds a blockout as small tool calls on a draft the run owns, looking when it asks to (issue 1823)", async () => {
-  const { emitted, results, terminal, detached } = await build({ turns: [async (call) => {
+  const { emitted, results, terminal, detached, servedAtCreate } = await build({ turns: [async (call) => {
     assert.match((await call("stage_get")).text, /"rendersLeft": 8/);
     await call("stage_add", { kind: "set", item: { name: "deck", kit: { kind: "room", open: ["front"] }, x: 0, z: 0, w: 8, h: 4, d: 10 } });
     await call("stage_add", { kind: "figure", item: { sheetId: "maren-kest", x: 0, z: 0, facing: 180 } });
@@ -131,6 +134,7 @@ it("builds a blockout as small tool calls on a draft the run owns, looking when 
     await call("stage_done", { assessment: "Wide on Maren at the rail, pushing to a medium as she leans.", assumptions: ["The rail is the deck's front edge."] });
   }] });
   assert.equal(terminal.status, "ready", terminal.detail);
+  assert.ok(servedAtCreate, "the tools are served before the session opens: Codex lists them while creating it");
   assert.ok(detached, "the run's tools stop answering when it ends");
   const draft = terminal.draft!;
   assert.deepEqual(draft.cast.map((figure) => figure.sheetId), ["maren-kest"]);
@@ -150,6 +154,18 @@ it("builds a blockout as small tool calls on a draft the run owns, looking when 
   assert.equal(steps.at(-1)?.step?.label, "done");
   assert.ok((steps.at(-1)?.calls ?? 0) >= 11);
   assert.ok(results.filter((result) => result.isError).length === 1, "only the early stage_done was refused");
+});
+
+it("records at most the frames authorship holds, however many the renders saw (issue 1823)", async () => {
+  const { terminal } = await build({ frames: 8, turns: [async (call) => {
+    await call("stage_add", { kind: "figure", item: { sheetId: "maren-kest", x: 0, z: 0, facing: 180 } });
+    await call("stage_camera_key", { key: { t: 0, frame: { subject: "maren-kest", size: "wide", angle: "eye", side: "front" } } });
+    await call("stage_camera_key", { key: { t: 4, frame: { subject: "maren-kest", size: "medium", angle: "eye", side: "front" } } });
+    for (let render = 0; render < 4; render++) await call("stage_render", { at: [1] });
+    await call("stage_done", { assessment: "Wide on Maren, pushing in." });
+  }] });
+  assert.equal(terminal.status, "ready", terminal.detail);
+  assert.equal(terminal.draft?.staging.authorship?.inspectedFrames, 24, "32 frames seen, 24 recorded: the build is not thrown away");
 });
 
 it("refuses a protected field at the tool, whatever the call (issue 1823)", async () => {

@@ -42,6 +42,8 @@ import { StageDraftTools, STAGE_RENDER_BUDGET } from "./stage-tools.js";
 
 type Request = Extract<ClientMessage, { kind: "stage-construct" }>;
 type ConstructionEvent = Extract<DomainEvent, { type: "stage.construction" }>;
+/** What a Stage authorship record holds of the frames a build inspected (StageAuthorshipSchema). */
+const MAX_INSPECTED_FRAMES = 24;
 const fingerprint = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 
@@ -133,6 +135,7 @@ export class StageConstructor {
       toolBuild ? 480_000 : 300_000,
     );
     let toolToken: string | null = null;
+    let tooled: StageDraftTools | undefined;
     let sessionId: string | undefined;
     let latest: StageConstructionDraft | undefined;
     let inspectedFrames = 0;
@@ -263,13 +266,64 @@ export class StageConstructor {
           configured.worldQueryUrl = url;
         }
       }
+      // Every read across the build, for the tool build's check that the sources were read.
+      const everRead = new Set<string>();
+      // The tools are served before the session opens: an adapter lists them while it creates the
+      // session (Codex calls tools/list from createSession), and a lease not yet registered answers
+      // 404, failing every build before either the tools or the single-reply fallback could run.
+      if (toolToken !== null) {
+        tooled = new StageDraftTools({
+          scene: source.scene,
+          shotId: source.shot.id,
+          aspect: source.aspect,
+          lens: effectiveFraming(source.scene, source.shot).lens,
+          durationSec: duration,
+          sheets: source.sheets.map((sheet) => ({ id: sheet.id, name: sheet.name })),
+          preserve: request.preserve,
+          original,
+          shotStaged: source.shot.staging !== undefined,
+          openingKeys: stageShot(source.shot, { cast: [], sets: [], durationSec: duration, framing: effectiveFraming(source.scene, source.shot), aspect: source.aspect }).keys,
+          lights: source.scene.blocking?.lights ?? [],
+          atmosphere: source.scene.blocking?.atmosphere,
+        }, {
+          step: (label, detail, draft, calls) => {
+            if (draft !== null) latest = draft;
+            emit("working", label, draft ?? undefined, { label, ...(detail === undefined ? {} : { detail }), calls });
+          },
+          render: async (draft, _times) => {
+            active.round += 1;
+            const round = active.round;
+            const frames = await new Promise<StageInspectionFrame[]>((resolve, reject) => {
+              const stopped = () => { delete active.receive; reject(abort.signal.reason); };
+              abort.signal.addEventListener("abort", stopped, { once: true });
+              active.receive = (received) => { abort.signal.removeEventListener("abort", stopped); resolve(received); };
+              emit("inspect", "Rendering the camera views…", draft);
+            });
+            assertCurrent();
+            const saved: Array<{ name: string; frame: StageInspectionFrame }> = [];
+            for (const [index, frame] of frames.entries()) {
+              const bytes = Buffer.from(frame.png, "base64");
+              if (bytes.length < 24 || bytes.readUInt32BE(16) > 2048 || bytes.readUInt32BE(20) > 2048 || imageFormatOf(bytes)?.extension !== ".png" || frame.at > duration)
+                throw new Error("A Stage inspection frame is invalid.");
+              decodePng(bytes);
+              const name = `render-${round}-${index}-${frame.view}.png`;
+              await writeFile(join(dir, name), bytes);
+              saved.push({ name, frame });
+            }
+            return saved;
+          },
+          sourcesRead: () => {
+            const missing = sourceImages.map((image) => image.name).filter((name) => ![...everRead].some((summary) => summary.includes(name)));
+            return { read: missing.length === 0, missing };
+          },
+        });
+        deps.tools!.attach(toolToken, tooled);
+      }
       const session = await createPreparedSession(deps.adapter, dir, configured, {
         purpose: "art-prompt",
         agent: "stage-designer",
       }, undefined, abort.signal);
       sessionId = session.sessionId;
-      // Every read across the build, for the tool build's check that the sources were read.
-      const everRead = new Set<string>();
       const readStep = (summary: string) => {
         if (toolToken === null) return;
         const name = sourceImages.find((image) => summary.includes(image.name));
@@ -373,56 +427,10 @@ export class StageConstructor {
       };
       const contract = `Contract: world metres, +Y up, +Z forward, angles in degrees; a figure faces +Z at facing 0 and stands 1.8 m unless its height says otherwise. Cover camera time 0 to ${duration}s exactly. Write camera keys in words wherever they can say it — {t, frame:{subject:sheetId, size:extreme wide|wide|medium|medium close-up|close-up|extreme close-up, angle:eye|low|high|top, side:front|behind|left|right|over, over?:sheetId, focalMm?}} with no p or l — and the Stage solves them through the shot's lens (${JSON.stringify(STAGE_FRAMED_HEIGHT)} of the figure for each size). A key written as numbers looks from p toward l; anchor makes p/l offsets from a figure or group, anchorSpace local turns them with it, track keeps the aim on it; easeIn/easeOut apply at the first departure, the last arrival and holds. Named moves the brief knows: ${STAGE_CAMERA_MOVES.map(move => move.label).join(", ")}. Set items: a kit item (${STAGE_KIT_KINDS.join(", ")}) is placed and sized whole by x, z, y, w, h, d and rotation and expands into its parts; a room is w on x, d on z, h high, its open sides without walls, its openings cut at metres along a wall from its centre. Other sets are primitives sized w/h/d about their centre and translated to (x, y+h/2, z), or bounded indexed meshes normalised to about -0.5..0.5; sets in a group use group-local coordinates and objectMotions move the group. Materials: ${STAGE_MATERIALS.join(", ")}; a kit item names them in surfaces by part or wall side. Marks: pose one of ${STAGE_POSES.join(", ")}; hand {side, on, part?} and look name a figure or a set; turns stay under ${STAGE_TURN_LIMIT_DPS}°/s and walks at a walking pace. Limits: 30 cast, 120 sets, 30 moving groups, 120 keys per track, 2048 vertices and 12288 indices per mesh, 24 lights. Use only the supplied sheet identities. Preserve ${request.preserve}.${sourceImages[0]?.name.startsWith("plate") && plate ? ` ${sourceImages[0].name} is the location plate, "${plate.label}": an empty picture of this place and the authority on its layout. Build the walls, openings and large furniture where it shows them, estimate where its camera stood and set plateCamera {p,l,focalMm}${plate.shotId === undefined || plate.shotId === request.shotId ? "; this shot's first camera key matches it" : ""}.` : ""}`;
       let answered: { final: string; reads: Set<string> } | undefined;
-      let tooled: StageDraftTools | undefined;
       if (toolToken !== null) {
         // Build with Arke as a tool session (issue 1823): small validated edits on a draft this
         // run owns, renders when the model wants to look, and stage_done to finish.
-        const host = tooled = new StageDraftTools({
-          scene: source.scene,
-          shotId: source.shot.id,
-          aspect: source.aspect,
-          lens: effectiveFraming(source.scene, source.shot).lens,
-          durationSec: duration,
-          sheets: source.sheets.map((sheet) => ({ id: sheet.id, name: sheet.name })),
-          preserve: request.preserve,
-          original,
-          shotStaged: source.shot.staging !== undefined,
-          openingKeys: stageShot(source.shot, { cast: [], sets: [], durationSec: duration, framing: effectiveFraming(source.scene, source.shot), aspect: source.aspect }).keys,
-          lights: source.scene.blocking?.lights ?? [],
-          atmosphere: source.scene.blocking?.atmosphere,
-        }, {
-          step: (label, detail, draft, calls) => {
-            if (draft !== null) latest = draft;
-            emit("working", label, draft ?? undefined, { label, ...(detail === undefined ? {} : { detail }), calls });
-          },
-          render: async (draft, _times) => {
-            active.round += 1;
-            const round = active.round;
-            const frames = await new Promise<StageInspectionFrame[]>((resolve, reject) => {
-              const stopped = () => { delete active.receive; reject(abort.signal.reason); };
-              abort.signal.addEventListener("abort", stopped, { once: true });
-              active.receive = (received) => { abort.signal.removeEventListener("abort", stopped); resolve(received); };
-              emit("inspect", "Rendering the camera views…", draft);
-            });
-            assertCurrent();
-            const saved: Array<{ name: string; frame: StageInspectionFrame }> = [];
-            for (const [index, frame] of frames.entries()) {
-              const bytes = Buffer.from(frame.png, "base64");
-              if (bytes.length < 24 || bytes.readUInt32BE(16) > 2048 || bytes.readUInt32BE(20) > 2048 || imageFormatOf(bytes)?.extension !== ".png" || frame.at > duration)
-                throw new Error("A Stage inspection frame is invalid.");
-              decodePng(bytes);
-              const name = `render-${round}-${index}-${frame.view}.png`;
-              await writeFile(join(dir, name), bytes);
-              saved.push({ name, frame });
-            }
-            return saved;
-          },
-          sourcesRead: () => {
-            const missing = sourceImages.map((image) => image.name).filter((name) => ![...everRead].some((summary) => summary.includes(name)));
-            return { read: missing.length === 0, missing };
-          },
-        });
-        deps.tools!.attach(toolToken, host);
+        const host = tooled!;
         emit("working", "Building the blockout…");
         let prompt = `Block out the selected shot with the stage tools, following your Stage direction brief. Work in small steps: read the source images with your read tool, call stage_get, then build the set, the figures and their marks, the lights and the camera, one thing per call. Look whenever you want with stage_render (${STAGE_RENDER_BUDGET} renders) and compare with the plate; run stage_check and fix what it finds; finish with stage_done and your assessment. The tools hold the draft: do not reply with it as JSON. ${contract} User instruction: ${request.instruction}\nCast colours in the renders, by order: blue, magenta, amber, teal, violet, lime. Source images to read: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nThe draft starts from: ${JSON.stringify(original)}`;
         // A model that ends its turn without finishing is asked twice to go on, then the build
@@ -445,7 +453,10 @@ export class StageConstructor {
         if ("problem" in finished) throw new Error(`The build ended without a whole blockout: ${finished.problem}`);
         const draft = finished.draft;
         if (!host.done) draft.assessment = "Unfinished: the build ended without calling stage_done. Review this blockout before keeping it.";
-        inspectedFrames = host.framesSeen;
+        // The record says how much the model looked at, up to what authorship holds (24): eight
+        // renders of up to eight frames can see more, and an over-count would fail the ready event's
+        // own schema and throw the finished build away.
+        inspectedFrames = Math.min(host.framesSeen, MAX_INSPECTED_FRAMES);
         // The tools refuse protected edits as they come; the finished draft is held to them too.
         if (original && request.preserve === "blocking" &&
           fingerprint([draft.cast, draft.sets, draft.staging.performances, draft.staging.objectMotions]) !==

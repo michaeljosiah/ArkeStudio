@@ -141,6 +141,13 @@ export async function executeTool(session: ToolSession, name: string, args: Json
   try { return await work; } finally { if (rootQueues.get(key) === settled) rootQueues.delete(key); }
 }
 
+/**
+ * The leased world tools whose results carry pictures: World Chat's image read and the Stage's
+ * render (issue 1823), whose frames are what a tool build looks at. Any other tool's image is
+ * refused as content it should not have.
+ */
+const WORLD_IMAGE_TOOLS = new Set(["world_view_image", "world_stage_render"]);
+
 async function executeOneTool(session: ToolSession, name: string, args: JsonObject, signal: AbortSignal): Promise<ExecutedTool> {
   signal.throwIfAborted();
   const definition = toolsFor(session).find(tool => tool.name === name);
@@ -155,7 +162,7 @@ async function executeOneTool(session: ToolSession, name: string, args: JsonObje
     const content: ToolContent[] = result.content.map(item => {
       const block = object(item);
       if (block.type === "text" && typeof block.text === "string") return { type: "text", text: block.text };
-      if (name !== "world_view_image" || !session.inputModalities?.includes("image") || block.type !== "image" ||
+      if (!WORLD_IMAGE_TOOLS.has(name) || !session.inputModalities?.includes("image") || block.type !== "image" ||
         block.mimeType !== "image/png" || typeof block.data !== "string" || block.data.length > 16 * 1024 * 1024 ||
         !/^[A-Za-z0-9+/]+={0,2}$/.test(block.data)) throw new Error("World-query returned unsupported image content for this model.");
       const bytes = Buffer.from(block.data, "base64");
