@@ -216,7 +216,7 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
-/* The location plate (issue 1818, design turn 228): the blockout line opens with it, a thumbnail
+/* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
    and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the
    line's own "> span" rule would shrink and fade, so it restores both. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__plateanchor { font: inherit; opacity: 1; }

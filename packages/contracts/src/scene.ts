@@ -148,7 +148,7 @@ export const StagingSetSchema = z
 export type StagingSet = z.infer<typeof StagingSetSchema>;
 
 /**
- * The location plate (issue 1818, design turn 228c): a picture of the empty place the set is
+ * The location plate (issue 1818, design turn 229c): a picture of the empty place the set is
  * built from. The build reads it as the authority on layout, matches one shot's opening camera
  * to it, and it can ride to the generator as the first image so the blockout and the location
  * reference agree about where the door is. A world file (a location sheet's picture) or an

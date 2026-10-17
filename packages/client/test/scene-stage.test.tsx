@@ -581,7 +581,7 @@ it("a list line stands for every pick of its thing, and a line that leaves the l
   assert.ok(q('[aria-label="Camera rig"]'), "the shot's form, not an empty panel");
 });
 
-// The location plate (issue 1818, design turn 228c).
+// The location plate (issue 1818, design turn 229c).
 const PLATE_PICTURE = { id: "ar_01J8G0000000000000000000P1", kind: "image" as const, file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" as const }, links: [], created: "2026-10-17T09:00:00.000Z" };
 
 it("opens the blockout line with a dashed Add plate, and a pick writes the plate with the scene's marks", async () => {
