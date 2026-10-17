@@ -352,6 +352,10 @@ preservation. Quota refusal is fixture/protocol coverage, not a deliberately exh
 Standalone host changes also run coordinator `test/studio-server.test.ts`, existing
 `test/transport.test.ts` and Studio host lifecycle tests. The Node journey uses a copied
 world, disables paid AI, exercises authenticated manuscript download and reopens saved prose.
+Its response waits allow 30 seconds for filesystem-backed operations on shared runners, with
+a 120-second bound on the complete journey. A socket close fails immediately; a missing reply
+names the phase and recent frame types/sequences without logging payloads. These are correctness
+bounds, not an application latency target.
 Run client `test/manuscript.test.tsx`, `test/image-download.test.tsx`,
 `test/dev-session.test.ts` and `test/dev-session-server.test.ts` for the browser path.
 Desktop composition changes still require the desktop checks below.

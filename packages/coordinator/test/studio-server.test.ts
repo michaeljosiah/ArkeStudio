@@ -20,27 +20,44 @@ async function connect(port: number, token = auth.token) {
   socket.on("message", data => { frames.push(FrameSchema.parse(JSON.parse(String(data)))); for (const notify of notices) notify(); });
   await once(socket, "open");
   const send = (message: ClientMessage) => socket.send(JSON.stringify(message));
-  const wait = async (predicate: (frame: Frame) => boolean) => {
+  // These replies include world indexing, durable writes and document export on a shared
+  // CI runner. This is an end-to-end correctness check, not a ten-second latency contract.
+  const wait = async (predicate: (frame: Frame) => boolean, description: string) => {
     if (frames.some(predicate)) return frames.find(predicate)!;
+    const timeoutError = new Error(`Timed out waiting for ${description}.`);
     return new Promise<Frame>((resolve, reject) => {
-      const timer = setTimeout(() => { notices.delete(check); reject(new Error("No matching server frame.")); }, 10000);
+      const cleanup = () => {
+        clearTimeout(timer); notices.delete(check);
+        socket.off("close", closed); socket.off("error", failed);
+      };
+      const failed = (error: Error) => { cleanup(); reject(error); };
+      const closed = (code: number) => failed(new Error(`Socket closed (${code}) while waiting for ${description}.`));
+      const timer = setTimeout(() => {
+        const recent = frames.slice(-8).map(frame => `${frame.seq}:${frame.kind === "event" ? frame.event.type : "snapshot"}`);
+        timeoutError.message += ` Socket state ${socket.readyState}; recent frames: ${recent.join(", ") || "none"}.`;
+        failed(timeoutError);
+      }, 30_000);
       const check = () => {
         const frame = frames.find(predicate);
-        if (frame) { clearTimeout(timer); notices.delete(check); resolve(frame); }
+        if (frame) { cleanup(); resolve(frame); }
       };
+      socket.once("close", closed); socket.once("error", failed);
+      if (socket.readyState !== WebSocket.OPEN) {
+        failed(new Error(`Socket is not open (state ${socket.readyState}) while waiting for ${description}.`)); return;
+      }
       notices.add(check); check();
     });
   };
   const event = async <K extends DomainEvent["type"]>(type: K, requestId?: string) => {
     const frame = await wait(frame => frame.kind === "event" && frame.event.type === type &&
-      (requestId === undefined || ("requestId" in frame.event && frame.event.requestId === requestId)));
+      (requestId === undefined || ("requestId" in frame.event && frame.event.requestId === requestId)), type);
     return (frame as Extract<Frame, { kind: "event" }>).event as Extract<DomainEvent, { type: K }>;
   };
   send({ kind: "hello", token });
   return { socket, frames, send, wait, event };
 }
 
-it("the Node host serves authenticated prose editing, reconnect and restart without Electron", async t => {
+it("the Node host serves authenticated prose editing, reconnect and restart without Electron", { timeout: 120_000 }, async t => {
   const { root } = await makeTempRoot();
   const credentials = join(root, "credentials.dev.dat");
   await writeFile(credentials, "Keep existing credentials untouched.");
@@ -53,7 +70,7 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   assert.equal(code, 1008); assert.equal(denied.frames.length, 0);
 
   const client = await connect(session.port); sockets.push(client.socket);
-  await client.wait(frame => frame.kind === "snapshot");
+  await client.wait(frame => frame.kind === "snapshot", "initial snapshot");
   client.send({ kind: "open-world", worldId: WORLD_ID });
   await client.event("world.opened");
   const requestId = ulid();
@@ -75,7 +92,7 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   assert.equal(saved.disposition, "saved");
   client.send({ kind: "export-manuscript", worldId: WORLD_ID, productionId: production.slug, format: "docx" });
   const exported = await client.wait(frame => frame.kind === "event" && frame.event.type === "export.progress" &&
-    frame.event.productionId === production.slug && ["done", "failed"].includes(frame.event.status));
+    frame.event.productionId === production.slug && ["done", "failed"].includes(frame.event.status), "completed manuscript export");
   assert.equal(exported.kind, "event");
   if (exported.kind !== "event" || exported.event.type !== "export.progress") throw new Error("Missing export.");
   assert.equal(exported.event.status, "done", exported.event.error ?? "");
@@ -91,7 +108,7 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   const picker = await client.event("manuscript.read-result", pickerRequest);
   assert.match(picker.reason ?? "", /desktop app/);
   const reconnected = await connect(session.port); sockets.push(reconnected.socket);
-  const snapshot = await reconnected.wait(frame => frame.kind === "snapshot");
+  const snapshot = await reconnected.wait(frame => frame.kind === "snapshot", "reconnect snapshot");
   assert.equal(snapshot.seq, 1);
   assert.equal((await reconnected.event("export.progress")).output, exported.event.output);
   for (const socket of sockets) socket.terminate();
@@ -99,7 +116,7 @@ it("the Node host serves authenticated prose editing, reconnect and restart with
   host = await createNodeStudioHost({ appRoot: root, appVersion: "test", adapter: null, transportAuth: auth });
   session = await host.server.start();
   const reopened = await connect(session.port); sockets.push(reopened.socket);
-  await reopened.wait(frame => frame.kind === "snapshot");
+  await reopened.wait(frame => frame.kind === "snapshot", "restarted host snapshot");
   reopened.send({ kind: "open-world", worldId: WORLD_ID }); await reopened.event("world.opened");
   const restoredExport = await reopened.event("export.progress");
   assert.equal(restoredExport.status, "done");
@@ -153,7 +170,7 @@ it("an occupied port rejects startup and drains the failed host", async t => {
   await assert.rejects(second.start(session.port), /EADDRINUSE/);
   assert.equal(cleaned, true);
   const client = await connect(session.port);
-  try { await client.wait(frame => frame.kind === "snapshot"); }
+  try { await client.wait(frame => frame.kind === "snapshot", "original host snapshot after port refusal"); }
   finally { client.socket.terminate(); }
 });
 
