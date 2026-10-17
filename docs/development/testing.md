@@ -316,7 +316,7 @@ A test holds onto behaviour: it renders a component or a route and reads the DOM
 
 Client tests use workspace-relative paths and must run with `packages/client` as cwd. Workspace npm scripts set that cwd for you. Check worktree-local package resolution before trusting cross-package results; see [worktree rules](../../CLAUDE.md#worktrees).
 
-Windows CI shard 2 first checks the Codex file helper's private pipe and independent junction-mutation fixture with the Unicode/binary transfer and reparse regressions. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
+The Windows CI other-workspaces job first checks the Codex file helper's private pipe and independent junction-mutation fixture with the Unicode/binary transfer and reparse regressions. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
 
 Windows shard 3 likewise runs `test/harness/owned-child.test.ts` first to verify native process inspection and abrupt-exit cleanup before the full coordinator shard. These preflights retain the ordinary test assertions and remain part of the later full suites.
 
@@ -888,7 +888,7 @@ inspection and removes its temporary profile/package. The same variables enable 
 real encode/ZIP/decode test. The smoke requires a desktop display (or an appropriate Linux display
 environment); ordinary CI unit tests do not replace it.
 
-[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.
+[ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four coordinator shards and a separate other-workspaces job per platform. Shard 1 runs lint, typecheck, build and the CI planner tests. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests using Node's discovered file list and discovers every other workspace with a test script. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that coordinator shard, not the complete CI gate. Run `node scripts/ci-test.mjs workspaces` for the other workspaces, or omit the selector for the complete unsharded test run. `node --test scripts/ci-test-plan.test.mjs` checks that the job plans cover every discovered workspace without duplication or omission.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.
 
