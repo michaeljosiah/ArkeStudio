@@ -178,7 +178,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 86: the Stage's look — set materials and surfaces, lights and atmosphere on the blocking, and the
 // look a playblast pin was drawn in (issue 1825, design turn 228a).
 // 87: a camera key written in words (issue 1820, design turn 228a).
-export const SUPPORTED_SCHEMA_VERSION = 87;
+// 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 228d).
+export const SUPPORTED_SCHEMA_VERSION = 88;
 
 export class WorldOpenError extends Error {
   constructor(

@@ -2,7 +2,7 @@ import { PerspectiveCamera, Vector3 } from "three";
 import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
 import { orderedShots } from "./scene-flow.js";
 import { stageCameraRest, stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey, StagePose } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -757,7 +757,7 @@ export function stageFigureAt(figure: StagingFigure, performances: readonly Stag
 export function stagePerformanceDeparture(a: StagePerformanceKey, b: StagePerformanceKey): number {
   return a.t + Math.min(a.hold ?? 0, Math.max(0, b.t - a.t - .1));
 }
-function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:"stand"|"sit"|"lie"} {
+function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:StagePose} {
   const keys = performances?.find(p => p.sheetId === figure.sheetId)?.keys;
   if (!keys?.length) {
     const [x, z] = figureAt(figure, durationSec <= 0 ? 0 : at / durationSec);

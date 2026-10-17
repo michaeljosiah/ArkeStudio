@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, SceneRecordSchema, stageFrameKey, type ScenePlate, type SceneRecord } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
-import { STAGE_KIT_SCHEMA_VERSION, STAGE_LOOK_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION, STAGE_WORDS_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { STAGE_KIT_SCHEMA_VERSION, STAGE_LOOK_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION, STAGE_POSE_SCHEMA_VERSION, STAGE_WORDS_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -117,5 +117,19 @@ describe("the camera in words (issue 1820)", () => {
     assert.equal(after.staging?.keys.at(-1)?.t, 8);
     assert.deepEqual(after.staging?.keys.at(-1)?.frame, words, "the words stay on the key");
     assert.ok((after.staging?.version ?? 0) > (orderedShots(before).find((shot) => shot.id === shotId)!.staging?.version ?? 0));
+  });
+});
+
+describe("poses and contacts (issue 1821)", () => {
+  it("lands a named pose with a hand and a look, and fences the world for it", async () => {
+    const store = await open();
+    const first = await sceneOnDisk(store);
+    const shotId = orderedShots(first)[0]!.id;
+    const performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0, pose: "lean-on", hand: { side: "left", on: "rail" }, look: "rail" }] }];
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: first.version,
+      command: { kind: "edit-stage", shotId, staging: { cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [{ name: "rail", x: 0, z: -1, w: 3, h: 1, d: .1 }], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 3], l: [0, 1, 0] }], performances } } as never });
+    const after = orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === shotId)!;
+    assert.deepEqual(after.staging?.performances, performances);
+    assert.ok(store.getBundle().meta.schemaVersion >= STAGE_POSE_SCHEMA_VERSION);
   });
 });

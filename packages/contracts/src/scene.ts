@@ -301,6 +301,27 @@ export type StageRig = z.infer<typeof StageRigSchema>;
 export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
 export type StageGait = z.infer<typeof StageGaitSchema>;
 
+/**
+ * What a figure is doing at a mark (issue 1821, design turn 228d). Stand, sit and lie are the
+ * postures the Stage always had; the rest are the actions scripts ask for. The jointed figure
+ * draws each by name; Greybox's capsules fall back to the nearest of the three.
+ */
+export const STAGE_POSES = ["stand", "sit", "lie", "lean-on", "reach", "point", "wipe", "crouch", "stumble", "fall", "arms-crossed", "phone", "carry", "hands-on-hips"] as const;
+export const StagePoseSchema = z.enum(STAGE_POSES);
+export type StagePose = z.infer<typeof StagePoseSchema>;
+
+/** A hand put on someone or something at a mark: the figure's arm reaches it by IK. */
+export const StageContactSchema = z
+  .object({
+    side: z.enum(["left", "right", "both"]),
+    /** A cast sheet or a set's name. */
+    on: z.string().min(1).max(80),
+    /** Which part of a figure; a set is touched on its top. */
+    part: z.enum(["left shoulder", "right shoulder", "head", "hand", "waist"]).optional(),
+  })
+  .strict();
+export type StageContact = z.infer<typeof StageContactSchema>;
+
 export const StagePerformanceKeySchema = z.object({
   t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
   gait: StageGaitSchema.optional(),
@@ -308,7 +329,10 @@ export const StagePerformanceKeySchema = z.object({
   easeOut: z.number().min(0).max(.5).optional(),
   hold: z.number().finite().nonnegative().optional(),
   y: z.number().finite().optional(), facing: z.number().finite().optional(),
-  pose: z.enum(["stand", "sit", "lie"]).optional(),
+  pose: StagePoseSchema.optional(),
+  hand: StageContactSchema.optional(),
+  /** Who or what the figure looks at: a cast sheet or a set's name. */
+  look: z.string().min(1).max(80).optional(),
 }).strict();
 export type StagePerformanceKey = z.infer<typeof StagePerformanceKeySchema>;
 export const StagePerformanceSchema = z.object({

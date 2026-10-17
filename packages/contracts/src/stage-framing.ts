@@ -1,5 +1,6 @@
 import { STAGE_CAMERA_NEAR, STAGE_FRAMED_HEIGHT, stageFigureAt, stagingFov, type ResolvedShotStaging } from "./staging.js";
-import type { StageFrameWords, StagingKey } from "./scene.js";
+import type { StageFrameWords, StagePose, StagingKey } from "./scene.js";
+import { stagePoseHeight } from "./stage-pose.js";
 
 /**
  * The camera in words (issue 1820, design turn 228a): who the frame is on, how big, from what
@@ -15,8 +16,8 @@ export const STAGE_FRAME_ANGLE_LABELS: ReadonlyArray<[StageFrameWords["angle"], 
 export const STAGE_FRAME_SIDE_LABELS: ReadonlyArray<[StageFrameWords["side"], string]> = [["front", "Front"], ["behind", "Behind"], ["left", "Left"], ["right", "Right"], ["over", "Over the shoulder"]];
 
 /** How tall a figure stands in frame in a pose: the size word judges what the lens sees. */
-function posedHeight(height: number, pose: string): number {
-  return pose === "sit" ? height * .72 : pose === "lie" ? height * .5 : height;
+function posedHeight(height: number, pose: StagePose): number {
+  return height * stagePoseHeight(pose);
 }
 
 /**
