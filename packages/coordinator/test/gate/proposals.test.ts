@@ -152,6 +152,20 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     await store.close();
   });
 
+  it("two discards at once leave one line (codex on PR 1850)", async () => {
+    const { dir, store, gate } = await openGate();
+    try {
+      const staged = await gate.stage({ kind: "new-canon", summary: "twice", source: "test", targets: [{ path: MAREN }], reserveCanonIds: 1 });
+      // Both see the directory before either reaches the gate; the second finds it gone there.
+      await Promise.all([gate.discard(staged.id), gate.discard(staged.id)]);
+      const lines = (await readChanges(join(dir, "changes.jsonl"))).filter((c) => c["discarded"] === true && String(c["entity"]).includes(staged.id));
+      assert.equal(lines.length, 1);
+      assert.deepEqual(lines[0]!["reservedCanonIds"], staged.reservedCanonIds, "the line carries what the manifest reserved");
+    } finally {
+      await store.close();
+    }
+  });
+
   it("a proposal whose target was retired can only be discarded (§2.11)", async () => {
     const { store, gate } = await openGate();
     const path = "characters/the-chorister.md";
