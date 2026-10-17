@@ -27,6 +27,8 @@ import {
   STAGE_PLATE_SCHEMA_VERSION,
   carriesStageKit,
   STAGE_KIT_SCHEMA_VERSION,
+  carriesStageLook,
+  STAGE_LOOK_SCHEMA_VERSION,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -946,6 +948,7 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageEvaluatorVersion(f.newContent)) ? 26 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePlate(f.newContent)) ? STAGE_PLATE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageKit(f.newContent)) ? STAGE_KIT_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageLook(f.newContent)) ? STAGE_LOOK_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,

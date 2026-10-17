@@ -14,7 +14,7 @@ export type SemanticSceneCommand =
       inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
       cast?: Record<string, SceneCastMember | null>;
     }
-  | { kind: "edit-stage"; shotId: string; blocking?: (Omit<SceneBlocking, "version" | "plate"> & { plate?: SceneBlocking["plate"] | null }) | null; staging?: ShotStageEdit | null }
+  | { kind: "edit-stage"; shotId: string; blocking?: (Omit<SceneBlocking, "version" | "plate" | "lights" | "atmosphere"> & { plate?: SceneBlocking["plate"] | null; lights?: SceneBlocking["lights"] | null; atmosphere?: SceneBlocking["atmosphere"] | null }) | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
@@ -64,9 +64,17 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
             : (() => {
                 // The plate is the scene's too, but most blocking edits move marks and boxes and never
                 // mention it; leaving it out keeps it, and only an explicit null takes it off (issue 1818).
-                const { plate, ...marks } = command.blocking;
-                const kept = plate === undefined ? record.blocking?.plate : plate ?? undefined;
-                return { ...marks, ...(kept === undefined ? {} : { plate: kept }), version: (record.blocking?.version ?? 0) + 1 };
+                // Lights and the atmosphere (issue 1825) are the scene's in the same way.
+                const { plate, lights, atmosphere, ...marks } = command.blocking;
+                const keep = <T,>(next: T | null | undefined, current: T | undefined) => (next === undefined ? current : next ?? undefined);
+                const kept = { plate: keep(plate, record.blocking?.plate), lights: keep(lights, record.blocking?.lights), atmosphere: keep(atmosphere, record.blocking?.atmosphere) };
+                return {
+                  ...marks,
+                  ...(kept.plate === undefined ? {} : { plate: kept.plate }),
+                  ...(kept.lights === undefined ? {} : { lights: kept.lights }),
+                  ...(kept.atmosphere === undefined ? {} : { atmosphere: kept.atmosphere }),
+                  version: (record.blocking?.version ?? 0) + 1,
+                };
               })(),
         });
       }

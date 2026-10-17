@@ -11512,6 +11512,7 @@ export class Coordinator {
           durationSec: msg.durationSec,
           aspect: msg.aspect,
           ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
+          ...(msg.look !== undefined ? { look: msg.look } : {}),
         }, this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}).catch((err: unknown) => ({
           outcome: "refused" as const,
           reason: describeCoordinatorError(err),

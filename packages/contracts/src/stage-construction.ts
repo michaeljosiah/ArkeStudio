@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ShotStageEditSchema, StagingFigureSchema, StagingSetSchema } from "./scene.js";
+import { SceneAtmosphereSchema, ShotStageEditSchema, StageLightSchema, StagingFigureSchema, StagingSetSchema } from "./scene.js";
 
 export const StageConstructionDraftSchema = z
   .object({
@@ -25,6 +25,9 @@ export const StageConstructionDraftSchema = z
       })
       .strict()
       .optional(),
+    /** The scene's practical lights and atmosphere, as the build read them (issue 1825); Keep writes them with the blocking. */
+    lights: z.array(StageLightSchema).max(24).optional(),
+    atmosphere: SceneAtmosphereSchema.optional(),
   })
   .strict();
 export type StageConstructionDraft = z.infer<typeof StageConstructionDraftSchema>;
