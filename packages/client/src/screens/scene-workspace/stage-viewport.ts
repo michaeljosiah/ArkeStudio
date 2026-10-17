@@ -49,6 +49,8 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { StageLookRig, type StagePlateView } from "./stage-look.js";
+import { lookMannequin, mannequin, poseMannequin, reachMannequin, type Mannequin } from "./stage-mannequin.js";
+import { stageBasePose, stageContactAt, stageLookAt, stagePoseHeight, type ResolvedShotStaging } from "@arke-studio/contracts";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, expandStageSet, STAGE_CAST_COLOURS, type SceneAtmosphere, type StageLight, type StageLook, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
@@ -659,15 +661,25 @@ export class StageViewport {
       const from = new Vector3(member.x, member.y ?? 0, member.z);
       const to = member.to === null ? null : new Vector3(member.to[0], 0, member.to[1]);
       const walker = new Group();
-      for (const pose of [null, "sit", "lie"] as const) {
-        const body = figure(member.colour, false, pose);
-        body.userData["pose"] = pose ?? "stand";
-        body.visible = pose === member.pose;
-        walker.add(body);
+      if (this.lookRig.look === "greybox") {
+        for (const pose of [null, "sit", "lie"] as const) {
+          const body = figure(member.colour, false, pose);
+          body.userData["pose"] = pose ?? "stand";
+          body.visible = pose === member.pose;
+          walker.add(body);
+        }
+      } else {
+        // Lit and Plate draw the jointed figure (issue 1821); it is posed every frame in refresh().
+        const jointed = mannequin(member.colour, false);
+        walker.add(jointed.root);
+        walker.userData["mannequin"] = jointed;
       }
       walker.scale.setScalar((member.height ?? 1.8) / 1.8);
       walker.position.copy(from);
-      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null } satisfies PickTag & Record<string, unknown>;
+      // The jointed figure rides on the walker's data: replacing that data without it would leave
+      // refresh() posing capsules that are not there and hiding the figure that is.
+      const jointedFigure = walker.userData["mannequin"] as Mannequin | undefined;
+      walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null, ...(jointedFigure ? { mannequin: jointedFigure } : {}) } satisfies PickTag & Record<string, unknown>;
       this.castGroup.add(walker);
       this.walkers.push(walker);
       if (this.isSelected({ kind: "cast", sheetId: member.sheetId })) {
@@ -1216,6 +1228,19 @@ export class StageViewport {
     this.path.geometry.computeBoundingSphere();
   }
 
+  /** The viewport's data in the shape the shared posing helpers read (issue 1821). */
+  private posingStaging(): ResolvedShotStaging {
+    const data = this.data;
+    return {
+      version: 1,
+      keys: [...data.keys],
+      cast: data.cast.map((member) => ({ sheetId: member.sheetId, x: member.x, z: member.z, ...(member.y === undefined ? {} : { y: member.y }), ...(member.height === undefined ? {} : { height: member.height }), ...(member.facing === undefined ? {} : { facing: member.facing }), ...(member.parent === undefined ? {} : { parent: member.parent }), ...(member.pose ? { pose: member.pose } : {}), ...(member.to ? { to: [...member.to] as [number, number] } : {}) })),
+      sets: [...data.sets],
+      ...(data.performances ? { performances: [...data.performances] } : {}),
+      ...(data.objectMotions ? { objectMotions: [...data.objectMotions] } : {}),
+    };
+  }
+
   /** Per-frame: move what exists. No geometry is created here. */
   private refresh(at: number): void {
     if (this.proxyLive) return;
@@ -1229,7 +1254,29 @@ export class StageViewport {
       const state = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, at, this.data.durationSec, this.data.objectMotions);
       walker.position.set(state.x, state.y, state.z);
       walker.rotation.y = state.facing * Math.PI / 180;
-      for (const body of walker.children) body.visible = body.userData["pose"] === state.pose;
+      const jointed = walker.userData["mannequin"] as Mannequin | undefined;
+      if (jointed === undefined) {
+        // Greybox's capsules show the nearest of their three postures (issue 1821).
+        const base = stageBasePose(state.pose);
+        for (const body of walker.children) body.visible = body.userData["pose"] === base;
+      } else {
+        const staging = this.posingStaging();
+        const later = stageFigureAt({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined }, this.data.performances, Math.min(this.data.durationSec, at + 0.05), this.data.durationSec, this.data.objectMotions);
+        const moving = Math.hypot(later.x - state.x, later.z - state.z) > 0.004;
+        walker.updateWorldMatrix(true, false);
+        poseMannequin(jointed, state.pose, moving ? Math.sin(at * Math.PI * 3.6) : null);
+        const contact = stageContactAt(staging, member.sheetId, at, this.data.durationSec);
+        if (contact !== null) {
+          const point = new Vector3(...contact.point);
+          if (contact.side === "both") {
+            const across = new Vector3(Math.cos(walker.rotation.y), 0, -Math.sin(walker.rotation.y)).multiplyScalar(0.15);
+            reachMannequin(jointed, "left", point.clone().add(across));
+            reachMannequin(jointed, "right", point.clone().sub(across));
+          } else reachMannequin(jointed, contact.side, point);
+        }
+        const look = stageLookAt(staging, member.sheetId, at, this.data.durationSec);
+        if (look !== null) lookMannequin(jointed, new Vector3(...look));
+      }
       const ring = walker.userData["ring"] as Mesh | undefined;
       ring?.position.set(state.x, 0.015, state.z);
     }
@@ -1463,7 +1510,7 @@ export class StageViewport {
           const projected=target.clone().project(this.shot);
           const member=this.data.cast.find(f=>f.sheetId===walker.userData["sheetId"])!;
           const state=stageFigureAt({...member,pose:member.pose??undefined,to:member.to?[...member.to]:undefined},this.data.performances,at,this.data.durationSec,this.data.objectMotions);
-          const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,(state.pose==="sit"?1.28:state.pose==="lie"?.18:1.62)*(member.height??1.8)/1.8,0));
+          const head=walker.getWorldPosition(new Vector3()).add(new Vector3(0,1.62*stagePoseHeight(state.pose)*(member.height??1.8)/1.8,0));
           const headScreen=head.clone().project(this.shot);
           const headRay=new Raycaster(eye,head.clone().sub(eye).normalize(),0,eye.distanceTo(head)-.1);
           const headBlocked=headRay.intersectObjects(this.setMeshes.filter(mesh=>mesh.userData["solid"]===true),false)[0];

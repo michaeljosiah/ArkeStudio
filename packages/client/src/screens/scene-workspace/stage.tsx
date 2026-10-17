@@ -49,6 +49,7 @@ import { STAGE_LOOKS, STAGE_LOOK_LABELS, type StageLook } from "@arke-studio/con
 import { AddSetMenu, KitRows, type AddSetChoice } from "./stage-kit-form.js";
 import { AtmosphereRows, LightForm, MaterialRow, SurfaceRows } from "./stage-light-form.js";
 import { CameraWords } from "./stage-words-form.js";
+import { STAGE_POSE_LABELS, STAGE_POSES, stageFastTurns, type StagePose } from "@arke-studio/contracts";
 import { stageFrameKey, type StageFrameWords } from "@arke-studio/contracts";
 import { stageLightDefault, type SceneAtmosphere, type StageLight } from "@arke-studio/contracts";
 import { STAGE_KIT_SIZES } from "@arke-studio/contracts";
@@ -1158,7 +1159,8 @@ export function SceneStage({
     const length = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
     return `walks ${length.toFixed(1)} m${tooFast ? " · too fast" : ""}`;
   };
-  const poseWord = (pose: "stand" | "sit" | "lie" | undefined): string => (pose === "sit" ? "sits" : pose === "lie" ? "lies" : "stands");
+  // The three postures keep their verbs; the named poses (issue 1821) are said by their label.
+  const poseWord = (pose: StagePose | undefined): string => (pose === "sit" ? "sits" : pose === "lie" ? "lies" : pose === undefined || pose === "stand" ? "stands" : STAGE_POSE_LABELS[pose].toLowerCase());
   const shotLensMm = framing.lens === undefined ? undefined : String(Number.parseFloat(framing.lens) || "");
   const filed = persisted?.playblast;
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
@@ -1344,7 +1346,12 @@ export function SceneStage({
                   >
                     <span className="fy-swstage__mark" style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
                     <span>{nameOf(figure.sheetId)}</span>
-                    <span>{movementWord(figure)} · {poseWord(figure.pose)}</span>
+                    {(() => {
+                      const spin = stageFastTurns(working).find((turn) => turn.sheetId === figure.sheetId);
+                      return spin === undefined
+                        ? <span>{movementWord(figure)} · {poseWord(figure.pose)}</span>
+                        : <span className="fy-swstage__warnstate" title={`${Math.round(spin.degrees)}° in ${(spin.to - spin.from).toFixed(1)} s`}>turns too fast at {spin.from.toFixed(1)} s</span>;
+                    })()}
                   </button>
                 ))}
                 {working.sets.length === 0 ? null : <div className="fy-swstage__group">set · {working.sets.length}</div>}
@@ -1553,9 +1560,44 @@ export function SceneStage({
                         </Row>
                         <Row label="pose">
                           <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s posture`} value={chosen.pose ?? "stand"} disabled={frozen} onChange={e => patchChosen({ pose: e.target.value as StagePerformanceKey["pose"] })}>
-                            <option value="stand">Standing</option><option value="sit">Seated</option><option value="lie">Lying</option>
+                            {STAGE_POSES.map((pose) => <option key={pose} value={pose}>{STAGE_POSE_LABELS[pose]}</option>)}
                           </select>
                         </Row>
+                        {/* A hand on someone or something, and where the figure looks (issue 1821, design turn 229d). */}
+                        <Row label="hand">
+                          <span className="fy-swstage__chips" role="radiogroup" aria-label={`${name} ${chosen.t}s hand`}>
+                            {([["none", "None"], ["left", "Left"], ["right", "Right"], ["both", "Both"]] as const).map(([side, label]) => {
+                              const on = (chosen.hand?.side ?? "none") === side;
+                              return <button key={side} type="button" role="radio" aria-checked={on} data-on={on ? "true" : undefined} disabled={frozen}
+                                onClick={() => {
+                                  if (side === "none") { patchChosen({ hand: undefined }); return; }
+                                  const other = working.cast.find((figure) => figure.sheetId !== sheetId);
+                                  const target = chosen.hand?.on ?? other?.sheetId ?? working.sets[0]?.name;
+                                  if (target !== undefined) patchChosen({ hand: { ...chosen.hand, side, on: target, ...(chosen.hand?.part === undefined && other !== undefined && target === other.sheetId ? { part: "left shoulder" as const } : {}) } });
+                                }}>{label}</button>;
+                            })}
+                          </span>
+                        </Row>
+                        {chosen.hand === undefined ? null : (
+                          <Row label="on">
+                            <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s hand on`} value={`${chosen.hand.on}|${chosen.hand.part ?? ""}`} disabled={frozen}
+                              onChange={(event) => { const [on, part] = event.target.value.split("|"); patchChosen({ hand: { side: chosen.hand!.side, on: on!, ...(part ? { part: part as NonNullable<StagePerformanceKey["hand"]>["part"] } : {}) } }); }}>
+                              {working.cast.filter((figure) => figure.sheetId !== sheetId).flatMap((figure) => (["left shoulder", "right shoulder", "head", "hand", "waist"] as const).map((part) => (
+                                <option key={`${figure.sheetId}|${part}`} value={`${figure.sheetId}|${part}`}>{nameOf(figure.sheetId)} · {part}</option>
+                              )))}
+                              {working.sets.map((set) => <option key={`${set.name}|`} value={`${set.name}|`}>{set.name}</option>)}
+                            </select>
+                          </Row>
+                        )}
+                        <Row label="look at">
+                          <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s looks at`} value={chosen.look ?? ""} disabled={frozen}
+                            onChange={(event) => patchChosen({ look: event.target.value === "" ? undefined : event.target.value })}>
+                            <option value="">Ahead</option>
+                            {working.cast.filter((figure) => figure.sheetId !== sheetId).map((figure) => <option key={figure.sheetId} value={figure.sheetId}>{nameOf(figure.sheetId)}</option>)}
+                            {working.sets.map((set) => <option key={set.name} value={set.name}>{set.name}</option>)}
+                          </select>
+                        </Row>
+                        <Row label="at"><Value muted><span className="fy-swstage__quietmono">{chosen.t.toFixed(2)} s{chosen.hold ? ` · hold ${chosen.hold.toFixed(2)} s` : ""}</span></Value></Row>
                         <Row label="gait">
                           <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s gait`} value={chosen.gait ?? "walk"} disabled={frozen} onChange={e => patchChosen({ gait: e.target.value as StagePerformanceKey["gait"] })}>
                             <option value="walk">Walk</option><option value="jog">Jog</option><option value="run">Run</option>

@@ -784,3 +784,29 @@ it("writes the camera in words, hides the numbers behind Edit as numbers, and dr
   const edited = sent.at(-1);
   assert.equal(edited?.kind === "edit-stage" ? edited.staging?.keys[0]?.frame : "missing", undefined, "a hand edit makes the key numbers again");
 });
+
+// Poses, contacts and turns (issue 1821, design turn 229d).
+it("poses a mark by name, puts a hand on someone, looks at them, and warns of a spin", async () => {
+  const { q, sent } = await mount((shot) => {
+    shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "ivo-rell", x: 1, z: 0 }];
+    shot.staging!.performances = [{ sheetId: "ivo-rell", keys: [{ t: 0, x: 1, z: 0, facing: 0 }, { t: 0.5, x: 1, z: 0, facing: 200 }] }];
+  });
+  const ivo = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].find((item) => item.querySelector(".fy-swstage__warnstate"));
+  assert.ok(ivo, "a spin between marks is said on the figure's line");
+  assert.match(ivo.textContent ?? "", /turns too fast at 0\.0 s/);
+  await click(ivo);
+  const marks = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__markrow")];
+  await click(marks[1]!);
+  const posture = q('[aria-label$="0.5s posture"]');
+  assert.equal(posture.querySelectorAll("option").length, 14, "every named pose");
+  await choose(posture, "lean-on");
+  await click([...q('[aria-label$="0.5s hand"]').querySelectorAll<HTMLElement>('[role="radio"]')].find((option) => option.textContent === "Left")!);
+  assert.ok(q('[aria-label$="0.5s hand on"]'), "a hand names what it is on");
+  await choose(q('[aria-label$="0.5s looks at"]'), "maren-kest");
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const mark = kept?.kind === "edit-stage" ? kept.staging?.performances?.[0]?.keys[1] : undefined;
+  assert.equal(mark?.pose, "lean-on");
+  assert.deepEqual(mark?.hand, { side: "left", on: "maren-kest", part: "left shoulder" });
+  assert.equal(mark?.look, "maren-kest");
+});
