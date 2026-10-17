@@ -26,7 +26,7 @@ ${FRAMES.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${es
 // ----- Prototype: the same drawings as states; anything carrying data-go moves between them -----
 const states = [...FRAMES, ...EXTRA];
 const JOURNEY = [['door', 'Door'], ['setup', 'Setup'], ['draft', 'Pilot'], ['select', 'Select'], ['hear', 'Hear'], ['audition', 'Audition'], ['review', 'Read-through'], ['cast', 'Cast'], ['quiet', 'Quiet scene'], ['map', 'Adaptation'], ['changed', 'Source changed'], ['studio', 'Audio Studio'], ['episodes', 'Episodes'], ['publish', 'Publish']];
-const PHONE = [['pepisodes', 'Episodes'], ['pscript', 'Script'], ['phear', 'Hear'], ['psource', 'Source']];
+const PHONE = [['pepisodes', 'Episodes'], ['pscript', 'Script'], ['phear', 'Hear'], ['pcast', 'Cast'], ['psource', 'Source']];
 write('audio-drama-230.prototype.html', `<!doctype html><html lang="en"><head>${HEAD}<title>Audio drama prototype · Turn 230</title>
 <style>
 html,body{margin:0;height:100%}body{background:#E9E8E4;color:#1a1a1a;font-family:var(--font-sans);display:flex;flex-direction:column}html.dark body{background:#111;color:#eee}
@@ -67,7 +67,8 @@ ${states.map(f => `<template data-state="${f.state}" data-w="${f.w}" data-h="${f
   };
   const say = m => { toast.textContent = m; toast.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => toast.classList.remove('on'), 1600); };
   stage.addEventListener('click', e => { const el = e.target.closest('[data-go]'); if (el && el.dataset.go) { e.preventDefault(); show(el.dataset.go); return; } if (e.target.closest('button')) say('Drawn, not wired in this prototype'); });
-  stage.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-go]')) { e.preventDefault(); show(e.target.dataset.go); } if (e.key === 'Escape') { const back = { hear: 'select', hear2: 'select', ask: 'select', cue: 'script', publish: 'episodes', phear: 'pscript', psource: 'pscript', changed: 'map', hearquiet: 'quiet' }[cur]; if (back) show(back); } });
+  stage.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-go]')) { e.preventDefault(); show(e.target.dataset.go); } if (e.key === 'Escape') { const back = { hear: 'select', hear2: 'select', ask: 'select', cue: 'script', publish: 'episodes', phear: 'pscript', psource: 'pscript', pcast: 'pscript', changed: 'map', hearquiet: 'quiet' }[cur]; if (back) show(back); } });
+  stage.addEventListener('input', e => { if (!e.target.matches('[data-reason]')) return; const b = e.target.closest('.decision')?.querySelector('[data-needs-reason]'); if (b) b.disabled = !e.target.value.trim(); });
   document.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => show(b.dataset.jump)));
   document.getElementById('theme').addEventListener('click', () => document.documentElement.classList.toggle('dark'));
   addEventListener('resize', fit);

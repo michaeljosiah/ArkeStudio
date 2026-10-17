@@ -82,7 +82,7 @@ Maren and Odile in the lamp room after midnight (episode 2, scene 3).
 | 230o | Audio Studio: episode 1 as one arrangement, with a listen-through note on a heard interval. |
 | 230p | Episodes: the show page, with episode 2 performing in the background. |
 | 230q | Publish an edition: what is included, frozen and held back. |
-| 230r–u | Phone: script, Hear sheet, Source sheet, Episodes. |
+| 230r–v | Phone: script, Hear sheet, Source sheet, Episodes, Cast sheet. |
 
 The prototype also draws the steps between frames: the pilot kept, Narrator stands in, the Fix
 waiting as a tracked edit, and Cast beside the pilot.
@@ -139,7 +139,7 @@ waiting as a tracked edit, and Cast beside the pilot.
 - `node design-system/audio-drama-230.mjs`, then `check-master.mjs --record`, `build-review.mjs` and
   `build-review.mjs --check`. These record 225 turns, resolve every anchor and 418 screens, and
   find no raw font size in turn 230.
-- All 21 frames were rendered in headless Chrome at their master sizes (1360 × 900 and 390 × 844),
+- All 22 frames were rendered in headless Chrome at their master sizes (1360 × 900 and 390 × 844),
   both from the review page and from the design master, and inspected by eye in light theme. Four
   frames were also inspected in dark theme.
 - No element overflows its frame. Every phone control in a tool bar, sheet or foot is at least

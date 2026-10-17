@@ -490,3 +490,4 @@
 .ad230 .pfoot .btn{height:44px;flex:1;justify-content:center}
 
 .ad230 .pl.fx.bedrow{border-left-color:transparent;padding-left:0}
+.ad230 textarea.reason{height:auto;min-height:64px;padding:9px 12px;resize:vertical;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--foreground);background:var(--background);width:100%;box-sizing:border-box}

@@ -77,7 +77,7 @@
  ],
  [
   "Phone",
-  "The script is one column with beds as lines at its left edge, scenes as a scrolling row of chips, and Hear, Ask Arke and Cast in a 44 px bar at the foot (230r). Hear, Source and Cast are sheets (230s, 230t). Episodes keeps Episode 1 under the thumb (230u). Audio Studio keeps turn 226’s phone layout."
+  "The script is one column with beds as lines at its left edge, scenes as a scrolling row of chips, and Hear, Ask Arke and Cast in a 44 px bar at the foot (230r). Hear, Source and Cast are sheets (230s, 230t, 230v); choosing a voice for a missing speaker happens in the Cast sheet. Episodes keeps Episode 1 under the thumb (230u). Audio Studio keeps turn 226’s phone layout."
  ],
  [
   "Arke",

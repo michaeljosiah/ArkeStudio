@@ -50,6 +50,7 @@ const SCREENS = [
   { group: "Audio drama · turn 230 · revision 1", screen: "Phone · Hear as a sheet; the missing voice decided first", frame: "230s", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },
   { group: "Audio drama · turn 230 · revision 1", screen: "Phone · Source as a sheet", frame: "230t", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },
   { group: "Audio drama · turn 230 · revision 1", screen: "Phone · Episodes, Episode 1 under the thumb", frame: "230u", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },
+  { group: "Audio drama · turn 230 · revision 1", screen: "Phone · Cast as a sheet; a voice for Sereth chosen in place", frame: "230v", route: "Audio drama", status: "drawn", checked: "2026-10-17", controls: [], notes: ["Proposed 17 October 2026; not approved for implementation."] },
   // END AUDIO DRAMA 230
 
   // BEGIN AUDIO DRAMA 228
