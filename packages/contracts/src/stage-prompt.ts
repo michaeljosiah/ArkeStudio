@@ -153,7 +153,7 @@ function placeNear(staging: ResolvedShotStaging, self: string, x: number, z: num
   return best?.name ?? null;
 }
 
-/** Where a figure is, in the Stage list's words (design turn 228a: "sits · armchair"). */
+/** Where a figure is, in the Stage list's words (design turn 229a: "sits · armchair"). */
 export function stagePlaceNear(staging: ResolvedShotStaging, sheetId: string, x: number, z: number, at: number, durationSec: number, nameOf: (sheetId: string) => string): string | null {
   return placeNear(staging, sheetId, x, z, at, durationSec, nameOf)?.replace(/^the /, "") ?? null;
 }

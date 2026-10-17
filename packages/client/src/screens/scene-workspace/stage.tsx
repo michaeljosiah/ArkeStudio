@@ -250,7 +250,7 @@ export function SceneStage({
   const [plateSelected, setPlateSelected] = useState(false);
   // A light is the scene's too, selected in the panel (issue 1825).
   const [lightSelected, setLightSelected] = useState<number | null>(null);
-  // A long list folds like 228a draws it: same-kind sets, set dressing and the lights each one line
+  // A long list folds like 229a draws it: same-kind sets, set dressing and the lights each one line
   // until opened, so the selected thing's form sits under the list rather than below the fold.
   const [setsOpen, setSetsOpen] = useState(false);
   const [lightsOpen, setLightsOpen] = useState(false);
@@ -275,7 +275,7 @@ export function SceneStage({
   const touch = useMediaQuery("(hover: none)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [stageWidth, setStageWidth] = useState(Number.POSITIVE_INFINITY);
-  // The lens's box inside the viewport, for the safe frame (228c: it frames the lens, not the panel).
+  // The lens's box inside the viewport, for the safe frame (229c: it frames the lens, not the panel).
   const [lensBox, setLensBox] = useState<{ w: number; h: number } | null>(null);
   const [touchMode, setTouchMode] = useState<"camera" | "figures" | "set">("figures");
   const inspectorSheet = phone || ((touch || compact) && stageWidth < 756);
@@ -293,7 +293,7 @@ export function SceneStage({
   const [instruction, setInstruction] = useState("");
   const [preserve, setPreserve] = useState<"blocking" | "camera" | "none">("blocking");
   const [inspectionRound, setInspectionRound] = useState<number | null>(null);
-  // Build with Arke's working log (issue 1823, design turn 228f): a line per step as it lands, the
+  // Build with Arke's working log (issue 1823, design turn 229f): a line per step as it lands, the
   // pictures a render looked at, and the build's clock.
   const [buildLog, setBuildLog] = useState<{ steps: Array<{ label: string; detail?: string; thumbs?: string[] }>; calls: number; round: number; started: number } | null>(null);
   const renderThumb = useRef<string | null>(null);
@@ -1356,7 +1356,7 @@ export function SceneStage({
     const length = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
     return `walks ${length.toFixed(1)} m${tooFast ? " · too fast" : ""}`;
   };
-  // A figure's line in the list (design turn 228a): "walks 3.3 m · leans" for one that moves, else
+  // A figure's line in the list (design turn 229a): "walks 3.3 m · leans" for one that moves, else
   // its pose and where it is, "sits · armchair".
   const figureState = (figure: ResolvedShotStaging["cast"][number]): string => {
     if (working === null) return "";
@@ -1799,7 +1799,7 @@ export function SceneStage({
                       patchCamera(current => ({ ...current, keys: stageCameraMove(move, current, { durationSec, at, subjectId, lens: framing.lens, aspect }) }));
                       setAt(0); setKeyIndex(0); setMotionMark(null);
                     }}>
-                      {/* The menu names the move the camera makes now (228a: "Locked off"); choosing one replaces it. */}
+                      {/* The menu names the move the camera makes now (229a: "Locked off"); choosing one replaces it. */}
                       <option value="">{(() => { const word = stagingMotionWord(working, durationSec); const said = word === "static" ? "locked off" : word; return said.charAt(0).toUpperCase() + said.slice(1); })()}</option>
                       {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
                     </select>
@@ -1896,7 +1896,7 @@ export function SceneStage({
                 );
                 return (
                   <div className="fy-swstage__block">
-                    {/* A chosen mark is the form (design turn 228d): its pose, hand, look and timing first. */}
+                    {/* A chosen mark is the form (design turn 229d): its pose, hand, look and timing first. */}
                     <Eyebrow title="Figure" meta={chosen === undefined ? name : `${name} · mark ${chosenIndex + 1} of ${marks.length}`} />
                     {chosen === undefined ? (
                       <>

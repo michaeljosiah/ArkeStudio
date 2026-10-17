@@ -18,7 +18,7 @@ export function CameraWords({ words, cast, defaultSubject, shotLensMm, at, numbe
   disabled: boolean;
   onWords: (next: StageFrameWords) => void;
   onNumbers: () => void;
-  /** The move row, drawn under the lens as 228a orders the form. */
+  /** The move row, drawn under the lens as 229a orders the form. */
   move?: ReactNode;
 }) {
   const subject = words?.subject ?? defaultSubject ?? cast[0]?.sheetId;

@@ -27,7 +27,7 @@ export function AddSetMenu({ disabled, onPick }: { disabled: boolean; onPick: (c
             {STAGE_KIT_KINDS.map((kind) => (
               <button key={kind} type="button" role="menuitem" onClick={() => { setOpen(false); onPick(kind); }}>
                 <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />{STAGE_KIT_LABELS[kind]}
-                {/* A room is the only kit that is more than one thing (228e): its walls and their openings. */}
+                {/* A room is the only kit that is more than one thing (229e): its walls and their openings. */}
                 {kind === "room" ? <em>walls · openings</em> : null}
               </button>
             ))}
@@ -45,7 +45,7 @@ export function AddSetMenu({ disabled, onPick }: { disabled: boolean; onPick: (c
 }
 
 /** A kit item's own rows, under the set's name. */
-/** A kit item's rows; its size sits under the kit, as 228e orders the form. */
+/** A kit item's rows; its size sits under the kit, as 229e orders the form. */
 export function KitRows({ kit, name, disabled, onChange, size }: { kit: StageKit; name: string; disabled: boolean; onChange: (next: StageKit) => void; size?: ReactNode }) {
   const toggleSide = (side: (typeof SIDES)[number]) => {
     const open = new Set(kit.open ?? []);

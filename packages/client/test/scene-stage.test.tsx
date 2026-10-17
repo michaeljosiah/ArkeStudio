@@ -394,7 +394,7 @@ it("puts a chosen camera move in the draft and Keeps it without changing timed a
 it("lists what is on the stage with its state, and shows one form for the selection (turn 144)", async () => {
   const { q } = await mount((shot) => { movingShot(shot); shot.framing = { lens: "35mm" }; });
   const items = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].map((item) => item.textContent);
-  assert.deepEqual(items(), ["cameralocked off · 35 mm", "Maren Kestwalks 2.2 m · stands", "Cartbox"], "camera, every figure, every set, each with its state, in 228a's words");
+  assert.deepEqual(items(), ["cameralocked off · 35 mm", "Maren Kestwalks 2.2 m · stands", "Cartbox"], "camera, every figure, every set, each with its state, in 229a's words");
   const eyebrows = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__eyebrow > span:first-child")].map((span) => span.textContent);
   assert.deepEqual(eyebrows(), ["Stage", "Shot"], "nothing selected: the shot's form");
   assert.ok(q('[aria-label="Camera rig"]'), "the rig is chosen on the shot's form");
@@ -650,7 +650,7 @@ it("adds a room from the kit, with its own rows in place of a shape, and keeps i
   await click(add);
   const menu = q('[data-testid="stage-kit-menu"]');
   const labels = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent);
-  assert.deepEqual(labels.slice(0, 3), ["Roomwalls · openings", "Doorway", "Window"], "the room says it is walls and openings (228e)");
+  assert.deepEqual(labels.slice(0, 3), ["Roomwalls · openings", "Doorway", "Window"], "the room says it is walls and openings (229e)");
   assert.deepEqual(labels.slice(-3), ["Box", "Cylinder", "Sphere"], "primitives after the kit");
   await click([...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.startsWith("Room"))!);
   assert.equal(selectedItem(q).startsWith("room"), true, "the new item is selected");

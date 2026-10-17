@@ -663,7 +663,7 @@ export class StageViewport {
       edges.rotation.copy(box.rotation);
       edges.scale.copy(box.scale);
       parent.add(edges);
-      // A room's walls face out on their side; the ceiling faces up (design turn 228a: the overview
+      // A room's walls face out on their side; the ceiling faces up (design turn 229a: the overview
       // looks into the room, dollhouse-fashion, while every lens sees the walls).
       if (item.kit?.kind === "room") {
         const side = /\b(back|front|left|right) wall\b/.exec(set.name)?.[1];
@@ -1453,7 +1453,7 @@ export class StageViewport {
       const box = this.letterbox(canvasWidth, canvasHeight);
       const x = Math.round((canvasWidth - box.w) / 2);
       const y = Math.round((canvasHeight - box.h) / 2);
-      // The bands outside the letterbox are black, as 228c draws Camera mode, never the last Look
+      // The bands outside the letterbox are black, as 229c draws Camera mode, never the last Look
       // frame: a scissored render clears only inside the scissor, so the whole canvas is cleared first.
       const clearColour = this.renderer.getClearColor(new Color());
       const clearAlpha = this.renderer.getClearAlpha();

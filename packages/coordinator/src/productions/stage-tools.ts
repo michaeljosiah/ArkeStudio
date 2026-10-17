@@ -36,7 +36,7 @@ import {
 import { z } from "zod";
 
 /**
- * Build with Arke as a tool session (issue 1823, design turn 228f). The stage-designer edits a
+ * Build with Arke as a tool session (issue 1823, design turn 229f). The stage-designer edits a
  * draft the coordinator owns, one small validated call at a time, and looks when it wants to:
  * a render is the same inspection round-trip the client already serves. What it ends with is the
  * same `StageConstructionDraft` the one-reply build returned, so review, Keep and filing are

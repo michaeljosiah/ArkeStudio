@@ -226,7 +226,7 @@ describe("scene detail owns the workspace", () => {
     const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}],objectMotions:[{group:"vehicle",keys:[{t:0,p:[0,0,0] as [number,number,number]},{t:4,p:[0,0,5] as [number,number,number]}]}],authorship:{model:"test/vision",sourceVersion:request.baseVersion,assumptions:["Vehicle is stationary at opening."],assessment:"Framing inspected.",inspectedFrames:6}};
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working",round:0,detail:"Inspecting next",draft:{staging,cast:[],sets:[],assumptions:[],assessment:"Draft",inspected:[]}});
     // Keep waits for construction to finish (issue 1127): while the build works there is no Keep
-    // to press at all (design turn 228f), so an in-flight draft cannot be presented as saved.
+    // to press at all (design turn 229f), so an in-flight draft cannot be presented as saved.
     assert.equal(q(mounted,'[data-testid="stage-moved"]'), null, "no Keep while the build works");
     assert.equal(sent.some(message=>message.kind==="scene-command"), false, "an in-flight draft cannot be presented as saved");
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:2,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",parent:"vehicle",x:0,z:0}],sets:[{name:"Vehicle",group:"vehicle",x:0,z:0,w:2,h:1,d:4,solid:true}],assumptions:[],assessment:"Inspected",inspected:[]}});
@@ -241,7 +241,7 @@ describe("scene detail owns the workspace", () => {
     assert.equal(write.command.staging?.cast?.[0]?.parent,"vehicle");
   });
 
-  it("shows a tool build as a working log, a line per step as it lands (issue 1823, turn 228f)",async()=>{
+  it("shows a tool build as a working log, a line per step as it lands (issue 1823, turn 229f)",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
     await openStage(mounted);
     await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
@@ -560,7 +560,7 @@ describe("scene detail owns the workspace", () => {
 
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 1);
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
-    // She still stands where she was: the walk pressed while frozen never landed (228a's words).
+    // She still stands where she was: the walk pressed while frozen never landed (229a's words).
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /stands$/);
     assert.doesNotMatch(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
   });

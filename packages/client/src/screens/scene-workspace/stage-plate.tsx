@@ -4,7 +4,7 @@ import { mediaUrl } from "../../lib/media.js";
 import { Eyebrow, Link, Row, Stepper, Value } from "./stage-inspector.js";
 
 /**
- * The location plate on the Stage (issue 1818, design turn 228c): the chip that opens the
+ * The location plate on the Stage (issue 1818, design turn 229c): the chip that opens the
  * blockout line, the picker behind it, and the plate's form in the inspector. A plate is a
  * picture of the empty place; the build reads it as the authority on layout and the generator
  * receives it as Image 1. Picked from the world's images, location pictures first — an image
@@ -84,14 +84,14 @@ function PlatePicker({ world, onPick }: { world: WorldBundle; onPick: (candidate
   );
 }
 
-/** The plate's form (228c): picture and Replace, the shot it matches, its lens and horizon, whether it rides, Match camera. */
+/** The plate's form (229c): picture and Replace, the shot it matches, its lens and horizon, whether it rides, Match camera. */
 export function PlateForm({ plate, world, shots, currentShotId, disabled, light, onChange, onReplace, onMatch, onRemove }: {
   plate: ScenePlate;
   world: WorldBundle;
   shots: readonly Shot[];
   currentShotId: string;
   disabled: boolean;
-  /** The scene's light as the plate shows it (228c: "night · warm practicals · 5"). */
+  /** The scene's light as the plate shows it (229c: "night · warm practicals · 5"). */
   light?: { time: string | undefined; summary: string | undefined };
   onChange: (next: ScenePlate) => void;
   onReplace: (candidate: PlateCandidate) => void;
