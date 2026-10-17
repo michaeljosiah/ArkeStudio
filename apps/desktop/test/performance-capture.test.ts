@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPerformanceSpool } from "../src/performance-spool.js";
 import { fullscreenAllowed, microphoneAllowed } from "../src/microphone-permission.js";
+import { LEAVE_PAGE_FULL_SCREEN } from "../src/focus-escape.js";
 
 it("performance capture grants only the exact studio top-level microphone request", () => {
   for (const rendererUrl of ["file:///C:/Arke/client/index.html", "http://localhost:5173/"]) {
@@ -29,6 +30,22 @@ it("Focus may take the window full screen from the studio's own page only (issue
       assert.equal(fullscreenAllowed({ ...input, ...change }), false);
     }
   }
+});
+it("Escape leaves Focus's full screen unless an overlay showing takes it (codex on PR 1835)", () => {
+  const press = (overlays: Array<{ shown: boolean }>, full = true) => {
+    let left = 0;
+    const page = {
+      fullscreenElement: full ? {} : null,
+      querySelectorAll: () => overlays.map((overlay) => ({ getClientRects: () => (overlay.shown ? [{}] : []) })),
+      exitFullscreen: () => { left++; return Promise.resolve(); },
+    };
+    new Function("document", LEAVE_PAGE_FULL_SCREEN)(page);
+    return left;
+  };
+  assert.equal(press([]), 1, "nothing showing: Escape leaves");
+  assert.equal(press([{ shown: true }]), 0, "the @ or / menu is open: it is the menu's Escape");
+  assert.equal(press([{ shown: false }]), 1, "a list kept out of sight does not hold the screen");
+  assert.equal(press([], false), 0, "not in full screen: nothing to leave");
 });
 it("opaque performance spools validate bytes, allow one claim and forget prior-process claims", async t => {
   /*
