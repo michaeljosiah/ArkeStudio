@@ -526,13 +526,18 @@ function prune(boards: Boards | undefined, shotId: string): Boards | undefined {
     ...(boards.prompts !== undefined
       ? { prompts: boards.prompts.filter((prompt) => !prompt.members.includes(shotId)) }
       : {}),
+    // An animatic is a recording of exactly its members (issue 1824): without one, it shows a board
+    // that no longer exists, and goes with the prompt.
+    ...(boards.animatics !== undefined
+      ? { animatics: boards.animatics.filter((animatic) => !animatic.members.includes(shotId)) }
+      : {}),
   });
 }
 
 /** An empty override block is absent, not `{splits: [], merges: []}` — one answer, not two. */
 function normalise(boards: Boards): Boards | undefined {
   const empty =
-    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0;
+    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0 && (boards.animatics ?? []).length === 0;
   return empty ? undefined : boards;
 }
 

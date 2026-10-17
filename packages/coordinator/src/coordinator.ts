@@ -378,6 +378,7 @@ import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
+import { fileBoardAnimatic } from "./productions/stage-animatic.js";
 import { assembleTimelineScene, applyHumanTimelineCommand, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { importAudioStudioMedia } from "./productions/audio-studio-import.js";
@@ -11531,6 +11532,36 @@ export class Coordinator {
             kind: artifact.kind,
             deduplicated: false,
           });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "stage-animatic": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        // A board's animatic files like a playblast (issue 1824): bytes and pin in one gated commit.
+        const outcome = await fileBoardAnimatic(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          sceneId: msg.sceneId,
+          baseVersion: msg.baseVersion,
+          members: msg.members,
+          stagings: msg.stagings,
+          durationSec: msg.durationSec,
+          aspect: msg.aspect,
+          ...(msg.look !== undefined ? { look: msg.look } : {}),
+          sourcePath: msg.sourcePath,
+          openingFrameSourcePath: msg.openingFrameSourcePath,
+        }, this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}).catch((err: unknown) => ({
+          outcome: "refused" as const,
+          reason: describeCoordinatorError(err),
+        }));
+        if (outcome.outcome === "refused") {
+          this.emit({ at: new Date().toISOString(), type: "scene.write-refused", worldId: msg.worldId, productionId: msg.productionId, sceneFile: msg.sceneFile, reason: outcome.reason });
+          return;
+        }
+        for (const artifact of outcome.artifacts) {
+          this.emit({ at: new Date().toISOString(), type: "artifact.attached", worldId: msg.worldId, artifactId: artifact.id, file: artifact.file, kind: artifact.kind, deduplicated: false });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;

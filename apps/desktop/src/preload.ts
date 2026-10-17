@@ -60,6 +60,20 @@ type AttachTarget =
       aspect: string;
       lens?: string;
     }
+  /** A board's cut animatic the Stage rendered (issue 1824), filed against each member's staging. */
+  | {
+      kind: "stage-animatic";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      members: string[];
+      stagings: Array<{ shotId: string; version: number; durationSec: number; lens: string }>;
+      durationSec: number;
+      aspect: string;
+      look?: "greybox" | "lit" | "plate";
+    }
   | {
       kind: "conversation-action-stage-playblast-complete";
       worldId: string;
@@ -323,7 +337,7 @@ const bridge = {
   },
 
   async finishStageExport(
-    target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
+    target: Extract<AttachTarget, { kind: "stage-playblast" | "stage-animatic" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
     referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,

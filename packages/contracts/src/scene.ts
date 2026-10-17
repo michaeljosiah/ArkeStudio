@@ -752,6 +752,34 @@ export const SceneBaseShape = {
         prompts: z
           .array(z.object({ members: z.array(ShotIdSchema).min(1), text: z.string().min(1) }).strict())
           .optional(),
+        /**
+         * A board's cut animatic (issue 1824, design turn 229g): its shots' cameras cut together over
+         * the scene's shared action, filed and pinned like a playblast, keyed by the exact member
+         * set as a board prompt is. Stale when any member's staging, length, lens or the aspect moved.
+         */
+        animatics: z
+          .array(
+            z
+              .object({
+                members: z.array(ShotIdSchema).min(2),
+                artifactId: ArtifactIdSchema,
+                openingFrameArtifactId: ArtifactIdSchema.optional(),
+                sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+                /** Each member's staging as it was recorded, so staleness reads without a hash. */
+                stagings: z.array(z.object({ shotId: ShotIdSchema, version: z.number().int().min(1), durationSec: z.number().positive(), lens: z.string() }).strict()).min(2),
+                /**
+                 * The scene blocking the board was drawn over: every blocking edit (marks, sets, the
+                 * plate, lights and atmosphere) moves its version without touching a shot's staging.
+                 */
+                blockingVersion: z.number().int().min(1).nullable(),
+                evaluatorVersion: z.number().int().positive(),
+                durationSec: z.number().positive(),
+                aspect: z.string().min(1),
+                look: z.enum(["greybox", "lit", "plate"]).optional(),
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict()
       .optional(),

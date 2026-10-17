@@ -14,6 +14,9 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       { kind: "upload-artifacts", worldId, requestId: worldId },
       { kind: "upload-artifacts", worldId, requestId: worldId, browserFiles: [{ name: "clip.mp4", data: "YQ==" }] },
       { kind: "stage-playblast", ...playblast },
+      { kind: "stage-animatic", worldId, productionId: "pilot", sceneFile: "sc-one.md", sceneId: "sc_one", baseVersion: 1, members: ["sh_one", "sh_two"],
+        stagings: [{ shotId: "sh_one", version: 1, durationSec: 1, lens: "" }, { shotId: "sh_two", version: 1, durationSec: 1, lens: "" }],
+        durationSec: 2, aspect: "16:9", sourcePath, openingFrameSourcePath: sourcePath, referenceFrames: [] },
       { kind: "conversation-action-stage-playblast-complete", ...playblast, conversationId, actionId: "act_" + worldId, status: "completed" },
     ];
 
