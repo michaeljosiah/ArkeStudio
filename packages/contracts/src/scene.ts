@@ -760,6 +760,11 @@ export const SceneBaseShape = {
                 sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
                 /** Each member's staging as it was recorded, so staleness reads without a hash. */
                 stagings: z.array(z.object({ shotId: ShotIdSchema, version: z.number().int().min(1), durationSec: z.number().positive(), lens: z.string() }).strict()).min(2),
+                /**
+                 * The scene blocking the board was drawn over: every blocking edit (marks, sets, the
+                 * plate, lights and atmosphere) moves its version without touching a shot's staging.
+                 */
+                blockingVersion: z.number().int().min(1).nullable(),
                 evaluatorVersion: z.number().int().positive(),
                 durationSec: z.number().positive(),
                 aspect: z.string().min(1),

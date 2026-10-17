@@ -785,7 +785,9 @@ async function mountBoard(stageSecond = true) {
   second!.durationSec = 6;
   first!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys: [0, 4].map(t => ({ t, p: [0, 1.5, 3], l: [0, 1, 0] })),
     performances: [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 4, x: 2, z: 0 }] }] };
-  if (stageSecond) second!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys: [0, 6].map(t => ({ t, p: [1, 1.6, 2.5], l: [0, 1, 0] })) };
+  // The second cut brings in Bray, who walks: a figure only a later cut has.
+  if (stageSecond) second!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "bray-half-hitch", x: 2, z: 0 }], sets: [], keys: [0, 6].map(t => ({ t, p: [1, 1.6, 2.5], l: [0, 1, 0] })),
+    performances: [{ sheetId: "bray-half-hitch", keys: [{ t: 0, x: 2, z: 0 }, { t: 6, x: 3, z: 0 }] }] };
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   root = createRoot(container);
@@ -821,6 +823,8 @@ it("opens a board on one clock: the cut list, the line check, the shared action 
   const cuts = [...q('[data-testid="stage-cuts"]').querySelectorAll(".fy-swstage__cut")];
   assert.deepEqual(cuts.map(cut => cut.getAttribute("style")), ["left:0%;width:calc(40% - 3px)", "left:40%;width:calc(60% - 3px)"]);
   assert.match(q(".fy-swstage__time").textContent ?? "", /\/ 10\.0s/);
+  const lanes = [...container.querySelectorAll(".fy-swstage__lane-label")].map((label) => label.textContent);
+  assert.ok(lanes.some((name) => /bray/i.test(name ?? "")), `every member's cast has its lane, not only the opening shot's: ${JSON.stringify(lanes)}`);
   assert.equal(stageItem(q, "camera").textContent, "camera2 cameras");
   assert.equal((stageItem(q, "camera") as HTMLButtonElement).disabled, true);
   assert.match(container.textContent ?? "", /animatic/);

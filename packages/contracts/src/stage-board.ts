@@ -77,9 +77,13 @@ export function stageBoardAnimatic(scene: SceneRecord, members: readonly string[
   return scene.boards?.animatics?.find((pin) => sameMembers(pin.members, members)) ?? null;
 }
 
-/** Whether the filed animatic still shows this board: same members, staging, lengths, lenses and aspect. */
+/**
+ * Whether the filed animatic still shows this board: same members, staging, lengths, lenses and
+ * aspect, over the same scene blocking (its marks, sets, plate, lights and atmosphere).
+ */
 export function stageBoardAnimaticIsStale(scene: SceneRecord, pin: StageBoardAnimatic, aspect: string): boolean {
   if (pin.aspect !== aspect || pin.evaluatorVersion !== STAGE_CAMERA_EVALUATOR_VERSION) return true;
+  if (pin.blockingVersion !== (scene.blocking?.version ?? null)) return true;
   const now = stageBoardStagings(scene, pin.members);
   return now === null || JSON.stringify(now) !== JSON.stringify(pin.stagings);
 }

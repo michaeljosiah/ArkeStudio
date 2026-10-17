@@ -694,9 +694,9 @@ export function stageSpeedWarning(leg: StageMotionSpeed, nameOf: (id: string) =>
   const verdict = leg.gait ? `too fast for a ${leg.gait}` : `above ${leg.ceiling.toFixed(2)}m/s ceiling`;
   return `Blocking warning — ${leg.kind === "performance" ? nameOf(leg.id) : leg.id} · ${leg.distance.toFixed(1)}m in ${(leg.to - leg.from).toFixed(1)}s · ${(Math.ceil(leg.speed * 100) / 100).toFixed(2)}m/s · ${verdict} (${leg.from.toFixed(2)}–${leg.to.toFixed(2)}s); ${suggestion ? `use ${suggestion} or add time` : "add time"}`;
 }
-export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number): string[] {
+export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number, offset = 0): string[] {
   return stageMotionSpeeds(staging, durationSec).flatMap(leg => {
-    const warning = stageSpeedWarning(leg, nameOf);
+    const warning = stageSpeedWarning({ ...leg, from: leg.from + offset, to: leg.to + offset }, nameOf);
     return warning === null ? [] : [warning];
   });
 }

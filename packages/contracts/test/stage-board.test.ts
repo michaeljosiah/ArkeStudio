@@ -55,12 +55,17 @@ describe("a board on the Stage (issue 1824)", () => {
     const scene = board();
     const stagings = stageBoardStagings(scene, members)!;
     assert.deepEqual(stagings.map((entry) => [entry.shotId, entry.version, entry.durationSec, entry.lens]), [["sh_1", 1, 2, "18 mm"], ["sh_2", 1, 4, ""], ["sh_3", 1, 4, ""]]);
-    const pin = { members, artifactId: "ar_01HZZZZZZZZZZZZZZZZZZZZZZZ", sourceFingerprint: "a".repeat(64), stagings, evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, durationSec: 10, aspect: "9:16" };
+    const pin = { members, artifactId: "ar_01HZZZZZZZZZZZZZZZZZZZZZZZ", sourceFingerprint: "a".repeat(64), stagings, blockingVersion: scene.blocking!.version, evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, durationSec: 10, aspect: "9:16" };
     scene.boards = { splits: [], merges: [], animatics: [pin] };
     assert.equal(stageBoardAnimatic(scene, members), pin);
     assert.equal(stageBoardAnimatic(scene, ["sh_1", "sh_2"]), null, "keyed by the exact members");
     assert.equal(stageBoardAnimaticIsStale(scene, pin, "9:16"), false);
     assert.equal(stageBoardAnimaticIsStale(scene, pin, "16:9"), true);
+    // A light, the plate, the atmosphere or a set moved on the scene's blocking leaves every shot's
+    // staging as it was, and still changes what the animatic shows.
+    scene.blocking!.version += 1;
+    assert.equal(stageBoardAnimaticIsStale(scene, pin, "9:16"), true, "a shared blocking edit marks it stale");
+    scene.blocking!.version -= 1;
     const before = stageBoardFingerprintInput(scene, members, "9:16");
     scene.shots[1]!.staging!.version = 2;
     assert.equal(stageBoardAnimaticIsStale(scene, pin, "9:16"), true, "a shot edit marks the board's animatic stale");
@@ -95,6 +100,15 @@ describe("a board on the Stage (issue 1824)", () => {
     const posture = stageBoardJumps(scene, members);
     assert.equal(posture.length, 2, "she sits at the cut to 2, and stands again at the cut to 3");
     assert.ok(posture.every((jump) => jump.posture));
+  });
+
+  it("puts a later cut's warnings on the board's clock with its lines", () => {
+    const scene = board();
+    // Ife covers 6 m in the third cut's first second: too fast for a walk.
+    scene.shots[2]!.staging!.performances = [{ sheetId: "ife", keys: [{ t: 0, x: 1, z: 0 }, { t: 1, x: 7, z: 0 }, { t: 4, x: 7, z: 0 }] }];
+    const clause = stagingBoardClause(scene, members, nameOf, "9:16");
+    assert.match(clause, /Blocking warning — Ife .*\(6\.00–7\.00s\)/, "the third cut starts at 6.0 s on the board");
+    assert.doesNotMatch(clause, /\(0\.00–1\.00s\)/);
   });
 
   it("writes the board as one timed cut list, with the shot's own follow line when the animatic rides", () => {

@@ -2074,7 +2074,7 @@ export function SceneStage({
               {/* Mounted whatever is selected: the reference plate lives in the viewport and its choice
                   must survive a change of form; only its rows belong to the shot's form. */}
               <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
-                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
+                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing && !boardOn}
                 disabled={frozen} onChoose={() => setMode("camera")} slot={referenceSlot} />
             </>
           )}
@@ -2117,7 +2117,8 @@ export function SceneStage({
             <span className="fy-swstage__cut-head" style={{ left: `${at / Math.max(0.01, boardTotal) * 100}%` }} aria-hidden="true" />
           </div>
           <span className="fy-swstage__keytools"><span className="fy-swstage__count">{boardCuts.length} shots</span></span>
-          {(working?.cast ?? []).flatMap((figure, position) => {
+          {/* Every member's cast, in order of first appearance: a figure only a later cut has still gets its lane. */}
+          {boardMembers.flatMap((member) => member.resolved.cast).filter((figure, index, all) => all.findIndex((other) => other.sheetId === figure.sheetId) === index).flatMap((figure, position) => {
             // A figure's action across the cuts: each member's marks on the board's clock.
             const marks = boardMembers.flatMap((member) => (member.resolved.performances?.find((track) => track.sheetId === figure.sheetId)?.keys ?? []).map((key) => ({ ...key, t: key.t + member.cut.from })));
             if (marks.length === 0) return [];
