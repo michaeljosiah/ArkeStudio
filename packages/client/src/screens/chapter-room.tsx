@@ -64,10 +64,10 @@ export function WritingBar({
       </button>
       <span className="fy-ch__chapnav">
         <button type="button" className="fy-ch__wbtn" aria-label="Previous chapter" title={previous?.title ?? undefined} disabled={previous === null} onClick={() => previous && onChapter(previous.id)}>
-          <ChevronLeft size={14} />
+          <ChevronLeft size={12} />
         </button>
         <button type="button" className="fy-ch__wbtn" aria-label="Next chapter" title={next?.title ?? undefined} disabled={next === null} onClick={() => next && onChapter(next.id)}>
-          <ChevronRight size={14} />
+          <ChevronRight size={12} />
         </button>
       </span>
       {views}
@@ -109,6 +109,7 @@ export function BriefFields({
   locked,
   onPlan,
   onNewCharacter,
+  faces = [],
   page = false,
 }: {
   synopsis: string | undefined;
@@ -121,6 +122,8 @@ export function BriefFields({
   onPlan: (changes: { synopsis?: string | null; pov?: string | null; when?: string | null; goal?: number | null }) => void;
   /** New character… (D-4): opens character creation and comes back to choose it. */
   onNewCharacter?: () => void;
+  /** The faces of the chapter's speakers (R-10, 227h), most lines first. */
+  faces?: readonly { id: string; name: string; face: string | null }[];
   /** At the top of a new chapter's page (R-32) rather than in the Brief. */
   page?: boolean;
 }) {
@@ -133,7 +136,7 @@ export function BriefFields({
         ) : (
           <EditableText
             value={synopsis ?? ""}
-            placeholder="Synopsis"
+            placeholder="Add a synopsis"
             className="fy-sbsynopsis fy-ch__synopsis-clamp fy-ch__brief-synopsis"
             rows={3}
             maxLength={CHAPTER_PLAN_LIMITS.synopsis}
@@ -173,7 +176,7 @@ export function BriefFields({
         ) : (
           <EditableText
             value={when ?? ""}
-            placeholder="When"
+            placeholder="Add when"
             className="fy-ch__when"
             rows={1}
             maxLength={CHAPTER_PLAN_LIMITS.when}
@@ -181,6 +184,18 @@ export function BriefFields({
           />
         )}
       </label>}
+      {!page && faces.length > 0 && (
+        <div className="fy-ch__brief-field">
+          <span>In this chapter</span>
+          <span className="fy-ch__brief-faces">
+            {faces.map((who) => (
+              <span key={who.id} className="fy-ch__brief-face" title={who.name}>
+                {who.face !== null ? <img src={who.face} alt={who.name} /> : who.name.slice(0, 1)}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
       <label className="fy-ch__brief-field">
         <span>Goal</span>
         <GoalField goal={goal} goalSource={goalSource} locked={locked} onPlan={onPlan} />
@@ -338,12 +353,12 @@ export function PageHeldBar({ name, detail, versions, refuse, keep }: {
    */
   versions?: { at: number; count: number; max: number; asking: boolean; note?: string; onPrevious: () => void; onNext: () => void };
   refuse: { label: string; onPress: () => void; disabled?: boolean };
-  keep: { label: string; onPress: () => void; blocked?: string };
+  /** `hint` is the key that keeps it, shown in the press (227s: Tab for a continuation). */
+  keep: { label: string; onPress: () => void; blocked?: string; hint?: string };
 }) {
   const last = versions !== undefined && versions.at === versions.count - 1;
   return (
     <div className="fy-pageheld" role="region" aria-label="Arke's change" data-testid="page-held-bar">
-      <Sparkle size={14} />
       <strong>{name}</strong>
       <span className="fy-pageheld__detail">{detail}</span>
       {versions !== undefined && (
@@ -369,6 +384,7 @@ export function PageHeldBar({ name, detail, versions, refuse, keep }: {
       <button type="button" className="ui-btn ui-btn--ghost ui-btn--default" disabled={refuse.disabled} onClick={refuse.onPress}>{refuse.label}</button>
       <button type="button" className="ui-btn ui-btn--primary ui-btn--default" disabled={keep.blocked !== undefined} title={keep.blocked} onClick={keep.onPress}>
         {keep.blocked ?? keep.label}
+        {keep.blocked === undefined && keep.hint !== undefined && <kbd className="fy-pageheld__kbd">{keep.hint}</kbd>}
       </button>
     </div>
   );

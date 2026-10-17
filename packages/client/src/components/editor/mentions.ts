@@ -16,6 +16,8 @@ export interface Mention {
   insert: string;
   group: MentionGroup;
   face?: string | null;
+  /** The line under the name (227c): the lines spoken here, a role, or "Place". */
+  sub?: string;
 }
 
 export interface MentionTrigger {

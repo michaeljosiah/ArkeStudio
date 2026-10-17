@@ -1,3 +1,4 @@
+import { Home } from "../icons.js";
 import { cx } from "../ui.js";
 import type { Mention, MentionMenuState } from "./mentions.js";
 
@@ -16,14 +17,12 @@ export function MentionMenu({ menu, rows, selected, onHover, onPick }: {
         <div className="fy-slash__empty">No names match</div>
       ) : (
         rows.map((row, index) => {
-          // Places sit under a rule, not a heading of their own (R-18).
+          // No headings (R-18, 227c): speakers, then the other characters, then places under a rule.
           const rule = row.group === "Places" && group !== null && group !== "Places";
-          const heading = row.group !== group && row.group !== "Places" ? row.group : null;
           group = row.group;
           return (
             <div key={`${row.group}:${row.id}`}>
               {rule && <hr className="fy-slash__rule" />}
-              {heading && <div className="fy-slash__group">{heading}</div>}
               <button
                 type="button"
                 role="option"
@@ -34,9 +33,12 @@ export function MentionMenu({ menu, rows, selected, onHover, onPick }: {
                 onClick={() => onPick(row)}
               >
                 <span className={cx("fy-mention__face", row.group === "Places" && "fy-mention__face--place")} aria-hidden="true">
-                  {row.face ? <img src={row.face} alt="" /> : row.name.slice(0, 1)}
+                  {row.face ? <img src={row.face} alt="" /> : row.group === "Places" ? <Home size={15} /> : row.name.slice(0, 1)}
                 </span>
-                {row.name}
+                <span className="fy-mention__who">
+                  {row.name}
+                  {row.sub !== undefined && row.sub !== "" && <small>{row.sub}</small>}
+                </span>
               </button>
             </div>
           );
