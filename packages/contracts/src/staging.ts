@@ -108,7 +108,7 @@ export function stagingEase(from: Pick<StagingKey, "easeOut">, to: Pick<StagingK
 export type EffectiveStageBlocking = {
   cast: StagingFigure[];
   sets: StagingSet[];
-  identity: { owner: "scene"; version: number | null } | { owner: "shot" };
+  identity: { owner: "scene"; version: number | null } | { owner: "shot"; sceneVersion?: number | null };
 };
 
 export type ResolvedShotStaging = Omit<ShotStaging, "cast" | "sets"> & {
@@ -135,11 +135,19 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
   return { ...staging, cast: blocking.cast, sets: blocking.sets };
 }
 
-/** Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050). */
-export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string): string {
+/**
+ * Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050).
+ * A Lit or Plate playblast also depicts the scene's lights, atmosphere and plate, whoever owns the
+ * marks (issue 1825), so those are in it too; a Greybox one's bytes are what they always were.
+ * Verifying a pin reads the look it was drawn in; filing names the look being drawn.
+ */
+export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string, look = shot.staging?.playblast?.look): string {
   if (!shot.staging) return "";
   const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
-  return JSON.stringify({ evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
+  const dressed = look === "lit" || look === "plate"
+    ? { look, scene: { lights: scene.blocking?.lights ?? null, atmosphere: scene.blocking?.atmosphere ?? null, plate: scene.blocking?.plate ?? null } }
+    : {};
+  return JSON.stringify({ evaluatorVersion: STAGE_CAMERA_EVALUATOR_VERSION, staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect, ...dressed });
 }
 
 /** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
@@ -151,8 +159,11 @@ export function stagePlayblastIsStale(
   const pinned = staging.playblast;
   if (pinned === undefined) return false;
   const current = effectiveStageBlocking(scene, staging).identity;
+  // A Lit or Plate playblast of a shot's own marks still shows the scene's lights, atmosphere and
+  // plate (issue 1825): a scene blocking edit since it was drawn may have moved any of them.
   const blockingMoved = current.owner === "shot"
-    ? pinned.blocking !== undefined && pinned.blocking.owner !== "shot"
+    ? (pinned.blocking !== undefined && pinned.blocking.owner !== "shot") ||
+      ((pinned.look === "lit" || pinned.look === "plate") && (pinned.blocking?.owner !== "shot" || (pinned.blocking.sceneVersion ?? null) !== (scene.blocking?.version ?? null)))
     : pinned.blocking === undefined || pinned.blocking.owner !== "scene" || pinned.blocking.version !== current.version;
   return pinned.evaluatorVersion !== STAGE_CAMERA_EVALUATOR_VERSION || pinned.version !== staging.version || blockingMoved ||
     (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||

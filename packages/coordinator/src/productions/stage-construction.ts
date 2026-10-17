@@ -219,6 +219,12 @@ export class StageConstructor {
       const platePath = plate === undefined ? null : scenePlatePath(plate, store.getBundle().artifacts);
       if (platePath !== null) {
         const [picture] = await readContainedImageReferences(store.dir, [platePath]);
+        // The plate is pinned by its hash: a picture that changed since it was chosen would have the
+        // build lay out and estimate a camera from other pixels under the old plate's name, and the
+        // Bench would refuse the same reference later. Refused before anything is spent.
+        if (picture && `sha256:${createHash("sha256").update(picture.data).digest("hex")}` !== plate!.source.hash) {
+          throw new Error("The location plate's picture changed after it was chosen. Pick the plate again.");
+        }
         if (picture) {
           const name = `plate${picture.name.slice(picture.name.lastIndexOf("."))}`;
           await writeFile(join(dir, name), picture.data);

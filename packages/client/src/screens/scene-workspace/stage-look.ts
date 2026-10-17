@@ -92,7 +92,15 @@ export class StageLookRig {
   private data: StageLookData = { look: "greybox", lights: [], atmosphere: undefined, plate: null };
   private sky: CanvasTexture | null = null;
   private sun: DirectionalLight | null = null;
+  /**
+   * The scene's lights as built, in the order they are listed. Held apart from the group, which
+   * also holds the sky light, the sun and the sun's target: counting into it put every named aim
+   * one light off (the first never aimed, each later one aimed by the light before it).
+   */
+  private practicals: Object3D[] = [];
   private plateTexture: Texture | null = null;
+  /** The plate picture's load, settled true once it is drawable and false if it failed. */
+  private plateLoading: Promise<boolean> | null = null;
   private plateUrl: string | null = null;
   private readonly loader = new TextureLoader();
 
@@ -116,6 +124,7 @@ export class StageLookRig {
       (child as { dispose?: () => void }).dispose?.();
     }
     this.sun = null;
+    this.practicals = [];
     this.sky?.dispose();
     this.sky = null;
     if (!dressed) {
@@ -136,15 +145,19 @@ export class StageLookRig {
     sun.shadow.radius = 4;
     this.lit.add(sun, sun.target);
     this.sun = sun;
-    for (const light of data.lights) this.lit.add(this.practical(light));
+    this.practicals = data.lights.map((light) => this.practical(light));
+    for (const object of this.practicals) this.lit.add(object);
     if (data.look === "plate" && data.plate !== null && data.plate.url !== this.plateUrl) {
       this.plateUrl = data.plate.url;
       this.plateTexture?.dispose();
       this.plateTexture = null;
-      this.loader.load(data.plate.url, (texture) => {
-        texture.colorSpace = SRGBColorSpace;
-        this.plateTexture = texture;
-        this.onReady();
+      this.plateLoading = new Promise((resolve) => {
+        this.loader.load(data.plate!.url, (texture) => {
+          texture.colorSpace = SRGBColorSpace;
+          this.plateTexture = texture;
+          this.onReady();
+          resolve(true);
+        }, undefined, () => resolve(false));
       });
     }
   }
@@ -175,11 +188,20 @@ export class StageLookRig {
     return point;
   }
 
+  /**
+   * Settles once a Plate look's picture can be drawn: until then the set wears Lit materials, so
+   * an export must wait or it would file Lit frames as Plate, or switch to the plate partway
+   * through when the picture arrives. False when the picture could not be loaded.
+   */
+  whenPlateReady(): Promise<boolean> {
+    if (this.data.look !== "plate" || this.data.plate === null || this.plateTexture !== null) return Promise.resolve(true);
+    return this.plateLoading ?? Promise.resolve(false);
+  }
+
   /** A named aim resolves against the set once it is built: the light points at that set's centre. */
   aimAt(resolve: (name: string) => Vector3 | null): void {
-    let index = 0;
-    for (const light of this.data.lights) {
-      const object = this.lit.children[2 + index++];
+    for (const [index, light] of this.data.lights.entries()) {
+      const object = this.practicals[index];
       if (typeof light.aim !== "string" || !object) continue;
       const target = resolve(light.aim);
       const spot = object.children.find((child) => (child as SpotLight).isSpotLight) as SpotLight | undefined;

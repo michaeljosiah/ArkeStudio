@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   STAGE_FRAMED_HEIGHT,
+  stageBriefForRouting,
   stageBriefWithFollow,
+  stageRoutingCitations,
   stageShotSize,
   stagingFollowLine,
   stagingPromptClause,
@@ -52,6 +54,32 @@ describe("the blockout written for a video model (issue 1817)", () => {
     assert.equal(stageBriefWithFollow(swapped, "camera-action"), brief, "and back again");
     const authored = "Use @Video 1 as you like.";
     assert.equal(stageBriefWithFollow(authored, "camera"), authored, "an author's own line is theirs");
+  });
+
+  it("keeps the brief's References and follow lines in step with what rides after a model switch", () => {
+    const references = [
+      { token: "Image 1", kind: "image" as const, sheetId: "ade", label: "Ade", detail: "Ade", ride: "when-supported" as const },
+      { token: "Image 2", kind: "image" as const, sheetId: "ife", label: "Ife", detail: "Ife", ride: "when-supported" as const },
+      { token: "Video 1", kind: "video" as const, label: "Shot 1 · playblast", detail: "the blockout", ride: "when-supported" as const },
+    ] as unknown as Parameters<typeof stageRoutingCitations>[0];
+    const clause = (video?: string) => stagingPromptClause(lobby(), nameOf, 4, video === undefined ? {} : { video, follow: "camera" });
+    const all = stageRoutingCitations(references, ["Image 1", "Image 2", "Video 1"], nameOf);
+    assert.deepEqual(all, { cited: ["@Image 1 Ade", "@Image 2 Ife", "@Video 1 the blockout"], video: "Video 1" });
+    const onVideo = `A lobby at night.\n\nReferences: ${all.cited.join(" · ")}.\n\n${clause("Video 1")}`;
+    // An image route: the playblast no longer rides, so neither its citation nor its follow line stays.
+    const pictures = stageRoutingCitations(references, ["Image 1", "Image 2"], nameOf);
+    const onImages = stageBriefForRouting(onVideo, { ...pictures, follow: "camera" });
+    assert.equal(onImages, `A lobby at night.\n\nReferences: @Image 1 Ade · @Image 2 Ife.\n\n${clause()}`);
+    assert.doesNotMatch(onImages, /@Video/);
+    // And back: the citation returns and the follow line closes the timed lines again.
+    assert.equal(stageBriefForRouting(onImages, { ...all, follow: "camera" }), onVideo);
+    // Nothing rides: the References paragraph goes; something rides again: it is written before the timed lines.
+    const bare = stageBriefForRouting(onImages, { cited: [], video: null, follow: "camera" });
+    assert.equal(bare, `A lobby at night.\n\n${clause()}`);
+    assert.equal(stageBriefForRouting(bare, { ...all, follow: "camera" }), onVideo);
+    assert.equal(stageBriefForRouting(onVideo, { ...all, follow: "camera" }), onVideo, "a route that changes nothing changes nothing");
+    const authored = "Make it moody. Use @Video 1 for the camera.";
+    assert.equal(stageBriefForRouting(authored, { ...pictures, follow: "camera" }), authored, "a brief without the Stage's lines is the author's");
   });
 
   it("puts a shot's lines on a board's clock", () => {
