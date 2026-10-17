@@ -1,6 +1,6 @@
-// Read-only loopback server for turn 228's stage renders: the design-system folder plus three.js
-// from node_modules, so stage-228.render.html can import it without a CDN.
-//   node design-system/stage-228.serve.mjs   (DESIGN_PORT picks the port)
+// Read-only loopback server for turn 229's stage renders: the design-system folder plus three.js
+// from node_modules, so stage-229.render.html can import it without a CDN.
+//   node design-system/stage-229.serve.mjs   (DESIGN_PORT picks the port)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +13,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 export function createStageServer() {
   return http.createServer((req, res) => {
     let requested;
-    try { requested = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname).slice(1) || 'stage-228.render.html'; } catch { res.writeHead(400); res.end(); return; }
+    try { requested = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname).slice(1) || 'stage-229.render.html'; } catch { res.writeHead(400); res.end(); return; }
     const root = requested.startsWith('three/') ? three : here;
     const file = path.resolve(root, requested.startsWith('three/') ? requested.slice(6) : requested);
     const relative = path.relative(root, file);
@@ -27,5 +27,5 @@ export function createStageServer() {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const server = createStageServer();
-  server.listen(Number(process.env.DESIGN_PORT) || 0, '127.0.0.1', () => console.log(`Stage renders: http://127.0.0.1:${server.address().port}/stage-228.render.html`));
+  server.listen(Number(process.env.DESIGN_PORT) || 0, '127.0.0.1', () => console.log(`Stage renders: http://127.0.0.1:${server.address().port}/stage-229.render.html`));
 }

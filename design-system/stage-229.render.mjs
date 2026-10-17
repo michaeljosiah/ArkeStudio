@@ -1,10 +1,10 @@
-// Turn 228 · the Stage's proposed look, rendered for the frames. One scene — a hotel lobby at night,
+// Turn 229 · the Stage's proposed look, rendered for the frames. One scene — a hotel lobby at night,
 // Ade waiting in an armchair and Ife crossing from the lifts to lean on his shoulder — drawn three
 // ways: Greybox (today's renderer: one grey, a sun, a grid, capsule figures), Lit (material tags,
 // practical lights, AgX, soft shadows, GTAO, fog, a night sky) and Plate (the location plate
 // projected from shot 1's camera). The set is assembled from kit items and the figures are jointed
 // mannequins posed by name with two-bone IK for the hand contact, as issues 1819, 1821 and 1825 ask.
-// window.stage228.render({look, view, w, h}) returns {png, labels}. Deterministic: no clock, no noise.
+// window.stage229.render({look, view, w, h}) returns {png, labels}. Deterministic: no clock, no noise.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -27,7 +27,7 @@ export const SHOTS = [
 const OVERVIEW = { p: V(-1.4, 8.6, 10.8), l: V(0.9, 0.2, -1.3), fov: 36 };
 const TOP = { p: V(0.4, 22, -0.2), l: V(0.4, 0, -0.21), fov: 34 };
 // The board's overview stands further back than the shot's, so every camera, shot 1's at the
-// lobby's open front included, is on the stage and numbered (228g).
+// lobby's open front included, is on the stage and numbered (229g).
 const BOARD = { p: V(-1.6, 10.5, 14.5), l: V(0.9, 0.2, 0.6), fov: 38 };
 
 // ---------- Materials by tag (Lit) and today's single grey (Greybox) ----------
@@ -223,7 +223,7 @@ function capsuleFigure(colour, seated) {
 }
 
 // ---------- Plate projection: the plate painted onto the set from shot 1's camera ----------
-const plateTexture = new THREE.TextureLoader().load('assets/stage-228-plate.jpg');
+const plateTexture = new THREE.TextureLoader().load('assets/stage-229-plate.jpg');
 plateTexture.colorSpace = THREE.SRGBColorSpace;
 function plateMaterial(projector) {
   return new THREE.ShaderMaterial({
@@ -379,5 +379,5 @@ async function render({ look = 'lit', view = 'overview', w = 1600, h = 900, type
   const projected = labels.map(([text, p]) => { const v = p.clone().project(cam); return { text, x: Math.round((v.x * 0.5 + 0.5) * w), y: Math.round((-v.y * 0.5 + 0.5) * h), visible: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; });
   return { png: renderer.domElement.toDataURL(type, 0.9), labels: projected };
 }
-window.stage228 = { render, SHOTS: SHOTS.map(s => ({ n: s.n, name: s.name, p: s.p.toArray(), l: s.l.toArray(), mm: s.mm, vfov: vfov(s.mm) })) };
-window.stage228ready = true;
+window.stage229 = { render, SHOTS: SHOTS.map(s => ({ n: s.n, name: s.name, p: s.p.toArray(), l: s.l.toArray(), mm: s.mm, vfov: vfov(s.mm) })) };
+window.stage229ready = true;

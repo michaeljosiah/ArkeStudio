@@ -1,12 +1,12 @@
-// Turn 228 · the frames. The full-screen Stage (144b's chrome) around renders from
-// stage-228.render.mjs: a hotel lobby at night, Ade waiting, Ife crossing to lean on his shoulder.
+// Turn 229 · the frames. The full-screen Stage (144b's chrome) around renders from
+// stage-229.render.mjs: a hotel lobby at night, Ade waiting, Ife crossing to lean on his shoulder.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
-const L = JSON.parse(fs.readFileSync(path.join(here, 'stage-228.labels.json'), 'utf8'));
-const A = 'assets/stage-228-';
-const PLATE = 'assets/stage-228-plate.jpg';
+const L = JSON.parse(fs.readFileSync(path.join(here, 'stage-229.labels.json'), 'utf8'));
+const A = 'assets/stage-229-';
+const PLATE = 'assets/stage-229-plate.jpg';
 
 const I = {
   left: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
@@ -83,7 +83,7 @@ ${lanes.map(({ who, colour, marks, poses = [], bars = [] }) => `<div class="who"
 }
 const ADE = { who: 'Ade', colour: '#2f7fd8' }, IFE = { who: 'Ife', colour: '#d6336c' };
 
-const stage = (inner, view = 'Stage') => `<div class="st228">${pill(view)}${inner}</div>`;
+const stage = (inner, view = 'Stage') => `<div class="st229">${pill(view)}${inner}</div>`;
 const main = (vp, pn) => `<div class="main" style="height:580px;flex:none">${vp}${pn}</div>`;
 
 // ---------- Frames ----------
@@ -129,7 +129,7 @@ const kitMenu = `<div style="border:1px solid var(--border);border-radius:10px;p
 ${[['Room', 'walls · openings'], ['Doorway', ''], ['Window', ''], ['Stairs', ''], ['Counter', ''], ['Booth', ''], ['Table and chairs', ''], ['Armchair', ''], ['Sofa', ''], ['Bed', ''], ['Planter', ''], ['Tree', ''], ['Lamp', 'with light'], ['Car', ''], ['Street', ''], ['Facade', '']].map(([n, m]) => li('o', n, m)).join('')}
 <div class="rule" style="margin:4px 0"></div>${['Box', 'Cylinder', 'Sphere', 'Mesh'].map(n => li('o', n, '')).join('')}</div>`;
 const surface = (k, colour, name) => row(k, `<span class="swatch" style="background:${colour}"></span>${sel(name)}`);
-const frameForms = () => `<div class="st228" style="width:920px;height:700px;display:grid;grid-template-columns:repeat(3,264px);gap:28px;padding:24px">
+const frameForms = () => `<div class="st229" style="width:920px;height:700px;display:grid;grid-template-columns:repeat(3,264px);gap:28px;padding:24px">
 <div class="panel"><div class="mono" style="padding-bottom:6px">Add set</div><div class="eyebrow">Stage<span class="mono">shared · scene</span></div>${li('', 'camera', 'locked off · 18 mm')}${li('#2f7fd8', 'Ade', 'sits · armchair')}<div class="add" style="color:var(--foreground)">${I.plus} Add set</div>${kitMenu}</div>
 <div class="panel"><div class="mono" style="padding-bottom:6px">lobby selected</div><div class="eyebrow">Set<span class="mono">lobby · kit</span></div>
 ${row('kit', sel('Room'))}
@@ -188,7 +188,7 @@ ${row('line', '<span style="color:var(--success)">180° · clear</span>')}
 ${row('action', chips(['Shared', 'Per shot'], 'Shared'))}
 ${row('cuts', chips(['Hard', 'Markers'], 'Hard'))}`, foot('filed · v2', 'animatic')))}${transport({ dur: 12, at: 6.4, cuts: CUTS, lanes: [{ ...ADE, marks: [0, 12], poses: [[1, 'sit'], [2.2, 'checks time']] }, { ...IFE, marks: [0, 8.6, 9.6, 12], poses: [[1, 'walk'], [9.6, 'lean on']], bars: [[9.6, 12]] }] })}`, 'Stage');
 
-const frameBench = () => `<div class="st228 bench"><div class="tb">Na Love or Juju · Bench<b>Arke <span class="mono">Studio</span></b><span></span></div><div class="bwrap"><div class="crail"></div><div class="bmain"><div class="card">
+const frameBench = () => `<div class="st229 bench"><div class="tb">Na Love or Juju · Bench<b>Arke <span class="mono">Studio</span></b><span></span></div><div class="bwrap"><div class="crail"></div><div class="bmain"><div class="card">
 <div class="tabs"><span>Image</span><span class="on">Video</span><span>Voice</span><span>Music</span></div>
 <div class="tabs"><span class="on">Reference</span><span>Keyframe</span></div>
 <div class="refs">
