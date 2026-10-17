@@ -111,7 +111,7 @@ function withKeyAt(staging: ResolvedShotStaging, at: number, patch: Partial<Stag
   return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
 }
 
-/** A lane's words (design turn 228d): the pose at each mark where it changes, and a walk where one starts. */
+/** A lane's words (design turn 229d): the pose at each mark where it changes, and a walk where one starts. */
 function lanePoses(keys: readonly StagePerformanceKey[]): Array<{ t: number; word: string }> {
   const words: Array<{ t: number; word: string }> = [];
   let pose: string | null = null;
@@ -188,7 +188,7 @@ export function SceneStage({
    * back for the way out alone, which 144 put on this row.
    */
   head?: boolean;
-  /** The board this shot cuts into (issue 1824, design turn 228g); null when it stands alone. */
+  /** The board this shot cuts into (issue 1824, design turn 229g); null when it stands alone. */
   board?: { letter: string; memberShotIds: string[]; capSec: number } | null;
   onRenderBoard?: (memberShotIds: string[]) => void;
 }) {
@@ -329,7 +329,7 @@ export function SceneStage({
   const playStart = useRef<{ wall: number; from: number } | null>(null);
   const handledPlayblastActions = useRef(new Set<string>());
   const frozen = locked || exporting !== null || constructing;
-  // A board (issue 1824, design turn 228g): the shots the scene's packing cuts this one into, on
+  // A board (issue 1824, design turn 229g): the shots the scene's packing cuts this one into, on
   // one clock, each with its own camera. The view is for watching, checking and recording the
   // board; editing stays on This shot, where each shot's own staging is.
   const [boardView, setBoardView] = useState(false);
@@ -1918,7 +1918,7 @@ export function SceneStage({
                             {STAGE_POSES.map((pose) => <option key={pose} value={pose}>{STAGE_POSE_LABELS[pose]}</option>)}
                           </select>
                         </Row>
-                        {/* A hand on someone or something, and where the figure looks (issue 1821, design turn 228d). */}
+                        {/* A hand on someone or something, and where the figure looks (issue 1821, design turn 229d). */}
                         <Row label="hand">
                           <span className="fy-swstage__chips" role="radiogroup" aria-label={`${name} ${chosen.t}s hand`}>
                             {([["none", "None"], ["left", "Left"], ["right", "Right"], ["both", "Both"]] as const).map(([side, label]) => {

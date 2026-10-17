@@ -173,13 +173,13 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 79: immutable, leased agent media evidence and durable coverage receipts.
 // 80: local measured speech evidence and transcript-grounded content review receipts.
 // 82: expanded provider vocal events in persisted cadence plans and reactions.
-// 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 228c).
-// 85: a Stage set kit item on a strict set entry (issue 1819, design turn 228e).
+// 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 229c).
+// 85: a Stage set kit item on a strict set entry (issue 1819, design turn 229e).
 // 86: the Stage's look — set materials and surfaces, lights and atmosphere on the blocking, and the
-// look a playblast pin was drawn in (issue 1825, design turn 228a).
-// 87: a camera key written in words (issue 1820, design turn 228a).
-// 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 228d).
-// 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 228g).
+// look a playblast pin was drawn in (issue 1825, design turn 229a).
+// 87: a camera key written in words (issue 1820, design turn 229a).
+// 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
+// 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
 export const SUPPORTED_SCHEMA_VERSION = 89;
 
 export class WorldOpenError extends Error {

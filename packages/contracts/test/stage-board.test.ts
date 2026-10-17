@@ -17,7 +17,7 @@ import {
   stagingFollowLine,
 } from "../src/index.js";
 
-// Design turn 228g's board, cut down: a wide, Ade, then Ife from the lifts, all over one action.
+// Design turn 229g's board, cut down: a wide, Ade, then Ife from the lifts, all over one action.
 function board() {
   return SceneSchema.parse({
     id: "sc_lobby", number: 1, slug: "lobby", title: "Lobby", status: "draft", version: 6,

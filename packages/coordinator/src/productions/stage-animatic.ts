@@ -26,7 +26,7 @@ import { parseSceneRecord } from "./scene-record.js";
 import { stemOrThrow } from "./scene-commands.js";
 
 /**
- * Filing a board's cut animatic (issue 1824, design turn 228g). Like a playblast (SPEC-036 R-35):
+ * Filing a board's cut animatic (issue 1824, design turn 229g). Like a playblast (SPEC-036 R-35):
  * the bytes and the pin land in one commit under one gate, or neither does; the pin sits on the
  * scene's boards keyed by the exact member set, as a board prompt is; and it records each member's
  * staging, so a moved shot reads as stale and the animatic stops riding.

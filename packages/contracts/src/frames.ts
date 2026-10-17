@@ -2752,7 +2752,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       look: z.enum(["greybox", "lit", "plate"]).optional(),
     })
     .strict(),
-  /** A board's cut animatic the Stage rendered (issue 1824, design turn 228g), filed and pinned on the scene's boards. */
+  /** A board's cut animatic the Stage rendered (issue 1824, design turn 229g), filed and pinned on the scene's boards. */
   z
     .object({
       kind: z.literal("stage-animatic"),

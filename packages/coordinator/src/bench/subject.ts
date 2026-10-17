@@ -486,7 +486,7 @@ export async function prepareBenchSubject(
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
-    // A staged clip's location plate rides first (issue 1818, design turn 228h): the picture the
+    // A staged clip's location plate rides first (issue 1818, design turn 229h): the picture the
     // set was built from, so the generator sees the place the blockout moves through.
     const plate = mode === "video" && shot.staging !== undefined ? plateToken(scene, world) : null;
     const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, plate === null ? 1 : 2)];
@@ -614,7 +614,7 @@ export async function prepareBenchSubject(
   if (board === null) return { ok: false, reason: "That board no longer matches the current scene." };
   const members = board.memberShotIds.map((id) => shots.find((candidate) => candidate.id === id)!);
   // A board with a current animatic rides it as one reference video, with the plate first, as a
-  // staged shot does with its playblast (issue 1824, design turn 228h).
+  // staged shot does with its playblast (issue 1824, design turn 229h).
   const animatic = animaticToken(scene, world, board.memberShotIds, aspect, board.letter);
   const plate = animatic === null ? null : plateToken(scene, world);
   const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, plate === null ? 1 : 2)];

@@ -109,7 +109,7 @@ export interface StageData {
   atmosphere?: SceneAtmosphere;
   plate?: StagePlateView | null;
   /**
-   * A board (issue 1824, design turn 228g): this is the member at the playhead, the other members'
+   * A board (issue 1824, design turn 229g): this is the member at the playhead, the other members'
    * cameras stand where they open, numbered, and the lens preview says which cut it is showing.
    */
   board?: StageBoardView | null;
@@ -221,7 +221,7 @@ function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Gro
   const head = new Mesh(new SphereGeometry(0.14, 24, 18), skin);
   head.position.y = 1.62;
   body.add(head);
-  // A nose (design turn 228 rule 3): a sphere has no front, and the lens and a video model both
+  // A nose (design turn 229 rule 3): a sphere has no front, and the lens and a video model both
   // need to see which way a figure faces.
   const nose = new Mesh(new ConeGeometry(0.035, 0.09, 12), new MeshStandardMaterial({ color: 0x15171c, roughness: 0.4, transparent: ghost, opacity: ghost ? 0.18 : 1 }));
   nose.rotation.x = Math.PI / 2;

@@ -83,7 +83,7 @@ const choose = async (select: HTMLElement, value: string) => {
   }
   await act(async () => { select.dispatchEvent(new dom.window.Event("change", { bubbles: true })); });
 };
-/** Add set opens the kit (issue 1819, design turn 228e); a plain box is its first primitive. */
+/** Add set opens the kit (issue 1819, design turn 229e); a plain box is its first primitive. */
 const addBox = async (q: (selector: string) => HTMLElement) => {
   await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
   await click([...q('[data-testid="stage-kit-menu"]').querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Box")!);
@@ -198,7 +198,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   const object = q('[data-key-track="object"]');
   assert.equal(performance.querySelectorAll("button").length, 2);
   assert.equal(object.querySelectorAll("button").length, 3);
-  assert.match(performance.getAttribute("style") ?? "", /2f7fd8/i, "the viewport's cast colour (design turn 228 rule 3)");
+  assert.match(performance.getAttribute("style") ?? "", /2f7fd8/i, "the viewport's cast colour (design turn 229 rule 3)");
   const first = performance.querySelector<HTMLElement>("button")!;
   await click(first);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
@@ -593,7 +593,7 @@ it("a list line stands for every pick of its thing, and a line that leaves the l
   assert.ok(q('[aria-label="Camera rig"]'), "the shot's form, not an empty panel");
 });
 
-// The location plate (issue 1818, design turn 228c).
+// The location plate (issue 1818, design turn 229c).
 const PLATE_PICTURE = { id: "ar_01J8G0000000000000000000P1", kind: "image" as const, file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" as const }, links: [], created: "2026-10-17T09:00:00.000Z" };
 
 it("opens the blockout line with a dashed Add plate, and a pick writes the plate with the scene's marks", async () => {
@@ -643,7 +643,7 @@ it("lists the plate second, opens its form, and Match camera puts the opening ke
   assert.equal(opening?.focalMm, 18);
 });
 
-// The set kit (issue 1819, design turn 228e).
+// The set kit (issue 1819, design turn 229e).
 it("adds a room from the kit, with its own rows in place of a shape, and keeps it as one entry", async () => {
   const { q, sent } = await mount();
   const add = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__add")].find((button) => button.textContent === "Add set")!;
@@ -667,7 +667,7 @@ it("adds a room from the kit, with its own rows in place of a shape, and keeps i
   assert.deepEqual([room?.w, room?.h, room?.d], [6, 3, 8]);
 });
 
-// The Stage's look and lights (issue 1825, design turn 228a/228e).
+// The Stage's look and lights (issue 1825, design turn 229a/229e).
 it("offers Greybox · Lit · Plate in the viewport's corner, Plate only once a plate is matched", async () => {
   const { q, render, scene, world } = await mount();
   const options = () => [...q('[data-testid="stage-look"]').querySelectorAll<HTMLButtonElement>('[role="radio"]')];
@@ -722,7 +722,7 @@ it("gives a plain set a material and a room its surfaces, kept with the set", as
   assert.deepEqual(sets?.find((set) => set.name === "room")?.surfaces, { "right wall": "wood" });
 });
 
-// The camera in words (issue 1820, design turn 228a).
+// The camera in words (issue 1820, design turn 229a).
 it("writes the camera in words, hides the numbers behind Edit as numbers, and drops the words on a hand edit", async () => {
   const { q, sent } = await mount((shot) => { shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }]; });
   await click(stageItem(q, "camera"));
@@ -749,7 +749,7 @@ it("writes the camera in words, hides the numbers behind Edit as numbers, and dr
   assert.equal(edited?.kind === "edit-stage" ? edited.staging?.keys[0]?.frame : "missing", undefined, "a hand edit makes the key numbers again");
 });
 
-// Poses, contacts and turns (issue 1821, design turn 228d).
+// Poses, contacts and turns (issue 1821, design turn 229d).
 it("poses a mark by name, puts a hand on someone, looks at them, and warns of a spin", async () => {
   const { q, sent } = await mount((shot) => {
     shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "ivo-rell", x: 1, z: 0 }];
@@ -804,7 +804,7 @@ async function mountBoard(stageSecond = true) {
 const scopeButton = (q: (selector: string) => HTMLElement, label: string) =>
   [...q('[data-testid="stage-scope"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === label)!;
 
-it("opens a board on one clock: the cut list, the line check, the shared action and the animatic (issue 1824, turn 228g)", async () => {
+it("opens a board on one clock: the cut list, the line check, the shared action and the animatic (issue 1824, turn 229g)", async () => {
   const { q, container } = await mountBoard();
   assert.equal(q('[data-testid="stage-board"]'), null, "the Stage opens on This shot");
   await click(scopeButton(q, "Board A"));
