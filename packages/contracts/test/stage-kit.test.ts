@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { expandStageSet, expandStageSets, STAGE_KIT_KINDS, STAGE_KIT_SIZES, StagingSetSchema, type StagingSet } from "../src/index.js";
 
-/** The set kit (issue 1819, design turn 228e): one entry, expanded into primitives every renderer shares. */
+/** The set kit (issue 1819, design turn 229e): one entry, expanded into primitives every renderer shares. */
 
 const lobby: StagingSet = {
   name: "lobby", x: 0, z: 0, w: 8, h: 5, d: 12,

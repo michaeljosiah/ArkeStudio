@@ -1,7 +1,7 @@
 import type { ScenePlate, StagingKey } from "./scene.js";
 
 /**
- * The location plate's pure parts (issue 1818, design turn 228c). The plate is a picture of the
+ * The location plate's pure parts (issue 1818, design turn 229c). The plate is a picture of the
  * empty place: the build reads it as the authority on layout and estimates where its camera
  * stood, Match camera puts the matched shot's opening key there, and on a staged clip it rides
  * to the generator as the first image so the blockout and the location reference agree.
