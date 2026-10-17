@@ -174,7 +174,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 80: local measured speech evidence and transcript-grounded content review receipts.
 // 82: expanded provider vocal events in persisted cadence plans and reactions.
 // 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 229c).
-export const SUPPORTED_SCHEMA_VERSION = 84;
+// 85: a Stage set kit item on a strict set entry (issue 1819, design turn 229e).
+export const SUPPORTED_SCHEMA_VERSION = 85;
 
 export class WorldOpenError extends Error {
   constructor(

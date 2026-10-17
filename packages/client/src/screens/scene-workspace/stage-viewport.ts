@@ -44,7 +44,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stageCameraScalar, expandStageSet, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -568,7 +568,9 @@ export class StageViewport {
     this.aim = null;
     this.path = null;
 
-    for (const [index, set] of data.sets.entries()) {
+    // A kit item (issue 1819) is drawn as its parts; each part picks as the item it belongs to, and
+    // only the first carries the floor label, so a room reads "lobby" once rather than per wall.
+    for (const [index, item] of data.sets.entries()) for (const [partIndex, set] of expandStageSet(item).entries()) {
       const picked = this.selection?.kind === "set" && this.selection.index === index;
       let parent = this.setGroup;
       if (set.group) {
@@ -593,7 +595,7 @@ export class StageViewport {
       if (set.rotation) box.rotation.set(...set.rotation.map(v => v * Math.PI / 180) as [number, number, number]);
       box.receiveShadow = true;
       box.castShadow = set.solid ?? false;
-      box.userData = { label: set.name, up: set.h / 2 + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
+      box.userData = { label: item.name, labelled: partIndex === 0, up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
       parent.add(box);
       this.setMeshes.push(box);
       // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
@@ -1071,6 +1073,7 @@ export class StageViewport {
       this.labels.push({ element: this.label(walker.userData["name"] as string, false), object: walker, up: 1.95 });
     }
     for (const mesh of this.setMeshes) {
+      if (mesh.userData["labelled"] === false) continue;
       this.labels.push({ element: this.label(mesh.userData["label"] as string, false), object: mesh, up: mesh.userData["up"] as number });
     }
     if (this.cam !== null) this.labels.push({ element: this.label("CAMERA", true), object: this.cam.rig, up: 0.34 });

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, SceneRecordSchema, type ScenePlate, type SceneRecord } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
-import { STAGE_PLATE_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { STAGE_KIT_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -70,5 +70,18 @@ describe("the location plate (issue 1818)", () => {
     assert.equal(moved.blocking?.cast[0]?.x, 1);
     await edit(store, moved.version, shotId, { cast: moved.blocking!.cast, sets: moved.blocking!.sets, plate: null });
     assert.equal((await sceneOnDisk(store)).blocking?.plate, undefined);
+  });
+});
+
+describe("the set kit (issue 1819)", () => {
+  it("lands a kit item on the scene's blocking and fences the world at the kit's schema", async () => {
+    const store = await open();
+    assert.ok(SUPPORTED_SCHEMA_VERSION >= STAGE_KIT_SCHEMA_VERSION, "this build reads what it writes");
+    const before = await sceneOnDisk(store);
+    const shotId = orderedShots(before)[0]!.id;
+    const room = { name: "lobby", x: 0, z: 0, w: 8, h: 5, d: 12, solid: true, kit: { kind: "room", open: ["front"] } };
+    await edit(store, before.version, shotId, { cast: [], sets: [room] });
+    assert.deepEqual((await sceneOnDisk(store)).blocking?.sets, [room], "the item is one entry; its walls are derived, never stored");
+    assert.ok(store.getBundle().meta.schemaVersion >= STAGE_KIT_SCHEMA_VERSION);
   });
 });
