@@ -177,7 +177,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 85: a Stage set kit item on a strict set entry (issue 1819, design turn 228e).
 // 86: the Stage's look — set materials and surfaces, lights and atmosphere on the blocking, and the
 // look a playblast pin was drawn in (issue 1825, design turn 228a).
-export const SUPPORTED_SCHEMA_VERSION = 86;
+// 87: a camera key written in words (issue 1820, design turn 228a).
+export const SUPPORTED_SCHEMA_VERSION = 87;
 
 export class WorldOpenError extends Error {
   constructor(

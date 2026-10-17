@@ -396,6 +396,13 @@ export function carriesStageConstruction(raw: string): boolean {
 
 /** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
 export const STAGE_PLATE_SCHEMA_VERSION = 84;
+/** A camera key carrying its words needs schema 87 (issue 1820). */
+export const STAGE_WORDS_SCHEMA_VERSION = 87;
+export function carriesStageWords(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.keys.some(key => key.frame !== undefined)); }
+  catch { return false; }
+}
+
 /** Materials, lights, atmosphere or a look-tagged playblast need schema 86 (issue 1825). */
 export const STAGE_LOOK_SCHEMA_VERSION = 86;
 export function carriesStageLook(raw: string): boolean {

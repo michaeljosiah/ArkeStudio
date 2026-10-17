@@ -721,3 +721,30 @@ it("gives a plain set a material and a room its surfaces, kept with the set", as
   assert.equal(sets?.find((set) => set.name === "set 1")?.material, "wood");
   assert.deepEqual(sets?.find((set) => set.name === "room")?.surfaces, { "right wall": "wood" });
 });
+
+// The camera in words (issue 1820, design turn 228a).
+it("writes the camera in words, hides the numbers behind Edit as numbers, and drops the words on a hand edit", async () => {
+  const { q, sent } = await mount((shot) => { shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }]; });
+  await click(stageItem(q, "camera"));
+  assert.ok(q('[data-testid="stage-camera-words"]'), "words first");
+  assert.ok(q('[aria-label="Camera height"]'), "a key with no words shows its numbers");
+  await click([...q('[aria-label="Shot size"]').querySelectorAll<HTMLElement>('[role="radio"]')].find((option) => option.textContent === "MCU")!);
+  assert.equal(q('[aria-label="Camera height"]'), null, "words put the numbers away");
+  assert.equal(q('[aria-label="Shot size"] [aria-checked="true"]')?.textContent, "MCU");
+  assert.match(q('[data-testid="stage-camera-words"]').textContent ?? "", /aim/);
+  await click([...q('[data-testid="stage-camera-words"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Edit as numbers")!);
+  assert.ok(q('[aria-label="Camera height"]'));
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const opening = kept?.kind === "edit-stage" ? kept.staging?.keys[0] : undefined;
+  assert.equal(opening?.frame?.size, "medium close-up");
+  assert.equal(opening?.frame?.subject, "maren-kest");
+  assert.equal(opening?.track, "maren-kest");
+  await click(stageItem(q, "camera"));
+  await click(stageItem(q, "camera"));
+  const height = q('[aria-label="Camera height"]') as HTMLInputElement;
+  await leaveField(height, "2.4");
+  await click(q(".fy-swstage__keep"));
+  const edited = sent.at(-1);
+  assert.equal(edited?.kind === "edit-stage" ? edited.staging?.keys[0]?.frame : "missing", undefined, "a hand edit makes the key numbers again");
+});

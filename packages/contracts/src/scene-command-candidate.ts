@@ -2,6 +2,8 @@ import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editSc
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
 import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
+import { stageReframed } from "./stage-framing.js";
+import { effectiveFraming } from "./scene.js";
 import type { SceneBlocking, SceneCastMember, Shot, ShotStageEdit } from "./scene.js";
 import type { WorldBundle } from "./client-state.js";
 
@@ -128,9 +130,17 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;
-      const change = retimed === undefined || retimed === current?.staging
+      // A camera written in words (issue 1820) is solved again when the shot's length or lens moves,
+      // so it still frames what the words say rather than what the old numbers did.
+      let staging = retimed ?? current?.staging;
+      if (current !== undefined && staging !== undefined && staging.keys.some((key) => key.frame !== undefined) && (retimed !== undefined || command.change.framing !== undefined)) {
+        const lens = effectiveFraming(record, { ...current, ...command.change } as Shot).lens;
+        const reframed = stageReframed(resolvedShotStaging(record, staging), command.change.durationSec ?? current.durationSec ?? 4, "16:9", lens);
+        if (JSON.stringify(reframed.keys) !== JSON.stringify(staging.keys)) staging = { ...staging, keys: reframed.keys };
+      }
+      const change = staging === undefined || staging === current?.staging
         ? command.change
-        : { ...command.change, staging: { ...retimed, version: retimed.version + 1 } };
+        : { ...command.change, staging: { ...staging, version: (current?.staging?.version ?? 0) + 1 } };
       return editShot(record, { shotId: command.shotId, change });
     }
     case "set-prompt-override": {

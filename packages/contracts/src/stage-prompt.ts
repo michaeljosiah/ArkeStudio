@@ -31,7 +31,7 @@ export type StageFollow = (typeof STAGE_FOLLOWS)[number];
 export const STAGE_FOLLOW_LABELS: Record<StageFollow, string> = { "camera-action": "Camera + action", camera: "Camera only" };
 
 export type StageShotSize = keyof typeof STAGE_FRAMED_HEIGHT;
-const SIZE_ORDER: readonly StageShotSize[] = ["extreme close-up", "close-up", "medium", "wide", "extreme wide"];
+const SIZE_ORDER: readonly StageShotSize[] = ["extreme close-up", "close-up", "medium close-up", "medium", "wide", "extreme wide"];
 
 /** The size word for a frame `framedHeight` tall on a subject `subjectHeight` tall: the nearest band of the first pass's table. */
 export function stageShotSize(framedHeight: number, subjectHeight: number): StageShotSize {
