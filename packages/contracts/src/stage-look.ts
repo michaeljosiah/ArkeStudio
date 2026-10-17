@@ -2,11 +2,11 @@ import type { SceneAtmosphere, StageMaterial, StagingSet } from "./scene.js";
 import type { StageKitPart, StageKitSurface } from "./stage-kit.js";
 
 /**
- * The Stage's looks (issue 1825, design turn 228a–c). Greybox is the drawing the Stage always
+ * The Stage's looks (issue 1825, design turn 229a–c). Greybox is the drawing the Stage always
  * had. Lit draws each part by what it is made of and lights the set with its own lights under
  * the scene's sky. Plate paints the set with the location plate from its matching camera. The
  * values live here, beside the schema, so the viewport, the inspection renderer and the export
- * draw the same thing; they are the ones turn 228's renders were approved from.
+ * draw the same thing; they are the ones turn 229's renders were approved from.
  */
 
 export const STAGE_LOOKS = ["greybox", "lit", "plate"] as const;
@@ -66,7 +66,7 @@ export function stageMaterialOf(item: StagingSet, part: StageKitPart): StageMate
 }
 
 /**
- * The cast's colours, in order (design turn 228 rule 3): strong against a neutral set in every
+ * The cast's colours, in order (design turn 229 rule 3): strong against a neutral set in every
  * look, so a figure never reads as part of the furniture. They replace burgundy, ochre, slate,
  * dark blue and brown, which sat too close to a warm set.
  */

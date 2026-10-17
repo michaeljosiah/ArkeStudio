@@ -215,7 +215,7 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
-/* The Stage's look and lights (issue 1825, design turn 228a/228e). The look control sits in the
+/* The Stage's look and lights (issue 1825, design turn 229a/229e). The look control sits in the
    viewport's corner before the ghost toggle and wears the modes' segment; the stage list groups
    set and lights under a mono count; a light's mark is its own colour. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__looks { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--background) 92%, transparent); box-shadow: var(--shadow-xs); }

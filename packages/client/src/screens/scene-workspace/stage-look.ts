@@ -36,7 +36,7 @@ import {
 } from "@arke-studio/contracts";
 
 /**
- * The Stage's looks in three.js (issue 1825, design turn 228a–c). Greybox shows the rig the
+ * The Stage's looks in three.js (issue 1825, design turn 229a–c). Greybox shows the rig the
  * viewport always had: one grey, a sun, the grid, the light ground. Lit hides that and lights the
  * set with its own lights under the scene's sky, in materials by what each part is made of. Plate
  * paints the set with the location plate projected from the camera it was taken from. Every look

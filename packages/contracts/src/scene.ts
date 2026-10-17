@@ -172,7 +172,7 @@ export const StageKitSchema: z.ZodType<StageKit, z.ZodTypeDef, unknown> = z
   .strict();
 
 /**
- * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 228a/228e). The
+ * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 229a/229e). The
  * renderer owns how each one looks; the world records only the word.
  */
 export const STAGE_MATERIALS = ["plaster", "concrete", "stone", "marble", "wood", "metal", "glass", "fabric", "leather", "foliage", "pot", "lamp", "screen", "neon", "road", "paint", "grass", "water"] as const;
@@ -180,7 +180,7 @@ export const StageMaterialSchema = z.enum(STAGE_MATERIALS);
 export type StageMaterial = z.infer<typeof StageMaterialSchema>;
 const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/i, "a colour is #rrggbb");
 
-/** A practical light on the set (issue 1825, design turn 228e): a lamp, a neon, a window, the sun. */
+/** A practical light on the set (issue 1825, design turn 229e): a lamp, a neon, a window, the sun. */
 export interface StageLight {
   name: string;
   kind: "point" | "spot" | "area" | "sun";
