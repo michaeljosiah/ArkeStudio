@@ -299,7 +299,7 @@ every stage of it is a screen you actually work in — not a black box between "
 
 <div align="center">
 
-<img src=".github/assets/readme-storyboard.png" alt="A scene's storyboard: four shots as cards, three frames already generated, Arke's dock offering to review continuity or generate the last one." width="100%">
+<img src=".github/assets/readme-storyboard.webp" alt="A scene's storyboard: four shots as cards, three frames already generated, Arke's dock offering to review continuity or generate the last one." width="100%">
 
 **The storyboard writes the shot list with you.** Each shot is its own brief, its own
 frame and its own retry. Arke reads the scene and tells you what's still missing — here,
@@ -307,7 +307,7 @@ one frame out of four.
 
 <br>
 
-<img src=".github/assets/readme-stage.png" alt="The Stage: a shot's camera and cast blocked out in 3D, a push-in key selected, the panel showing move, height, back, lens and easing, a playblast filed." width="100%">
+<img src=".github/assets/readme-stage.webp" alt="The Stage: a shot's camera and cast blocked out in 3D, a push-in key selected, the panel showing move, height, back, lens and easing, a playblast filed." width="100%">
 
 **The Stage blocks the shot before you spend on it.** Cast and set are placed once per
 scene; the camera is keyed per shot — height, distance, lens, easing — and previewed as a
@@ -316,7 +316,7 @@ blocking stays put unless you ask it to revise that too — or move the keys you
 
 <br>
 
-<img src=".github/assets/readme-bench.png" alt="The Bench: an image-to-video generation with a keyframe and a written prompt, voice references switched on, a take playing back beside six others." width="100%">
+<img src=".github/assets/readme-bench.webp" alt="The Bench: an image-to-video generation with a keyframe and a written prompt, voice references switched on, a take playing back beside six others." width="100%">
 
 **The Bench dispatches with everything attached.** A keyframe, a written prompt, voice
 references, the model and its price, all in one row. Every take is kept until you discard
@@ -324,7 +324,7 @@ it, so a regenerate is never a gamble on losing what you had.
 
 <br>
 
-<img src=".github/assets/readme-cut.png" alt="The cut: a multi-lane timeline with picture, dialogue, ambience and music, one shot still uncovered, Arke reporting what it assembled." width="100%">
+<img src=".github/assets/readme-cut.webp" alt="The cut: a multi-lane timeline with picture, dialogue, ambience and music, one shot still uncovered, Arke reporting what it assembled." width="100%">
 
 **The cut assembles itself from what you've accepted.** One pass places every shot's
 picture in script order, conforms the subtitles, and lays an ambience bed under the
@@ -333,7 +333,7 @@ are called out by name rather than left silent.
 
 <br>
 
-<img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and a finished job's receipt." width="100%">
+<img src=".github/assets/readme-activity.webp" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and a finished job's receipt." width="100%">
 
 **Nothing runs unwatched.** Every dispatch and every voice line lands in one panel — what
 needs your answer, what's running right now with Cancel on every job still stoppable, and
