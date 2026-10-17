@@ -57,6 +57,7 @@ import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
 import { stageBoardAnimatic, stageBoardAnimaticIsStale, stageBoardAt, stageBoardCuts, stageBoardJumps, stageBoardLineFindings, stageBoardStagings } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
+import { readStageLook, rememberStageLook } from "../../lib/stage-look-preference.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
@@ -253,15 +254,10 @@ export function SceneStage({
   const [numbers, setNumbers] = useState(false);
   // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
   // device and never written to the world; the playblast records the look it was exported in.
-  const [look, setLookState] = useState<StageLook>(() => {
-    try {
-      const saved = window.localStorage.getItem("arke.stage.look");
-      return (STAGE_LOOKS as readonly string[]).includes(saved ?? "") ? saved as StageLook : "lit";
-    } catch { return "lit"; }
-  });
+  const [look, setLookState] = useState<StageLook>(readStageLook);
   const setLook = (next: StageLook) => {
     setLookState(next);
-    try { window.localStorage.setItem("arke.stage.look", next); } catch { /* the choice still holds for this visit */ }
+    rememberStageLook(next);
   };
   // Where a build estimated the plate's camera; Keep saves it on the plate (issue 1818).
   const [draftPlateCamera, setDraftPlateCamera] = useState<ScenePlate["camera"] | null>(null);
