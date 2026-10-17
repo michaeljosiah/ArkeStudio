@@ -103,7 +103,7 @@ export const BenchVideoParamsSchema = z
      */
     who: z.record(z.string().regex(/^Image [1-9][0-9]*$/), z.string().max(80)).optional(),
     /**
-     * How closely the take follows a Stage blockout video (issue 1817, design turn 228h): present
+     * How closely the take follows a Stage blockout video (issue 1817, design turn 229h): present
      * only on a staged shot whose playblast is attached. "camera" keeps the move and leaves the
      * figures' stiff mechanics behind; the brief's closing line says which, and the take records it.
      */

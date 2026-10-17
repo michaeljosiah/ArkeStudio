@@ -228,7 +228,7 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__materialrow, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lightcolour > :last-child { flex: 1; min-width: 0; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
-/* The location plate (issue 1818, design turn 228): the blockout line opens with it, a thumbnail
+/* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail
    and its name, or a dashed Add plate; the picker drops beneath it. The anchor is a span the
    line's own "> span" rule would shrink and fade, so it restores both. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__plateanchor { font: inherit; opacity: 1; }
@@ -250,7 +250,7 @@
 /* The chip is not the reference underlay: sharing .fy-swstage__plate gave it the underlay's
    absolute centring and pointer-events none, so it floated over the line and could not be pressed. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__platehead > span:last-child > .fy-swstage__field { align-self: stretch; flex: none; width: 100%; box-sizing: border-box; }
-/* The set kit (issue 1819, design turn 228e): Add set opens the kit, then primitives under a rule;
+/* The set kit (issue 1819, design turn 229e): Add set opens the kit, then primitives under a rule;
    a room's openings are a list of one-line entries with their size and a remove. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitanchor { position: relative; display: flex; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; width: 220px; max-height: 420px; overflow: auto; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); }

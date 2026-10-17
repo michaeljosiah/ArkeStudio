@@ -562,7 +562,7 @@ describe("references (R-23; design 142a)", () => {
   });
 });
 
-describe("Follow, for a staged clip (issue 1817; design 228h)", () => {
+describe("Follow, for a staged clip (issue 1817; design 229h)", () => {
   const staged = (): BenchSession => {
     const session = shotSession("video");
     const composer = session.composer as unknown as { params: Record<string, unknown>; brief: string };

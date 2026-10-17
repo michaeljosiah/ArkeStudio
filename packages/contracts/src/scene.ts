@@ -128,7 +128,7 @@ export const StagingFigureSchema = z
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
 /**
- * A set kit item (issue 1819, design turn 228e): one entry that expands into primitives
+ * A set kit item (issue 1819, design turn 229e): one entry that expands into primitives
  * (stage-kit.ts). Its x/z/y/w/h/d/rotation place and size the whole item; these fields say what
  * it is and, for a room, which sides are open and where its doors and windows are.
  */
@@ -274,7 +274,7 @@ export const StagingSetSchema: z.ZodType<StagingSet, z.ZodTypeDef, unknown> = z
   .strict();
 
 /**
- * The location plate (issue 1818, design turn 228c): a picture of the empty place the set is
+ * The location plate (issue 1818, design turn 229c): a picture of the empty place the set is
  * built from. The build reads it as the authority on layout, matches one shot's opening camera
  * to it, and it can ride to the generator as the first image so the blockout and the location
  * reference agree about where the door is. A world file (a location sheet's picture) or an

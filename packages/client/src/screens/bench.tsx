@@ -2189,7 +2189,7 @@ function BenchWorkspace({
                     {videoParams?.sound === false ? "sound · off" : "sound · on"}
                   </span>
                 )}
-                {/* How closely a staged clip follows its blockout (issue 1817, design turn 228h).
+                {/* How closely a staged clip follows its blockout (issue 1817, design turn 229h).
                     Present only when the Stage's playblast is attached; the choice rewrites the
                     brief's closing line, so the words sent and the param recorded agree. */}
                 {subject !== undefined && videoParams?.follow !== undefined && (

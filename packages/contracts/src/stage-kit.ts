@@ -1,7 +1,7 @@
 import type { StageKit, StagingSet } from "./scene.js";
 
 /**
- * The set kit (issue 1819, design turn 228e). A kit item is one set entry — a name, a place, an
+ * The set kit (issue 1819, design turn 229e). A kit item is one set entry — a name, a place, an
  * overall size, a turn — that expands here into the primitives the viewport, occlusion and the
  * inspection renderer draw. The model writes "a room 8 × 12 × 5, open at the front, two doors on
  * the right wall" instead of a dozen boxes it has to line up by hand: fewer tokens, and walls
