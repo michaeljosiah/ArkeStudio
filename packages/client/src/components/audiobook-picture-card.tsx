@@ -12,6 +12,7 @@ import {
   lookViewFor,
   mainPhotoFor,
   pictureOwnLooks,
+  pictureQuote,
   priceLabel,
   referenceBudget,
   type AudiobookLook,
@@ -112,11 +113,11 @@ type LookMode = "only" | "chapter";
  * before the chapter's look changed would otherwise show, and Make again send, words for clothes
  * the coordinator no longer dresses them in (issue 1658), with no Update prompt to offer.
  *
- * Who rides is the model's reference budget to say. Where someone has a picture now who had none
- * when the card was drafted, or the other way round, it is said again for everyone, ranked as the
- * coordinator ranks at Make (`pictureWho`): a lead given a look takes a supporting character's
- * slot rather than wait for a spare one (codex on PR 1868). `budget` is the model as Make weighs
- * it, and each sheet's billing.
+ * Who rides is the model's reference budget to say, said again for everyone as the coordinator
+ * says it at Make (`pictureWho`): a lead given a look takes a supporting character's slot rather
+ * than wait for a spare one (codex on PR 1868), and someone a made picture went without rides
+ * once they have a picture, so Make again is priced for them (issue 1876). `budget` is the model
+ * as Make weighs it, and each sheet's billing; without it the card's own word stands.
  */
 export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined, budget?: { model: ManifestModel; billing: (sheetId: string) => string | undefined }): PictureWho[] {
   const resolved = who.map((entry): PictureWho => {
@@ -137,7 +138,7 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
     const photo = kit === undefined ? null : mainPhotoFor(kit);
     return { ...base, reference: photo === null ? null : `references/${entry.sheet}/${photo.file}`, carried: photo !== null && entry.carried, ...tag };
   });
-  if (budget === undefined || resolved.every((entry, index) => (entry.reference === null) === (who[index]!.reference === null))) return resolved;
+  if (budget === undefined) return resolved;
   const candidates: BudgetCandidate[] = resolved.flatMap((entry, index) => {
     if (entry.sheet === undefined) return [];
     const billing = budget.billing(entry.sheet);
@@ -427,6 +428,11 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const model = models?.find((candidate) => candidate.provider === suggestion.model.provider && candidate.id === suggestion.model.id);
   const admission = model === undefined ? undefined : { model: { ...model, accepts: { ...model.accepts, referenceImages: suggestion.model.references } }, billing: (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.billing };
   const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, admission);
+  // Make again's price is what rides now (issue 1876): the coordinator weighs everyone again and
+  // refuses a press confirmed below that, so a reference gained since the draft was `the price
+  // moved` on every press. Priced as the suggestion was, from the same figures the Bench plans with.
+  const carriedNow = riding.filter((entry) => entry.carried).length;
+  const quote = model !== undefined && carriedNow !== suggestion.who.filter((entry) => entry.carried).length ? pictureQuote(model, carriedNow, suggestion.aspect) : suggestion.estimatedMicroUsd;
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
@@ -549,7 +555,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
             <span className="fy-mono">Model</span>
             {/* The model and the price, as the master draws it; the shape is on the empty slot, and here as its tooltip. */}
             <b data-testid="picture-card-model" {...(suggestion.aspect !== undefined ? { title: suggestion.aspect } : {})}>
-              {suggestion.model.name} · {priceLabel(suggestion.estimatedMicroUsd, suggestion.model.plan)}
+              {suggestion.model.name} · {priceLabel(quote, suggestion.model.plan)}
             </b>
           </div>
         </div>
@@ -634,8 +640,8 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
         <Button variant="outline" disabled={offline || busy} onClick={() => onEdit({ ...suggestion, who: riding }, prompt)} data-testid="suggest-edit">
           Edit prompt
         </Button>
-        <Button variant="primary" disabled={offline || busy || updatingNow || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt, chapter !== undefined ? own : undefined)} data-testid="suggest-generate">
-          {busy ? "Generating…" : `${picture !== null ? "Make again" : "Generate"} · ${priceLabel(suggestion.estimatedMicroUsd, suggestion.model.plan)}`}
+        <Button variant="primary" disabled={offline || busy || updatingNow || prompt.trim() === ""} onClick={() => state.generate(suggestion, prompt, chapter !== undefined ? own : undefined, quote)} data-testid="suggest-generate">
+          {busy ? "Generating…" : `${picture !== null ? "Make again" : "Generate"} · ${priceLabel(quote, suggestion.model.plan)}`}
         </Button>
       </div>
       {/* New look from a row's menu: 193b's sheet, drawn on the body over the panel (it puts a raised block sheet away while open). */}

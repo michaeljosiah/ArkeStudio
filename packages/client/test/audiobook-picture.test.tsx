@@ -551,6 +551,25 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
   });
 
+  it("prices Make again for someone the picture went without, now that their look rides, and confirms that price (issue 1876)", async () => {
+    // Made with the Vigil alone: Maren had nothing to carry then. The chapter dresses her in the storm coat now.
+    const without = artifact("ar_01J8G0000000000000000PICMD", "made-maren.png", {
+      origin: { by: "system" },
+      generation: {
+        source: "bench", sessionId: "se_01J8G00000000000000000MADE", takeId: "tk_01J8G00000000000000000MADE", takeNumber: 1,
+        brief: pictureBench(PROMPT, [{ name: "The Vigil", kind: "place", token: "Image 1" }], "Grey dusk."),
+        references: [{ token: "Image 1", kind: "image", source: { source: "world-file", path: VIGIL, hash: "sha256:0" } }],
+        keyframes: [], provider: "openai", model: "gpt-image-2", params: { kind: "image", count: 1, aspect: "16:9" }, costMicroUsd: 50_000,
+      },
+    } as unknown as Partial<ArtifactSidecar>);
+    extraArtifacts = [without];
+    const m = await mount(2, { "p1.0": made(SHOT) }, STORM_CHAPTER);
+    assert.deepEqual(all(m, '[data-testid="suggest-who"]').map((el) => [el.dataset.key, el.dataset.state]), [["maren-kest", "carried"], ["the-vigil", "carried"]], "she rides at Make again, as the coordinator will send her");
+    assert.equal(text(q(m, '[data-testid="picture-card-model"]')), "GPT Image 2 · ~$0.06", "a picture and two references, not the one it was made with");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.confirmedMicroUsd, 55_000, "never below what Make again spends, which the coordinator refuses as the price moved");
+  });
+
   it("keeps the shot a suggestion was made from on the picture it makes", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));
@@ -713,9 +732,10 @@ describe("a made picture on its block (turn 194g)", () => {
     // A supporting character carried first, the bare lead after, and room for one: the lead's look rides, as Make sends it.
     const support = { key: "odile-sarn", name: "Odile", sheet: "odile-sarn", kind: "character" as const, reference: "references/odile-sarn/head-front.png", carried: true };
     assert.deepEqual(withOwnLooks([support, bare], {}, harbour, kits, undefined, budget(1)).map((entry) => [entry.key, entry.carried]), [["odile-sarn", false], ["maren-kest", true]]);
-    // Nobody gained or lost a picture: the drafted budget stands, one it left out included.
+    // One a made picture went without, whose picture the model has room for, rides at Make again (issue 1876).
     const left = { ...bare, reference: "references/maren-kest/head-front.png" };
-    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, false);
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, true);
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(0))[0]!.carried, false);
   });
 
   it("re-resolves the chosen look against the kit as it is, so a close view accepted since is what the card shows (codex on PR 1868)", () => {
