@@ -110,6 +110,38 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.deepEqual(adaptableStories(productions), [{ id: "juju", title: "Na love or Juju", kind: "book", chapters: 2, words: 7500 }]);
   });
 
+  it("never offers an audio drama as a story to adapt (SPEC-057 R-82)", () => {
+    const withDrama = [...(productions as unknown as unknown[]), {
+      meta: { id: "juju-drama", title: "Juju, for the ear", format: "story", medium: "story", kind: "audio-drama" },
+      chapters: [chapter("stray", 1, 100)],
+    }] as never;
+    assert.deepEqual(adaptableStories(withDrama).map((story) => story.id), ["juju"]);
+  });
+
+  it("starts an audio drama from the default plan, and keeps the plan Arke proposes (SPEC-057 D-2, R-7)", () => {
+    const becoming = applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "audio-drama" } });
+    assert.deepEqual(becoming.audioDrama, { episodes: 6, minutes: 25, keptFromListener: [] });
+    const planned = applyProductionSetupUpdate(becoming, { expectedRevision: 2, fields: { audioDrama: {
+      episodes: 6, minutes: 25, narrator: "narrated",
+      keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 5 }],
+      pilot: { title: "The tide turns", chapters: [3] },
+    } } });
+    assert.equal(planned.audioDrama?.narrator, "narrated");
+    assert.equal(planned.audioDrama?.keptFromListener[0]?.revealEpisode, 5);
+    const retitled = applyProductionSetupUpdate(planned, { expectedRevision: 3, fields: { title: "Low Water" } });
+    assert.deepEqual(retitled.audioDrama, planned.audioDrama, "other edits keep the plan");
+    assert.equal(applyProductionSetupUpdate(retitled, { expectedRevision: 4, fields: { audioDrama: null } }).audioDrama, undefined);
+    assert.throws(() => applyProductionSetupUpdate(planned, { expectedRevision: 3, fields: { audioDrama: { episodes: 0, minutes: 25, keptFromListener: [] } } }));
+  });
+
+  it("an audio drama holds no video scenes, episodes, arcs or Series (SPEC-057 R-7)", () => {
+    const drama = { ...draft(), kind: "audio-drama" as const, scenes: [] };
+    assert.deepEqual(productionSetupProblems(drama, []), []);
+    const withScene = { ...drama, scenes: [{ key: "s1", title: "One" }] };
+    assert.match(productionSetupProblems(withScene, []).join(" "), /audio drama plans its episodes in its own plan/);
+    assert.doesNotMatch(productionSetupProblems(withScene, []).join(" "), /owns scenes directly/);
+  });
+
   it("keeps the source a setup names across other edits, and clears it on null", () => {
     const named = applyProductionSetupUpdate({ ...draft(), kind: "microdrama" }, { expectedRevision: 1, fields: { source: { productionId: "juju" } } });
     assert.deepEqual(named.source, { productionId: "juju" });
@@ -122,7 +154,8 @@ describe("conversational production setup (SPEC-012 §4)", () => {
   it("names a source on the wrong format, or one no longer in the world, as a problem", () => {
     const sourced = { ...draft(), source: { productionId: "juju" } };
     assert.deepEqual(productionSetupProblems(sourced, [], productions), []);
-    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama or a film/);
+    assert.match(productionSetupProblems({ ...sourced, kind: "music-video" }, [], productions).join(" "), /Adapt from is for a micro drama, a film or an audio drama/);
+    assert.deepEqual(productionSetupProblems({ ...sourced, kind: "audio-drama", scenes: [] }, [], productions), [], "an audio drama adapts a story too (SPEC-057 R-2)");
     assert.match(productionSetupProblems({ ...sourced, source: { productionId: "empty-book" } }, [], productions).join(" "), /no longer in this world/);
     // Without the world's productions only the format is checked: the client may not hold them yet.
     assert.deepEqual(productionSetupProblems({ ...sourced, source: { productionId: "gone" } }, []), []);
