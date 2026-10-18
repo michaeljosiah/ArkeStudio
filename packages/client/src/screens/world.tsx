@@ -4572,7 +4572,7 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
@@ -4895,7 +4895,7 @@ export function NewProductionScreen() {
       <div className="fy-dialogwrap fy-production-step" data-screen="new-production">
         <ProductionDialogBackdrop world={world} />
         <div
-          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds")}
+          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds", kinds.length === 3 && "fy-production-step__panel--three")}
         >
           <div className="fy-production-step__head">
             {kinds.length > 0 ? (
@@ -4916,7 +4916,7 @@ export function NewProductionScreen() {
             </div>
           )}
           {kinds.length > 0 && (
-          <div className="fy-production-kinds">
+          <div className={cx("fy-production-kinds", kinds.length === 3 && "fy-production-kinds--three")}>
             {kinds.map((k) => (
               <button
                 key={k.id}
@@ -4975,12 +4975,12 @@ export function NewProductionScreen() {
               A novel or Other has none, and a video asks it in setup. */}
           {isAudioDrama && (stories.length > 0 || source !== "") && (
             <label className="fy-production-step__adapt">
-              <span className="fy-mono">ADAPT FROM</span>
+              <span className="fy-production-step__label">Adapt from</span>
               <Select label="Adapt from" value={source} onChange={(e) => setSource(e.target.value)}>
                 <option value="">Nothing · an original drama</option>
                 {stories.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.title} · {s.chapters} chapter{s.chapters === 1 ? "" : "s"} · {s.words.toLocaleString("en-GB")} words
+                    {s.title} · {s.kind} · {s.chapters} chapter{s.chapters === 1 ? "" : "s"} · {s.words.toLocaleString("en-GB")} words
                   </option>
                 ))}
                 {source !== "" && !story && <option value={source}>{source} · no longer here</option>}

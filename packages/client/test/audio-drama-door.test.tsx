@@ -132,7 +132,7 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Audio drama/, "the drama is the kind already chosen");
     const adapt = m.container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!;
     assert.equal(adapt.value, "low-water");
-    assert.deepEqual([...adapt.options].map(o => o.textContent), ["Nothing · an original drama", "Low Water · 2 chapters · 7,500 words"],
+    assert.deepEqual([...adapt.options].map(o => o.textContent), ["Nothing · an original drama", "Low Water · book · 2 chapters · 7,500 words"],
       "the drama made from it is never offered as a story to adapt");
     assert.doesNotMatch(text, /DEFAULTS · CHANGE LATER|FRAME|RATE|LENGTH/, "no frame, rate, episodes or length for a story for the ear");
     assert.equal(button(m.container, "Create"), undefined, "nothing is created before Arke has read it");
@@ -244,6 +244,25 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     await choose(m.container.querySelector<HTMLSelectElement>(".fy-production-setup__fields select")!, "film");
     const update = m.setup().at(-1)!;
     assert.deepEqual(update.action.operation === "update" && update.action.update.fields, { kind: "film", aspect: "16:9", audioDrama: null });
+  });
+});
+
+describe("a book offers Adapt… (SPEC-057 R-4)", () => {
+  it("its ⋯ opens Tell a story's step two holding the book, as an audio drama", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      __setStateForTest(withStories(), { connection: "open" });
+      root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water`]}><App /></MemoryRouter>);
+    });
+    const more = container.querySelector<HTMLButtonElement>(".fy-story-more__btn")!;
+    assert.ok(more, "the book's heading carries a ⋯");
+    await act(async () => more.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    await click(container, "Adapt…");
+    assert.match(container.textContent!, /What kind of story\?/);
+    assert.equal(container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!.value, "low-water");
+    assert.ok(button(container, "Plan with Arke"));
   });
 });
 

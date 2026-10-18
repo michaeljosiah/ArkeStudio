@@ -10,14 +10,14 @@ import {
   takeCostCopy,
   type ModelChoices,
 } from "@arke-studio/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Composer } from "../components/composer.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait } from "../components/portrait.js";
 import { Button } from "../components/ui.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { ChevronRight, Lock } from "../components/icons.js";
+import { ChevronRight, Lock, More } from "../components/icons.js";
 import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
@@ -57,6 +57,36 @@ export function ProductionHomeScreen() {
   if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
   if (production && productionShape(production.meta).isAudioDrama) return <AudioDramaEpisodesScreen />;
   return <ProductionDashboardScreen />;
+}
+
+/**
+ * The story's ⋯ (SPEC-057 R-4). Adapt… opens Tell a story's step two holding this book, as an
+ * audio drama: the one adaptation made from step two. A film or a micro drama adapts the book from
+ * its own setup, which offers the same story under Adapt from.
+ */
+function StoryMore({ onAdapt }: { onAdapt: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: Event) => { if (box.current !== null && !box.current.contains(event.target as Node)) setOpen(false); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", key); };
+  }, [open]);
+  return (
+    <span ref={box} className="fy-story-more">
+      <button type="button" className="fy-story-more__btn" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <More size={16} />
+      </button>
+      {open && (
+        <div className="fy-story-more__menu" role="menu" aria-label="More">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onAdapt(); }}>Adapt…</button>
+        </div>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -165,6 +195,10 @@ export function ProductionDashboardScreen() {
                   inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
+          {/* Adapt… (SPEC-057 R-4): a book with chapters is something to make a drama from. */}
+          {chapters.length > 0 && (
+            <StoryMore onAdapt={() => navigate(`/w/${worldId}/productions/new`, { state: { adapt: { productionId: production.meta.id } } })} />
+          )}
         </div>
         <div className="fy-h1row__meta">
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
