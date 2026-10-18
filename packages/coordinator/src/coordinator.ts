@@ -10599,7 +10599,9 @@ export class Coordinator {
           : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch((err: unknown) => {
           this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
         });
-        await this.refreshWorldSnapshot(msg.worldId);
+        // Only while that world is still open (codex on PR 1873): a write landing after the author
+        // moved on never reopens the world they left.
+        if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "decide-drama-take": {
