@@ -8,9 +8,24 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
 
+/**
+ * One read-change-write at a time per file (codex on PR 1873): two edits arriving together would
+ * both read the same bytes, and the later one's fenced write would be refused.
+ */
+const writing = new Map<string, Promise<unknown>>();
+export async function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const before = writing.get(key) ?? Promise.resolve();
+  const turn = before.catch(() => {}).then(work);
+  writing.set(key, turn);
+  try { return await turn; } finally { if (writing.get(key) === turn) writing.delete(key); }
+}
+
 /** `audio-drama.json`, changed in one write fenced on the file it was read from (SPEC-057 R-85). */
 async function writeDramaRecord(store: WorldStore, productionId: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
   const path = `productions/${productionId}/audio-drama.json`;
+  return oneAtATime(`${store.dir}/${path}`, () => writeDramaRecordNow(store, path, change));
+}
+async function writeDramaRecordNow(store: WorldStore, path: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (live === null) throw new Error("that production is not an audio drama");
   const next = AudioDramaRecordSchema.parse(change(AudioDramaRecordSchema.parse(JSON.parse(live))));
@@ -59,6 +74,14 @@ export async function saveEpisodeScript(
   const path = `productions/${productionId}/scripts/${episodeScriptFile(input.episode)}`;
   // Parsed here so a broken relation (a cut with no line breaking in) is refused before it lands.
   const record = EpisodeScriptSchema.parse({ version: 1, episode: input.episode, title: input.title, blocks: input.blocks });
+  // A placed sound must be one this production can play (codex on PR 1872): audio, here, not retired.
+  for (const block of record.blocks) {
+    if ((block.kind !== "sound" && block.kind !== "ambience" && block.kind !== "music") || !block.soundArtifact) continue;
+    const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === block.soundArtifact);
+    if (!artifact || artifact.kind !== "audio" || artifact.retiredAt !== undefined || (artifact.production !== undefined && artifact.production !== productionId)) {
+      throw new Error(`“${block.heard}” is placed with a sound this production cannot use. Choose its sound again.`);
+    }
+  }
   const result = await store.commit({
     kind: "episode-script-save",
     source: options.source ?? "editor",

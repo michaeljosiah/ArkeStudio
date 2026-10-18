@@ -120,7 +120,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);
-    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); }
+    // A save that lands clears what an earlier one said (codex on PR 1871): Hear prices again.
+    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); setFailure(null); }
     else { setFailure(result.reason ?? "Not saved."); setDirty(false); setConflict(true); }
   }), [saving, version]);
 
@@ -420,7 +421,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             blocks={headings.length === 0 ? blocks : blocks.filter((_, i) => scenes[i]?.id === selectedScene?.id)} />
         )}
         {side === "review" && (
-          <ReviewColumn world={world} production={production} episode={episode} version={version ?? 1} blocks={blocks} onClose={() => setSide(null)}
+          // The saved script it names as evidence, never an unsaved draft (codex on PR 1873).
+          <ReviewColumn world={world} production={production} episode={episode} version={stored?.script.version ?? 1} blocks={stored?.script.blocks ?? []} onClose={() => setSide(null)}
             onPick={(id) => { setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
         )}
       </div>

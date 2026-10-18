@@ -52,7 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { DramaReviewDecisionSchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2354,7 +2354,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("set-drama-role"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      role: SlugSchema,
+      role: DramaRoleKeySchema,
       value: DramaRoleSchema.nullable(),
     })
     .strict(),
@@ -2377,6 +2377,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       episode: z.number().int().min(1).max(200),
       block: UlidSchema,
       keep: z.enum(["new", "kept"]),
+      /** The waiting take the author heard: a different one waiting now is not decided. */
+      waiting: ArtifactIdSchema,
     })
     .strict(),
   z

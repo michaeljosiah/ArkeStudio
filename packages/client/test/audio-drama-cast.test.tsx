@@ -81,7 +81,7 @@ describe("the drama's Cast (230k)", () => {
     const headers = [...container.querySelectorAll('[role="columnheader"]')].map((cell) => cell.textContent);
     assert.deepEqual(headers, ["Role", "Voice", "How they sound", "Lines"]);
     assert.match(container.textContent!, /This production · 4 roles · 2 without a voice/);
-    assert.match(rowText(container, "narrator"), /Narrator.*optional role.*App narrator/);
+    assert.match(rowText(container, "@narrator"), /Narrator.*optional role.*App narrator/);
     assert.match(rowText(container, "maren-kest"), /Maren Kest.*from character.*1$/);
     assert.match(rowText(container, "bray"), /BrayNo voice.*Warm, steady\. Counts when frightened\.When the narrator quotes them: A slower warmth\.2$/);
     assert.doesNotMatch(rowText(container, "maren-kest"), /When the narrator quotes/, "Maren is never quoted by the narrator");
@@ -103,7 +103,7 @@ describe("the drama's Cast (230k)", () => {
     const reveal = container.querySelector('input[aria-label="Revealed in episode"]')!;
     await act(async () => (props(reveal) as { onChange: (e: unknown) => void }).onChange({ target: { value: "4" } }));
     await act(async () => props(reveal).onBlur!({}));
-    assert.deepEqual(sent.at(-1), { kind: "set-drama-role", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", role: "bray", value: { publicLabel: "The counter", revealEpisode: 4 } });
+    assert.deepEqual(sent.at(-1), { kind: "set-drama-role", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", role: "bray", value: { sound: "Warm, steadier.", publicLabel: "The counter", revealEpisode: 4 } }, "built on the edit before it");
   });
 
   it("shows a hidden role by its public label, locked until its episode", async () => {
@@ -139,7 +139,33 @@ describe("Review in the score (230j)", () => {
     const decided = sent.at(-1) as { kind: string; key: string; decision: string };
     assert.equal(decided.kind, "decide-drama-note");
     assert.equal(decided.decision, "intentional");
-    assert.match(decided.key, /^clarity:/);
+    assert.match(decided.key, /^e1:clarity:/, "scoped to its episode");
+  });
+});
+
+describe("codex round 1 on PR 1873", () => {
+  it("builds a second quick edit on the first, never on the stale role", async () => {
+    const { container, sent } = await mount(drama([line("bray", "Climb."), narration("\u201CTwo,\u201D Bray counted.")]), "cast");
+    await act(async () => props(container.querySelector('[data-role="bray"] [role="row"]')!).onClick!({}));
+    const [sound, narrator] = [...container.querySelectorAll("textarea")];
+    await act(async () => props(sound!).onBlur!({ target: { value: "Warm, steadier." } }));
+    await act(async () => props(narrator!).onBlur!({ target: { value: "Slower." } }));
+    assert.deepEqual((sent.at(-1) as { value: unknown }).value, { sound: "Warm, steadier.", narration: "Slower." });
+  });
+
+  it("lists a decided note with how it was decided, and reopens it", async () => {
+    const state = drama([{ id: ulid(), kind: "heading", place: "The quay" }, line("bray", "Climb.")]);
+    // The score with its one note decided Intentional in the production.
+    const notes = (await import("@arke-studio/contracts")).reviewDramaScript({ episode: 1, version: 3, names: { bray: "Bray" },
+      blocks: state.world!.productions.at(-1)!.episodeScripts![0]!.script.blocks });
+    const decided = structuredClone(state);
+    (decided.world!.productions.at(-1) as { audioDrama: Record<string, unknown> }).audioDrama.review = { [notes.notes[0]!.key]: "intentional" };
+    const { container, sent } = await mount(decided, "script/1");
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Review")!).onClick!({}));
+    const closed = container.querySelector('[data-decided="intentional"]')!;
+    assert.match(closed.textContent!, /Clarity · script v3 · intentional/);
+    await act(async () => props([...closed.querySelectorAll("button")].find((button) => button.textContent === "Reopen")!).onClick!({}));
+    assert.deepEqual(sent.at(-1), { kind: "decide-drama-note", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", key: notes.notes[0]!.key, decision: null });
   });
 });
 

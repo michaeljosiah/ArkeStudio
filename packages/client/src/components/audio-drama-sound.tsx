@@ -115,6 +115,8 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
   const [quote, setQuote] = useState<DramaSound | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // A sound made only in part (one loop of two) is said before it is placed (codex on PR 1872).
+  const [partial, setPartial] = useState<string | null>(null);
   const asked = useRef<string | null>(null);
   const durationSec = cue.kind === "ambience" || automatic ? null : seconds;
   const input = { cue: cue.kind, heard: cue.heard, prompt: prompt.trim() || cue.heard, durationSec, ...(cue.kind === "sound" && loop ? { loop } : {}), name: name.trim() || CUE_LABEL[cue.kind] };
@@ -128,7 +130,8 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
     if (result.requestId === asked.current) { setQuote(result); if (result.disposition === "refused") setFailure(result.reason ?? "Not priced."); }
     if (result.requestId === making) {
       setMaking(null);
-      if (result.disposition === "made" && result.artifactIds?.[0]) onMade(result.artifactIds[0]);
+      if (result.disposition === "made" && result.artifactIds?.[0] && result.reason) { setPartial(result.artifactIds[0]); setFailure(result.reason); }
+      else if (result.disposition === "made" && result.artifactIds?.[0]) onMade(result.artifactIds[0]);
       else setFailure(result.reason ?? "Not made.");
     }
   }), [making, key]);
@@ -153,10 +156,11 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
       )}
       {cue.kind === "sound" && <label className="fy-ad-gen__check"><input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} /> Loop seamlessly</label>}
       <label>Save as<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
-      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec ? ` · ${request.durationSec} s` : " · length chosen by the model"}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
+      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec ? ` · ${request.durationSec} s` : ""}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
       {failure && <p role="alert" className="fy-ad-gen__fail">{failure}</p>}
       <footer>
         <Button variant="ghost" onClick={onBack}>Back</Button>
+        {partial && <Button variant="secondary" onClick={() => onMade(partial)}>Place it</Button>}
         <Button variant="primary" disabled={!priced || making !== null} onClick={() => {
           setFailure(null);
           const requestId = generateDramaSound(world.meta.worldId, production.meta.id, { ...input, quoteToken: priced!.token });
@@ -174,8 +178,10 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
   const recorder = useRef<MediaRecorder | null>(null);
   const microphone = useRef<MediaStream | null>(null);
   const importing = useRef<string | null>(null);
+  const disposed = useRef(false);
   // Leaving mid-take lets the microphone go (codex on PR 1872): nothing else could stop it after.
   useEffect(() => () => {
+    disposed.current = true;
     const live = recorder.current;
     if (live && live.state !== "inactive") { live.onstop = null; live.stop(); }
     microphone.current?.getTracks().forEach((track) => track.stop());
@@ -192,6 +198,8 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
     setFailure(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Granted after the panel was left (codex on PR 1872): let it go rather than record unseen.
+      if (disposed.current) { stream.getTracks().forEach((track) => track.stop()); return; }
       microphone.current = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(stream);

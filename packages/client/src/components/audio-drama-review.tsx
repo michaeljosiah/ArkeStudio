@@ -34,6 +34,9 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
       const voice = cast[block.speaker]?.voice ?? sheet?.voice;
       if (voice) voices[block.speaker] = `${voice.provider}/${voice.voiceId}`;
     }
+    // The narrator's voice is told apart from the characters' too (codex on PR 1873).
+    const narrator = cast[DRAMA_NARRATOR]?.voice;
+    if (narrator) voices[DRAMA_NARRATOR] = `${narrator.provider}/${narrator.voiceId}`;
     for (const key of Object.keys(cast)) {
       if (key === DRAMA_NARRATOR || names[key] !== undefined) continue;
       names[key] = world.sheets.find((sheet) => sheet.id === key)?.name ?? key;
@@ -51,7 +54,9 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
   }, [blocks, version, episode, record, world.sheets, world.productions]);
   const decided = record?.review ?? {};
   const open = review.notes.filter((note) => decided[note.key] === undefined);
-  const settled = review.notes.length - open.length;
+  // Decided notes stay to be read, with how they were decided, and can be opened again (codex on PR 1873).
+  const settledNotes = review.notes.filter((note) => decided[note.key] !== undefined);
+  const settled = settledNotes.length;
   const [current, setCurrent] = useState<string | null>(null);
   const at = Math.max(0, open.findIndex((note) => note.key === current));
   const show = (index: number) => {
@@ -101,6 +106,13 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
             </li>
           );
         })}
+        {settledNotes.map((note) => (
+          <li key={note.key} className="fy-ad-review__note fy-ad-review__note--closed" data-decided={decided[note.key]}>
+            <span className="fy-ad-review__kind">{CHECK[note.check]} · {note.evidence} · {decided[note.key] === "intentional" ? "intentional" : "dismissed"}</span>
+            <p>{note.says}</p>
+            <button type="button" className="fy-linkbtn" onClick={() => decideDramaNote(world.meta.worldId, production.meta.id, note.key, null)}>Reopen</button>
+          </li>
+        ))}
         {review.checked.map((entry, index) => (
           <li key={`${entry.check}-${index}`} className="fy-ad-review__note fy-ad-review__note--closed">
             <span className="fy-ad-review__kind">{CHECK[entry.check]} · {entry.check === "intelligibility" ? "audio · not heard" : `script v${version} · checked`}</span>

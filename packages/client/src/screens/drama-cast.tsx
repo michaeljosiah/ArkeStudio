@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
-  DRAMA_NARRATOR, DramaRoleSchema,
+  DRAMA_NARRATOR, DramaRoleSchema, narrationQuotes,
   type AudiobookReader, type DramaRole, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -9,7 +9,7 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { Lock, X } from "../components/icons.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SentList, useHearQuote } from "../components/audio-drama-hear.js";
-import { dramaBlocks, dramaCastRoles, takesOutOfDate, type DramaCastRole } from "../lib/audio-drama-cast.js";
+import { dramaBlocks, dramaCastRoles, quotableNames, takesOutOfDate, type DramaCastRole } from "../lib/audio-drama-cast.js";
 import { setDramaRole } from "../lib/store.js";
 
 /**
@@ -94,18 +94,25 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
   const [problem, setProblem] = useState<string | null>(null);
   const [label, setLabel] = useState(role.role?.publicLabel ?? "");
   const [reveal, setReveal] = useState(role.role?.revealEpisode ? String(role.role.revealEpisode) : "");
+  // The role as last sent (codex on PR 1873): two edits before the world answers build on each
+  // other, never both on the same stale role.
+  const latest = useRef(role.role);
+  useEffect(() => { latest.current = role.role; }, [JSON.stringify(role.role ?? null)]);
   const save = (patch: Partial<DramaRole>) => {
-    const next = nextRole(role.role, patch);
+    const next = nextRole(latest.current, patch);
     if (next !== null) {
       const checked = DramaRoleSchema.safeParse(next);
       if (!checked.success) { setProblem(checked.error.issues[0]?.message ?? "Not saved."); return; }
     }
     setProblem(null);
-    if (!setDramaRole(world.meta.worldId, production.meta.id, role.key, next)) setProblem("The studio is disconnected.");
+    if (!setDramaRole(world.meta.worldId, production.meta.id, role.key, next)) { setProblem("The studio is disconnected."); return; }
+    latest.current = next ?? undefined;
   };
   // Both or neither (R-59): a label waits for its episode, and clearing both shows the name again.
   const saveHidden = (nextLabel: string, nextReveal: string) => {
     const episode = Number(nextReveal);
+    const planned = production.audioDrama?.plan.episodes ?? 200;
+    if (nextLabel.trim() !== "" && episode > planned) { setProblem(`The plan has ${planned} episodes.`); return; }
     if (nextLabel.trim() === "" && nextReveal === "") save({ publicLabel: undefined, revealEpisode: undefined });
     else if (nextLabel.trim() !== "" && Number.isInteger(episode) && episode >= 2) save({ publicLabel: nextLabel.trim(), revealEpisode: episode });
   };
@@ -139,7 +146,7 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
           <input aria-label="Public label" placeholder="Public label" maxLength={80} value={label}
             onChange={(event) => setLabel(event.target.value)} onBlur={() => saveHidden(label, reveal)} />
           <label>until episode
-            <input aria-label="Revealed in episode" type="number" min={2} max={200} value={reveal}
+            <input aria-label="Revealed in episode" type="number" min={2} max={production.audioDrama?.plan.episodes ?? 200} value={reveal}
               onChange={(event) => setReveal(event.target.value)} onBlur={() => saveHidden(label, reveal)} />
           </label>
         </fieldset>
@@ -147,7 +154,8 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
       <div className="fy-ad-cast__acts">
         <button type="button" className="fy-linkbtn" aria-expanded={sent} onClick={() => setSent(!sent)}>What's sent</button>
         <span className="gap" />
-        {role.from === "production" && sheetVoice && <Button size="sm" variant="ghost" onClick={() => setPending({ voice: null, label: sheetVoice.label ?? sheetVoice.voiceId })}>Use the character's voice</Button>}
+        {/* Back to the character's voice, or to none, so a speaker can stand in or be left out again (codex on PR 1873). */}
+        {role.from === "production" && <Button size="sm" variant="ghost" onClick={() => setPending({ voice: null, label: sheetVoice ? sheetVoice.label ?? sheetVoice.voiceId : "No voice" })}>{sheetVoice ? "Use the character's voice" : "No voice"}</Button>}
         <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>Change voice…</Button>
       </div>
       {problem && <p className="fy-ad-cast__problem" role="alert">{problem}</p>}
@@ -184,7 +192,10 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
 
 /** The request for this role's first line, as Hear would send it (R-60): priced, never made here. */
 function RoleSent({ world, production, role }: { world: WorldBundle; production: ProductionBundle; role: DramaCastRole }) {
-  const first = dramaBlocks(production).find(({ block }) => role.key === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === role.key);
+  // A role heard only in the narrator's mouth shows the narration that quotes it (codex on PR 1873).
+  const quotable = quotableNames(world, production);
+  const first = dramaBlocks(production).find(({ block }) => role.key === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === role.key)
+    ?? dramaBlocks(production).find(({ block }) => block.kind === "narration" && narrationQuotes(block.words, quotable).includes(role.key));
   // Priced from the saved script, as Hear is: the request shown is the one a press would send.
   const saved = production.episodeScripts?.find((entry) => entry.script.episode === first?.episode)?.hash ?? null;
   const quote = useHearQuote(world.meta.worldId, production.meta.id, first?.episode ?? 1, first ? [first.block.id] : [], {}, JSON.stringify(role.role ?? null), false, saved);

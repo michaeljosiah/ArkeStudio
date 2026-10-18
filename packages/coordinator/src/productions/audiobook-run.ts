@@ -326,6 +326,8 @@ export interface ReadingRoom {
   freePlanAllowance?: (model: string) => FreePlanAllowance;
   /** This machine can split a grouped request (design turn 185); grouping is not offered without it. */
   transcriber?: boolean;
+  /** Why the book's own narrator cannot read now (issue 1661), as the door says it; absent while it can. */
+  unavailable?: string;
 }
 
 /**

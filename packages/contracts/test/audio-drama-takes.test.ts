@@ -26,3 +26,14 @@ describe("a line's take (SPEC-057 R-29..R-31)", () => {
     assert.equal(dramaTakeState(line, { waiting: take({ misread: "climb snow" }) }), "misread");
   });
 });
+
+describe("a take and the role's voice now (codex on PR 1871)", () => {
+  it("is out of date in another voice, or when a stand-in's speaker now has a voice", () => {
+    const kept = take();
+    assert.equal(dramaTakeState(line, { kept }, { provider: "elevenlabs", voiceId: "v" }), "kept");
+    assert.equal(dramaTakeState(line, { kept }, { provider: "elevenlabs", voiceId: "w" }), "out of date");
+    assert.equal(dramaTakeState(line, { kept }, { provider: "elevenlabs", voiceId: "v", model: "eleven_v3" }), "out of date", "another model of the same voice");
+    assert.equal(dramaTakeState(line, { kept: take({ standIn: true }) }), "stand-in");
+    assert.equal(dramaTakeState(line, { kept: take({ standIn: true }) }, { provider: "elevenlabs", voiceId: "v" }), "out of date");
+  });
+});

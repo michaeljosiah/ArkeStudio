@@ -2276,6 +2276,7 @@ function handleFrame(json: string): void {
       if (event.outcome === "proposed" && event.proposal !== undefined) {
         // What is left after a run keeps the author's skips for the rows still in it, and how the run ended.
         const present = new Set(event.proposal.rows.map((row) => row.block));
+        const shown = new Map((before?.proposal?.rows ?? []).map((row) => [row.block, new Set(row.disagrees ?? [])]));
         illustration = {
           ...illustration,
           [key]: {
@@ -2283,7 +2284,11 @@ function handleFrame(json: string): void {
             proposal: event.proposal,
             skipped: (before?.skipped ?? []).filter((block) => present.has(block)),
             // A row refused again is held again: consent to try it was for the run that just ended (codex on PR 1559).
-            without: (before?.without ?? []).filter((block) => present.has(block) && event.proposal!.rows.find((row) => row.block === block)?.refused === undefined),
+            // So is one the run found a look disagreeing on that it never showed: the consent was not to that (codex on PR 1868).
+            without: (before?.without ?? []).filter((block) => {
+              const row = event.proposal!.rows.find((candidate) => candidate.block === block);
+              return row !== undefined && row.refused === undefined && (row.disagrees ?? []).every((who) => shown.get(block)?.has(who) === true);
+            }),
             ...((before?.state === "done" || before?.state === "stopped") && before.progress !== undefined ? { progress: before.progress } : {}),
           },
         };
@@ -5095,8 +5100,8 @@ export function decideDramaNote(worldId: string, productionId: string, key: stri
 }
 
 /** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */
-export function decideDramaTake(worldId: string, productionId: string, episode: number, block: string, keep: "new" | "kept"): void {
-  send({ kind: "decide-drama-take", worldId, productionId, episode, block, keep });
+export function decideDramaTake(worldId: string, productionId: string, episode: number, block: string, keep: "new" | "kept", waiting: string): void {
+  send({ kind: "decide-drama-take", worldId, productionId, episode, block, keep, waiting: waiting as never });
 }
 
 /**

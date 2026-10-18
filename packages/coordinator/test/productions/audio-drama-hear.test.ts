@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { decideDramaNote, saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
@@ -125,7 +125,7 @@ describe("the cast in each request (SPEC-057 R-55..R-58, R-85)", () => {
     const plain: EpisodeScriptBlock = { id: ulid(), kind: "narration", words: "The water took the stairs." };
     const { store, id, deps } = await drama([spoken, quoting, plain]);
     await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even.", narration: "A little of her slowness." });
-    await setDramaRole(store, id, "narrator", { voice: BREEZE, sound: "Close, unhurried." });
+    await setDramaRole(store, id, DRAMA_NARRATOR, { voice: BREEZE, sound: "Close, unhurried." });
     const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [spoken.id, quoting.id, plain.id], quoteOnly: true }, deps());
     assert.ok(quoted.disposition === "quoted");
     if (quoted.disposition !== "quoted") return;
@@ -195,13 +195,110 @@ describe("codex round 1 on PR 1871", () => {
     const dir = ".staging/drama/recovered";
     await mkdir(join(store.dir, dir), { recursive: true });
     await writeFile(join(store.dir, dir, "line.mp3"), Buffer.from("audio:paid"));
-    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, productionId: id, model: "eleven_multilingual_v2",
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs", productionId: id, model: "eleven_multilingual_v2",
       params: { block: a.id, text: a.kind === "dialogue" ? a.words : "", voiceId: "v_8Kq2" }, landedFiles: [`${dir}/line.mp3`] } as unknown as Job;
     const made = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: quoted.quote.token },
-      deps({ succeededJobs: (match) => [paid].filter(match) }));
+      deps({ jobs: (match) => [paid].filter(match) }));
     assert.deepEqual(made, { disposition: "made", made: [a.id] });
     assert.equal(sent.length, 0, "the line is not sent again");
     assert.ok(takes()!.lines[a.id]!.kept);
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_TAKE_SCHEMA_VERSION, "a build that cannot read takes refuses the world");
+  });
+});
+
+describe("codex round 2 on PR 1871", () => {
+  it("refuses a line already being made rather than paying for it twice", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, sent } = await drama([a]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const running = { id: newId("jb"), status: "running", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs",
+      productionId: id, model: "eleven_multilingual_v2", params: { block: a.id, text: "Climb.", voiceId: "v_8Kq2" } } as unknown as Job;
+    await assert.rejects(hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: quoted.quote.token }, deps({ jobs: (match) => [running].filter(match) })), /already being made/);
+    assert.equal(sent.length, 0);
+  });
+
+  it("keeps and reports the lines made before a later one fails", async () => {
+    const a = maren("One."), b = maren("Two.");
+    const { store, id, deps, takes } = await drama([a, b]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id] }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    let calls = 0;
+    const base = deps();
+    const failingSecond = deps({ waitForJob: async (jobId) => (++calls === 1 ? base.waitForJob(jobId) : ({ id: jobId, status: "failed" } as unknown as Job)) });
+    const made = await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id], quoteToken: quoted.quote.token }, failingSecond);
+    assert.equal(made.disposition, "made");
+    assert.ok(made.disposition === "made" && made.made.length === 1 && /1 of 2 made/.test(made.reason ?? ""));
+    assert.ok(takes()!.lines[a.id]!.kept, "the paid first line is kept");
+  });
+
+  it("decides only the waiting take the author heard", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, takes } = await drama([a]);
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const retake = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true, quoteToken: retake.disposition === "quoted" ? retake.quote.token : "" }, deps());
+    const waiting = takes()!.lines[a.id]!.waiting!;
+    await assert.rejects(decideDramaTake(store, id, 1, a.id, "new", "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV"), /no take is waiting/);
+    await decideDramaTake(store, id, 1, a.id, "new", waiting.artifactId);
+    assert.equal(takes()!.lines[a.id]!.kept!.artifactId, waiting.artifactId);
+  });
+});
+
+describe("codex round 3 on PR 1871", () => {
+  it("recovers a paid retake as the take that waits, sending nothing again", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, sent, takes } = await drama([a]);
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const kept = takes()!.lines[a.id]!.kept!;
+    const before = sent.length;
+    await mkdir(join(store.dir, ".staging/drama/retake"), { recursive: true });
+    await writeFile(join(store.dir, ".staging/drama/retake/line.mp3"), Buffer.from("audio:retake"));
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs",
+      productionId: id, model: "eleven_multilingual_v2", params: { block: a.id, text: "Climb.", voiceId: "v_8Kq2" }, landedFiles: [".staging/drama/retake/line.mp3"] } as unknown as Job;
+    const retake = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true, quoteToken: retake.disposition === "quoted" ? retake.quote.token : "" },
+      deps({ jobs: (match) => [paid].filter(match) }));
+    assert.equal(sent.length, before, "the retake is not bought twice");
+    assert.equal(takes()!.lines[a.id]!.kept!.artifactId, kept.artifactId);
+    assert.ok(takes()!.lines[a.id]!.waiting, "the recovered retake waits for the author");
+  });
+
+  it("refuses to hear a production that is not an audio drama", async () => {
+    const { store, deps } = await drama([maren("Climb.")]);
+    await assert.rejects(hearDramaLines(store, "the-ledger-of-nights", { episode: 1, blocks: [ulid()] }, deps()), /not an audio drama/);
+  });
+});
+
+describe("codex round 2 on PR 1873", () => {
+  const BREEZE = { provider: "breezeblue", model: "breeze-tts-2", voiceId: "breeze-a", label: "Breeze A" };
+
+  it("sends a take again when How they sound changes, never replaying it as performed", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps } = await drama([a]);
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even." });
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const same = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(same.disposition === "quoted" && same.quote.requests[0]!.cached, "the same note is played, not sent");
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Quick, bright." });
+    const changed = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(changed.disposition === "quoted" && !changed.quote.requests[0]!.cached, "a new note is a new performance");
+  });
+
+  it("lands a cast edit and a review decision made together", async () => {
+    const { store, id } = await drama([maren("Climb.")]);
+    await Promise.all([
+      setDramaRole(store, id, "maren-kest", { sound: "Quick, bright." }),
+      decideDramaNote(store, id, "e1:pacing:x:1", "dismissed"),
+      setDramaRole(store, id, DRAMA_NARRATOR, { sound: "Close." }),
+    ]);
+    const record = store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
+    assert.deepEqual(Object.keys(record.cast ?? {}).sort(), [DRAMA_NARRATOR, "maren-kest"].sort());
+    assert.deepEqual(record.review, { "e1:pacing:x:1": "dismissed" });
   });
 });

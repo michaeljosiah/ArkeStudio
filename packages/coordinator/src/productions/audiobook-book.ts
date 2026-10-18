@@ -153,6 +153,9 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   // The book's own narrator, when it has one and it speaks now (R-46), is said on its chip.
   const own = bookFile === null || bookFile === "unreadable" ? undefined : bookFile.narrator;
   if (own !== undefined && sameVoice(own, room.narrator)) narratorRow.book = true;
+  // And when it cannot read now, why (issue 1661): the door said `Performed · George` over a
+  // narrator a 402 had silenced, with the reason only in app.jsonl.
+  if (room.unavailable !== undefined) narratorRow.unavailable = room.unavailable;
   // A narrator whose row takes no phrase cannot play a note (R-45): said on each noted speaker
   // before anything is made.
   const narratorModel = room.models.find((m) => m.provider === room.narrator.provider && m.id === room.narrator.model && m.capability === "voice-tts") ?? null;

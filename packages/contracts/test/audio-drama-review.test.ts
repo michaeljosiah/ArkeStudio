@@ -119,6 +119,54 @@ describe("cast (R-57..R-59, R-85)", () => {
       voice: { provider: "elevenlabs", model: "m", voiceId: "a" }, estimatedMicroUsd: 0, madeAt: "2026-10-18T12:00:00.000Z" };
     assert.equal(dramaTakeState(block, { kept }, { provider: "elevenlabs", voiceId: "a" }), "kept");
     assert.equal(dramaTakeState(block, { kept }, { provider: "elevenlabs", voiceId: "b" }), "out of date");
-    assert.equal(dramaTakeState(block, { kept: { ...kept, standIn: true } }, { provider: "elevenlabs", voiceId: "b" }), "stand-in");
+    assert.equal(dramaTakeState(block, { kept: { ...kept, standIn: true } }), "stand-in");
+    assert.equal(dramaTakeState(block, { kept: { ...kept, standIn: true } }, { provider: "elevenlabs", voiceId: "b" }), "out of date", "a voice of its own now");
+  });
+});
+
+describe("codex round 1 on PR 1873", () => {
+  it("catches a one-word secret, whole", () => {
+    const plan = { minutes: 25, keptFromListener: [{ fact: "Pregnant.", revealEpisode: 4 }] };
+    const said = line("bray", "She's pregnant, Maren.");
+    const review = reviewDramaScript({ episode: 2, version: 1, names, plan, blocks: [heading("Quay"), ambience("Gulls"), said] });
+    assert.deepEqual(review.notes.filter((note) => note.check === "mystery").map((note) => note.blocks), [[said.id]]);
+    const clear = reviewDramaScript({ episode: 2, version: 1, names, plan, blocks: [heading("Quay"), ambience("Gulls"), line("bray", "Pregnancy tests are dear.")] });
+    assert.equal(clear.notes.filter((note) => note.check === "mystery").length, 0);
+  });
+
+  it("names a role by its first word only where no other role shares it", () => {
+    const two = { kest: "Maren Kest", vale: "Maren Vale" };
+    assert.deepEqual(narrationQuotes("“Climb,” said Maren Kest.", two), ["kest"]);
+    assert.deepEqual(narrationQuotes("“Climb,” said Maren.", two), [], "an ambiguous first name names neither");
+  });
+
+  it("opens a decided note again when its line is rewritten", () => {
+    const leak = (words: string) => ({ ...line("bray", words), id: "01ARZ3NDEKTSV4RRFFQ69G5FAV" }) as EpisodeScriptBlock;
+    const plan = { minutes: 25, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 5 }] };
+    const key = (words: string) => reviewDramaScript({ episode: 1, version: 1, names, plan, blocks: [heading("Quay"), ambience("Gulls"), leak(words)] })
+      .notes.find((note) => note.check === "mystery")!.key;
+    assert.notEqual(key("Ilo's alive."), key("Ilo is alive, I swear it."));
+  });
+
+  it("checks lines before the first heading too", () => {
+    const opener = line("maren-kest", "Bray.");
+    const review = reviewDramaScript({ episode: 1, version: 1, names, blocks: [opener] });
+    assert.deepEqual(review.notes.filter((note) => note.check === "clarity").map((note) => note.blocks), [[opener.id]]);
+  });
+});
+
+describe("codex round 2 on PR 1873", () => {
+  it("keeps a reveal inside the planned episodes, and a role key no sheet id can take", () => {
+    const record = (cast: object) => AudioDramaRecordSchema.safeParse({ version: 1, plan: { episodes: 6, minutes: 25 }, cast });
+    assert.ok(!record({ ilo: { publicLabel: "The Singer", revealEpisode: 20 } }).success);
+    assert.ok(record({ "@narrator": { sound: "Close." } }).success);
+    assert.ok(!record({ "@bray": { sound: "Close." } }).success);
+  });
+
+  it("matches a short full name, and tells a character in the narrator's voice apart", () => {
+    assert.deepEqual(narrationQuotes("“Go,” said Li.", { li: "Li" }), ["li"]);
+    const review = reviewDramaScript({ episode: 1, version: 1, names, voices: { maren: "el/v1", "@narrator": "el/v1" },
+      blocks: [heading("Quay"), narration("The tide turned."), line("maren", "Climb.")] });
+    assert.ok(review.notes.some((note) => note.says === "The narrator and Maren Kest speak in the same voice here."));
   });
 });

@@ -976,7 +976,10 @@ export class Committer {
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       files.some((f) => {
-        if (!/^productions\/[^/]+\/audio-drama\.json$/.test(f.path) || !f.newContent) return false;
+        if (!f.newContent) return false;
+        // A take's instruction digest is the same boundary (codex on PR 1873): strict on the takes file.
+        if (/^productions\/[^/]+\/drama-takes\//.test(f.path)) return f.newContent.includes('"instructionsHash"');
+        if (!/^productions\/[^/]+\/audio-drama\.json$/.test(f.path)) return false;
         const record = JsonFile.parse(f.newContent).value;
         return "cast" in record || "review" in record;
       }) ? DRAMA_CAST_SCHEMA_VERSION : 0,
