@@ -259,6 +259,35 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice?book=inkbound`, "a speaker's chip opens their voice page, the book carried for its narrator (turn 200)");
   });
 
+  it("a book narrator that cannot read is said on its row, the menu and Read the book, which holds (issue 1661)", async () => {
+    const m = await mount(inkbound());
+    // A 402 once had the door say `Performed · George` over the book's own narrator, with no reason given.
+    await answerDoor(m, door("narrator", { voices: [{ name: "Nigerian Woman 2", voice: { label: "Nigerian Woman 2", provider: "google", local: false }, state: "narrator", blocks: 40, book: true, unavailable: "Google needs payment" }] }));
+    assert.match(q(m, '[data-testid="audiobook-line"]')?.textContent ?? "", /Read by Nigerian Woman 2$/, "the book keeps its narrator");
+    const press = q(m, '[data-testid="read-book"]') as HTMLButtonElement;
+    assert.equal(press.disabled, true);
+    assert.match(press.textContent ?? "", / · Google needs payment$/);
+    await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+    assert.match(q(m, '[data-testid="menu-narrator"]')?.textContent ?? "", /Google needs payment/);
+    await act(async () => q(m, '[data-testid="menu-reading"]')!.click());
+    assert.equal(q(m, '[data-testid="reading-narrator-unavailable"]')?.textContent, "Google needs payment");
+  });
+
+  it("asks the door again when a provider's fault comes or goes, so an idle page learns its narrator was silenced (codex on PR 1869)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = asks();
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "a 402 on another job asks again");
+    await answerDoor(m, door("narrator"));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "the same status again asks nothing");
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(asks(), before + 2, "and once more when it clears");
+  });
+
   it("the narrator's chip opens the book's narrator: the app's, or a voice for this book, and nothing written until the press (SPEC-047 R-46)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));

@@ -4,6 +4,7 @@ import { ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookLookSchema,
   PictureLookSchema,
+  chapterLookDisagreement,
   chooseLook,
   cutMoodClothing,
   editLook,
@@ -306,5 +307,20 @@ describe("the frame word (design turn 193, rule 11)", () => {
       assert.equal(frameWord(frame), word, frame);
       assert.equal(lookViewFor(frame), view, frame);
     }
+  });
+
+  // Issue 1658: the Looks sheet flagged a carried look and Illustrate made the pictures anyway.
+  it("says where a chosen or carried look disagrees with the chapter, and only then", () => {
+    const conflict = { kind: "chapter" as const, part: "dress", a: "white linen", b: "mango orange" };
+    const look = { characters: {
+      ife: { name: "Ife", sheet: "ife", text: "mango-orange dress", lookId: "look-3", from: "chapters/03.md", reading: "white linen dress", conflicts: [conflict] },
+      ade: { name: "Ade", sheet: "ade", text: "sleeved shirt", lookId: "look-4" },
+      tunde: { name: "Tunde", sheet: "tunde", text: "suit", conflicts: [conflict] },
+    } } satisfies Pick<AudiobookLook, "characters">;
+    assert.deepEqual(chapterLookDisagreement(look, "ife"), [conflict]);
+    assert.deepEqual(chapterLookDisagreement(look, "ade"), [], "a look the chapter agrees with");
+    assert.deepEqual(chapterLookDisagreement(look, "tunde"), [], "no look rides: the main photo is not the chapter's choice");
+    assert.deepEqual(chapterLookDisagreement(look, "nobody"), []);
+    assert.deepEqual(chapterLookDisagreement(null, "ife"), []);
   });
 });

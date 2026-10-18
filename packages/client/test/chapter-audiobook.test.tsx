@@ -1571,6 +1571,90 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(held.getAttribute("aria-disabled"), "true", "the card answers it until it is accepted or discarded");
     assert.equal(held.querySelector(".fy-ab__menu-meta")?.textContent, "proposed");
   });
+
+  it("a book narrator that cannot read holds Direct and Read and says why, and a read it stalls says what it waits on (issue 1661)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const read = () => q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement;
+    assert.equal(read().disabled, false, "a narrator that reads is pressed");
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, configured: true, validation: "invalid" as const, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(read().disabled, true);
+    assert.match(text(m), /Rachel unavailable · ElevenLabs needs payment/, "the reason on the chapter, not only in app.jsonl");
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    assert.equal(item.getAttribute("aria-disabled"), "true", "never directed for the voice it would fall to");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")?.textContent, "narrator unavailable");
+
+    // Back, and read; the 402 lands on the first request and pauses the lane under it.
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(read().disabled, false);
+    await act(async () => read().click());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4, requests: 9 }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 9/);
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 4");
+  });
+
+  it("a read whose cast voice's lane pauses says what it waits on, though the narrator reads locally (codex on PR 1869)", async () => {
+    // Maren speaks in Low tide on a model the manifest lists, so her block is ElevenLabs' to read.
+    const cast = inkbound("cast");
+    const state = voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } });
+    const m = await mount(state);
+    await answerOpen(m, { voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 5, blocks: 5, requests: 3 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "fishaudio", paused: true, pauseKind: "offline", reason: "offline", held: 1 } }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 3/, "a lane none of the chapter's readers use holds nothing here");
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 5", "Maren's voice, Low tide, is ElevenLabs'");
+  });
+
+  it("a block's own read waits only on its own reader's lane (codex on PR 1869)", async () => {
+    const cast = inkbound("cast");
+    const m = await mount(voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } }));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    const reread = async (index: number, key: string) => {
+      await act(async () => all(m, ".fy-ab__block")[index]!.click());
+      await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+      assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, [key]);
+      await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    };
+    // The narrator's made paragraph read again alone: George reads it here, whatever Maren's lane is doing.
+    await reread(1, "p0.0");
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading…/, "another block's lane holds nothing of this read");
+  });
+
+  it("Make again of a made block waits on that block's own lane (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, ["p0.0"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 1", "the block it reads again, though made");
+  });
+
+  it("the chapter holds Direct and Read on a book narrator an empty voice list cannot resolve (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [] }));
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, true);
+    assert.match(text(m), /Rachel unavailable · the voice list didn't load/);
+    assert.equal((await menuItem(m, "direct-audiobook"))!.getAttribute("aria-disabled"), "true");
+  });
 });
 
 /**
@@ -1753,6 +1837,55 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
     const sent = sentOf(m, "accept-illustration")[0]!;
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p1.0", "p3.0"], ["p1.0"], 120_000]);
+  });
+
+  // Issue 1658: looks the Looks sheet flagged rode in 17 pictures with nothing on the card to say so.
+  it("holds a row whose chapter look disagrees with the chapter, names who, and sends it only as it is", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "disagrees");
+    assert.ok(card.className.includes("fy-ills__card--held"), "amber, as a held row is");
+    assert.equal(card.querySelector('[data-testid="illustration-skip"]'), null, "Review looks stands where Skip would");
+    assert.equal(card.querySelector('[data-testid="illustration-review-look"]')!.textContent, "Review looks");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.match(q(m, '[data-testid="illustration-headline"]')!.textContent!, /· 1 to make · 1 look disagrees$/);
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "not priced in until it is sent");
+    await act(async () => (card.querySelector('[data-testid="illustration-as-is"]') as HTMLButtonElement).click());
+    assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "ready");
+    assert.equal(all(m, '[data-testid="illustration-disagrees"]')[0]!.textContent, "sent as it is");
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    const sent = sentOf(m, "accept-illustration")[0]!;
+    assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p0.0"], 80_000]);
+  });
+
+  it("a row missing a reference whose other look disagrees says both on its one press (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is", "never a Without that also sends a disputed look unsaid");
+    const plain = all(m, '[data-testid="illustration-row"]')[1]!;
+    assert.equal(plain.querySelector('[data-testid="illustration-without"]'), null);
+  });
+
+  it("a row handed back with a look it never showed disagreeing is held again, its Without spent (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"] }), row("p3.0", { at: 150 })] } }));
+    await act(async () => (all(m, '[data-testid="illustration-row"]')[0]!.querySelector('[data-testid="illustration-without"]') as HTMLButtonElement).click());
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    assert.deepEqual(sentOf(m, "accept-illustration")[0]!.without, ["p0.0"]);
+    // The run finds Maren's look disputed now, holds the row, and hands it back marked.
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.progress", ...ids, progress: { proposalId: "ill-1", state: "done", total: 2, made: ["p3.0"], failed: [{ block: "p0.0", reason: "a look disagrees with the chapter · review looks" }], spentMicroUsd: 40_000, confirmedMicroUsd: 80_000 } }));
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held", "not `sent as it is` on a Without given for the missing reference alone");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is");
   });
 
   it("counts the pictures as they are made in the dock's one line and Stop keeps what is made", async () => {

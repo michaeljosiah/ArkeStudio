@@ -5,6 +5,7 @@ import { orderCues } from "./direction-tags.js";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { isSceneBreak } from "./manuscript.js";
 import { DeliverySchema } from "./voice.js";
+import { NARRATOR_UNAVAILABLE_MAX } from "./narrator-availability.js";
 import { chapterParagraphs, voicedBlocks, type VoicedBlock } from "./prose.js";
 import { textDigest } from "./subtitles.js";
 import { expectedSpeechSeconds } from "./speech-pricing.js";
@@ -1172,6 +1173,11 @@ export const AudiobookVoiceRowSchema = z
     noteHeld: z.literal(true).optional(),
     /** On the narrator's row: the book has a narrator of its own (R-46), not the app's. */
     book: z.literal(true).optional(),
+    /**
+     * On the narrator's row: why the book's own narrator cannot read now (`Google needs payment`,
+     * issue 1661). Read and Direct are held until it can, or another narrator is chosen.
+     */
+    unavailable: z.string().min(1).max(NARRATOR_UNAVAILABLE_MAX).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
