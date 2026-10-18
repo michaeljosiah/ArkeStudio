@@ -25,7 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
-import { saveEpisodeScript } from "./productions/audio-drama.js";
+import { decideDramaNote, saveEpisodeScript, setDramaRole } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -10553,6 +10553,18 @@ export class Coordinator {
         } catch (err) {
           refuse(describeCoordinatorError(err));
         }
+        return;
+      }
+      case "set-drama-role":
+      case "decide-drama-note": {
+        // The production's cast and review decisions (SPEC-057 R-53, R-85): written to its
+        // audio-drama.json; the refreshed world shows what landed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await (msg.kind === "set-drama-role"
+          ? setDramaRole(store, msg.productionId, msg.role, msg.value)
+          : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "decide-drama-take": {

@@ -1,7 +1,8 @@
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, performanceNote, quoteSpeech, voiceFormatForModel,
+  DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote, quoteSpeech,
+  sheetSound, voiceFormatForModel,
   type AudiobookReader, type DramaRequest, type DramaTake, type EpisodeScriptBlock, type EpisodeTakes, type Job, type ManifestModel,
   type MissingVoiceChoice, type SpeechQuote,
 } from "@arke-studio/contracts";
@@ -58,22 +59,38 @@ export async function hearDramaLines(
   const lines = script.blocks.filter((block): block is Spoken => wanted.has(block.id) && (block.kind === "dialogue" || block.kind === "narration"));
   if (lines.length === 0) throw new Error("no spoken lines are selected");
   const takes = production.episodeTakes?.find((entry) => entry.episode === input.episode);
+  // The production's cast (R-55..R-58): a voice here wins over the character's, and each role's
+  // note goes to its own request only — the narrator's version never reaches the actor's.
+  const cast = production.audioDrama?.cast ?? {};
+  const narrator = cast[DRAMA_NARRATOR]?.voice ?? deps.narrator;
+  const roleNames: Record<string, string> = {};
+  for (const sheet of bundle.sheets) if (sheet.type === "character" && !sheet.retired) roleNames[sheet.id] = sheet.name;
+  for (const key of Object.keys(cast)) if (key !== DRAMA_NARRATOR) roleNames[key] ??= key;
   const missing = new Map<string, { speaker: string; name: string; blocks: string[] }>();
   const planned: Planned[] = [];
   for (const block of lines) {
-    let voice: AudiobookReader | null = deps.narrator;
+    let voice: AudiobookReader | null = narrator;
     let standIn = false;
     let speakerName = "Narrator";
+    let note: string | undefined;
+    if (block.kind === "narration") {
+      const quoted = narrationQuotes(block.words, roleNames).flatMap((key) => {
+        const version = cast[key]?.narration ?? bundle.sheets.find((sheet) => sheet.id === key)?.narration?.trim();
+        return version ? [`When quoting ${roleNames[key]}: ${version}`] : [];
+      });
+      note = [cast[DRAMA_NARRATOR]?.sound, ...quoted].filter(Boolean).join("\n") || undefined;
+    }
     if (block.kind === "dialogue") {
       const sheet = bundle.sheets.find((candidate) => candidate.id === block.speaker);
       speakerName = sheet?.name ?? block.speaker;
-      const assigned = sheet?.voice;
+      note = cast[block.speaker]?.sound ?? sheetSound(sheet);
+      const assigned = cast[block.speaker]?.voice ?? sheet?.voice;
       const model = assigned ? readerModel(deps.models, assigned) : null;
       voice = assigned && model ? { provider: assigned.provider, model: model.id, voiceId: assigned.voiceId, ...(assigned.label ? { label: assigned.label } : {}) } : null;
       if (voice === null) {
         const choice = input.decisions?.[block.speaker];
         if (choice === "leave-out") continue;
-        if (choice === "narrator") { voice = deps.narrator; standIn = true; }
+        if (choice === "narrator") { voice = narrator; standIn = true; note = undefined; }
         else {
           const entry = missing.get(block.speaker) ?? { speaker: block.speaker, name: speakerName, blocks: [] };
           entry.blocks.push(block.id);
@@ -93,17 +110,26 @@ export async function hearDramaLines(
     let instructions: string | undefined;
     let direction: DramaRequest["direction"];
     if (block.direction) {
-      const note = performanceNote(block.direction, model);
-      if (note.mode === "tag") { text = `${note.tag} ${block.words}`; direction = { sent: "tag", text: note.tag }; }
-      else if (note.mode === "instruction") { instructions = block.direction; direction = { sent: "instruction", text: block.direction }; }
-      else direction = { sent: "not sent", reason: note.reason };
+      const played = performanceNote(block.direction, model);
+      if (played.mode === "tag") { text = `${played.tag} ${block.words}`; direction = { sent: "tag", text: played.tag }; }
+      else if (played.mode === "instruction") { instructions = block.direction; direction = { sent: "instruction", text: block.direction }; }
+      else direction = { sent: "not sent", reason: played.reason };
+    }
+    // The role's note rides as an instruction, ahead of the line's own, where the reader takes
+    // one; a reader that takes tags keeps them for the line's direction, and says so.
+    let noteSent: DramaRequest["note"];
+    if (note) {
+      if (performanceNote(note.slice(0, 300), model).mode === "instruction") {
+        instructions = instructions === undefined ? note : `${note}\n${instructions}`;
+        noteSent = { sent: "instruction", text: note };
+      } else noteSent = { sent: "not sent", text: note, reason: "This reader takes no instruction." };
     }
     const quote = cached ? null : quoteSpeech(model, text, { ...(instructions !== undefined ? { instructions } : {}), at: store.now() });
     planned.push({
       block, voice, model, text, ...(instructions !== undefined ? { instructions } : {}), quote, standIn,
       request: {
         block: block.id, speaker: speakerName, voice: voice.label ?? voice.voiceId, model: model.displayName, text,
-        ...(direction ? { direction } : {}), ...(standIn ? { standIn: true } : {}),
+        ...(direction ? { direction } : {}), ...(noteSent ? { note: noteSent } : {}), ...(standIn ? { standIn: true } : {}),
         estimatedMicroUsd: quote?.expectedMicroUsd ?? 0, cached,
       },
     });

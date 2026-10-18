@@ -437,6 +437,8 @@ const CLIENT_COMMAND_METADATA = {
   // Hearing lines spends on the author's press and its quote (SPEC-057 R-26); deciding a take is theirs.
   "hear-drama-lines": humanOnly("Hearing lines spends at the author's press, against the quote they saw."),
   "decide-drama-take": humanOnly(HUMAN_DECISION),
+  "set-drama-role": humanOnly("A role's voice and notes are the author's casting."),
+  "decide-drama-note": humanOnly(HUMAN_DECISION),
   "generate-drama-sound": humanOnly("Making a sound spends at the author's press, against the quote they saw."),
   "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),

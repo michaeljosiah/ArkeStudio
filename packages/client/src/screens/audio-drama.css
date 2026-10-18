@@ -147,3 +147,60 @@ button.fy-ad-chip { cursor: pointer; }
   .fy-ad-score { position: absolute; inset: 0 auto auto 0; overflow: visible; padding: 0; }
   .fy-ad-score__tools, .fy-ad-score__add, .fy-ad-score__take { display: none; }
 }
+
+/* Cast (design turn 230k): every speaking role, its voice, How they sound, and its lines. */
+.fy-ad-cast { padding: 28px 32px 48px; max-width: 1280px; }
+.fy-ad-cast__head h1 { font-size: 26px; font-weight: 600; margin: 0; }
+.fy-ad-cast__head p { margin: 4px 0 20px; color: var(--muted-foreground); font-size: 13px; }
+.fy-ad-cast__table { border-top: 1px solid var(--border); }
+.fy-ad-cast__row {
+  display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(170px, 1fr) minmax(240px, 3fr) 56px;
+  gap: 16px; align-items: center; padding: 12px 12px; border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.fy-ad-cast__row--head { cursor: default; padding: 10px 12px; color: var(--muted-foreground); font-size: 12px; }
+.fy-ad-cast__row:not(.fy-ad-cast__row--head):hover, .fy-ad-cast__group--open > .fy-ad-cast__row { background: var(--secondary); }
+.fy-ad-cast__row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.fy-ad-cast__role, .fy-ad-cast__voice, .fy-ad-cast__sound { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fy-ad-cast__role b, .fy-ad-cast__voice b { font-weight: 600; font-size: 14px; }
+.fy-ad-cast__row small { color: var(--muted-foreground); font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; }
+.fy-ad-cast__sound { font-size: 14px; }
+.fy-ad-cast__lines { text-align: right; font-variant-numeric: tabular-nums; }
+.fy-ad-cast__none { color: var(--warning); }
+.fy-ad-cast__detail {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; padding: 14px 12px 18px 52px;
+  background: var(--secondary); border-bottom: 1px solid var(--border);
+}
+.fy-ad-cast__field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.fy-ad-cast__field > span { font-weight: 600; }
+.fy-ad-cast__field textarea { font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: inherit; resize: vertical; }
+.fy-ad-cast__field small, .fy-ad-cast__sent, .fy-ad-cast__problem { color: var(--muted-foreground); font-size: 12px; }
+.fy-ad-cast__hidden { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; border: 0; padding: 0; margin: 0; font-size: 13px; }
+.fy-ad-cast__hidden legend { float: left; font-weight: 600; margin-right: 8px; }
+.fy-ad-cast__hidden input { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: inherit; }
+.fy-ad-cast__hidden input[type="number"] { width: 64px; margin-left: 6px; }
+.fy-ad-cast__acts { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+.fy-ad-cast__acts .gap { flex: 1; }
+.fy-ad-cast__sent, .fy-ad-cast__confirm, .fy-ad-cast__problem { grid-column: 1 / -1; }
+.fy-ad-cast__confirm { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--background); font-size: 13px; }
+.fy-ad-cast__confirm p { margin: 0 0 6px; }
+.fy-ad-cast__confirm ul { margin: 0 0 8px; padding-left: 18px; color: var(--muted-foreground); }
+.fy-ad-cast__problem { color: var(--warning); }
+
+/* The score's Cast and Review columns (230j) share the source column's frame. */
+.fy-ad-castcol__role { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.fy-ad-castcol__role h3 { margin: 0 0 4px; font-size: 14px; display: flex; gap: 8px; align-items: baseline; }
+.fy-ad-castcol__role h3 small, .fy-ad-castcol__role p small { color: var(--muted-foreground); font-weight: 400; font-size: 12px; }
+.fy-ad-castcol__role p { margin: 0 0 2px; font-size: 13px; }
+.fy-ad-castcol__empty { color: var(--muted-foreground); font-size: 13px; }
+.fy-ad-review__cover { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+.fy-ad-review__notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fy-ad-review__note { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; cursor: pointer; background: var(--background); }
+.fy-ad-review__note--open { box-shadow: var(--shadow-sm); cursor: default; }
+.fy-ad-review__note--closed { cursor: default; background: transparent; }
+.fy-ad-review__note p { margin: 4px 0 0; font-size: 13.5px; }
+.fy-ad-review__note q { display: block; margin-top: 6px; color: var(--muted-foreground); font-size: 12.5px; }
+.fy-ad-review__kind { font-size: 11.5px; color: var(--muted-foreground); }
+.fy-ad-review__kind b { color: var(--foreground); margin-right: 4px; }
+.fy-ad-review__acts { display: flex; gap: 6px; margin-top: 10px; }
+
+@media print { .fy-ad-castcol, .fy-ad-review { display: none; } }
