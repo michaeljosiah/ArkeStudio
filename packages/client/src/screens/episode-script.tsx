@@ -345,6 +345,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         </div>
         {lines.length > 0 && (
           <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
+            scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
             onHeard={() => setRetake(false)} />
         )}

@@ -222,7 +222,23 @@ describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
     assert.equal(hear.querySelector(".fy-ad-hear__dot"), null, "nothing waits on the author");
     await click(hear);
     const made = hearSent(m.sent).at(-1)!;
-    assert.deepEqual([made.quoteToken, made.quoteOnly], ["tok", undefined]);
+    assert.deepEqual([made.quoteToken, made.quoteOnly, made.scriptHash], ["tok", undefined, "sha256:base"], "fenced on the saved script");
+  });
+
+  it("prices nothing while the line is unsaved, then the saved words (codex on PR 1871)", async () => {
+    const m = await mount(withScript([a]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log said three hours." } }));
+    const before = hearSent(m.sent).length;
+    await wait(350);
+    assert.equal(hearSent(m.sent).length, before, "an unsaved line is not priced");
+    await wait(400);
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:saved" }));
+    await wait(350);
+    assert.equal(hearSent(m.sent).at(-1)!.scriptHash, "sha256:saved");
   });
 
   it("an uncast speaker always opens the decision; nothing substitutes on its own", async () => {

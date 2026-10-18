@@ -19,14 +19,16 @@ type Quote = DramaHeard;
  * within the one-press limit; anything else opens the dialog, with only the decision that waits.
  */
 export function useHearQuote(worldId: string, productionId: string, episode: number, lines: readonly string[],
-  decisions: Record<string, MissingVoiceChoice>, revision: string, retake = false) {
+  decisions: Record<string, MissingVoiceChoice>, revision: string, retake = false,
+  /** The saved script's hash, or null while edits are unsaved: nothing is priced from words not yet kept. */
+  scriptHash: string | null = null) {
   const [quote, setQuote] = useState<{ key: string; result: DramaHeard } | null>(null);
-  const key = JSON.stringify([lines, decisions, revision, retake]);
+  const key = JSON.stringify([lines, decisions, revision, retake, scriptHash]);
   const asked = useRef<string | null>(null);
   useEffect(() => {
-    if (lines.length === 0) return;
+    if (lines.length === 0 || scriptHash === null) return;
     const timer = setTimeout(() => {
-      asked.current = hearDramaLines(worldId, productionId, episode, [...lines], { quoteOnly: true, decisions, ...(retake ? { retake } : {}) });
+      asked.current = hearDramaLines(worldId, productionId, episode, [...lines], scriptHash, { quoteOnly: true, decisions, ...(retake ? { retake } : {}) });
     }, 300);
     return () => clearTimeout(timer);
   }, [key]);
@@ -36,8 +38,10 @@ export function useHearQuote(worldId: string, productionId: string, episode: num
   return quote?.key === key ? quote.result : null;
 }
 
-export function HearBar({ worldId, productionId, episode, lines, script, takes, worldSlug, name, onClear, onHeard, retake = false }: {
+export function HearBar({ worldId, productionId, episode, lines, script, scriptHash, takes, worldSlug, name, onClear, onHeard, retake = false }: {
   worldId: string; productionId: string; episode: number; lines: readonly string[]; script: readonly EpisodeScriptBlock[];
+  /** The saved script's hash; null while the score holds unsaved edits (codex on PR 1871). */
+  scriptHash: string | null;
   takes: EpisodeTakes | undefined; worldSlug: string; name: (slug: string) => string; onClear: () => void; onHeard?: () => void;
   /** A new take beside a current one, to wait for the author (R-30). */
   retake?: boolean;
@@ -47,16 +51,18 @@ export function HearBar({ worldId, productionId, episode, lines, script, takes, 
   const [pressed, setPressed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const revision = JSON.stringify(script.filter((block) => lines.includes(block.id)));
-  const quote = useHearQuote(worldId, productionId, episode, lines, decisions, revision, retake);
+  const quote = useHearQuote(worldId, productionId, episode, lines, decisions, revision, retake, scriptHash);
   const quoted = quote?.disposition === "quoted" ? quote : null;
   const missing = quoted?.missing ?? [];
   const price = quoted?.quote?.estimatedMicroUsd ?? 0;
   const waits = missing.length > 0 || price > HEAR_ONE_PRESS_LIMIT_MICRO_USD;
   const spoken = script.filter((block): block is Spoken => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"));
+  // A line the author left out is not played either (codex on PR 1871): only what the quote sends or plays.
+  const included = quoted?.quote ? new Set(quoted.quote.requests.map((request) => request.block)) : null;
 
   // Played in script order on the app's player, each line's kept take, or the take that waits.
   const play = (current: EpisodeTakes | undefined) => {
-    const items = spoken.flatMap((block) => {
+    const items = spoken.filter((block) => included === null || included.has(block.id)).flatMap((block) => {
       const line = current?.lines[block.id];
       const take = line?.waiting ?? line?.kept;
       if (!take) return [];
@@ -68,7 +74,16 @@ export function HearBar({ worldId, productionId, episode, lines, script, takes, 
     loadPlaylist(items);
     void playPlaylistLine(0);
   };
-  const latest = useRef(takes); latest.current = takes;
+  // The lines just made, and the take each had before: played once every one has a new take
+  // in the world (codex on PR 1871), however long the world takes to arrive.
+  const beforePress = useRef(takes);
+  const [toPlay, setToPlay] = useState<Record<string, string | null> | null>(null);
+  const takeOf = (current: EpisodeTakes | undefined, block: string) => { const line = current?.lines[block]; return (line?.waiting ?? line?.kept)?.artifactId ?? null; };
+  useEffect(() => {
+    if (toPlay === null || Object.entries(toPlay).some(([block, before]) => takeOf(takes, block) === before)) return;
+    setToPlay(null);
+    play(takes);
+  }, [toPlay, takes]);
   useEffect(() => subscribeDramaHeard((result) => {
     if (result.requestId !== pressed) return;
     setPressed(null);
@@ -76,15 +91,16 @@ export function HearBar({ worldId, productionId, episode, lines, script, takes, 
     if (result.disposition === "quoted") { setOpen(true); return; }
     setOpen(false);
     onHeard?.();
-    // The takes arrive with the world a moment after the answer: played once they are here.
-    setTimeout(() => play(latest.current), 400);
-  }), [pressed]);
+    if ((result.made ?? []).length === 0) { play(takes); return; }
+    setToPlay(Object.fromEntries((result.made ?? []).map((block) => [block, takeOf(beforePress.current, block)])));
+  }), [pressed, takes]);
 
   const hear = () => {
     setFailure(null);
     if (price === 0 && missing.length === 0 && quoted?.quote?.requests.every((request) => request.cached)) { play(takes); return; }
-    if (!quoted?.quote) return;
-    const requestId = hearDramaLines(worldId, productionId, episode, [...lines], { quoteToken: quoted.quote.token, decisions, ...(retake ? { retake } : {}) });
+    if (!quoted?.quote || scriptHash === null) return;
+    beforePress.current = takes;
+    const requestId = hearDramaLines(worldId, productionId, episode, [...lines], scriptHash, { quoteToken: quoted.quote.token, decisions, ...(retake ? { retake } : {}) });
     if (requestId === null) setFailure("The studio is disconnected.");
     setPressed(requestId);
   };

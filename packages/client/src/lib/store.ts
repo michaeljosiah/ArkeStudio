@@ -5055,10 +5055,11 @@ export function hearDramaLines(
   productionId: string,
   episode: number,
   blocks: string[],
+  scriptHash: string,
   options: { quoteOnly?: boolean; quoteToken?: string; decisions?: Record<string, "narrator" | "leave-out">; retake?: boolean } = {},
 ): string | null {
   const requestId = ulid();
-  return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, ...options }) ? requestId : null;
+  return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, scriptHash, ...options }) ? requestId : null;
 }
 
 /** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */

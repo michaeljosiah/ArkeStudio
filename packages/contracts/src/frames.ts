@@ -2316,6 +2316,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       episode: z.number().int().min(1).max(200),
       blocks: z.array(UlidSchema).min(1).max(400),
+      /** The saved script's hash the press was priced from: a line edited since is refused, not heard old. */
+      scriptHash: z.string().min(1),
       quoteOnly: z.boolean().optional(),
       quoteToken: z.string().min(1).max(200).optional(),
       decisions: z.record(SlugSchema, MissingVoiceChoiceSchema).optional(),
