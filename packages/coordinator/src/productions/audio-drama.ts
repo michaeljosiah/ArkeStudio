@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudioDramaRecordSchema, EpisodeScriptSchema, episodeScriptFile, productionShape,
-  type AudioDramaRecord, type DramaReviewDecision, type DramaRole, type EpisodeScriptBlock,
+  type AudioDramaRecord, type DramaChapterDecision, type DramaReviewDecision, type DramaRole, type EpisodeScriptBlock,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -42,6 +42,17 @@ export async function setDramaRole(store: WorldStore, productionId: string, role
     else cast[role] = value;
     const { cast: _was, ...rest } = record;
     return Object.keys(cast).length > 0 ? { ...rest, cast } : rest;
+  });
+}
+
+/** What became of a source chapter (R-61); null clears it back to what the scripts say. */
+export async function setDramaVerdict(store: WorldStore, productionId: string, chapter: string, value: DramaChapterDecision | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    const verdicts = { ...record.verdicts };
+    if (value === null) delete verdicts[chapter];
+    else verdicts[chapter] = value;
+    const { verdicts: _was, ...rest } = record;
+    return Object.keys(verdicts).length > 0 ? { ...rest, verdicts } : rest;
   });
 }
 

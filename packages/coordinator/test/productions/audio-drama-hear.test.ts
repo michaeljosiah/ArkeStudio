@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
-import { decideDramaNote, saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
+import { decideDramaNote, saveEpisodeScript, setDramaRole, setDramaVerdict } from "../../src/productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines, placeTake, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
-import { DRAMA_CAST_SCHEMA_VERSION, DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { DRAMA_ADAPTATION_SCHEMA_VERSION, DRAMA_CAST_SCHEMA_VERSION, DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -300,5 +300,17 @@ describe("codex round 2 on PR 1873", () => {
     const record = store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
     assert.deepEqual(Object.keys(record.cast ?? {}).sort(), [DRAMA_NARRATOR, "maren-kest"].sort());
     assert.deepEqual(record.review, { "e1:pacing:x:1": "dismissed" });
+  });
+});
+
+describe("a chapter's verdict (SPEC-057 R-61)", () => {
+  it("keeps what became of a chapter in the production, fenced at its schema, and clears it", async () => {
+    const { store, id } = await drama([maren("Climb.")]);
+    const record = () => store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
+    await setDramaVerdict(store, id, "ch-5", { verdict: "show", reason: "Heard, not told." });
+    assert.deepEqual(record().verdicts, { "ch-5": { verdict: "show", reason: "Heard, not told." } });
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_ADAPTATION_SCHEMA_VERSION);
+    await setDramaVerdict(store, id, "ch-5", null);
+    assert.equal(record().verdicts, undefined);
   });
 });

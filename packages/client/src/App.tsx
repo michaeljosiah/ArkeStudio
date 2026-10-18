@@ -75,6 +75,7 @@ import { ProductionHomeScreen } from "./screens/production-dashboard.js";
 import { ProductionLayout, ProductionChatScreen } from "./screens/production-shell.js";
 import { ChapterScreen } from "./screens/chapter-workspace.js";
 import { EpisodeScriptScreen } from "./screens/episode-script.js";
+import { DramaAdaptationScreen } from "./screens/drama-adaptation.js";
 import { ShotPage } from "./screens/scene-workspace/shot-page.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
@@ -355,6 +356,7 @@ function AppRoutes() {
           <Route path="story/chapters/:chapterId" element={<ChapterScreen />} />
           {/* An audio drama's episode, as its script (design turn 230d, SPEC-057 R-11). */}
           <Route path="script/:episode" element={<EpisodeScriptScreen />} />
+          <Route path="adaptation" element={<DramaAdaptationScreen />} />
           {/* The audiobook's door (turn 146, SPEC-047 R-29): a row a chapter, its state, one priced batch. */}
           <Route path="story/audiobook" element={<AudiobookScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item

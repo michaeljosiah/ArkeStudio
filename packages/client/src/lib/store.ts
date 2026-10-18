@@ -21,6 +21,7 @@ import {
   type ClientState,
   type ConversationActionCard,
   type DomainEvent,
+  type DramaChapterDecision,
   type DramaRole,
   type EpisodeScriptBlock,
   type Delivery,
@@ -5092,6 +5093,11 @@ export function generateDramaSound(
 /** A role as this production plays it (SPEC-057 R-55..R-60); null clears it back to the sheet. */
 export function setDramaRole(worldId: string, productionId: string, role: string, value: DramaRole | null): boolean {
   return send({ kind: "set-drama-role", worldId, productionId, role, value });
+}
+
+/** What became of a source chapter (SPEC-057 R-61); null clears it. */
+export function setDramaVerdict(worldId: string, productionId: string, chapter: string, value: DramaChapterDecision | null): boolean {
+  return send({ kind: "set-drama-verdict", worldId, productionId, chapter, value });
 }
 
 /** Decide a review note Intentional or Dismiss (SPEC-057 R-53); null opens it again. */

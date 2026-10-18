@@ -25,7 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
-import { decideDramaNote, saveEpisodeScript, setDramaRole } from "./productions/audio-drama.js";
+import { decideDramaNote, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -10588,6 +10588,7 @@ export class Coordinator {
         return;
       }
       case "set-drama-role":
+      case "set-drama-verdict":
       case "decide-drama-note": {
         // The production's cast and review decisions (SPEC-057 R-53, R-85): written to its
         // audio-drama.json; the refreshed world shows what landed.
@@ -10596,6 +10597,8 @@ export class Coordinator {
         // A write that fails is said (codex on PR 1873): the author's edit did not land.
         await (msg.kind === "set-drama-role"
           ? setDramaRole(store, msg.productionId, msg.role, msg.value)
+          : msg.kind === "set-drama-verdict"
+          ? setDramaVerdict(store, msg.productionId, msg.chapter, msg.value)
           : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch((err: unknown) => {
           this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
         });

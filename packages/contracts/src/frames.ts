@@ -52,7 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2356,6 +2356,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       role: DramaRoleKeySchema,
       value: DramaRoleSchema.nullable(),
+    })
+    .strict(),
+  /** What became of a source chapter (SPEC-057 R-61): kept in `audio-drama.json`; null clears it. */
+  z
+    .object({
+      kind: z.literal("set-drama-verdict"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: z.string().min(1).max(200),
+      value: DramaChapterDecisionSchema.nullable(),
     })
     .strict(),
   /** A review note decided Intentional or Dismiss (R-53); null opens it again. */

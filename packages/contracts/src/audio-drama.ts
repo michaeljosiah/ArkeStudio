@@ -77,6 +77,25 @@ export const DramaRoleSchema = z.object({
   { message: "A hidden identity needs a public label and the episode that reveals it." });
 export type DramaRole = z.infer<typeof DramaRoleSchema>;
 
+/**
+ * What became of a source chapter (SPEC-057 R-61, SPEC-052 R-19): the stored values are SPEC-052's;
+ * an audio drama says Hear for `show` (R-27). A chapter with no verdict and scenes is kept; with
+ * neither, it is not yet planned.
+ */
+export const DramaVerdictSchema = z.enum(["keep", "show", "merge", "cut", "expand", "invent"]);
+export type DramaVerdict = z.infer<typeof DramaVerdictSchema>;
+export const DRAMA_VERDICT_LABEL: Record<DramaVerdict, string> = {
+  keep: "Keep", show: "Hear", merge: "Merge", cut: "Cut", expand: "Expand", invent: "Invent",
+};
+export const DramaChapterDecisionSchema = z.object({
+  verdict: DramaVerdictSchema,
+  /** Why, in a line (SPEC-052 R-19). */
+  reason: z.string().trim().min(1).max(300).optional(),
+  /** What the drama leaves out of it (230m). */
+  leavesOut: z.string().trim().min(1).max(300).optional(),
+}).strict();
+export type DramaChapterDecision = z.infer<typeof DramaChapterDecisionSchema>;
+
 /** A review note the author kept as written, or set aside (R-53): closed until its lines change. */
 export const DramaReviewDecisionSchema = z.enum(["intentional", "dismissed"]);
 export type DramaReviewDecision = z.infer<typeof DramaReviewDecisionSchema>;
@@ -90,6 +109,8 @@ export const AudioDramaRecordSchema = z.object({
   cast: z.record(z.string().min(1).max(80), DramaRoleSchema).optional(),
   /** By note key (`reviewDramaScript`). */
   review: z.record(z.string().min(1).max(200), DramaReviewDecisionSchema).optional(),
+  /** By source chapter id: what became of it (R-61). */
+  verdicts: z.record(z.string().min(1).max(200), DramaChapterDecisionSchema).optional(),
 }).strict().superRefine((record, ctx) => {
   for (const [key, role] of Object.entries(record.cast ?? {})) {
     if (!DramaRoleKeySchema.safeParse(key).success) ctx.addIssue({ code: "custom", path: ["cast", key], message: `“${key}” is not a role.` });
@@ -137,6 +158,8 @@ export const ScriptHeadingSchema = z.object({
      */
     hash: z.string().min(1).max(200).optional(),
     paragraphs: Paragraphs,
+    /** Why the scene stays as it is against this version, when the author kept it (R-65, D-11). */
+    keptReason: z.string().trim().min(1).max(300).optional(),
   }).strict().optional(),
   estimateSec: z.number().int().min(0).max(36_000).optional(),
 }).strict();
@@ -653,4 +676,31 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
       // Scoped to the episode (codex on PR 1873): two episodes' like notes are decided apart.
       key: noteKey(`e${episode}:${note.check}`, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
   return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
+}
+
+// ---------------------------------------------------------------------------
+// Changed source (SPEC-057 R-64, R-65, design turn 230n).
+// ---------------------------------------------------------------------------
+
+const sameText = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/**
+ * Which paragraphs of the adapted version are gone from the chapter now, by number in the adapted
+ * version (1-based). A paragraph is found by its words, wherever it now sits: a split or a join
+ * changes the paragraphs it touched, a move or a repeat changes nothing.
+ */
+export function changedParagraphs(adapted: readonly string[], now: readonly string[]): number[] {
+  const present = new Set(now.map(sameText));
+  return adapted.flatMap((paragraph, i) => present.has(sameText(paragraph)) ? [] : [i + 1]);
+}
+
+/** The blocks of a scene that rest on changed paragraphs: its lines' own, else the scene's pin. */
+export function affectedBlocks(scene: readonly EpisodeScriptBlock[], pinned: readonly number[] | undefined, changed: readonly number[]): string[] {
+  const moved = new Set(changed);
+  const sceneHit = (pinned ?? []).some((n) => moved.has(n));
+  return scene.flatMap((block) => {
+    if (block.kind !== "dialogue" && block.kind !== "narration") return [];
+    const own = block.paragraphs ?? [];
+    return (own.length > 0 ? own.some((n) => moved.has(n)) : sceneHit) ? [block.id] : [];
+  });
 }

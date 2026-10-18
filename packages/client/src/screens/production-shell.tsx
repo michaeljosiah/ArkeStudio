@@ -707,6 +707,8 @@ export function ProductionLayout() {
                writing happens in its episodes, and Arke is the Chat beside every page. */
             <>
               {item("", "Episodes", String(dramaEpisodes))}
+              {/* After Episodes, only for a drama that adapts a story (SPEC-057 R-61). */}
+              {production?.audioDrama?.source && item("adaptation", "Adaptation")}
               {item("cast", "Cast", String(castCount))}
               <span className="fy-prodrail__section-divider" aria-hidden="true" />
               {item("artifacts", "Artifacts", String(artifactCount))}
