@@ -1,7 +1,8 @@
 # Audio drama — adapting a novel for the ear · design turn 230
 
-Status: **Proposed · revision 4 · 18 October 2026.** For the owner's review, not approved for
-implementation. Nothing here adds a production type to the app, generates audio or changes a novel.
+Status: **Approved · revision 4 · 18 October 2026.** Implementation: epic #1856 (slices #1857–#1864)
+against SPEC-057 in the private set. This turn supersedes turn 228. The drawings themselves add
+nothing to the app, generate no audio and change no novel.
 
 Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](audio-drama-230.review.html) ·
 [Prototype](audio-drama-230.prototype.html) · [Design master](Arke%20Studio.dc.html#t230) ·
