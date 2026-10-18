@@ -42,10 +42,11 @@
 .fy-ad-score__words { min-width: 0; display: grid; gap: 2px; }
 .fy-ad-score__words textarea, .fy-ad-score__words input { border: 0; background: none; color: inherit; font: inherit; padding: 2px 0; resize: none; width: 100%; field-sizing: content; min-height: 0; }
 .fy-ad-score__words textarea:focus, .fy-ad-score__words input:focus { outline: none; }
-.fy-ad-score__direction { font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-score__dirwrap { display: inline-flex; align-items: baseline; font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-score__words .fy-ad-score__direction { width: auto; min-width: 6ch; font-size: 13px; color: var(--muted-foreground); }
 /* Only the spoken words are set large (R-13). */
 .fy-ad-score__line { display: flex; align-items: baseline; gap: 6px; }
-.fy-ad-score__line textarea { font: 400 var(--text-lg)/1.45 var(--font-sans); }
+.fy-ad-score__words .fy-ad-score__line textarea { font: 400 var(--text-lg)/1.45 var(--font-sans); width: auto; min-width: 4ch; max-width: 100%; flex: 0 1 auto; }
 .fy-ad-score__cut { font-size: var(--text-lg); font-weight: 600; text-decoration: underline; }
 .fy-ad-score__row--breaks-in > .fy-ad-score__who::before { content: ""; position: absolute; left: 152px; top: -8px; width: 10px; height: 18px; border-left: 1.5px solid var(--muted-foreground); border-bottom: 1.5px solid var(--muted-foreground); border-bottom-left-radius: 6px; }
 .fy-ad-score__new { font-size: 11px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
@@ -54,7 +55,8 @@
 .fy-ad-score__cue--missing { border-left-color: var(--warning); }
 .fy-ad-score__warn { color: var(--warning); font-weight: 600; font-size: 12px; }
 .fy-ad-score__silence { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
-.fy-ad-score__silence input[type="number"] { width: 56px; }
+.fy-ad-score__words .fy-ad-score__silence input[type="number"] { width: 4.5em; }
+.fy-ad-score__words .fy-ad-score__silence input:not([type]) { width: auto; min-width: 12ch; }
 .fy-ad-score__gap { border-top: 2px dotted var(--muted-foreground); height: 0; }
 .fy-ad-score__note { font-size: 13px; color: var(--muted-foreground); font-style: italic; }
 .fy-ad-score__take { padding-top: 8px; color: var(--muted-foreground); text-align: center; }

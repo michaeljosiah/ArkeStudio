@@ -110,7 +110,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
 
   const insertAfter = (kind: EpisodeScriptBlock["kind"]) => {
     const at = selectedIndex >= 0 ? selectedIndex + 1 : blocks.length;
-    const previousSpeaker = [...blocks.slice(0, at)].reverse().find((block) => block.kind === "dialogue");
+    const previousSpeaker = blocks.slice(0, at).reverse().find((block) => block.kind === "dialogue");
     const block = newBlock(kind, previousSpeaker?.kind === "dialogue" ? previousSpeaker.speaker : cast[0]?.id);
     edit([...blocks.slice(0, at), block, ...blocks.slice(at)]);
     setSelected(block.id);
@@ -233,8 +233,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                       {(block.kind === "dialogue" || block.kind === "narration") && (
                         <>
                           {(on || block.direction) && (
-                            <input className="fy-ad-score__direction" aria-label="Direction" placeholder="(direction)" value={block.direction ?? ""} maxLength={240}
-                              onChange={(event) => change(block.id, { direction: event.target.value || undefined } as Partial<EpisodeScriptBlock>)} />
+                            // How, in parentheses above the words, never part of them (R-13).
+                            <span className="fy-ad-score__dirwrap">(<input className="fy-ad-score__direction" aria-label="Direction" placeholder="direction" value={block.direction ?? ""} maxLength={240}
+                              onChange={(event) => change(block.id, { direction: event.target.value || undefined } as Partial<EpisodeScriptBlock>)} />)</span>
                           )}
                           <span className="fy-ad-score__line">
                             <textarea data-words={block.id} aria-label={block.kind === "dialogue" ? `${name(block.speaker)}'s line` : "Narration"}
