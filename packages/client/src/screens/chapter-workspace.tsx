@@ -57,7 +57,7 @@ import {
 import { ProductionConversation, StagedDecision, type DockAsk } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { ArrowLeftRight, Chat, ChevronDown, ChevronLeft, ChevronRight, FileText, Maximize2, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
+import { Chat, ChevronDown, ChevronLeft, ChevronRight, FileText, FocusCorners, PagesSide, Pin, Play, RotateCcw, Sparkle, Speaker, X } from "../components/icons.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../lib/arke-half.js";
 import { marginsRemembered, namesRemembered, rememberDock, rememberedDocks, rememberMargins, rememberNames, type ChapterMargins } from "../lib/chapter-dock.js";
@@ -67,6 +67,7 @@ import { BriefFields, DocHead, FindBar, FormatBar, GoalField, GoalRing, NEW_CHAR
 import type { FindState } from "../components/editor/writing-aids.js";
 import type { MarginItem } from "../components/editor/margins.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
+import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { CompareVersions } from "./chapter-compare.js";
 import { ReviewNotes } from "./chapter-review-notes.js";
 import { placeReviewNotes, quoteText, type PlacedNote, type ReviewFinding } from "../lib/review-notes.js";
@@ -2172,7 +2173,7 @@ export function ChapterWorkspace({
       ? pending ? { pending, blocked: keeping !== null ? "Keeping…" : "Accepting…" } : undefined
     : !choosing || keptCount === editCount
       ? {
-          label: "Accept",
+          label: choosing ? `Accept ${editCount} of ${editCount}` : "Accept",
           pending,
           ...(accepting !== null ? { blocked: "Accepting…" } : {}),
           onAccept: (confirmSignature?: string) => {
@@ -2841,7 +2842,8 @@ export function ChapterWorkspace({
           }}
           openingNote="opening…"
           emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}
-          placeholder={`Ask about ${chapterLabel}`}
+          // A chapter with no words yet is written with Arke, not asked about (227u).
+          placeholder={emptyChapter ? `Write Chapter ${chapter.order} with Arke…` : `Ask about ${chapterLabel}`}
           {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
             ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
             : stagedDraft === undefined && view === "audiobook" && illustration.run !== undefined
@@ -2930,6 +2932,7 @@ export function ChapterWorkspace({
   }));
   const hereIds = new Set(speakers.flatMap((who) => (who.sheet !== undefined ? [who.sheet] : [])));
   if (chapter.pov !== undefined) hereIds.add(chapter.pov);
+  const linesHere = (id: string) => speakers.find((who) => who.sheet === id)?.lines ?? 0;
   const mentions: Mention[] = nameSheets.map((sheet) => ({
     id: sheet.id,
     name: sheet.name,
@@ -2937,6 +2940,7 @@ export function ChapterWorkspace({
     insert: sheet.type === "character" && sheet.shortName?.trim() ? sheet.shortName.trim() : sheet.name,
     group: sheet.type !== "character" ? "Places" : hereIds.has(sheet.id) ? "In this chapter" : "Characters",
     face: sheet.type === "character" ? portraitOf(sheet.id) : null,
+    sub: sheet.type !== "character" ? "Place" : linesHere(sheet.id) > 0 ? `${linesHere(sheet.id)} line${linesHere(sheet.id) === 1 ? "" : "s"} here` : (sheet.role ?? ""),
   }));
   // The chapters each character speaks in, from the book's cast stamps: the card's first and last seen.
   const appearances = new Map<string, number[]>();
@@ -2989,6 +2993,7 @@ export function ChapterWorkspace({
       face: portraitOf(id),
       linesHere: speakers.find((who) => who.sheet === id)?.lines ?? 0,
       chapters: appearances.get(id) ?? [],
+      book: activeChapters.length,
       ...(sheet.voice !== undefined ? { voice: voiceDisplayLabel(sheet.voice, world) } : {}),
       ...(designatedVoiceSample(world.referenceKits.find((kit) => kit.sheetId === id) ?? null) !== null ? { sample: true } : {}),
       voicePage: `/w/${at}/cast/${sid}/voice?book=${encodeURIComponent(prodId)}`,
@@ -3222,13 +3227,13 @@ export function ChapterWorkspace({
   ];
   const focusPress = (
     <button type="button" className={cx("fy-ch__wbtn", focus && "fy-ch__wbtn--on")} aria-label="Focus" title={`Focus · ${MOD}Shift+F`} aria-pressed={focus} onClick={enterFocus} data-testid="chapter-focus">
-      <Maximize2 size={15} />
+      <FocusCorners size={16} />
     </button>
   );
   const comparePress = (
     <button type="button" className={cx("fy-ch__wbtn", comparing && "fy-ch__wbtn--on")} aria-label="Compare versions" title="Compare versions" aria-pressed={comparing}
       disabled={history.length === 0 || record === null} onClick={() => setComparing((open) => !open)} data-testid="chapter-compare-press">
-      <ArrowLeftRight size={15} />
+      <PagesSide size={16} />
     </button>
   );
   const findBar = find === null ? null : (
@@ -3297,7 +3302,8 @@ export function ChapterWorkspace({
       </>}
       actions={<>
         {phone ? null : audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : words > 0 ? (pageReadControl ?? null) : <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>}
-        {reviewControl}
+        {/* Nothing to review before a word is written (227x). */}
+        {words > 0 && reviewControl}
       </>}
       views={viewNav}
       cast={castCards.length > 0 ? <CastCards cards={castCards} selected={castOpen} onCard={(key) => (key === "narrator" ? setNarratorOpen(true) : setCastOpen((open) => (open === key ? null : key)))} /> : null}
@@ -3595,7 +3601,8 @@ export function ChapterWorkspace({
             )}
             {(room || phoneRoom) && (
               <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
-                {emptyChapter && (
+                {/* The plan stays while Arke's first draft waits under it (227v). */}
+                {record !== null && (record.body ?? "").trim() === "" && (
                   <BriefFields page synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
                     characters={characters} locked={locked} onPlan={(changes) => plan(changes)} onNewCharacter={newCharacter} />
                 )}
@@ -3635,14 +3642,15 @@ export function ChapterWorkspace({
               <div className="fy-ch__prose">
                 {/* A passage waits (turn 128): the replacement stands in the passage's place, the
                     rest of the chapter untouched, and the band counts the span both ways. */}
-                <div className="fy-ch__band">
+                {/* Decided on the page, the held bar says all this (227e); the band is for the thread's. */}
+                {!decidedOnPage && <div className="fy-ch__band">
                   <span className="fy-ch__band-who">Arke&rsquo;s passage</span>
                   <span>· {countWords(passageChange.before).toLocaleString()} → {countWords(passageChange.after).toLocaleString()} words</span>
                   {choosing && <span>· {keptCount} of {editCount} changes kept</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
-                  {!decidedOnPage && <span>decide in the thread</span>}
-                </div>
+                  <span>decide in the thread</span>
+                </div>}
                 <div className="fy-ch__draft-passage" aria-label="Arke's passage">
                   {passageParagraphs.map((paragraph, i) => {
                     // Inclusive at both ends, and at least one character wide (codex on PR 899):
@@ -3670,7 +3678,7 @@ export function ChapterWorkspace({
                     if (!choosing || !changed) {
                       const line = (
                         <p key={i} className={changed ? "fy-ch__passage" : undefined}>
-                          {paragraph.text}
+                          {renderInlineMarkdown(paragraph.text)}
                         </p>
                       );
                       if (!cut || anchorParagraph !== i) return line;
@@ -3709,13 +3717,13 @@ export function ChapterWorkspace({
               </div>
             ) : stagedDraft !== undefined ? (
               <div className="fy-ch__prose">
-                <div className="fy-ch__band">
+                {!decidedOnPage && <div className="fy-ch__band">
                   <span className="fy-ch__band-who">Arke&rsquo;s draft</span>
                   {stagedDraft.body !== null && <span>· {countWords(stagedDraft.body).toLocaleString()} words</span>}
                   <span>· against v{record.version}</span>
                   <span className="fy-ch__band-push" />
-                  {!decidedOnPage && <span>decide in the thread</span>}
-                </div>
+                  <span>decide in the thread</span>
+                </div>}
                 {/* Read, not edited: the draft waits where it will land (R-27). What it adds after
                     the prose is grey, a suggestion; a draft that rewrites is grey throughout. */}
                 <div className="fy-ch__draft" aria-label="Arke's draft">
@@ -3877,6 +3885,7 @@ export function ChapterWorkspace({
                 refuse={{ label: continuation ? "Discard" : "Refuse all", onPress: () => { for (const id of versions.length > 0 ? versions : [stagedDraft.staged.proposal.id]) discardProposal(worldId, id); }, disabled: pending }}
                 keep={{
                   label: continuation ? "Keep" : accept !== undefined && "label" in accept ? accept.label : "Accept",
+                  ...(continuation ? { hint: "Tab" } : {}),
                   onPress: () => {
                     if (accept === undefined || !("onAccept" in accept)) return;
                     discardOtherVersions();
@@ -3894,10 +3903,15 @@ export function ChapterWorkspace({
               />
             ))}
             {focus && (
-              <div className="fy-ch__focusfoot" data-testid="chapter-focus-foot">
-                <span className="fy-ch__focustrack" role="progressbar" aria-label="Chapter goal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalShare}><i style={{ width: `${goalShare}%` }} /></span>
-                {wordsToday > 0 && <span className="fy-mono">+{wordsToday.toLocaleString()} today</span>}
-              </div>
+              <>
+                {/* The one way out that shows (227g): Esc, said where the bar was. */}
+                <button type="button" className="fy-ch__focusleave" onClick={leaveFocus} data-testid="chapter-focus-leave"><kbd>Esc</kbd>Leave focus</button>
+                <div className="fy-ch__focusfoot" data-testid="chapter-focus-foot">
+                  {wordsToday > 0 && <span>+{wordsToday.toLocaleString()} today</span>}
+                  <span className="fy-ch__focustrack" role="progressbar" aria-label="Chapter goal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalShare}><i style={{ width: `${goalShare}%` }} /></span>
+                  <span>{words.toLocaleString()} / {goal.words.toLocaleString()}</span>
+                </div>
+              </>
             )}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
@@ -3982,7 +3996,8 @@ export function ChapterWorkspace({
           <aside className="fy-ch__side fy-ch__notes">
             {view === "manuscript" && !compact && !emptyChapter && (
               <BriefFields synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
-                characters={characters} locked={locked} onPlan={(changes) => plan(changes)} onNewCharacter={newCharacter} />
+                characters={characters} locked={locked} onPlan={(changes) => plan(changes)} onNewCharacter={newCharacter}
+                faces={speakers.flatMap((who) => (who.sheet !== undefined ? [{ id: who.sheet, name: sheetNameOf(who.sheet), face: portraitOf(who.sheet) }] : []))} />
             )}
             {view === "manuscript" && stale && (
               <p className="fy-ch__moved">overview moved · v{chapter.draftedAgainst} → v{production.story?.version}</p>
@@ -4118,8 +4133,9 @@ export function ChapterWorkspace({
       {phone && view === "chapter" && !(stagedDraft !== undefined && passageChange !== null) && (
         // Write and Listen held at the foot of the phone's Chapter view (R-46, 227n).
         <HeldBar className="fy-chov-held">
-          <Button variant="primary" onClick={() => chooseView("manuscript")}>Write</Button>
-          {audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} /> : pageReadControl}
+          {/* With takes to hear, Listen is the press and Write beside it (227m); without, Write is. */}
+          <Button variant={audiobook.counts.made > 0 ? "secondary" : "primary"} onClick={() => chooseView("manuscript")}>Write</Button>
+          {audiobook.counts.made > 0 ? <ListenButton worldId={worldId} production={production} chapterId={chapter.id} className="fy-chov-listen" solid /> : pageReadControl}
         </HeldBar>
       )}
       {chapterExportOpen && <AudiobookExportSheet worldId={worldId} production={production} chapterId={chapter.id} onClose={closeChapterExport} onReviewChapters={() => { closeChapterExport(); navigate(`/w/${worldId}/p/${prodId}/story/chapters`); }} onReadRemaining={audiobook.readRemaining} />}
@@ -4172,9 +4188,9 @@ function ReadPress({ read, voiced }: { read: PageRead; voiced: PageRead | null }
   }, [open]);
   return (
     <span className="fy-ch__readpress" ref={menu}>
-      <Button variant="outline" onClick={read.begin}>
+      <Button variant="outline" aria-label="Read the chapter" onClick={read.begin}>
         <Play size={13} />
-        Read the chapter
+        <span className="fy-ch__readlabel">Read the chapter</span>
       </Button>
       {voiced !== null && (
         <Button variant="outline" size="icon" aria-label="More ways to read" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((was) => !was)}>

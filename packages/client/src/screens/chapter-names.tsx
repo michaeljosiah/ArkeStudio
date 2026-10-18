@@ -18,6 +18,8 @@ export interface NameCardSheet {
   linesHere?: number;
   /** The chapters, by number, the book's cast stamps have them speaking in. */
   chapters?: number[];
+  /** How many chapters the book has, for "14 of 25". */
+  book?: number;
   voice?: string;
   /** The character's designated voice sample, to hear from the card (227b). */
   sample?: boolean;
@@ -31,19 +33,29 @@ const GUTTER = 16;
 function where(rect: DOMRect, height: number): { left: number; top: number } {
   // The card narrows with the window (its CSS max-width), so it is placed by the width it has.
   const width = Math.min(CARD_WIDTH, window.innerWidth - 2 * GUTTER);
-  const left = Math.max(GUTTER, Math.min(rect.left, window.innerWidth - width - GUTTER));
+  // Centred under the name (227b), held inside the window.
+  const left = Math.max(GUTTER, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - GUTTER));
   // Below the name unless that runs off the window, then above it.
   const below = rect.bottom + 8;
   const top = below + height > window.innerHeight - GUTTER ? Math.max(GUTTER, rect.top - 8 - height) : below;
   return { left, top };
 }
 
-function seen(chapters: number[]): string | null {
-  if (chapters.length === 0) return null;
+/** The line under the name (227b): the role, then the lines spoken here. */
+function sub(sheet: NameCardSheet): string {
+  const lines = sheet.linesHere !== undefined && sheet.linesHere > 0 ? `${sheet.linesHere} line${sheet.linesHere === 1 ? "" : "s"} here` : "";
+  return [sheet.role ?? "", lines].filter((part) => part !== "").join(" · ");
+}
+
+/** First seen, how many chapters, last seen (227b): label and value, a row each. */
+function seen(chapters: number[], book: number | undefined): [string, string][] {
+  if (chapters.length === 0) return [];
   const first = chapters[0]!, last = chapters[chapters.length - 1]!;
-  return chapters.length === 1
-    ? `Chapter ${first}`
-    : `Ch ${first}–${last} · ${chapters.length} chapters`;
+  return [
+    ["First seen", `Chapter ${first}`],
+    ["Chapters", book !== undefined ? `${chapters.length} of ${book}` : String(chapters.length)],
+    ...(last !== first ? [["Last seen", `Chapter ${last}`] as [string, string]] : []),
+  ];
 }
 
 export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk, onHear }: {
@@ -100,14 +112,15 @@ export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk, onHea
             </span>
             <span className="fy-namecard__who">
               <strong>{sheet.name}</strong>
-              {sheet.role !== undefined && sheet.role !== "" && <span>{sheet.role}</span>}
+              {sub(sheet) !== "" && <span>{sub(sheet)}</span>}
             </span>
           </header>
-          {(sheet.linesHere !== undefined || (sheet.chapters?.length ?? 0) > 0) && (
-            <p className="fy-namecard__facts">
-              {sheet.linesHere !== undefined && sheet.linesHere > 0 && <span>{sheet.linesHere} line{sheet.linesHere === 1 ? "" : "s"} here</span>}
-              {seen(sheet.chapters ?? []) !== null && <span>{seen(sheet.chapters ?? [])}</span>}
-            </p>
+          {seen(sheet.chapters ?? [], sheet.book).length > 0 && (
+            <dl className="fy-namecard__facts">
+              {seen(sheet.chapters ?? [], sheet.book).map(([label, value]) => (
+                <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+              ))}
+            </dl>
           )}
           {sheet.kind === "character" && (
             <p className="fy-namecard__voice">
@@ -121,8 +134,8 @@ export function NameCard({ sheets, rect, onEnter, onLeave, onClose, onAsk, onHea
             </p>
           )}
           <div className="fy-namecard__acts">
-            <Link className="ui-btn ui-btn--ghost ui-btn--default" to={sheet.open}>Open</Link>
-            <Button variant="ghost" onClick={() => onAsk(sheet)}>Ask Arke</Button>
+            <Link className="ui-btn ui-btn--secondary ui-btn--default" to={sheet.open}>Open</Link>
+            <Button variant="secondary" onClick={() => onAsk(sheet)}>Ask Arke</Button>
           </div>
         </section>
       ))}

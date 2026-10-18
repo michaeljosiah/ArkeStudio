@@ -143,6 +143,14 @@ export function reviewMarksPlugin(): Plugin<ReviewMarksState> {
             class: mark.n === own.current ? "fy-review-quote fy-review-quote--here" : "fy-review-quote",
             "data-note": String(mark.n),
           }));
+          // The note's number after the words it quotes (227r): drawn, never written.
+          const n = mark.n;
+          out.push(Decoration.widget(match.to, () => {
+            const sup = document.createElement("sup");
+            sup.className = "fy-review-n";
+            sup.textContent = String(n);
+            return sup;
+          }, { side: 1, key: `review-n-${n}` }));
         }
         return DecorationSet.create(state.doc, out);
       },

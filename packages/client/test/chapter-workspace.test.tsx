@@ -424,7 +424,9 @@ describe("the chapter, opened (turn 126)", () => {
     const m = await mount(inkbound([DRAFT]));
     await answerOpen(m);
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the draft waits");
-    assert.match(text(m), /Arke’s draft/);
+    // Decided on the page, the held bar says what waits; the thread's band is not drawn (227v).
+    assert.equal(q(m, ".fy-ch__band"), null);
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Draft/);
     assert.doesNotMatch(text(m), /decide in the thread/, "the writing room decides it on the page (R-27)");
     assert.match(text(m), /Drafted anew\./, "the draft's own prose is what stands in the manuscript");
     assert.ok([...m.container.querySelectorAll(".fy-ch__draft p")].every((p) => p.classList.contains("fy-ch__ghost")), "a rewrite is grey throughout, a suggestion");
@@ -1723,7 +1725,7 @@ describe("the craft loop (turn 128)", () => {
     await answerOpen(m);
     assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the passage waits");
     // Spans, so the text runs together without the spaces the screen draws between them.
-    assert.match(text(m), /Arke’s passage ?· 1 → 2 words ?· against v4/);
+    assert.equal(q(m, ".fy-ch__band"), null, "the held bar says the span, not a band (227e)");
     const held = q(m, '[data-testid="page-held-bar"]')!;
     assert.match(held.textContent ?? "", /^Revise a passage: The counting of bells1 edit · 1 → 2 words1 of 1Refuse allAccept$/, "the ask, its edits and words, Refuse all and Accept (R-24)");
     assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
@@ -1810,12 +1812,10 @@ describe("the craft loop (turn 128)", () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);
       assert.equal(edits(m).length, 2, "Maren→Ines and the seven are two edits");
-      assert.match(text(m), /2 of 2 changes kept/);
-      assert.equal(acceptButton(m).textContent, "Accept");
+      assert.equal(acceptButton(m).textContent, "Accept 2 of 2", "all of them, said as many (R-24, 227e)");
       assert.match(text(m), /Six, and the tide/, "the rest of the chapter stands as it was");
 
       await act(async () => edits(m)[0]!.click());
-      assert.match(text(m), /1 of 2 changes kept/);
       assert.equal(edits(m)[0]!.getAttribute("aria-pressed"), "false");
       assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
 
@@ -2099,7 +2099,7 @@ describe("the craft loop (turn 128)", () => {
       const m = await mount(inkbound([TWO]));
       await answerOpen(m);
       await act(async () => edits(m)[0]!.click());
-      assert.match(text(m), /1 of 2 changes kept/);
+      assert.equal(acceptButton(m).textContent, "Accept 1 of 2");
       const rewritten: StagedProposal = {
         ...TWO,
         review: {
@@ -2107,7 +2107,7 @@ describe("the craft loop (turn 128)", () => {
         },
       };
       await act(async () => __setStateForTest(inkbound([rewritten]), { connection: "open" }));
-      assert.match(text(m), /2 of 2 changes kept/, "a refusal chosen against other edits does not carry over");
+      assert.equal(acceptButton(m).textContent, "Accept 2 of 2", "a refusal chosen against other edits does not carry over");
     });
 
     it("a blank line holding spaces is still a paragraph boundary: nothing after the passage is drawn twice (codex on PR 1232)", async () => {
@@ -2198,7 +2198,7 @@ describe("the craft loop (turn 128)", () => {
     };
     const m = await mount(inkbound([deletion]));
     await answerOpen(m);
-    assert.match(text(m), /Arke’s passage ?· 1 → 0 words/, "a zero-width replacement is still a passage");
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /1 → 0 words/, "a zero-width replacement is still a passage");
     const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
     assert.deepEqual(marked, ["counted the bells."], "the paragraph the deletion sat in is the one marked");
   });
@@ -2849,12 +2849,12 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
     const calls: string[] = [];
     const m = await mountCard([{
       id: "maren-kest", kind: "character", name: "Maren Kest", role: "Bell-keeper", face: null,
-      linesHere: 3, chapters: [1, 2, 4], voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
+      linesHere: 3, chapters: [1, 2, 4], book: 6, voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
     }], calls);
     const card = q(m, '[data-testid="name-card"]')!;
-    assert.match(card.textContent ?? "", /Maren KestBell-keeper/);
+    assert.match(card.textContent ?? "", /Maren KestBell-keeper · 3 lines here/, "the role, then the lines spoken here");
     assert.match(card.textContent ?? "", /3 lines here/);
-    assert.match(card.textContent ?? "", /Ch 1–4 · 3 chapters/, "first and last seen, and how many");
+    assert.match(card.textContent ?? "", /First seenChapter 1Chapters3 of 6Last seenChapter 4/, "first and last seen, and how many of the book (227b)");
     assert.match(card.textContent ?? "", /Ama · ElevenLabs/);
     assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest/voice?book=inkbound"]'), "Change goes to the voice");
     assert.ok(card.querySelector('a[href="/w/x/cast/maren-kest"]'), "Open goes to the sheet");
@@ -2967,7 +2967,7 @@ describe("Compare versions (design turn 227f, SPEC-056 R-13)", () => {
     assert.equal(q(m, ".fy-ch__manuscript")!.getAttribute("data-compare"), "true", "the comparison takes the page's place");
     assert.deepEqual([...panel.querySelectorAll("del")].map((node) => node.textContent), ["bells once."]);
     assert.deepEqual([...panel.querySelectorAll("ins")].map((node) => node.textContent), ["bells."]);
-    const restore = [...panel.querySelectorAll("button")].find((button) => button.textContent === "Restore") as HTMLButtonElement;
+    const restore = [...panel.querySelectorAll("button")].find((button) => button.textContent === "Restore v3") as HTMLButtonElement;
     await act(async () => restore.click());
     const restored = m.sent.findLast((message) => message.kind === "restore-chapter") as Extract<ClientMessage, { kind: "restore-chapter" }>;
     assert.equal(restored.version, 3);
@@ -3133,7 +3133,7 @@ describe("Continue (design turn 227s, SPEC-056 R-19, R-26)", () => {
     const ghost = q(m, ".fy-ch__draft-passage .fy-ch__ghost");
     assert.equal(ghost?.textContent, " The seventh never came.", "the written-on words, grey, after the words that stood");
     assert.equal(q(m, ".fy-ch__draft-passage ins"), null, "not tracked as an edit");
-    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue4 words1 of 1DiscardKeep$/);
+    assert.match(q(m, '[data-testid="page-held-bar"]')?.textContent ?? "", /^Continue4 words1 of 1DiscardKeepTab$/);
   });
 
   it("Tab keeps it and Esc lets it go (D-7)", async () => {
@@ -3207,7 +3207,7 @@ describe("review notes in the margin (design turn 227r, SPEC-056 R-29 – R-31)"
     ));
     open.push({ container, root, sent: [], navigate: () => {} });
     const notes = container.querySelector('[data-testid="review-notes"]')!;
-    assert.match(notes.textContent ?? "", /^2 notes/);
+    assert.match(notes.textContent ?? "", /^Review3 open/, "the lost note is open too (codex on PR 1816)");
     assert.match(notes.textContent ?? "", /Quote no longer in the chapterAn old worry\./);
     const cards = [...notes.querySelectorAll(".fy-note")];
     assert.match(cards[0]!.textContent ?? "", /^1Continuity · ContradictionWhich bells, and whose count\?FixIntentionalDismiss$/);
