@@ -14,6 +14,9 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { wav } from "../audio/helpers.js";
+import { readFile } from "node:fs/promises";
+import { DramaEditionService } from "../../src/publications/drama.js";
+import { tempDir } from "../tmp.js";
 
 /** An audio drama's episode in Audio Studio (SPEC-057 R-67, R-68): one arrangement, on the chapter's studio. */
 const CLOCK = "2026-10-18T12:00:00.000Z";
@@ -82,5 +85,25 @@ describe("an episode in Audio Studio (SPEC-057 R-67, R-68)", () => {
     const reopened = await openAudioStudio(store, id, "episode-001");
     assert.ok(reopened.saved && reopened.state.tracks.some((track) => track.id === "extra"));
     await assert.rejects(access(join(store.dir, "productions", id, ".audiobook")), "no chapter record is made");
+  });
+});
+
+describe("an audio drama's edition (SPEC-057 R-71..R-76)", () => {
+  it("publishes the ready episodes as copies — audio, transcript, credits, script — unchanged by later edits", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb.", direction: "breathless" };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    const edition = await editions.publish(store, id, { name: "Pilot", delivery: "podcast", episodes: [1] });
+    assert.deepEqual(edition.files.map((file) => file.name).sort(), ["credits.txt", "episode-001-script.txt", "episode-001.wav", "transcript.txt"]);
+    assert.ok(edition.episodes[0]!.seconds >= 1);
+    const transcript = await editions.serve(edition.id, "transcript.txt");
+    assert.equal(await readFile(transcript!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n", "words, never directions");
+    const before = await readFile((await editions.serve(edition.id, "episode-001.wav"))!.path);
+    // Edited afterwards: the published edition is as it was.
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "Changed", blocks: [...entry.script.blocks, { id: ulid(), kind: "dialogue", speaker: "bray", words: "New." }], baseHash: entry.hash });
+    assert.deepEqual(await readFile((await editions.serve(edition.id, "episode-001.wav"))!.path), before);
+    assert.equal((await editions.list(store.worldId, id)).length, 1);
+    await assert.rejects(editions.publish(store, id, { name: "Again", delivery: "archive", episodes: [1] }), /not ready: 1 line not performed/, "the new line has no take");
   });
 });
