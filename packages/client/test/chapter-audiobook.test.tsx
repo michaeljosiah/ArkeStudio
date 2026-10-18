@@ -1776,6 +1776,18 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p0.0"], 80_000]);
   });
 
+  it("a row missing a reference whose other look disagrees says both on its one press (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is", "never a Without that also sends a disputed look unsaid");
+    const plain = all(m, '[data-testid="illustration-row"]')[1]!;
+    assert.equal(plain.querySelector('[data-testid="illustration-without"]'), null);
+  });
+
   it("counts the pictures as they are made in the dock's one line and Stop keeps what is made", async () => {
     const m = await proposedMount();
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());

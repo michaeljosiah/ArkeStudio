@@ -1758,9 +1758,12 @@ export class Coordinator {
           // look held on the block for its picture alone rides for that person in its place (R-146).
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
           // A look the Looks sheet has come to flag since the proposal holds the row as the card
-          // would have (issue 1658), unless the author sent it as it is (codex on PR 1868).
+          // would have (issue 1658), unless the author sent it as it is (codex on PR 1868). That is
+          // only where the row said it disagreed when they pressed: Without for a missing reference,
+          // or Try again on a refusal, is no consent to a look the chapter disputes.
           const disagreeing = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0).map((entry) => entry.key);
-          if (!run.without.has(row.block) && disagreeing.length > 0) {
+          const asIs = run.without.has(row.block) && (row.disagrees?.length ?? 0) > 0;
+          if (!asIs && disagreeing.length > 0) {
             disagreedHere.set(row.block, disagreeing);
             progress.failed.push({ block: row.block, reason: "a look disagrees with the chapter · review looks" });
             continue;

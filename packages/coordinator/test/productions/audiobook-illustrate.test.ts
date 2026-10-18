@@ -317,7 +317,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
     );
   });
 
-  it("holds a row whose look came to disagree after the proposal, unless sent as it is (codex on PR 1868)", () => {
+  it("holds a row whose look came to disagree after the proposal until the author sends it as it is (codex on PR 1868)", () => {
     let flagged = false;
     return withHarness(
       async (h) => {
@@ -330,16 +330,18 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         flagged = true;
         await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000006" });
         const [first, second] = proposal.rows;
+        // The second named in `without` as a Try again or a Without would name it: no consent to a look it never said disagreed.
         await accept(h.send, proposal, { blocks: [first!.block, second!.block], without: [second!.block], confirmedMicroUsd: first!.estimatedMicroUsd + second!.estimatedMicroUsd });
-        const last = progressOf(h.events).at(-1)!.progress;
-        assert.deepEqual(last.failed, [{ block: first!.block, reason: "a look disagrees with the chapter · review looks" }], "not made, nor paid for, in a look the chapter now disputes");
-        assert.equal(h.enqueued.length, 1, "the row sent as it is is made");
-        // The row it held comes back marked, so its card offers As it is (codex on PR 1868).
+        const reason = "a look disagrees with the chapter · review looks";
+        assert.deepEqual(progressOf(h.events).at(-1)!.progress.failed, [{ block: first!.block, reason }, { block: second!.block, reason }], "not made, nor paid for, in a look the chapter now disputes");
+        assert.equal(h.enqueued.length, 0);
+        // The rows it held come back marked, so their cards offer As it is (codex on PR 1868).
         const left = finished(h.events).proposal!;
         const held = left.rows.find((row) => row.block === first!.block)!;
         assert.deepEqual(held.disagrees, ["maren-kest"]);
+        assert.deepEqual(left.rows.find((row) => row.block === second!.block)!.disagrees, ["maren-kest"]);
         await accept(h.send, left, { blocks: [held.block], without: [held.block], confirmedMicroUsd: held.estimatedMicroUsd });
-        assert.equal(h.enqueued.length, 2, "and goes once the author sends it as it is");
+        assert.equal(h.enqueued.length, 1, "and goes once the author sends it as it is");
       },
       {
         illustrate: says((input) => MARENS(input)),

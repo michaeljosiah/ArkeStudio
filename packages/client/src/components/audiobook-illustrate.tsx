@@ -191,7 +191,8 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
         {people.length === 0 && <span className="fy-ills__note">{row.who.length > 0 ? "place only" : "no reference rides"}</span>}
         {held && !skipped && (
           <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-without">
-            Without
+            {/* One press sends both: where a look disagrees too, the press says so (codex on PR 1868). */}
+            {disagrees.size > 0 ? "Without · as it is" : "Without"}
           </Button>
         )}
         {disagreeing && !skipped && (
