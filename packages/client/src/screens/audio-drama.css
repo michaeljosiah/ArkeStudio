@@ -77,6 +77,29 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-score__add { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 0 154px; }
 .fy-ad-score__add button { border: 1px dashed var(--border); border-radius: 999px; background: none; color: var(--muted-foreground); font: 500 12px var(--font-sans); padding: 4px 10px; cursor: pointer; }
 
+/* Hear (230g/h): the selection's bar, the decision dialog, and each line's take (230i). */
+.fy-ad-hear { position: sticky; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 10px; max-width: 900px; margin: 16px 0 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); box-shadow: var(--shadow-lg); font-size: 13px; }
+.fy-ad-hear .gap { flex: 1; }
+.fy-ad-hear__dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); margin-right: 6px; }
+.fy-ad-hear__fail { color: var(--destructive, var(--warning)); }
+.fy-ad-heardlg { display: grid; gap: 14px; padding: 4px 2px 2px; font-size: 13px; }
+.fy-ad-heardlg__missing h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.fy-ad-heardlg__choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.fy-ad-heardlg__sent { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; }
+.fy-ad-heardlg__sent li { display: grid; gap: 3px; }
+.fy-ad-heardlg__sent code { font: var(--type-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--secondary); padding: 4px 6px; border-radius: 6px; }
+.fy-ad-heardlg__sent small { color: var(--muted-foreground); }
+.fy-ad-heardlg__cached { opacity: .7; }
+.fy-ad-heardlg__foot { display: flex; justify-content: flex-end; gap: 8px; }
+.fy-ad-take { display: inline-grid; justify-items: center; gap: 2px; font-size: 11px; color: var(--muted-foreground); }
+.fy-ad-take button { border: 0; background: none; color: var(--foreground); font-size: 14px; cursor: pointer; padding: 0 2px; }
+.fy-ad-take--out-of-date small, .fy-ad-take--waits small { color: var(--warning); }
+.fy-ad-take--out-of-date button { color: var(--warning); }
+.fy-ad-take--stand-in small { color: var(--muted-foreground); }
+.fy-ad-take__acts { display: grid; gap: 2px; }
+.fy-ad-take__acts button { font-size: 11px; color: var(--foreground); text-decoration: underline; }
+.fy-ad-score__row { grid-template-columns: 14px 14px 120px minmax(0, 1fr) 92px; }
+
 /* Source (230e): the pinned chapter version, numbered by paragraph, the line's passage marked. */
 .fy-ad-source { border-left: 1px solid var(--border); overflow: auto; padding: 18px 20px 40px; font-size: 14px; line-height: 1.6; }
 .fy-ad-source header { display: flex; align-items: baseline; gap: 8px; }

@@ -1063,6 +1063,14 @@ export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult
   return () => chapterOpenListeners.delete(listener);
 }
 
+/** An audio drama's lines heard (SPEC-057 R-25..R-28): a quote, the speakers with no voice, or what was made. */
+export type DramaHeard = Extract<DomainEvent, { type: "drama.heard" }>;
+const dramaHeardListeners = new Set<(result: DramaHeard) => void>();
+export function subscribeDramaHeard(listener: (result: DramaHeard) => void): () => void {
+  dramaHeardListeners.add(listener);
+  return () => dramaHeardListeners.delete(listener);
+}
+
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
 const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
@@ -1764,6 +1772,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "drama.heard") {
+      for (const listener of dramaHeardListeners) listener(event);
     }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
@@ -5033,6 +5044,26 @@ export function saveEpisodeScript(
 ): string | null {
   const requestId = ulid();
   return send({ kind: "save-episode-script", requestId, worldId, productionId, episode, title, blocks, baseHash }) ? requestId : null;
+}
+
+/**
+ * Hear an audio drama's lines (SPEC-057 R-25): `quoteOnly` prices them and names any speaker with
+ * no voice; a press sends the token it was quoted. Answered, by requestId, as `drama.heard`.
+ */
+export function hearDramaLines(
+  worldId: string,
+  productionId: string,
+  episode: number,
+  blocks: string[],
+  options: { quoteOnly?: boolean; quoteToken?: string; decisions?: Record<string, "narrator" | "leave-out">; retake?: boolean } = {},
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, ...options }) ? requestId : null;
+}
+
+/** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */
+export function decideDramaTake(worldId: string, productionId: string, episode: number, block: string, keep: "new" | "kept"): void {
+  send({ kind: "decide-drama-take", worldId, productionId, episode, block, keep });
 }
 
 /**
