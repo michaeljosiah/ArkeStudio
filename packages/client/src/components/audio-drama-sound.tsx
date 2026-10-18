@@ -153,7 +153,7 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
       )}
       {cue.kind === "sound" && <label className="fy-ad-gen__check"><input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} /> Loop seamlessly</label>}
       <label>Save as<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
-      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec ? ` · ${request.durationSec} s` : " · length chosen by the model"}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
+      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec ? ` · ${request.durationSec} s` : ""}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
       {failure && <p role="alert" className="fy-ad-gen__fail">{failure}</p>}
       <footer>
         <Button variant="ghost" onClick={onBack}>Back</Button>
@@ -174,8 +174,10 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
   const recorder = useRef<MediaRecorder | null>(null);
   const microphone = useRef<MediaStream | null>(null);
   const importing = useRef<string | null>(null);
+  const disposed = useRef(false);
   // Leaving mid-take lets the microphone go (codex on PR 1872): nothing else could stop it after.
   useEffect(() => () => {
+    disposed.current = true;
     const live = recorder.current;
     if (live && live.state !== "inactive") { live.onstop = null; live.stop(); }
     microphone.current?.getTracks().forEach((track) => track.stop());
@@ -192,6 +194,8 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
     setFailure(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Granted after the panel was left (codex on PR 1872): let it go rather than record unseen.
+      if (disposed.current) { stream.getTracks().forEach((track) => track.stop()); return; }
       microphone.current = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(stream);

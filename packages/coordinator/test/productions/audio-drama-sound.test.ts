@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, type Job } from "@arke-studio/contracts";
+import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { generateDramaSound, type DramaSoundDeps, type DramaSoundInput } from "../../src/productions/audio-drama-sound.js";
@@ -105,5 +106,37 @@ describe("codex round 1 on PR 1872", () => {
     assert.equal(made.artifactIds.length, 1, "the paid first loop is placed, not orphaned");
     assert.match(made.reason ?? "", /second loop was not made/);
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= SOUND_ARTIFACT_SCHEMA_VERSION);
+  });
+});
+
+describe("codex round 2 on PR 1872", () => {
+  it("sends the length an automatic sound was priced at", async () => {
+    const { store, id, sent, deps } = await drama();
+    const auto = { ...bell, durationSec: null };
+    const quoted = await generateDramaSound(store, id, { ...auto, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted" && quoted.quote.requests[0]!.durationSec === 10);
+    if (quoted.disposition !== "quoted") return;
+    await generateDramaSound(store, id, { ...auto, quoteToken: quoted.quote.token }, deps);
+    assert.equal(sent[0]!.params["durationSec"], 10, "what is sent is what was priced");
+  });
+
+  it("files a sound paid for and landed before the process stopped, buying nothing again", async () => {
+    const { store, id, sent, deps } = await drama();
+    const quoted = await generateDramaSound(store, id, { ...bell, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    await mkdir(join(store.dir, ".staging/drama-sound/landed"), { recursive: true });
+    await writeFile(join(store.dir, ".staging/drama-sound/landed/paid.mp3"), Buffer.from("mp3:paid"));
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "drama-sound", id: "sound/Harbour bell" }, worldId: store.worldId, productionId: id,
+      provider: "elevenlabs", model: "eleven_text_to_sound_v2", params: { text: bell.prompt, durationSec: 4 }, landedFiles: [".staging/drama-sound/landed/paid.mp3"] } as unknown as Job;
+    const made = await generateDramaSound(store, id, { ...bell, quoteToken: quoted.quote.token }, { ...deps, jobs: (match) => [paid].filter(match) });
+    assert.equal(made.disposition, "made");
+    assert.equal(sent.length, 0, "nothing is sent again");
+  });
+
+  it("refuses a script placing a sound this production cannot use", async () => {
+    const { store, id } = await drama();
+    const cue: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "A bell.", soundArtifact: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV" };
+    await assert.rejects(saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [cue], baseHash: null }), /cannot use/);
   });
 });

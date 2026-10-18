@@ -10551,12 +10551,15 @@ export class Coordinator {
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
           });
-          if (result.disposition === "made") await this.refreshWorldSnapshot(msg.worldId);
+          // Only while this world is still the open one (codex on PR 1872): a sound finishing after
+          // the author moved on never reopens the world they left.
+          if (result.disposition === "made" && this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, ...result });
         } catch (err) {
           refuse(describeCoordinatorError(err));
-          await this.refreshWorldSnapshot(msg.worldId);
+          if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
         }
         return;
       }

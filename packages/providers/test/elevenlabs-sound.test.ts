@@ -50,3 +50,10 @@ it("reads the shared durationSec, and sings the Bench's lyrics rather than dropp
   await client.submit("key", { capability: "sound-effect", model: "eleven_text_to_sound_v2", params: { text: "Rain", durationSec: 3 } } as SubmitRequest);
   assert.equal(bodies[2]!["duration_seconds"], 3);
 });
+
+it("refuses style and lyrics past Eleven Music's 2,000 characters before sending (codex on PR 1872)", async () => {
+  let calls = 0;
+  const client = new ElevenLabsClient(async () => { calls++; return new Response(mp3); });
+  await assert.rejects(client.submit("key", { capability: "music", model: "music_v1", params: { prompt: "Highlife", lyrics: "la ".repeat(700) } } as SubmitRequest), /2,000 characters/);
+  assert.equal(calls, 0);
+});
