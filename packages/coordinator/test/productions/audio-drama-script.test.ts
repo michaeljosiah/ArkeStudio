@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { createProduction } from "../../src/productions/ops.js";
@@ -30,12 +30,12 @@ describe("saving an episode script (SPEC-057 R-83)", () => {
     const blocks = [scene([14, 15]), line("maren", "Bray, look.", [14])];
     const first = await saveEpisodeScript(store, id, { episode: 1, title: "The tide turns", blocks, baseHash: null });
     assert.equal(first.version, 1);
-    const path = join(store.dir, "productions", id, "scripts", "episode-01.json");
+    const path = join(store.dir, "productions", id, "scripts", "episode-001.json");
     assert.deepEqual(JSON.parse(await readFile(path, "utf8")).blocks, blocks, "ids and source pins round-trip");
     const second = await saveEpisodeScript(store, id, { episode: 1, title: "The tide turns", blocks: [...blocks, line("bray", "I see them.")], baseHash: first.hash });
     assert.equal(second.version, 1, "a direct save keeps the version, as a chapter's does");
     assert.notEqual(second.hash, first.hash);
-    assert.ok(await exists(join(store.dir, ".history", "productions", id, "scripts", "episode-01", "v1.json")));
+    assert.ok(await exists(join(store.dir, ".history", "productions", id, "scripts", "episode-001", "v1.json")));
     const bundled = store.getBundle().productions.find(production => production.meta.id === id)!;
     assert.equal(bundled.episodeScripts?.[0]?.hash, second.hash, "the scan carries the base the next save is fenced on");
     assert.equal(bundled.episodeScripts?.[0]?.script.blocks.length, 3);
@@ -51,6 +51,16 @@ describe("saving an episode script (SPEC-057 R-83)", () => {
       /breaks in/);
     const book = await createProduction(store, { title: "A book", medium: "story" });
     await assert.rejects(saveEpisodeScript(store, book, { episode: 1, title: "", blocks: [], baseHash: null }), /not an audio drama/);
+  });
+
+  it("reports a script file named for another episode instead of opening it as that episode", async () => {
+    const { store, id } = await drama();
+    await saveEpisodeScript(store, id, { episode: 2, title: "", blocks: [line("maren", "Two.")], baseHash: null });
+    const scripts = join(store.dir, "productions", id, "scripts");
+    await rename(join(scripts, "episode-002.json"), join(scripts, "episode-001.json"));
+    await store.reload();
+    const bundled = store.getBundle().productions.find(production => production.meta.id === id)!;
+    assert.equal(bundled.episodeScripts, undefined, "a misnamed script is not read as an episode");
   });
 
   it("pins a repeated passage by paragraph number, never by its text", async () => {

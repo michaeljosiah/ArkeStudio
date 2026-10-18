@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
-  estimateScriptSeconds, pickableSheets,
+  estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
@@ -12,6 +12,7 @@ import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
   scenesOf, scriptAsText, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
+import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, More, X } from "../components/icons.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -36,7 +37,8 @@ export function EpisodeScriptScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const episode = Number(episodeParam);
   if (!world || !production) return <Screen id="episode-script"><EmptyState title="Opening the script…" /></Screen>;
-  if (!Number.isInteger(episode) || episode < 1) return <p role="alert">This episode address is invalid.</p>;
+  if (!Number.isInteger(episode) || episode < 1) return <Screen id="episode-script"><EmptyState title="This episode address is invalid." /></Screen>;
+  if (!productionShape(production.meta).isAudioDrama) return <Screen id="episode-script"><EmptyState title="Scripts are an audio drama's." /></Screen>;
   return <EpisodeScript key={`${production.meta.id}:${episode}`} world={world} production={production} episode={episode} />;
 }
 
@@ -47,12 +49,14 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const plan = production.audioDrama?.plan;
   const episodes = Math.max(plan?.episodes ?? 1, episode);
 
-  // The editor's copy, and the file it was read from: every save is fenced on that hash.
-  const [blocks, setBlocks] = useState<EpisodeScriptBlock[]>(() => stored?.script.blocks ?? []);
-  const [title, setTitle] = useState(() => stored?.script.title ?? "");
-  const [baseHash, setBaseHash] = useState<string | null>(stored?.hash ?? null);
+  // The editor's copy, and the file it was read from: every save is fenced on that hash. A draft
+  // left unsent by the last score on this episode comes back first (codex on PR 1870).
+  const [parked] = useState(() => takeParked(production.meta.id, episode));
+  const [blocks, setBlocks] = useState<EpisodeScriptBlock[]>(() => parked?.blocks ?? stored?.script.blocks ?? []);
+  const [title, setTitle] = useState(() => parked?.title ?? stored?.script.title ?? "");
+  const [baseHash, setBaseHash] = useState<string | null>(parked ? parked.baseHash : stored?.hash ?? null);
   const [version, setVersion] = useState<number | null>(stored?.script.version ?? null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(parked !== null);
   const [saving, setSaving] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -76,11 +80,20 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
     if (!dirty || saving) return;
     const timer = setTimeout(() => {
       const requestId = saveEpisodeScript(world.meta.worldId, production.meta.id, episode, title, blocks, baseHash);
+      // Still unsaved: it is tried again, and parked if the score is left meanwhile.
       if (requestId === null) { setFailure("The studio is disconnected. Your edits are kept here."); return; }
       setSaving(requestId); setDirty(false);
     }, 700);
     return () => clearTimeout(timer);
-  }, [dirty, saving, blocks, title, baseHash]);
+  }, [dirty, saving, blocks, title, baseHash, failure]);
+  // Leaving with edits unsent — inside the pause, behind a save in flight, or disconnected — parks
+  // them rather than dropping them (codex on PR 1870).
+  const latest = useRef({ blocks, title, baseHash, dirty, saving });
+  latest.current = { blocks, title, baseHash, dirty, saving };
+  useEffect(() => () => {
+    const now = latest.current;
+    if (now.dirty) parkDraft({ worldId: world.meta.worldId, productionId: production.meta.id, episode, title: now.title, blocks: now.blocks, baseHash: now.baseHash }, now.saving);
+  }, []);
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);
@@ -97,7 +110,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   });
 
   const cast = useMemo(() => pickableSheets(world.sheets, production.meta.id).filter((sheet) => sheet.type === "character"), [world.sheets, production.meta.id]);
-  const name = (slug: string) => cast.find((sheet) => sheet.id === slug)?.name ?? slug;
+  // Choices are the pickable cast; a speaker already in the script is named from every sheet,
+  // a guest of another production included (codex on PR 1870).
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
   const scenes = scenesOf(blocks);
   const beds = bedMarks(blocks);
   const tones = speakerTones(blocks);
@@ -199,10 +214,15 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             const scene = scenes[i] ?? null;
             const on = selected === block.id;
             const lanes = beds[i]!;
-            const lane = (which: "ambience" | "music") => {
-              const mark = lanes.find((candidate) => candidate.lane === which);
-              return <span className={cx("fy-ad-score__lane", mark && `fy-ad-score__lane--${mark.at}`, mark?.stops && mark.at === "end" && "fy-ad-score__lane--foot")} data-lane={which} />;
-            };
+            // Every bed in the lane is drawn, side by side where two overlap (codex on PR 1870).
+            const lane = (which: "ambience" | "music") => (
+              <span className="fy-ad-score__lane" data-lane={which}>
+                {lanes.filter((candidate) => candidate.lane === which).map((mark, at) => (
+                  <i key={mark.bed} data-bed={mark.bed} style={{ left: `${at * 5}px` }}
+                    className={cx("fy-ad-score__bed", `fy-ad-score__bed--${mark.at}`, mark.stops && mark.at === "end" && "fy-ad-score__bed--foot")} />
+                ))}
+              </span>
+            );
             const isNew = (block.kind === "dialogue" || block.kind === "narration") && !!scene?.source && !block.paragraphs?.length;
             return (
               <div key={block.id} role="listitem" data-block={block.id} aria-selected={on}
@@ -371,7 +391,6 @@ function RowTools({ block, index, blocks, scene, onChange, onBreak, onInsert, on
   onInsert: (kind: EpisodeScriptBlock["kind"]) => void; onRemove: () => void;
 }) {
   const next = blocks[index + 1];
-  const sceneEnd = (() => { let end = index + 1; while (end < blocks.length && blocks[end]!.kind !== "heading") end++; return end; })();
   return (
     <div className="fy-ad-score__tools" onClick={(event) => event.stopPropagation()}>
       {block.kind === "dialogue" && (
@@ -385,7 +404,8 @@ function RowTools({ block, index, blocks, scene, onChange, onBreak, onInsert, on
       {(block.kind === "ambience" || block.kind === "music") && (
         <select aria-label="Runs until" value={block.until ?? ""} onChange={(event) => onChange({ until: event.target.value || undefined } as Partial<EpisodeScriptBlock>)}>
           <option value="">Runs to the end of the scene</option>
-          {blocks.slice(index + 1, sceneEnd + 1).filter(Boolean).map((candidate, offset) => (
+          {/* Any later block: a bed may run on across a scene change (codex on PR 1870). */}
+          {blocks.slice(index + 1).map((candidate, offset) => (
             <option key={candidate.id} value={candidate.id}>Stops before row {index + offset + 2}{candidate.kind === "heading" ? ` · scene ${candidate.place}` : ""}</option>
           ))}
         </select>

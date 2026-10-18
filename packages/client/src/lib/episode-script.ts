@@ -1,6 +1,13 @@
 import { ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
 
 /**
+ * A chapter's paragraphs as every surface numbers them: the shared splitter, so a source pin's
+ * paragraph number means the same passage here as in the rest of the chapter tooling (codex on
+ * PR 1870).
+ */
+export { chapterParagraphs } from "@arke-studio/contracts";
+
+/**
  * The episode score's pure parts (SPEC-057 R-11..R-24, design turn 230d–f): which scene a block is
  * in, where beds run, which voice colour a speaker wears, and the edits that keep block ids.
  */
@@ -123,11 +130,6 @@ export function mendRelations(blocks: readonly EpisodeScriptBlock[]): EpisodeScr
     }
     return block;
   });
-}
-
-/** A chapter's paragraphs, numbered from 1 as Source shows them: blank lines separate them. */
-export function chapterParagraphs(body: string): string[] {
-  return body.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
 }
 
 /** "14–17" or "14, 16" from the numbers a block cites. */

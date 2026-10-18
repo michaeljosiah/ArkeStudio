@@ -31,10 +31,10 @@
 .fy-ad-score__row--heading { padding-top: 22px; }
 .fy-ad-score__row--heading > .fy-ad-score__heading { grid-column: 3 / -1; }
 .fy-ad-score__lane { align-self: stretch; position: relative; margin: -6px 0; }
-.fy-ad-score__lane--start, .fy-ad-score__lane--run, .fy-ad-score__lane--end { border-left: 1.5px solid var(--muted-foreground); margin-left: 6px; }
-.fy-ad-score__lane--start { margin-top: 10px; }
-.fy-ad-score__lane--start::before { content: ""; position: absolute; left: -5px; top: -2px; width: 7px; height: 7px; border: 1.5px solid var(--muted-foreground); border-radius: 50%; background: var(--background); }
-.fy-ad-score__lane--foot::after { content: ""; position: absolute; left: -5px; bottom: 0; width: 9px; border-top: 1.5px solid var(--muted-foreground); }
+.fy-ad-score__bed { position: absolute; top: 0; bottom: 0; border-left: 1.5px solid var(--muted-foreground); margin-left: 6px; }
+.fy-ad-score__bed--start { top: 10px; }
+.fy-ad-score__bed--start::before { content: ""; position: absolute; left: -5px; top: -2px; width: 7px; height: 7px; border: 1.5px solid var(--muted-foreground); border-radius: 50%; background: var(--background); }
+.fy-ad-score__bed--foot::after { content: ""; position: absolute; left: -5px; bottom: 0; width: 9px; border-top: 1.5px solid var(--muted-foreground); }
 .fy-ad-score__who { text-align: right; padding-top: 6px; display: grid; justify-items: end; gap: 2px; }
 .fy-ad-score__who small { font-size: 11px; color: var(--muted-foreground); }
 .fy-ad-score__speaker { font: 600 13px var(--font-sans); border-bottom: 2px solid var(--fy-voice, var(--foreground)); padding-bottom: 1px; }

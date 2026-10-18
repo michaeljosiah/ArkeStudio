@@ -22,8 +22,9 @@ describe("an episode script (SPEC-057 R-83)", () => {
     ];
     const script = EpisodeScriptSchema.parse({ version: 1, episode: 1, title: "The tide turns", blocks });
     assert.deepEqual(script.blocks, blocks);
-    assert.equal(episodeScriptFile(1), "episode-01.json");
-    assert.equal(episodeScriptFile(12), "episode-12.json");
+    assert.equal(episodeScriptFile(1), "episode-001.json");
+    assert.equal(episodeScriptFile(12), "episode-012.json");
+    assert.ok(episodeScriptFile(100) > episodeScriptFile(11), "three digits keep 100 after 11");
   });
 
   it("an interruption is a stored relation: a cut line needs the line that breaks in (R-18)", () => {
@@ -31,7 +32,9 @@ describe("an episode script (SPEC-057 R-83)", () => {
     const breaksIn = line("bray", "Two. Climb.", { overlapsPrevious: true });
     assert.deepEqual(episodeScriptProblems([cut, breaksIn]), []);
     assert.match(episodeScriptProblems([cut, line("bray", "Two.")]).join(" "), /must be followed by the line that breaks in/);
-    assert.match(episodeScriptProblems([{ id: id(), kind: "narration", words: "x" }, breaksIn]).join(" "), /must follow a line/);
+    assert.match(episodeScriptProblems([{ id: id(), kind: "narration", words: "x" }, breaksIn]).join(" "), /must follow the line it breaks off/);
+    assert.match(episodeScriptProblems([line("maren", "Not broken off."), breaksIn]).join(" "), /must follow the line it breaks off/,
+      "both sides of the relation: the line above must be marked broken off");
     assert.throws(() => EpisodeScriptSchema.parse({ version: 1, episode: 1, blocks: [cut] }));
   });
 

@@ -171,8 +171,10 @@ export function episodeScriptProblems(blocks: readonly EpisodeScriptBlock[]): st
       const next = blocks[i + 1];
       if (next?.kind !== "dialogue" || !next.overlapsPrevious) problems.push(`A line broken off (${block.id}) must be followed by the line that breaks in.`);
     }
-    if (block.kind === "dialogue" && block.overlapsPrevious && blocks[i - 1]?.kind !== "dialogue") {
-      problems.push(`A line that breaks in (${block.id}) must follow a line.`);
+    if (block.kind === "dialogue" && block.overlapsPrevious) {
+      // Both sides of the relation (codex on PR 1870): the line above must be the one broken off.
+      const previous = blocks[i - 1];
+      if (previous?.kind !== "dialogue" || !previous.cut) problems.push(`A line that breaks in (${block.id}) must follow the line it breaks off.`);
     }
     if ((block.kind === "ambience" || block.kind === "music") && block.until !== undefined) {
       const at = index.get(block.until);
@@ -193,9 +195,9 @@ export const EpisodeScriptSchema = z.object({
 });
 export type EpisodeScript = z.infer<typeof EpisodeScriptSchema>;
 
-/** Where episode `n`'s script lives: two digits keep the folder in episode order. */
+/** Where episode `n`'s script lives: three digits keep every allowed episode in order (codex on PR 1870). */
 export function episodeScriptFile(episode: number): string {
-  return `episode-${String(episode).padStart(2, "0")}.json`;
+  return `episode-${String(episode).padStart(3, "0")}.json`;
 }
 
 /**
