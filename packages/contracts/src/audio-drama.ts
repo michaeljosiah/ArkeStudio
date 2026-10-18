@@ -94,6 +94,11 @@ export const ScriptHeadingSchema = z.object({
     story: SlugSchema,
     chapter: z.string().min(1).max(200),
     version: z.number().int().min(1),
+    /**
+     * The chapter file's hash when pinned (codex on PR 1870): a direct chapter save keeps its
+     * version, so the version alone cannot say the prose moved under the pin; the hash can.
+     */
+    hash: z.string().min(1).max(200).optional(),
     paragraphs: Paragraphs,
   }).strict().optional(),
   estimateSec: z.number().int().min(0).max(36_000).optional(),

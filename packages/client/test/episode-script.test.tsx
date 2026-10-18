@@ -6,7 +6,8 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
-import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, splitBlock } from "../src/lib/episode-script.js";
+import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, splitBlock } from "../src/lib/episode-script.js";
+import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -79,7 +80,7 @@ function withScript(blocks: EpisodeScriptBlock[]): ClientState {
   const state = structuredClone(FIXTURE_STATE);
   const base = state.world!.productions[0]!;
   const novel = { ...structuredClone(base), meta: { ...base.meta, id: "low-water", title: "Low Water", format: "story", medium: "story", kind: undefined },
-    chapters: [{ id: "the-bell-tower", order: 3, title: "The bell tower", file: "03-the-bell-tower.md", words: 900, version: 14, status: "drafted" }],
+    chapters: [{ id: "the-bell-tower", order: 3, title: "The bell tower", file: "03-the-bell-tower.md", words: 900, version: 14, hash: "sha256:now", status: "drafted" }],
     scenes: [], episodes: [], takes: [] };
   const drama = { ...structuredClone(base), meta: { ...base.meta, id: "low-water-drama", title: "Low Water", format: "story", medium: "story", kind: "audio-drama" },
     chapters: [], scenes: [], episodes: [], takes: [],
@@ -92,6 +93,8 @@ function withScript(blocks: EpisodeScriptBlock[]): ClientState {
 let root: Root | null = null;
 afterEach(async () => {
   await act(async () => root?.unmount());
+  // A draft left unsent by a test's score is parked; the next test's score must not take it back.
+  takeParked(FIXTURE_WORLD_ID, "low-water-drama", 1);
   root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
   dom.document.body.innerHTML = "";
 });
@@ -194,5 +197,38 @@ describe("the score (230e)", () => {
     await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
       productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:next" }));
     assert.match(m.container.textContent!, /Saved · script v2/);
+  });
+});
+
+describe("codex round 2 on PR 1870", () => {
+  it("keeps parked drafts apart by world, and parks a draft it cannot send yet", () => {
+    __setBridgeForTest(null);
+    const draft = { productionId: "story", episode: 1, title: "", blocks: [line("maren", "Unsent.")], baseHash: null };
+    parkDraft({ ...draft, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HA" }, null);
+    assert.equal(takeParked("01J8F3K2QW9VZX4N7M0RTYB6HB", "story", 1), null, "another world's story:1 does not take it");
+    assert.equal(takeParked("01J8F3K2QW9VZX4N7M0RTYB6HA", "story", 1)?.blocks[0]!.id, draft.blocks[0]!.id);
+  });
+
+  it("says an incomplete draft cannot be saved rather than sending what would go unanswered", async () => {
+    assert.equal(scriptSaveProblem("", [{ id: ulid(), kind: "heading", place: "" }]), "A scene needs a place.");
+    assert.equal(scriptSaveProblem("", [{ id: ulid(), kind: "sound", heard: " " }]), "A cue needs what is heard.");
+    assert.equal(scriptSaveProblem("", [line("maren", "Fine.")]), null);
+    const heading: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
+    const m = await mount(withScript([heading, line("maren", "Bray.")]));
+    const place = m.container.querySelector(`[data-block="${heading.id}"] input[aria-label="Place"]`)!;
+    await act(async () => props(place).onChange!({ target: { value: "" } }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    assert.equal(m.sent.some(message => message.kind === "save-episode-script"), false, "nothing sent that the transport would drop");
+    assert.match(m.container.textContent!, /Not saved · A scene needs a place\./);
+  });
+
+  it("marks a scene changed when its chapter was rewritten under the same version", async () => {
+    const pinned = (hash: string): EpisodeScriptBlock => ({ id: ulid(), kind: "heading", place: "The bell tower", source: { story: "low-water", chapter: "the-bell-tower", version: 14, hash } });
+    const same = await mount(withScript([pinned("sha256:now")]));
+    assert.doesNotMatch(same.container.textContent!, /changed v14/);
+    await act(async () => root?.unmount()); root = null;
+    takeParked(FIXTURE_WORLD_ID, "low-water-drama", 1);
+    const moved = await mount(withScript([pinned("sha256:then")]));
+    assert.match(moved.container.textContent!, /Chapter 3 · changed v14/, "the version alone would not have said it");
   });
 });

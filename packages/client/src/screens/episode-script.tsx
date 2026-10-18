@@ -10,7 +10,7 @@ import {
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  scenesOf, scriptAsText, speakerTones, splitBlock,
+  scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, More, X } from "../components/icons.js";
@@ -51,7 +51,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
 
   // The editor's copy, and the file it was read from: every save is fenced on that hash. A draft
   // left unsent by the last score on this episode comes back first (codex on PR 1870).
-  const [parked] = useState(() => takeParked(production.meta.id, episode));
+  const [parked] = useState(() => takeParked(world.meta.worldId, production.meta.id, episode));
   const [blocks, setBlocks] = useState<EpisodeScriptBlock[]>(() => parked?.blocks ?? stored?.script.blocks ?? []);
   const [title, setTitle] = useState(() => parked?.title ?? stored?.script.title ?? "");
   const [baseHash, setBaseHash] = useState<string | null>(parked ? parked.baseHash : stored?.hash ?? null);
@@ -79,6 +79,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   useEffect(() => {
     if (!dirty || saving) return;
     const timer = setTimeout(() => {
+      // Said, not sent: a draft the coordinator would drop unanswered (codex on PR 1870).
+      const problem = scriptSaveProblem(title, blocks);
+      if (problem !== null) { setFailure(problem); return; }
       const requestId = saveEpisodeScript(world.meta.worldId, production.meta.id, episode, title, blocks, baseHash);
       // Still unsaved: it is tried again, and parked if the score is left meanwhile.
       if (requestId === null) { setFailure("The studio is disconnected. Your edits are kept here."); return; }
@@ -342,7 +345,9 @@ function HeadingRow({ block, n, on, production, world, source, onChange, onSourc
   const story = block.source ? world.productions.find((p) => p.meta.id === block.source!.story) ?? null : source;
   const chapter = block.source ? story?.chapters.find((c) => c.id === block.source!.chapter) : undefined;
   const current = chapter?.version ?? null;
-  const changed = block.source && current !== null && current > block.source.version;
+  // Moved on by a new version, or rewritten in place under the same one (codex on PR 1870).
+  const changed = !!block.source && chapter !== undefined && ((current ?? 1) > block.source.version ||
+    (block.source.hash !== undefined && chapter.hash !== undefined && chapter.hash !== block.source.hash));
   const heardAs = block.heardAs ?? (production.audioDrama?.plan.narrator === "narrated" ? "narrated" : production.audioDrama?.plan.narrator === "in-the-room" ? "in-the-room" : undefined);
   return (
     <div className="fy-ad-score__heading">
@@ -362,19 +367,20 @@ function HeadingRow({ block, n, on, production, world, source, onChange, onSourc
           {on && story && (
             <select aria-label="Adapts chapter" value={block.source?.chapter ?? ""} onChange={(event) => {
               const picked = story.chapters.find((c) => c.id === event.target.value);
-              onChange({ source: picked ? { story: story.meta.id, chapter: picked.id, version: picked.version ?? 1 } : undefined });
+              onChange({ source: picked ? { story: story.meta.id, chapter: picked.id, version: picked.version ?? 1, ...(picked.hash ? { hash: picked.hash } : {}) } : undefined });
             }}>
               <option value="">No chapter</option>
               {story.chapters.filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>Chapter {c.order} · {c.title}</option>)}
             </select>
           )}
           {on && block.source && (
-            <input aria-label="Source paragraphs" className="fy-ad-score__paras" placeholder="¶ e.g. 14-17" defaultValue={(block.source.paragraphs ?? []).join(", ")}
+            // Keyed by the chapter: choosing another drops what was typed for the last (codex on PR 1870).
+            <input key={`${block.source.story}/${block.source.chapter}`} aria-label="Source paragraphs" className="fy-ad-score__paras" placeholder="¶ e.g. 14-17" defaultValue={(block.source.paragraphs ?? []).join(", ")}
               onBlur={(event) => onChange({ source: { ...block.source!, paragraphs: parseParagraphs(event.target.value) } })} />
           )}
           {!on && block.source && chapter && (
             <button type="button" className={cx("fy-ad-chip", changed && "fy-ad-chip--warn")} onClick={(event) => { event.stopPropagation(); onSource(); }}>
-              Chapter {chapter.order}{changed ? ` · changed v${current}` : ""}
+              Chapter {chapter.order}{changed ? ` · changed v${current ?? 1}` : ""}
             </button>
           )}
           {block.estimateSec !== undefined && <span className="fy-ad-chip">≈{Math.floor(block.estimateSec / 60)}:{String(block.estimateSec % 60).padStart(2, "0")}</span>}
@@ -466,6 +472,9 @@ function SourceColumn({ world, story, heading, block, onClose }: {
         <>
           <h3><BookOpen size={14} />Chapter {chapter.order} · {chapter.title}</h3>
           {(chapter.version ?? 1) > pin.version && <p className="fy-ad-source__changed">The chapter is now v{chapter.version}. This scene was written from v{pin.version}.</p>}
+          {(chapter.version ?? 1) === pin.version && pin.hash !== undefined && chapter.hash !== undefined && chapter.hash !== pin.hash && (
+            <p className="fy-ad-source__changed">The chapter was edited since this scene was written. This is the chapter now; its paragraph numbers may have moved.</p>
+          )}
           {block && "paragraphs" in block && block.paragraphs?.length ? <p className="fy-ad-source__from">{paragraphLabel(block.paragraphs)}</p> : null}
           {!shown ? <p className="fy-ad-source__none">Reading…</p> : "failure" in shown ? <p role="alert">{shown.failure}</p> : (
             <ol className="fy-ad-source__paras">

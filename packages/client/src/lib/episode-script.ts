@@ -1,4 +1,25 @@
-import { ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
+import { EpisodeScriptSchema, episodeScriptProblems, ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
+
+/**
+ * Why a draft cannot be saved yet, or null (codex on PR 1870): an emptied scene place or cue would
+ * be dropped by the transport unanswered, and a save waiting for that answer would wait forever.
+ * It is said here instead, and the draft stays, unsaved, for the author to finish.
+ */
+export function scriptSaveProblem(title: string, blocks: readonly EpisodeScriptBlock[]): string | null {
+  if (title.trim().length > 160) return "The title is too long.";
+  const relations = episodeScriptProblems(blocks)[0];
+  if (relations) return relations;
+  const parsed = EpisodeScriptSchema.safeParse({ version: 1, episode: 1, title, blocks });
+  if (!parsed.success) {
+    const at = parsed.error.issues[0]?.path[1];
+    const block = typeof at === "number" ? blocks[at] : undefined;
+    if (block?.kind === "heading") return "A scene needs a place.";
+    if (block?.kind === "sound" || block?.kind === "ambience" || block?.kind === "music") return "A cue needs what is heard.";
+    if (block?.kind === "note") return "A note needs words.";
+    return "A block is incomplete.";
+  }
+  return null;
+}
 
 /**
  * A chapter's paragraphs as every surface numbers them: the shared splitter, so a source pin's
