@@ -38,3 +38,15 @@ it("composes instrumental music of the asked length with Eleven Music", async ()
   assert.match(sent!.url, /\/v1\/music\?output_format=mp3_44100_128$/);
   assert.deepEqual(sent!.body, { prompt: "A cello, solo, slow", model_id: "music_v1", force_instrumental: true, music_length_ms: 45_000 });
 });
+
+it("reads the shared durationSec, and sings the Bench's lyrics rather than dropping them (codex on PR 1872)", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const client = new ElevenLabsClient(async (_url, init) => { bodies.push(JSON.parse(String(init?.body))); return new Response(mp3); });
+  await client.submit("key", { capability: "music", model: "music_v1", params: { prompt: "Lagos highlife, brass", durationSec: 60 } } as SubmitRequest);
+  assert.equal(bodies[0]!["music_length_ms"], 60_000, "the priced length is the length sent");
+  await client.submit("key", { capability: "music", model: "music_v1", params: { prompt: "Lagos highlife", lyrics: "Water rise, water fall", durationSec: 30 } } as SubmitRequest);
+  assert.equal(bodies[1]!["force_instrumental"], false);
+  assert.equal(bodies[1]!["prompt"], "Lagos highlife\n\nLyrics:\nWater rise, water fall");
+  await client.submit("key", { capability: "sound-effect", model: "eleven_text_to_sound_v2", params: { text: "Rain", durationSec: 3 } } as SubmitRequest);
+  assert.equal(bodies[2]!["duration_seconds"], 3);
+});

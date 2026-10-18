@@ -4,7 +4,7 @@ import {
   type ArtifactSidecar, type ProductionBundle, type ScriptCue, type WorldBundle,
 } from "@arke-studio/contracts";
 import { ReferencePickerBody, type PickerSource } from "./reference-picker.js";
-import { generateDramaSound, subscribeDramaSound, uploadArtifacts, type DramaSound } from "../lib/store.js";
+import { generateDramaSound, subscribeDramaSound, subscribeQueueResults, uploadArtifacts, type DramaSound } from "../lib/store.js";
 import { recordingToWav } from "../lib/wav.js";
 
 import { Button } from "./ui.js";
@@ -24,7 +24,8 @@ export function soundUses(production: ProductionBundle): Map<string, number> {
   return uses;
 }
 
-const words = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3));
+// Letters and numbers in any script (codex on PR 1872): a cue in Cyrillic or Yoruba still ranks.
+const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((word) => word.length > 3));
 
 /**
  * The world's and this production's audio as picker rows (230w): ranked against the cue's words,
@@ -137,7 +138,7 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
     <section className="fy-ad-gen" aria-label={`Generate ${CUE_LABEL[cue.kind].toLowerCase()}`}>
       <header><button type="button" className="fy-linkbtn" onClick={onBack}>‹ Sounds</button><h2>Generate {CUE_LABEL[cue.kind].toLowerCase()}</h2></header>
       <label>In the script<textarea readOnly value={cue.heard} rows={2} /></label>
-      <label>What's sent<textarea value={prompt} rows={3} maxLength={2_000} onChange={(event) => setPrompt(event.target.value)} /></label>
+      <label>What's sent<textarea value={prompt} rows={3} maxLength={cue.kind === "music" ? 2_000 : 450} onChange={(event) => setPrompt(event.target.value)} /></label>
       <div className="fy-ad-gen__row"><span>Engine</span><b>{engine}</b></div>
       {cue.kind === "ambience" ? (
         <div className="fy-ad-gen__row"><span>Length</span><b>Two seamless loops · 30 s and 23 s</b></div>
@@ -171,10 +172,27 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
   const [phase, setPhase] = useState<"idle" | "recording" | "saving" | "saved">("idle");
   const [failure, setFailure] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const microphone = useRef<MediaStream | null>(null);
+  const importing = useRef<string | null>(null);
+  // Leaving mid-take lets the microphone go (codex on PR 1872): nothing else could stop it after.
+  useEffect(() => () => {
+    const live = recorder.current;
+    if (live && live.state !== "inactive") { live.onstop = null; live.stop(); }
+    microphone.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+  // Kept only once the import says so (codex on PR 1872): a submitted file can still be refused.
+  useEffect(() => subscribeQueueResults((result) => {
+    if (result.requestId !== importing.current) return;
+    importing.current = null;
+    // An import queues no job: kept is a "not-queued" answer naming no failure.
+    if (result.disposition !== "rejected" && result.failures.length === 0) setPhase("saved");
+    else { setFailure(result.failures[0]?.reason ?? "The recording could not be kept."); setPhase("idle"); }
+  }), []);
   const start = async () => {
     setFailure(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      microphone.current = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(stream);
       next.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
@@ -187,7 +205,7 @@ function RecordPanel({ world, production, cue, onBack }: { world: WorldBundle; p
           const file = new File([wav as BlobPart], `${base}.wav`, { type: "audio/wav" });
           const sent = uploadArtifacts(world.meta.worldId, [file], production.meta.id);
           if (sent.requestId === null) throw new Error(sent.reason ?? "The studio is disconnected.");
-          setPhase("saved");
+          importing.current = sent.requestId;
         } catch (error) { setFailure(error instanceof Error ? error.message : "The recording could not be kept."); setPhase("idle"); }
       };
       recorder.current = next;

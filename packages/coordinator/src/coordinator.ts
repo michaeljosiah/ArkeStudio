@@ -10552,10 +10552,11 @@ export class Coordinator {
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
           });
-          this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, ...result });
           if (result.disposition === "made") await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, ...result });
         } catch (err) {
           refuse(describeCoordinatorError(err));
+          await this.refreshWorldSnapshot(msg.worldId);
         }
         return;
       }

@@ -495,6 +495,8 @@ export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
  * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
  */
 export const DRAMA_TAKE_SCHEMA_VERSION = 92;
+/** A generated sound's sidecar (SPEC-057 R-48): `source: "sound"` is unreadable to a build before it. */
+export const SOUND_ARTIFACT_SCHEMA_VERSION = 93;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -532,6 +534,7 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.recording !== undefined) boundary = Math.max(boundary, RECORDED_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && (record.generation.grouped !== undefined || record.generation.loudness !== undefined)) boundary = Math.max(boundary, AUDIOBOOK_GROUPED_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.episode !== undefined) boundary = Math.max(boundary, DRAMA_TAKE_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "sound") boundary = Math.max(boundary, SOUND_ARTIFACT_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
