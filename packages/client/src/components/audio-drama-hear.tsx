@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   HEAR_ONE_PRESS_LIMIT_MICRO_USD, dramaTakeState, formatMicroUsd,
-  type EpisodeScriptBlock, type EpisodeTakes, type MissingVoiceChoice,
+  type DramaRequest, type EpisodeScriptBlock, type EpisodeTakes, type MissingVoiceChoice,
 } from "@arke-studio/contracts";
 import { decideDramaTake, hearDramaLines, subscribeDramaHeard, type DramaHeard } from "../lib/store.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
@@ -165,20 +165,7 @@ function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear
           </section>
         ))}
         <button type="button" className="fy-linkbtn" aria-expanded={sent} onClick={() => setSent(!sent)}>What's sent</button>
-        {sent && (
-          <ol className="fy-ad-heardlg__sent">
-            {requests.map((request) => (
-              <li key={request.block} className={cx(request.cached && "fy-ad-heardlg__cached")}>
-                <b>{request.speaker}</b> · {request.voice}{request.standIn ? " · stand-in" : ""} · {request.model}
-                <code>{request.cached ? "already performed · not sent" : request.text}</code>
-                {request.direction && (request.direction.sent === "not sent"
-                  ? <small><s>direction</s> · not sent: {request.direction.reason}</small>
-                  : <small>direction sent as {request.direction.sent}: {request.direction.text}</small>)}
-                {!request.cached && <small>{formatMicroUsd(request.estimatedMicroUsd)}</small>}
-              </li>
-            ))}
-          </ol>
-        )}
+        {sent && <SentList requests={requests} />}
         <div className="fy-ad-heardlg__foot">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={missing.length > 0 || busy || !quote} onClick={onHear}>
@@ -194,6 +181,31 @@ function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear
  * A line's take, in the score's last column (230i): nothing yet, kept, a stand-in, out of date, a
  * new take waiting to be kept or not, or a take heard to say other words — with Retake.
  */
+/**
+ * What's sent (R-27, R-60): each request as it goes — who, the voice, the words, and how the line's
+ * direction and the role's note travel, or that they do not.
+ */
+export function SentList({ requests }: { requests: readonly DramaRequest[] }) {
+  return (
+    <ol className="fy-ad-heardlg__sent">
+      {requests.map((request) => (
+        <li key={request.block} className={cx(request.cached && "fy-ad-heardlg__cached")}>
+          <b>{request.speaker}</b> · {request.voice}{request.standIn ? " · stand-in" : ""} · {request.model}
+          <code>{request.cached ? "already performed · not sent" : request.text}</code>
+          {/* A performed line sends nothing: its note is not said to be sent (codex on PR 1873). */}
+          {request.note && !request.cached && (request.note.sent === "not sent"
+            ? <small><s>note</s> · not sent: {request.note.reason}</small>
+            : <small>note sent as instruction: {request.note.text}</small>)}
+          {request.direction && (request.direction.sent === "not sent"
+            ? <small><s>direction</s> · not sent: {request.direction.reason}</small>
+            : <small>direction sent as {request.direction.sent}: {request.direction.text}</small>)}
+          {!request.cached && <small>{formatMicroUsd(request.estimatedMicroUsd)}</small>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function TakeCell({ block, line, voice, worldId, productionId, episode, worldSlug, onRetake }: {
   block: Spoken; line: EpisodeTakes["lines"][string] | undefined; worldId: string; productionId: string; episode: number;
   worldSlug: string; onRetake: () => void;

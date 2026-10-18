@@ -1,5 +1,60 @@
-import { EpisodeScriptSchema, episodeScriptFile, productionShape, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  AudioDramaRecordSchema, EpisodeScriptSchema, episodeScriptFile, productionShape,
+  type AudioDramaRecord, type DramaReviewDecision, type DramaRole, type EpisodeScriptBlock,
+} from "@arke-studio/contracts";
+import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
+
+/**
+ * One read-change-write at a time per file (codex on PR 1873): two edits arriving together would
+ * both read the same bytes, and the later one's fenced write would be refused.
+ */
+const writing = new Map<string, Promise<unknown>>();
+export async function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const before = writing.get(key) ?? Promise.resolve();
+  const turn = before.catch(() => {}).then(work);
+  writing.set(key, turn);
+  try { return await turn; } finally { if (writing.get(key) === turn) writing.delete(key); }
+}
+
+/** `audio-drama.json`, changed in one write fenced on the file it was read from (SPEC-057 R-85). */
+async function writeDramaRecord(store: WorldStore, productionId: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
+  const path = `productions/${productionId}/audio-drama.json`;
+  return oneAtATime(`${store.dir}/${path}`, () => writeDramaRecordNow(store, path, change));
+}
+async function writeDramaRecordNow(store: WorldStore, path: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
+  if (live === null) throw new Error("that production is not an audio drama");
+  const next = AudioDramaRecordSchema.parse(change(AudioDramaRecordSchema.parse(JSON.parse(live))));
+  await store.commit({ kind: "audio-drama", source: "audio-drama", files: [{
+    path, action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(live),
+  }] });
+}
+
+/** A role as this production plays it (R-55..R-60); null clears it back to the sheet. */
+export async function setDramaRole(store: WorldStore, productionId: string, role: string, value: DramaRole | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    const cast = { ...record.cast };
+    if (value === null) delete cast[role];
+    else cast[role] = value;
+    const { cast: _was, ...rest } = record;
+    return Object.keys(cast).length > 0 ? { ...rest, cast } : rest;
+  });
+}
+
+/** A review note decided (R-53); null opens it again. */
+export async function decideDramaNote(store: WorldStore, productionId: string, key: string, decision: DramaReviewDecision | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    const review = { ...record.review };
+    if (decision === null) delete review[key];
+    else review[key] = decision;
+    const { review: _was, ...rest } = record;
+    return Object.keys(review).length > 0 ? { ...rest, review } : rest;
+  });
+}
 
 /**
  * Save an audio drama's episode script whole (SPEC-057 R-83). Fenced like a chapter save: the

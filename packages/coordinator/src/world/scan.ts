@@ -191,7 +191,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 91: an audio drama's episode scripts (SPEC-057 R-83, issue 1858).
 // 92: an audio drama's takes — drama-takes and the episode on a take's sidecar (SPEC-057 R-29, issue 1859).
 // 93: a generated sound artifact (SPEC-057 R-48, issue 1860).
-export const SUPPORTED_SCHEMA_VERSION = 93;
+// 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
+export const SUPPORTED_SCHEMA_VERSION = 94;
 
 export class WorldOpenError extends Error {
   constructor(

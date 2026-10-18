@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { AudiobookReaderSchema } from "./audiobook.js";
+import { PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { textDigest } from "./subtitles.js";
 
 /**
@@ -59,12 +60,46 @@ export type AudioDramaPlan = z.infer<typeof AudioDramaPlanSchema>;
 /** Where the plan starts before Arke has read anything, or with nothing to read (D-2). */
 export const DEFAULT_AUDIO_DRAMA_PLAN: AudioDramaPlan = { episodes: 6, minutes: 25, keptFromListener: [] };
 
+/**
+ * A speaking role as this production plays it (SPEC-057 R-55..R-60, R-85), kept in the production
+ * and never on the character's sheet. `sound` is the actor's note and `narration` the narrator's
+ * when quoting them; neither ever reaches the other's request (R-58). A voice here is this
+ * production's, over the character's, and the only one a speaker with no sheet can have.
+ */
+export const DramaRoleSchema = z.object({
+  voice: AudiobookReaderSchema.optional(),
+  sound: z.string().trim().min(1).max(PERFORMANCE_NOTE_MAX).optional(),
+  narration: z.string().trim().min(1).max(PERFORMANCE_NOTE_MAX).optional(),
+  /** Who the listener is told this is until `revealEpisode` (R-59). */
+  publicLabel: z.string().trim().min(1).max(80).optional(),
+  revealEpisode: z.number().int().min(2).max(200).optional(),
+}).strict().refine((role) => (role.publicLabel === undefined) === (role.revealEpisode === undefined),
+  { message: "A hidden identity needs a public label and the episode that reveals it." });
+export type DramaRole = z.infer<typeof DramaRoleSchema>;
+
+/** A review note the author kept as written, or set aside (R-53): closed until its lines change. */
+export const DramaReviewDecisionSchema = z.enum(["intentional", "dismissed"]);
+export type DramaReviewDecision = z.infer<typeof DramaReviewDecisionSchema>;
+
 /** `productions/<id>/audio-drama.json`: the plan, and the story it adapts when it adapts one. */
 export const AudioDramaRecordSchema = z.object({
   version: z.literal(1),
   plan: AudioDramaPlanSchema,
   source: z.object({ productionId: SlugSchema }).strict().optional(),
-}).strict();
+  /** By speaker: a sheet id, a name no sheet carries, or the narrator (`@narrator`). */
+  cast: z.record(z.string().min(1).max(80), DramaRoleSchema).optional(),
+  /** By note key (`reviewDramaScript`). */
+  review: z.record(z.string().min(1).max(200), DramaReviewDecisionSchema).optional(),
+}).strict().superRefine((record, ctx) => {
+  for (const [key, role] of Object.entries(record.cast ?? {})) {
+    if (!DramaRoleKeySchema.safeParse(key).success) ctx.addIssue({ code: "custom", path: ["cast", key], message: `“${key}” is not a role.` });
+    // A reveal the plan never reaches keeps the name hidden for good (codex on PR 1873).
+    if (role.revealEpisode !== undefined && role.revealEpisode > record.plan.episodes) ctx.addIssue({
+      code: "custom", path: ["cast", key, "revealEpisode"],
+      message: `${role.publicLabel ?? key} is revealed in episode ${role.revealEpisode}, but the plan has ${record.plan.episodes}.`,
+    });
+  }
+});
 export type AudioDramaRecord = z.infer<typeof AudioDramaRecordSchema>;
 
 // ---------------------------------------------------------------------------
@@ -226,6 +261,8 @@ export const DramaTakeSchema = z.object({
   /** The audio, relative to the world folder (`artifacts/<file>`). */
   file: z.string().min(1).max(400),
   textHash: z.string().min(1),
+  /** The instruction it was read with — How they sound, the narrator's versions, the direction — as a digest. */
+  instructionsHash: z.string().min(1).optional(),
   voice: AudiobookReaderSchema,
   /** Spoken in the narrator's voice because the speaker had none (R-28): labelled everywhere. */
   standIn: z.boolean().optional(),
@@ -273,6 +310,11 @@ export const DramaRequestSchema = z.object({
   model: z.string().min(1).max(200),
   text: z.string().max(10_000),
   direction: z.object({ sent: z.enum(["tag", "instruction", "not sent"]), text: z.string().max(400).optional(), reason: z.string().max(400).optional() }).strict().optional(),
+  /**
+   * How they sound (R-57), or for the narrator its own note and its version of each role it
+   * quotes (R-58): sent as an instruction where the reader takes one, said not sent otherwise.
+   */
+  note: z.object({ sent: z.enum(["instruction", "not sent"]), text: z.string().max(2_000), reason: z.string().max(400).optional() }).strict().optional(),
   standIn: z.boolean().optional(),
   estimatedMicroUsd: z.number().int().min(0),
   /** Already performed for these words in this voice: played, not sent again. */
@@ -305,4 +347,276 @@ export function estimateScriptSeconds(blocks: readonly EpisodeScriptBlock[]): nu
     else if (block.kind === "sound") seconds += 1;
   }
   return Math.round(seconds);
+}
+
+// ---------------------------------------------------------------------------
+// Cast (SPEC-057 R-55..R-60, design turn 230k): who speaks, in what voice, and how they sound here.
+// ---------------------------------------------------------------------------
+
+/** The role key the narrator is kept under in `cast`. */
+export const DRAMA_NARRATOR = "@narrator";
+/** A role's key: a sheet id, a name no sheet carries, or the narrator — which no slug can be (codex on PR 1873). */
+export const DramaRoleKeySchema = z.union([SlugSchema, z.literal(DRAMA_NARRATOR)]);
+
+/** The name a role is heard by in an episode (R-59): its public label until the episode that reveals it. */
+export function dramaRoleName(name: string, role: Pick<DramaRole, "publicLabel" | "revealEpisode"> | undefined, episode: number): string {
+  return role?.publicLabel !== undefined && role.revealEpisode !== undefined && episode < role.revealEpisode ? role.publicLabel : name;
+}
+
+/** Where How they sound starts (R-57): the first paragraph of the sheet's Voice section. */
+export function sheetSound(sheet: { sections?: ReadonlyArray<{ heading: string; body: string }> } | undefined): string | undefined {
+  const section = sheet?.sections?.find((candidate) => /^voice\b/i.test(candidate.heading.trim()));
+  const first = section?.body.split(/\n\s*\n/)[0]?.replace(/\s+/g, " ").trim();
+  return first ? first.slice(0, PERFORMANCE_NOTE_MAX) : undefined;
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const firstOf = (name: string) => name.trim().toLowerCase().split(/\s+/)[0] ?? "";
+/**
+ * A name as it is said: in full, and by its first word — only where no other role shares that
+ * first word (codex on PR 1873), so a narration naming Maren Kest never names Maren Vale.
+ */
+function nameForms(name: string, shared: ReadonlySet<string>): string[] {
+  const full = name.trim().toLowerCase();
+  const first = firstOf(name);
+  // A full name always counts, however short (codex on PR 1873); a first word only from three letters.
+  return [...new Set([full, shared.has(first) || first.length < 3 ? "" : first].filter((form) => form.length > 0))];
+}
+/** First words more than one role answers to. */
+function sharedFirsts(all: Iterable<string>): Set<string> {
+  const seen = new Set<string>(), shared = new Set<string>();
+  for (const name of all) { const first = firstOf(name); if (seen.has(first)) shared.add(first); seen.add(first); }
+  return shared;
+}
+function names(words: string, name: string, shared: ReadonlySet<string> = new Set()): boolean {
+  const text = words.toLowerCase();
+  return nameForms(name, shared).some((form) => new RegExp(`(^|[^\\p{L}])${escapeRegExp(form)}($|[^\\p{L}])`, "u").test(text));
+}
+
+/**
+ * Whose words a narration quotes (R-58): a role it names in a narration holding quoted speech.
+ * Those roles show the narrator's version on Cast, and only their narration notes reach the
+ * narrator's request for that block.
+ */
+export function narrationQuotes(words: string, roles: Readonly<Record<string, string>>): string[] {
+  if (!/["“”]/.test(words)) return [];
+  const shared = sharedFirsts(Object.values(roles));
+  return Object.entries(roles).filter(([, name]) => names(words, name, shared)).map(([key]) => key);
+}
+
+// ---------------------------------------------------------------------------
+// Review (SPEC-057 R-49..R-54, design turn 230j): one review, every note saying what it rests on.
+// These checks read the script; nothing here has heard audio, and the coverage says so.
+// ---------------------------------------------------------------------------
+
+export const DRAMA_REVIEW_CHECKS = ["fidelity", "clarity", "pacing", "emotion", "mystery", "intelligibility"] as const;
+export type DramaReviewCheck = (typeof DRAMA_REVIEW_CHECKS)[number];
+
+export interface DramaReviewNote {
+  /** Stable while the lines it quotes and what it says stay the same: the decision's key. */
+  key: string;
+  check: DramaReviewCheck;
+  /** What it rests on (R-50): `script v3`. */
+  evidence: string;
+  blocks: string[];
+  quote: string;
+  says: string;
+}
+
+export interface DramaReview {
+  /** The header (R-51): `Script v3 · no audio heard yet`, or `heard 0:00–14:40 of 24:10`. */
+  coverage: string;
+  notes: DramaReviewNote[];
+  /** Checks with nothing to say, listed closed (R-53), and the one that needs heard audio. */
+  checked: Array<{ check: DramaReviewCheck; says: string }>;
+}
+
+const clockOf = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+
+/** How much has been heard (R-51): exact, merged, and never a clean review for partial listening. */
+export function reviewCoverage(version: number, heard: ReadonlyArray<readonly [number, number]>, totalSec: number): string {
+  const spans = [...heard]
+    .map(([from, to]) => [Math.max(0, Math.min(from, to)), Math.min(totalSec, Math.max(from, to))] as [number, number])
+    .filter(([from, to]) => to > from)
+    .sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push([...span]);
+  }
+  if (merged.length === 0) return `Script v${version} · no audio heard yet`;
+  return `heard ${merged.map(([from, to]) => `${clockOf(from)}–${clockOf(to)}`).join(", ")} of ${clockOf(totalSec)}`;
+}
+
+const STOP = new Set(["the", "and", "was", "were", "is", "are", "has", "had", "have", "his", "her", "hers", "him", "who", "that", "this",
+  "with", "for", "not", "but", "from", "they", "them", "she", "he", "it", "its", "into", "onto", "been", "be", "of", "to", "in", "on", "at", "a", "an"]);
+const termsOf = (text: string) => (text.toLowerCase().match(/\p{L}+/gu) ?? []).filter((word) => word.length >= 3 && !STOP.has(word));
+/** Every significant word of the fact, in the line, allowing a word's ending to differ. */
+function tells(words: string, fact: string): boolean {
+  const facts = termsOf(fact);
+  if (facts.length === 0) return false;
+  const line = termsOf(words);
+  // A one-word secret is matched whole (codex on PR 1873): "pregnant", never any word near it.
+  if (facts.length === 1) return line.includes(facts[0]!);
+  return facts.every((term) => line.some((word) => word.startsWith(term.slice(0, Math.max(4, term.length - 2))) || term.startsWith(word) && word.length >= 4));
+}
+
+/**
+ * A short, stable key for a note's decision, over what it says and every line it rests on (codex
+ * on PR 1873): rewrite a line and the note opens again, decided afresh.
+ */
+function noteKey(check: string, blocks: readonly string[], says: string, evidence: string): string {
+  let hash = 5381;
+  for (const char of `${says}\n${evidence}`) hash = ((hash << 5) + hash + char.charCodeAt(0)) >>> 0;
+  return `${check}:${blocks.slice(0, 3).join("+")}${blocks.length > 3 ? `+${blocks.length - 3}` : ""}:${hash.toString(36)}`;
+}
+
+export interface DramaReviewInput {
+  episode: number;
+  version: number;
+  blocks: readonly EpisodeScriptBlock[];
+  plan?: Pick<AudioDramaPlan, "minutes" | "keptFromListener">;
+  /** Each speaker's name, by speaker key. */
+  names: Readonly<Record<string, string>>;
+  /** Each speaker's voice as `provider/voiceId`, where it has one. */
+  voices?: Readonly<Record<string, string>>;
+  cast?: AudioDramaRecord["cast"];
+  /** The pinned chapters as they are now. */
+  chapters?: ReadonlyArray<{ story: string; chapter: string; version: number; hash?: string | undefined }>;
+  /** Intervals of this episode's audio actually heard, in seconds. None yet. */
+  heard?: ReadonlyArray<readonly [number, number]>;
+}
+
+const LONG_SPEECH_WORDS = 70;
+const LONG_DIRECTION_WORDS = 12;
+const LONG_SILENCE_SEC = 8;
+const OFF_MIC_RUN = 5;
+
+/**
+ * The script's review (R-52): fidelity to the source, clarity by ear, pacing, emotion as written and
+ * mystery against Kept from the listener, each note resting on `script v<n>`. Intelligibility is
+ * judged on heard audio only, so with none heard it is listed as waiting, never as passed.
+ */
+export function reviewDramaScript(input: DramaReviewInput): DramaReview {
+  const { blocks, episode } = input;
+  const evidence = `script v${input.version}`;
+  const index = new Map(blocks.map((block, i) => [block.id, i]));
+  const raw: Array<Omit<DramaReviewNote, "key" | "evidence">> = [];
+  const checked: DramaReview["checked"] = [];
+  const add = (check: DramaReviewCheck, ids: string[], says: string) => {
+    const first = ids.length > 0 ? blocks[index.get(ids[0]!) ?? -1] : undefined;
+    const quote = first === undefined ? "" : "words" in first ? first.words
+      : first.kind === "heading" ? first.place : "heard" in first ? first.heard : first.kind === "note" ? first.text : `${first.seconds} s`;
+    raw.push({ check, blocks: ids, quote, says });
+  };
+  const nameOf = (speaker: string) => speaker === DRAMA_NARRATOR ? "The narrator" : input.names[speaker] ?? speaker;
+  type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
+  const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
+
+  // Scenes: what sits under each heading, and whatever comes before the first.
+  const scenes: Array<{ heading: ScriptHeading | null; blocks: EpisodeScriptBlock[] }> = [{ heading: null, blocks: [] }];
+  for (const block of blocks) {
+    if (block.kind === "heading") scenes.push({ heading: block, blocks: [] });
+    else scenes[scenes.length - 1]!.blocks.push(block);
+  }
+  const before = raw.length;
+  const since = (check: DramaReviewCheck, says: string, from: number) => { if (raw.length === from) checked.push({ check, says }); };
+
+  // Fidelity: lines a sourced scene adds, and scenes whose chapter has moved since.
+  let sourced = 0;
+  for (const scene of scenes) {
+    const source = scene.heading?.source;
+    if (!source || !scene.heading) continue;
+    sourced += 1;
+    const added = scene.blocks.filter((block) => spoken(block) && !block.paragraphs?.length);
+    if (added.length > 0) add("fidelity", added.map((block) => block.id), added.length === 1 ? "This line is not in the source." : `${added.length} lines in this scene are not in the source.`);
+    const now = input.chapters?.find((chapter) => chapter.story === source.story && chapter.chapter === source.chapter);
+    if (now && now.version > source.version) add("fidelity", [scene.heading.id], `Written from v${source.version}. The chapter is now v${now.version}.`);
+    else if (now && source.hash !== undefined && now.hash !== undefined && now.hash !== source.hash) add("fidelity", [scene.heading.id], "The chapter was edited after this scene was written.");
+  }
+  since("fidelity", sourced === 0 ? "No scene names its source." : "Every sourced line cites its passage.", before);
+
+  // Clarity by ear: where we are, and who is speaking.
+  const clarity = raw.length;
+  for (const scene of scenes) {
+    // Lines before any heading are a scene too (codex on PR 1873): the listener is placed or not.
+    if (!scene.heading && scene.blocks.length === 0) continue;
+    const opener = scene.blocks.find((block) => block.kind !== "note" && block.kind !== "silence");
+    if (opener?.kind === "dialogue") add("clarity", [opener.id], "The scene opens on a line. Nothing yet tells the listener where we are.");
+    const offMic = new Map<string, string[]>();
+    const byVoice = new Map<string, string[]>();
+    for (const block of scene.blocks) {
+      // The narrator is a speaker too (codex on PR 1873): a character in its voice is not told apart.
+      if (block.kind === "narration") {
+        const voice = input.voices?.[DRAMA_NARRATOR];
+        if (voice !== undefined && !(byVoice.get(voice) ?? []).includes(DRAMA_NARRATOR)) byVoice.set(voice, [...(byVoice.get(voice) ?? []), DRAMA_NARRATOR]);
+        continue;
+      }
+      if (block.kind !== "dialogue") continue;
+      if (block.channel === "off-mic") offMic.set(block.speaker, [...(offMic.get(block.speaker) ?? []), block.id]);
+      const voice = input.voices?.[block.speaker];
+      if (voice !== undefined && !(byVoice.get(voice) ?? []).includes(block.speaker)) byVoice.set(voice, [...(byVoice.get(voice) ?? []), block.speaker]);
+    }
+    for (const [speaker, ids] of offMic) {
+      if (ids.length >= OFF_MIC_RUN) add("clarity", ids, `${nameOf(speaker)} is off-mic for ${ids.length} lines. The listener may lose where they are.`);
+    }
+    for (const speakers of byVoice.values()) {
+      if (speakers.length < 2) continue;
+      const firsts = speakers.map((speaker) => scene.blocks.find((block) => speaker === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === speaker)!.id);
+      add("clarity", firsts, `${speakers.map(nameOf).join(" and ")} speak in the same voice here.`);
+    }
+  }
+  since("clarity", "Every scene places the listener, and every speaker is told apart.", clarity);
+
+  // Pacing: what the ear can hold in one breath, dead air, and the episode against its target.
+  const pacing = raw.length;
+  for (const block of blocks) {
+    if (spoken(block)) {
+      const words = block.words.trim().split(/\s+/).filter(Boolean).length;
+      if (words > LONG_SPEECH_WORDS) add("pacing", [block.id], `About ${Math.round(words / 2.6)} s in one breath. Long for the ear.`);
+    } else if (block.kind === "silence" && block.seconds > LONG_SILENCE_SEC) add("pacing", [block.id], `${block.seconds} s of silence may sound like dead air.`);
+  }
+  const minutes = estimateScriptSeconds(blocks) / 60;
+  if (input.plan && minutes > input.plan.minutes * 1.25) add("pacing", [], `About ${Math.round(minutes)} min against a ${input.plan.minutes} min target.`);
+  since("pacing", "Speeches and silences sit within what the ear holds.", pacing);
+
+  // Emotion as written: a direction a reader can play, and only how, never what.
+  const emotion = raw.length;
+  for (const block of blocks) {
+    if (!spoken(block) || !block.direction) continue;
+    if (/["“”]/.test(block.direction)) add("emotion", [block.id], "This direction holds words to say. Direction is how, never what.");
+    else if (block.direction.trim().split(/\s+/).length > LONG_DIRECTION_WORDS) add("emotion", [block.id], "A direction this long is hard to play. Keep its feeling in a few words.");
+  }
+  since("emotion", "Every direction is short enough to play.", emotion);
+
+  // Mystery: each fact kept from the listener, and each hidden name, before its episode.
+  const mystery = raw.length;
+  const withheld = (input.plan?.keptFromListener ?? []).filter((kept) => kept.revealEpisode > episode);
+  const hidden = Object.entries(input.cast ?? {}).filter(([, role]) => role.publicLabel !== undefined && role.revealEpisode !== undefined && role.revealEpisode > episode);
+  for (const kept of withheld) {
+    const leaks = blocks.filter((block) => spoken(block) && tells(block.words, kept.fact));
+    for (const block of leaks) add("mystery", [block.id], `This may tell the listener “${kept.fact}” before episode ${kept.revealEpisode}.`);
+    if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${kept.fact.replace(/\.$/, "")}.` });
+  }
+  const shared = sharedFirsts(Object.values(input.names));
+  for (const [speaker, role] of hidden) {
+    const name = nameOf(speaker);
+    const leaks = blocks.filter((block) => spoken(block) && names(block.words, name, shared));
+    for (const block of leaks) add("mystery", [block.id], `${name} is named here, before episode ${role.revealEpisode}.`);
+    if (leaks.length === 0) checked.push({ check: "mystery", says: `${role.publicLabel} is not named before episode ${role.revealEpisode}.` });
+  }
+  if (withheld.length === 0 && hidden.length === 0 && raw.length === mystery) checked.push({ check: "mystery", says: "Nothing is kept from the listener here." });
+
+  // Intelligibility needs ears: with nothing heard it waits, and is never counted as passed.
+  if ((input.heard ?? []).length === 0) checked.push({ check: "intelligibility", says: "Needs heard audio." });
+
+  const at = (note: Omit<DramaReviewNote, "key" | "evidence">) => note.blocks.length === 0 ? Number.MAX_SAFE_INTEGER : index.get(note.blocks[0]!) ?? Number.MAX_SAFE_INTEGER;
+  const notes = raw
+    .map((note, order) => ({ note, order }))
+    .sort((a, b) => at(a.note) - at(b.note) || a.order - b.order)
+    .map(({ note }) => ({ ...note, evidence,
+      // Scoped to the episode (codex on PR 1873): two episodes' like notes are decided apart.
+      key: noteKey(`e${episode}:${note.check}`, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
+  return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
 }

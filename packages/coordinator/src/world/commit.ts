@@ -497,6 +497,11 @@ export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
 export const DRAMA_TAKE_SCHEMA_VERSION = 92;
 /** A generated sound's sidecar (SPEC-057 R-48): `source: "sound"` is unreadable to a build before it. */
 export const SOUND_ARTIFACT_SCHEMA_VERSION = 93;
+/**
+ * An audio drama's cast notes and review decisions (SPEC-057 R-53, R-85): strict fields of
+ * `audio-drama.json`, which a build before them refuses to parse, dropping the whole plan.
+ */
+export const DRAMA_CAST_SCHEMA_VERSION = 94;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -970,6 +975,14 @@ export class Committer {
       input.raiseSchemaVersion ?? 0,
       files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
+      files.some((f) => {
+        if (!f.newContent) return false;
+        // A take's instruction digest is the same boundary (codex on PR 1873): strict on the takes file.
+        if (/^productions\/[^/]+\/drama-takes\//.test(f.path)) return f.newContent.includes('"instructionsHash"');
+        if (!/^productions\/[^/]+\/audio-drama\.json$/.test(f.path)) return false;
+        const record = JsonFile.parse(f.newContent).value;
+        return "cast" in record || "review" in record;
+      }) ? DRAMA_CAST_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,

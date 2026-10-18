@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
-import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { decideDramaNote, saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines, placeTake, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
-import { DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { DRAMA_CAST_SCHEMA_VERSION, DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -115,6 +115,69 @@ describe("hearing an audio drama's lines (SPEC-057 R-25..R-31)", () => {
   });
 });
 
+describe("the cast in each request (SPEC-057 R-55..R-58, R-85)", () => {
+  // Breeze takes a note as an instruction beside the words, so what reaches each request shows.
+  const BREEZE = { provider: "breezeblue", model: "breeze-tts-2", voiceId: "breeze-a", label: "Breeze A" };
+
+  it("sends How they sound to the actor and the narrator's version only to the narrator", async () => {
+    const spoken = maren("The log said two hours.");
+    const quoting: EpisodeScriptBlock = { id: ulid(), kind: "narration", words: "\u201CTwo hours,\u201D Maren said, and did not look up." };
+    const plain: EpisodeScriptBlock = { id: ulid(), kind: "narration", words: "The water took the stairs." };
+    const { store, id, deps } = await drama([spoken, quoting, plain]);
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even.", narration: "A little of her slowness." });
+    await setDramaRole(store, id, DRAMA_NARRATOR, { voice: BREEZE, sound: "Close, unhurried." });
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [spoken.id, quoting.id, plain.id], quoteOnly: true }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const [actor, narrator, narrating] = quoted.quote.requests;
+    assert.deepEqual(actor!.note, { sent: "instruction", text: "Low and even." });
+    assert.equal(actor!.voice, "Breeze A", "this production's voice wins over the character's");
+    assert.deepEqual(narrator!.note, { sent: "instruction", text: "Close, unhurried.\nWhen quoting Maren Kest: A little of her slowness." });
+    assert.doesNotMatch(narrator!.note!.text, /Low and even/, "the actor's note never reaches the narrator");
+    assert.deepEqual(narrating!.note, { sent: "instruction", text: "Close, unhurried." }, "no quotation, no character's version");
+  });
+
+  it("starts the actor's note from the sheet, and says a reader that takes no instruction is not sent it", async () => {
+    const spoken = maren("Climb.");
+    const { store, id, deps } = await drama([spoken]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [spoken.id], quoteOnly: true }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const note = quoted.quote.requests[0]!.note!;
+    assert.equal(note.sent, "not sent");
+    assert.match(note.text, /^Low and even\. Speaks to the water/);
+  });
+
+  it("gives a speaker with no voice one through this production, sheet or not (R-56)", async () => {
+    const b = bray("The log's wrong.");
+    const clerk: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "harbour-clerk", words: "Turn of tide." };
+    const { store, id, deps } = await drama([b, clerk]);
+    const before = await hearDramaLines(store, id, { episode: 1, blocks: [b.id, clerk.id], quoteOnly: true }, deps());
+    assert.ok(before.disposition === "quoted" && before.missing.length === 2);
+    await setDramaRole(store, id, "bray-half-hitch", { voice: BREEZE });
+    await setDramaRole(store, id, "harbour-clerk", { voice: BREEZE });
+    const after = await hearDramaLines(store, id, { episode: 1, blocks: [b.id, clerk.id], quoteOnly: true }, deps());
+    assert.ok(after.disposition === "quoted" && after.missing.length === 0 && after.quote.requests.length === 2);
+  });
+
+  it("keeps role notes and review decisions in the production, never on the sheet (R-85)", async () => {
+    const { store, id } = await drama([maren("Climb.")]);
+    const record = () => store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
+    await setDramaRole(store, id, "maren-kest", { sound: "Quick, bright.", publicLabel: "The keeper", revealEpisode: 3 });
+    await decideDramaNote(store, id, "pacing:x:1", "intentional");
+    assert.deepEqual(record().cast, { "maren-kest": { sound: "Quick, bright.", publicLabel: "The keeper", revealEpisode: 3 } });
+    assert.deepEqual(record().review, { "pacing:x:1": "intentional" });
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_CAST_SCHEMA_VERSION, "a build that cannot read the cast refuses the world");
+    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === "maren-kest")!;
+    assert.equal(sheet.narration, undefined);
+    assert.equal(sheet.name, "Maren Kest");
+    await setDramaRole(store, id, "maren-kest", null);
+    await decideDramaNote(store, id, "pacing:x:1", null);
+    assert.equal(record().cast, undefined);
+    assert.equal(record().review, undefined);
+  });
+});
+
 describe("codex round 1 on PR 1871", () => {
   it("refuses a press priced from a script that has since changed", async () => {
     const a = maren("Climb.");
@@ -208,5 +271,34 @@ describe("codex round 3 on PR 1871", () => {
   it("refuses to hear a production that is not an audio drama", async () => {
     const { store, deps } = await drama([maren("Climb.")]);
     await assert.rejects(hearDramaLines(store, "the-ledger-of-nights", { episode: 1, blocks: [ulid()] }, deps()), /not an audio drama/);
+  });
+});
+
+describe("codex round 2 on PR 1873", () => {
+  const BREEZE = { provider: "breezeblue", model: "breeze-tts-2", voiceId: "breeze-a", label: "Breeze A" };
+
+  it("sends a take again when How they sound changes, never replaying it as performed", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps } = await drama([a]);
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even." });
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const same = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(same.disposition === "quoted" && same.quote.requests[0]!.cached, "the same note is played, not sent");
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Quick, bright." });
+    const changed = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(changed.disposition === "quoted" && !changed.quote.requests[0]!.cached, "a new note is a new performance");
+  });
+
+  it("lands a cast edit and a review decision made together", async () => {
+    const { store, id } = await drama([maren("Climb.")]);
+    await Promise.all([
+      setDramaRole(store, id, "maren-kest", { sound: "Quick, bright." }),
+      decideDramaNote(store, id, "e1:pacing:x:1", "dismissed"),
+      setDramaRole(store, id, DRAMA_NARRATOR, { sound: "Close." }),
+    ]);
+    const record = store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
+    assert.deepEqual(Object.keys(record.cast ?? {}).sort(), [DRAMA_NARRATOR, "maren-kest"].sort());
+    assert.deepEqual(record.review, { "e1:pacing:x:1": "dismissed" });
   });
 });

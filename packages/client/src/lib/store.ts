@@ -21,6 +21,7 @@ import {
   type ClientState,
   type ConversationActionCard,
   type DomainEvent,
+  type DramaRole,
   type EpisodeScriptBlock,
   type Delivery,
   type Frame,
@@ -5086,6 +5087,16 @@ export function generateDramaSound(
 ): string | null {
   const requestId = ulid();
   return send({ kind: "generate-drama-sound", requestId, worldId, productionId, ...input }) ? requestId : null;
+}
+
+/** A role as this production plays it (SPEC-057 R-55..R-60); null clears it back to the sheet. */
+export function setDramaRole(worldId: string, productionId: string, role: string, value: DramaRole | null): boolean {
+  return send({ kind: "set-drama-role", worldId, productionId, role, value });
+}
+
+/** Decide a review note Intentional or Dismiss (SPEC-057 R-53); null opens it again. */
+export function decideDramaNote(worldId: string, productionId: string, key: string, decision: "intentional" | "dismissed" | null): boolean {
+  return send({ kind: "decide-drama-note", worldId, productionId, key, decision });
 }
 
 /** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */

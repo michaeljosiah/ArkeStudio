@@ -13,10 +13,13 @@ import {
   scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
-import { BookOpen, ChevronLeft, ChevronRight, More, X } from "../components/icons.js";
+import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Users, X } from "../components/icons.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
+import { ReviewColumn } from "../components/audio-drama-review.js";
+import { CastColumn } from "./drama-cast.js";
+import { roleVoice } from "../lib/audio-drama-cast.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -68,7 +71,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // stored script nor sent again, until they take the saved one, keep theirs, or edit again.
   const [conflict, setConflict] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [sourceOpen, setSourceOpen] = useState(false);
+  // One column beside the score at a time (230j): the source, the scene's cast, or the review.
+  const [side, setSide] = useState<"source" | "cast" | "review" | null>(null);
+  const toggle = (which: "source" | "cast" | "review") => setSide(side === which ? null : which);
   const [menuOpen, setMenuOpen] = useState(false);
   // The spoken lines selected to hear (230g): a click selects one, shift extends the run.
   const [lines, setLines] = useState<string[]>([]);
@@ -222,8 +227,14 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             style={{ strokeDasharray: `${Math.min(1, estimate / Math.max(1, (plan?.minutes ?? 25) * 60)) * 50.3} 50.3` }} /></svg>
           <b>{clock(estimate)}</b><span>/ {plan?.minutes ?? 25}:00</span>
         </span>
-        <button type="button" className={cx("fy-ad-ep__toggle", sourceOpen && "fy-ad-ep__toggle--on")} aria-pressed={sourceOpen} onClick={() => setSourceOpen(!sourceOpen)}>
+        <button type="button" className={cx("fy-ad-ep__toggle", side === "source" && "fy-ad-ep__toggle--on")} aria-pressed={side === "source"} onClick={() => toggle("source")}>
           <BookOpen size={14} />Source
+        </button>
+        <button type="button" className={cx("fy-ad-ep__toggle", side === "cast" && "fy-ad-ep__toggle--on")} aria-pressed={side === "cast"} onClick={() => toggle("cast")}>
+          <Users size={14} />Cast
+        </button>
+        <button type="button" className={cx("fy-ad-ep__toggle", side === "review" && "fy-ad-ep__toggle--on")} aria-pressed={side === "review"} onClick={() => toggle("review")}>
+          <ListCheck size={14} />Review
         </button>
         <span className="fy-ad-ep__more">
           <IconButton label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><More size={16} /></IconButton>
@@ -235,7 +246,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           )}
         </span>
       </header>
-      <div className={cx("fy-ad-ep__body", sourceOpen && "fy-ad-ep__body--source")}>
+      <div className={cx("fy-ad-ep__body", side !== null && "fy-ad-ep__body--source")}>
         <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`}>
           {blocks.length === 0 && (
             <div className="fy-ad-score__empty">
@@ -266,7 +277,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                 {lane("ambience")}{lane("music")}
                 {block.kind === "heading" ? (
                   <HeadingRow block={block} n={headings.indexOf(block) + 1} on={on} production={production} world={world}
-                    source={source} onChange={(patch) => change(block.id, patch)} onSource={() => { setSelected(block.id); setSourceOpen(true); }} />
+                    source={source} onChange={(patch) => change(block.id, patch)} onSource={() => { setSelected(block.id); setSide("source"); }} />
                 ) : (
                   <>
                     <div className="fy-ad-score__who">
@@ -344,8 +355,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                     </div>
                     {/* The take (230i): what this line's performance is, and what waits on it. */}
                     <span className="fy-ad-score__take">{(block.kind === "dialogue" || block.kind === "narration") && (
-                      <TakeCell block={block} line={takes?.lines[block.id]} voice={block.kind === "dialogue" ? world.sheets.find((sheet) => sheet.id === block.speaker)?.voice : undefined}
-                        worldId={world.meta.worldId} productionId={production.meta.id} episode={episode}
+                      <TakeCell block={block} line={takes?.lines[block.id]} voice={roleVoice(production, world.sheets, block)} worldId={world.meta.worldId} productionId={production.meta.id} episode={episode}
                         worldSlug={world.meta.slug} onRetake={() => { setLines([block.id]); setRetake(true); }} />
                     )}</span>
                   </>
@@ -376,9 +386,18 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
             onHeard={() => setRetake(false)} />
         )}
-        {sourceOpen && (
+        {side === "source" && (
           <SourceColumn world={world} story={selectedScene?.source ? world.productions.find((p) => p.meta.id === selectedScene.source!.story) ?? null : source}
-            heading={selectedScene ?? null} block={selectedIndex >= 0 ? blocks[selectedIndex]! : null} onClose={() => setSourceOpen(false)} />
+            heading={selectedScene ?? null} block={selectedIndex >= 0 ? blocks[selectedIndex]! : null} onClose={() => setSide(null)} />
+        )}
+        {side === "cast" && (
+          <CastColumn world={world} production={production} base={base} onClose={() => setSide(null)}
+            blocks={headings.length === 0 ? blocks : blocks.filter((_, i) => scenes[i]?.id === selectedScene?.id)} />
+        )}
+        {side === "review" && (
+          // The saved script it names as evidence, never an unsaved draft (codex on PR 1873).
+          <ReviewColumn world={world} production={production} episode={episode} version={stored?.script.version ?? 1} blocks={stored?.script.blocks ?? []} onClose={() => setSide(null)}
+            onPick={(id) => { setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
         )}
       </div>
       <footer className="fy-ad-ep__foot">

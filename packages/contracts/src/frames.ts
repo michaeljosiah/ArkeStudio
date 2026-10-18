@@ -52,7 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2343,6 +2343,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(120),
       quoteOnly: z.boolean().optional(),
       quoteToken: z.string().min(1).max(200).optional(),
+    })
+    .strict(),
+  /**
+   * A role as this production plays it (SPEC-057 R-55..R-60, R-85): its voice here, How they sound,
+   * the narrator's version and a hidden identity. Kept in `audio-drama.json`; null clears the role.
+   */
+  z
+    .object({
+      kind: z.literal("set-drama-role"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      role: DramaRoleKeySchema,
+      value: DramaRoleSchema.nullable(),
+    })
+    .strict(),
+  /** A review note decided Intentional or Dismiss (R-53); null opens it again. */
+  z
+    .object({
+      kind: z.literal("decide-drama-note"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      key: z.string().min(1).max(200),
+      decision: DramaReviewDecisionSchema.nullable(),
     })
     .strict(),
   /** The author's answer to a take that waits (R-30): keep the new one, or the one kept before. */
