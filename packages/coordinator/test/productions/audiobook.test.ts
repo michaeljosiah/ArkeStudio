@@ -179,6 +179,8 @@ async function withHarness(
     replay: () => DomainEvent[];
     /** What every refresh of the world told the windows was still going, in order. */
     refreshes: DomainEvent[][];
+    /** A provider answering mid-session that its credential no longer works: a 402, a revoked key. */
+    fault: (provider: import("@arke-studio/contracts").ProviderId, message: string) => void;
   }) => Promise<void>,
 ): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
@@ -259,6 +261,7 @@ async function withHarness(
       },
       replay,
       refreshes,
+      fault: (provider, message) => coordinator.reportProviderFault(provider, message),
     });
   } finally {
     await provider.close();
@@ -2148,7 +2151,7 @@ describe("an explicit book narrator never falls back (#1752)", () => {
       await read(send);
       await send({ kind: "read-audiobook-book", worldId: WORLD_ID, productionId: LEDGER });
       await send({ kind: "hear-audiobook-line", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: "p0.0", requestId: "01J8F3K2QW9VZX4N7M0RTYB6E3" });
-      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide.*unavailable.*Refresh/);
+      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide is unavailable · ElevenLabs doesn't list this voice now/);
       assert.match(events.find(e => e.type === "audiobook.book-finished")?.reason ?? "", /Low tide.*unavailable/);
       assert.match(events.find(e => e.type === "audiobook.heard")?.refused ?? "", /Low tide.*unavailable/);
       assert.equal(events.some(e => e.type === "audiobook.priced" || e.type === "audiobook.book-priced"), false);
@@ -2157,6 +2160,45 @@ describe("an explicit book narrator never falls back (#1752)", () => {
       await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: null });
       await read(send);
       assert.ok(spoken.length > 0, "explicit reset permits the inherited reader");
+    }));
+
+  it("says a narrator's provider wants payment, holds Read and Direct on it, and the door says why (issue 1661)", () =>
+    withHarness({ cloud: [LOW_TIDE], direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })), summary: "Measured." }) }, async ({ send, events, spoken, fault }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      fault("elevenlabs", "elevenlabs: HTTP 402 payment_required");
+
+      await read(send);
+      assert.match(events.find(e => e.type === "audiobook.finished")?.reason ?? "", /Low tide is unavailable · ElevenLabs needs payment\./);
+      assert.equal(events.some(e => e.type === "audiobook.priced"), false, "refused before a price is asked");
+      assert.deepEqual(spoken, []);
+
+      // Directed for George, the chapter came back `0 directed, 5 dropped` and would have read in another voice.
+      await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const directed = events.find((e): e is Extract<DomainEvent, { type: "direction.finished" }> => e.type === "direction.finished");
+      assert.equal(directed?.outcome, "unavailable");
+      assert.match(directed?.reason ?? "", /ElevenLabs needs payment/);
+      assert.equal(directed?.proposed, undefined);
+
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6D9";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.ok(door);
+      assert.equal(door.voices[0]?.name, "Low tide", "the book keeps its narrator");
+      assert.equal(door.voices[0]?.unavailable, "ElevenLabs needs payment");
+    }));
+
+  it("a book narrator that can read has nothing said of it on the door", () =>
+    withHarness({ cloud: [LOW_TIDE] }, async ({ send, events }) => {
+      await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6DA";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.ok(door);
+      assert.equal(door.voices[0]?.name, "Low tide");
+      assert.equal(door.voices[0]?.book, true);
+      assert.equal(door.voices[0]?.unavailable, undefined);
     }));
   it("prices the exact v4 voice and refuses an old confirmation if the voice disappears", async () => {
     const calen = { ...LOW_TIDE, model: "eleven_v4", voiceId: "S44KQ3oLFckbxgyKfold", label: "Calen Voss" };

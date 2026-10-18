@@ -75,6 +75,7 @@ export * from "./reference-budget.js";
 export * from "./reference-route.js";
 export * from "./bench.js";
 export * from "./voice.js";
+export * from "./narrator-availability.js";
 export * from "./designed-voice.js";
 export * from "./planning.js";
 export * from "./cut.js";

@@ -1571,6 +1571,30 @@ describe("the director reads the book (design turn 184)", () => {
     assert.equal(held.getAttribute("aria-disabled"), "true", "the card answers it until it is accepted or discarded");
     assert.equal(held.querySelector(".fy-ab__menu-meta")?.textContent, "proposed");
   });
+
+  it("a book narrator that cannot read holds Direct and Read and says why, and a read it stalls says what it waits on (issue 1661)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    const read = () => q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement;
+    assert.equal(read().disabled, false, "a narrator that reads is pressed");
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, configured: true, validation: "invalid" as const, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(read().disabled, true);
+    assert.match(text(m), /Rachel unavailable · ElevenLabs needs payment/, "the reason on the chapter, not only in app.jsonl");
+    const item = (await menuItem(m, "direct-audiobook"))!;
+    assert.equal(item.getAttribute("aria-disabled"), "true", "never directed for the voice it would fall to");
+    assert.equal(item.querySelector(".fy-ab__menu-meta")?.textContent, "narrator unavailable");
+
+    // Back, and read; the 402 lands on the first request and pauses the lane under it.
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(read().disabled, false);
+    await act(async () => read().click());
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4, requests: 9 }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 9/);
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 4");
+  });
 });
 
 /**

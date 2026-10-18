@@ -1172,6 +1172,11 @@ export const AudiobookVoiceRowSchema = z
     noteHeld: z.literal(true).optional(),
     /** On the narrator's row: the book has a narrator of its own (R-46), not the app's. */
     book: z.literal(true).optional(),
+    /**
+     * On the narrator's row: why the book's own narrator cannot read now (`Google needs payment`,
+     * issue 1661). Read and Direct are held until it can, or another narrator is chosen.
+     */
+    unavailable: z.string().min(1).max(300).optional(),
   })
   .strict();
 export type AudiobookVoiceRow = z.infer<typeof AudiobookVoiceRowSchema>;
