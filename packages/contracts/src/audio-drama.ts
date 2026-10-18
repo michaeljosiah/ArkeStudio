@@ -77,6 +77,25 @@ export const DramaRoleSchema = z.object({
   { message: "A hidden identity needs a public label and the episode that reveals it." });
 export type DramaRole = z.infer<typeof DramaRoleSchema>;
 
+/**
+ * What became of a source chapter (SPEC-057 R-61, SPEC-052 R-19): the stored values are SPEC-052's;
+ * an audio drama says Hear for `show` (R-27). A chapter with no verdict and scenes is kept; with
+ * neither, it is not yet planned.
+ */
+export const DramaVerdictSchema = z.enum(["keep", "show", "merge", "cut", "expand", "invent"]);
+export type DramaVerdict = z.infer<typeof DramaVerdictSchema>;
+export const DRAMA_VERDICT_LABEL: Record<DramaVerdict, string> = {
+  keep: "Keep", show: "Hear", merge: "Merge", cut: "Cut", expand: "Expand", invent: "Invent",
+};
+export const DramaChapterDecisionSchema = z.object({
+  verdict: DramaVerdictSchema,
+  /** Why, in a line (SPEC-052 R-19). */
+  reason: z.string().trim().min(1).max(300).optional(),
+  /** What the drama leaves out of it (230m). */
+  leavesOut: z.string().trim().min(1).max(300).optional(),
+}).strict();
+export type DramaChapterDecision = z.infer<typeof DramaChapterDecisionSchema>;
+
 /** A review note the author kept as written, or set aside (R-53): closed until its lines change. */
 export const DramaReviewDecisionSchema = z.enum(["intentional", "dismissed"]);
 export type DramaReviewDecision = z.infer<typeof DramaReviewDecisionSchema>;
@@ -90,6 +109,8 @@ export const AudioDramaRecordSchema = z.object({
   cast: z.record(z.string().min(1).max(80), DramaRoleSchema).optional(),
   /** By note key (`reviewDramaScript`). */
   review: z.record(z.string().min(1).max(200), DramaReviewDecisionSchema).optional(),
+  /** By source chapter id: what became of it (R-61). */
+  verdicts: z.record(z.string().min(1).max(200), DramaChapterDecisionSchema).optional(),
 }).strict().superRefine((record, ctx) => {
   for (const [key, role] of Object.entries(record.cast ?? {})) {
     if (!DramaRoleKeySchema.safeParse(key).success) ctx.addIssue({ code: "custom", path: ["cast", key], message: `“${key}” is not a role.` });
@@ -137,6 +158,8 @@ export const ScriptHeadingSchema = z.object({
      */
     hash: z.string().min(1).max(200).optional(),
     paragraphs: Paragraphs,
+    /** Why the scene stays as it is against this version, when the author kept it (R-65, D-11). */
+    keptReason: z.string().trim().min(1).max(300).optional(),
   }).strict().optional(),
   estimateSec: z.number().int().min(0).max(36_000).optional(),
 }).strict();
@@ -659,6 +682,68 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
 }
 
+// ---------------------------------------------------------------------------
+// Changed source (SPEC-057 R-64, R-65, design turn 230n).
+// ---------------------------------------------------------------------------
+
+const sameText = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/**
+ * Which paragraphs of the adapted version are gone from the chapter now, by number in the adapted
+ * version (1-based). A paragraph is found by its words, wherever it now sits: a split or a join
+ * changes the paragraphs it touched, a move or a repeat changes nothing.
+ */
+export function changedParagraphs(adapted: readonly string[], now: readonly string[]): number[] {
+  const placed = alignParagraphs(adapted, now);
+  return adapted.flatMap((_, i) => placed.has(i + 1) ? [] : [i + 1]);
+}
+
+/**
+ * Each adapted paragraph's place now, one to one (codex on PR 1878): the longest run kept in order
+ * first, so a repeated paragraph is told by its occurrence, then any paragraph moved elsewhere.
+ */
+function alignParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
+  const a = adapted.map(sameText), b = now.map(sameText);
+  const placed = new Map<number, number>(), used = new Set<number>();
+  const keep = (i: number, j: number) => { placed.set(i + 1, j + 1); used.add(j); };
+  // The unchanged head and tail first (codex on PR 1878): an edit is usually local, and the table
+  // below grows with the product of what is left. Both always belong to a longest run.
+  let head = 0, tail = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) { keep(head, head); head++; }
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) { keep(a.length - 1 - tail, b.length - 1 - tail); tail++; }
+  const m = a.length - head - tail, n = b.length - head - tail, width = n + 1;
+  // Past a few million cells the order is let go, and the words alone place each paragraph.
+  if (m > 0 && n > 0 && (m + 1) * width <= 4_000_000) {
+    const lcs = new Uint16Array((m + 1) * width);
+    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) {
+      lcs[i * width + j] = a[head + i] === b[head + j] ? lcs[(i + 1) * width + j + 1]! + 1 : Math.max(lcs[(i + 1) * width + j]!, lcs[i * width + j + 1]!);
+    }
+    for (let i = 0, j = 0; i < m && j < n;) {
+      if (a[head + i] === b[head + j]) { keep(head + i, head + j); i++; j++; }
+      else if (lcs[(i + 1) * width + j]! >= lcs[i * width + j + 1]!) i++;
+      else j++;
+    }
+  }
+  a.forEach((text, i) => {
+    if (placed.has(i + 1)) return;
+    const j = b.findIndex((candidate, at) => !used.has(at) && candidate === text);
+    if (j >= 0) keep(i, j);
+  });
+  return new Map([...placed].sort(([x], [y]) => x - y));
+}
+
+/** The blocks of a scene that rest on changed paragraphs: its lines' own, else the scene's pin. */
+export function affectedBlocks(scene: readonly EpisodeScriptBlock[], pinned: readonly number[] | undefined, changed: readonly number[]): string[] {
+  const moved = new Set(changed);
+  const sceneHit = (pinned ?? []).some((n) => moved.has(n));
+  return scene.flatMap((block) => {
+    // A cue rests on its passage as a line does (codex on PR 1878).
+    if (block.kind === "heading" || block.kind === "note" || block.kind === "silence") return [];
+    const own = block.paragraphs ?? [];
+    return (own.length > 0 ? own.some((n) => moved.has(n)) : sceneHit) ? [block.id] : [];
+  });
+}
+
 /**
  * A placed sound a production cannot play (SPEC-057 R-43): not audio, retired, gone, or another
  * production's. Checked wherever a script lands — a save, an Arke draft staged, a draft kept.
@@ -676,4 +761,17 @@ export function unusableSound(
     }
   }
   return null;
+}
+
+/**
+ * Where each paragraph of the adapted version now stands (codex on PR 1878): by its words, each
+ * matched once, in order. A changed paragraph has no place, and pins to it are let go.
+ */
+export function remapParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
+  return alignParagraphs(adapted, now);
+}
+
+/** Where an adapted chapter's exact text is kept, by the hash it was pinned at. */
+export function dramaSourceSnapshotPath(productionId: string, hash: string): string {
+  return `productions/${productionId}/source-snapshots/${hash.replace(/^sha256:/, "").replace(/[^a-zA-Z0-9]/g, "")}.md`;
 }

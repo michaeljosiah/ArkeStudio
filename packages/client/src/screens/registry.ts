@@ -74,6 +74,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "production-dashboard", samplePath: P },
   // An audio drama's episode script (SPEC-057 R-11); on a production that is not one, it says so.
   { id: "episode-script", samplePath: `${P}/script/1` },
+  { id: "drama-adaptation", samplePath: `${P}/adaptation` },
   { id: "production-cast", samplePath: `${P}/cast` },
   // The production's own shelf, inside the production (design 134).
   { id: "production-artifacts", samplePath: `${P}/artifacts` },

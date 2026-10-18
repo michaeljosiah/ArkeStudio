@@ -25,7 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
-import { decideDramaNote, saveEpisodeScript, setDramaRole } from "./productions/audio-drama.js";
+import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -4987,6 +4987,7 @@ export class Coordinator {
         try { await recoverProductionSetups(store); }
         finally { await this.refreshConversations(store); }
       });
+      await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
@@ -10588,6 +10589,7 @@ export class Coordinator {
         return;
       }
       case "set-drama-role":
+      case "set-drama-verdict":
       case "decide-drama-note": {
         // The production's cast and review decisions (SPEC-057 R-53, R-85): written to its
         // audio-drama.json; the refreshed world shows what landed.
@@ -10596,6 +10598,8 @@ export class Coordinator {
         // A write that fails is said (codex on PR 1873): the author's edit did not land.
         await (msg.kind === "set-drama-role"
           ? setDramaRole(store, msg.productionId, msg.role, msg.value)
+          : msg.kind === "set-drama-verdict"
+          ? setDramaVerdict(store, msg.productionId, msg.chapter, msg.value)
           : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch((err: unknown) => {
           this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
         });
@@ -10654,6 +10658,15 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         await new ProseAuthoringService(store).editPlan(msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "read-drama-source": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { body: string } | { reason: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "drama.source", requestId: msg.requestId, ...result });
+        if (!store || store.worldId !== msg.worldId) { answer({ reason: "that world is not open" }); return; }
+        try { answer({ body: await readDramaSource(store, msg.productionId, msg.hash) }); }
+        catch (err) { answer({ reason: describeCoordinatorError(err) }); }
         return;
       }
       case "read-chapter-version": {

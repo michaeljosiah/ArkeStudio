@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { ModelWorldChatActionSchema, newId, ulid, type ConversationId, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { createProduction } from "../../src/productions/ops.js";
-import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { readDramaSource, saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -93,5 +93,22 @@ describe("codex round 2 on PR 1874", () => {
     await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay" }, { kind: "sound", heard: "A bell.", soundArtifact: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV" }]), /cannot use/);
     await stage([{ id: scene.id, kind: "heading", place: "The quay, at night" }]);
     await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay, at dawn" }]), /is waiting/);
+  });
+});
+
+describe("codex round 2 on PR 1878", () => {
+  it("gives a hashless pin the chapter's hash at its version, and keeps that text", async () => {
+    const { store, id, gate, intent } = await drama([]);
+    const story = store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+    const chapter = story.chapters[0]!;
+    const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash: null, checkReceiptIds: [],
+        blocks: [{ kind: "heading", place: "The quay", source: { story: story.meta.id, chapter: chapter.id, version: chapter.version ?? 1 } }] },
+    });
+    const staged = Object.values(store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!.episodeScripts ?? {})[0]!;
+    const pin = staged.blocks[0]!.kind === "heading" ? staged.blocks[0]!.source : undefined;
+    assert.equal(pin?.hash, chapter.hash);
+    assert.ok((await readDramaSource(store, id, chapter.hash!)).length > 0, "the pinned text is kept when the draft is staged");
   });
 });

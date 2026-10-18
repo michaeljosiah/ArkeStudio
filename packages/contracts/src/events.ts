@@ -445,6 +445,16 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+  /** `read-drama-source` answered: the text, or why it is not kept. */
+  z
+    .object({
+      ...base,
+      type: z.literal("drama.source"),
+      requestId: UlidSchema,
+      body: z.string().optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
   /** `save-episode-script` answered: the new base on success, the reason on refusal (SPEC-057). */
   z
     .object({

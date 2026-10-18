@@ -21,6 +21,7 @@ import {
   type ClientState,
   type ConversationActionCard,
   type DomainEvent,
+  type DramaChapterDecision,
   type DramaRole,
   type EpisodeScriptBlock,
   type Delivery,
@@ -1088,6 +1089,22 @@ export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScri
   return () => episodeScriptSaveListeners.delete(listener);
 }
 
+const dramaSourceListeners = new Set<(result: Extract<DomainEvent, { type: "drama.source" }>) => void>();
+/** The exact text a scene was adapted from, by its pinned hash (SPEC-057 R-65). Rejects with why. */
+export function readDramaSource(worldId: string, productionId: string, hash: string): Promise<string> {
+  const requestId = ulid();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { dramaSourceListeners.delete(listener); reject(new Error("No answer.")); }, 15_000);
+    const listener = (result: Extract<DomainEvent, { type: "drama.source" }>) => {
+      if (result.requestId !== requestId) return;
+      clearTimeout(timer); dramaSourceListeners.delete(listener);
+      if (result.body !== undefined) resolve(result.body); else reject(new Error(result.reason ?? "Not kept."));
+    };
+    dramaSourceListeners.add(listener);
+    if (!send({ kind: "read-drama-source", requestId, worldId, productionId, hash })) { clearTimeout(timer); dramaSourceListeners.delete(listener); reject(new Error("Not connected.")); }
+  });
+}
+
 /** What became of one chapter save (turn 126): the new base, or a refusal by name. */
 export type ChapterSaveResult = Extract<DomainEvent, { type: "chapter.save-result" }>;
 const chapterSaveListeners = new Set<(result: ChapterSaveResult) => void>();
@@ -1781,6 +1798,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "episode-script.save-result") {
       for (const listener of episodeScriptSaveListeners) listener(event);
+    }
+    if (event.type === "drama.source") {
+      for (const listener of dramaSourceListeners) listener(event);
     }
     if (event.type === "drama.heard") {
       for (const listener of dramaHeardListeners) listener(event);
@@ -5092,6 +5112,11 @@ export function generateDramaSound(
 /** A role as this production plays it (SPEC-057 R-55..R-60); null clears it back to the sheet. */
 export function setDramaRole(worldId: string, productionId: string, role: string, value: DramaRole | null): boolean {
   return send({ kind: "set-drama-role", worldId, productionId, role, value });
+}
+
+/** What became of a source chapter (SPEC-057 R-61); null clears it. */
+export function setDramaVerdict(worldId: string, productionId: string, chapter: string, value: DramaChapterDecision | null): boolean {
+  return send({ kind: "set-drama-verdict", worldId, productionId, chapter, value });
 }
 
 /** Decide a review note Intentional or Dismiss (SPEC-057 R-53); null opens it again. */

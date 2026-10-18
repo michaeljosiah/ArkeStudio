@@ -32,6 +32,7 @@ import {
   type ProductionBundle,
 } from "@arke-studio/contracts";
 import type { ProposalManager } from "../gate/proposals.js";
+import { keepAdaptedText } from "../productions/audio-drama.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
@@ -432,13 +433,16 @@ export async function stageWorldChatProductionAuthoredAction(
     const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
     if (sound) throw new Error(sound);
     // A scene's source must be a chapter there is (codex on PR 1874): a pin the score cannot open is refused.
+    // A pin with no hash is given the chapter's now, at its version (codex on PR 1878), so an edit
+    // in place is still seen; and the text it points at is kept, as a direct save keeps it.
     for (const block of record.blocks) {
       if (block.kind !== "heading" || !block.source) continue;
       const { story, chapter } = block.source;
-      if (!store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.some((candidate) => candidate.id === chapter)) {
-        throw new Error(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
-      }
+      const found = store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.find((candidate) => candidate.id === chapter);
+      if (!found) throw new Error(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
+      if (block.source.hash === undefined && found.hash !== undefined && (found.version ?? 1) === block.source.version) block.source.hash = found.hash;
     }
+    await keepAdaptedText(store, production.meta.id, record.blocks).catch(() => {});
     // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
     // and keeping either would make the other stale.
     const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;

@@ -502,6 +502,11 @@ export const SOUND_ARTIFACT_SCHEMA_VERSION = 93;
  * `audio-drama.json`, which a build before them refuses to parse, dropping the whole plan.
  */
 export const DRAMA_CAST_SCHEMA_VERSION = 94;
+/**
+ * An audio drama's adaptation (SPEC-057 R-61, R-65): chapter verdicts in `audio-drama.json`, and a
+ * kept reason on a scene's source pin — strict fields a build before them refuses.
+ */
+export const DRAMA_ADAPTATION_SCHEMA_VERSION = 95;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -983,6 +988,8 @@ export class Committer {
         const record = JsonFile.parse(f.newContent).value;
         return "cast" in record || "review" in record;
       }) ? DRAMA_CAST_SCHEMA_VERSION : 0,
+      files.some((f) => !!f.newContent && ((/^productions\/[^/]+\/audio-drama\.json$/.test(f.path) && "verdicts" in JsonFile.parse(f.newContent).value) ||
+        (classify(f.path).track === "episode-script" && f.newContent.includes('"keptReason"')))) ? DRAMA_ADAPTATION_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
