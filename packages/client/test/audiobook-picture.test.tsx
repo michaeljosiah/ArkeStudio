@@ -718,6 +718,14 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, false);
   });
 
+  it("re-resolves the chosen look against the kit as it is, so a close view accepted since is what the card shows (codex on PR 1868)", () => {
+    const kits = state().world!.referenceKits;
+    // Drafted while the storm coat had only its full body; the kit now holds its close view.
+    const drafted = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: `references/maren-kest/${STORM_LOOK.file}`, carried: true, look: { lookId: STORM_LOOK.id, view: "full" as const } };
+    const [now] = withOwnLooks([drafted], {}, STORM_CHAPTER, kits, "Close-up on Maren at the rail", undefined);
+    assert.deepEqual([now!.reference, now!.look, now!.carried], [`references/maren-kest/${STORM_LOOK.closeFile}`, { lookId: STORM_LOOK.id, view: "close" }, true]);
+  });
+
   it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": HARBOUR_LOOK.id } });

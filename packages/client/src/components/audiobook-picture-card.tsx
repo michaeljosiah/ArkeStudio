@@ -122,10 +122,9 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
   const resolved = who.map((entry): PictureWho => {
     if (entry.kind !== "character" || entry.sheet === undefined) return entry;
     const mine = own[entry.key];
-    if (mine === undefined && entry.only !== true) {
-      const chosen = chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
-      if (chapter === null || chosen === (entry.look?.lookId ?? MAIN_PHOTO_LOOK)) return entry;
-    }
+    // Re-resolved even where the look is the one drafted: a close view accepted since is the
+    // picture Make again sends, and the card shows it (codex on PR 1868).
+    if (mine === undefined && entry.only !== true && chapter === null) return entry;
     const target = mine ?? chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
     const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
     const { look: _look, only: _only, ...base } = entry;

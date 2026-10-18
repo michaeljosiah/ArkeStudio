@@ -1730,6 +1730,9 @@ export class Coordinator {
     // The rows the provider would not make: only these are held as refused, to be tried again. A row
     // whose words changed or that has a picture now is not one Try again could make (codex on PR 1559).
     const refusedHere = new Set<string>();
+    // Rows held for a look that came to disagree during the proposal, by who: marked on the row the
+    // proposal keeps, so its card holds it with As it is rather than as an ordinary picture.
+    const disagreedHere = new Map<string, string[]>();
     try {
       if (!model) {
         for (const row of rows) progress.failed.push({ block: row.block, reason: "no picture model is on" });
@@ -1756,7 +1759,9 @@ export class Coordinator {
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
           // A look the Looks sheet has come to flag since the proposal holds the row as the card
           // would have (issue 1658), unless the author sent it as it is (codex on PR 1868).
-          if (!run.without.has(row.block) && who.some((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0)) {
+          const disagreeing = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0).map((entry) => entry.key);
+          if (!run.without.has(row.block) && disagreeing.length > 0) {
+            disagreedHere.set(row.block, disagreeing);
             progress.failed.push({ block: row.block, reason: "a look disagrees with the chapter · review looks" });
             continue;
           }
@@ -1811,9 +1816,10 @@ export class Coordinator {
       .filter((row) => !progress.made.includes(row.block))
       .map((row) => {
         if (reasons.has(row.block)) return { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) };
-        if (!otherwise.has(row.block) || row.refused === undefined) return row;
+        const flagged = disagreedHere.get(row.block);
+        if (!otherwise.has(row.block) || row.refused === undefined) return flagged === undefined ? row : { ...row, disagrees: flagged };
         const { refused: _old, ...rest } = row;
-        return rest;
+        return flagged === undefined ? rest : { ...rest, disagrees: flagged };
       });
     this.makingIllustrations.delete(key);
     if (remaining.length > 0 && !store.closingSignal.aborted) {

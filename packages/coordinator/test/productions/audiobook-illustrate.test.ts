@@ -334,6 +334,12 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
         const last = progressOf(h.events).at(-1)!.progress;
         assert.deepEqual(last.failed, [{ block: first!.block, reason: "a look disagrees with the chapter · review looks" }], "not made, nor paid for, in a look the chapter now disputes");
         assert.equal(h.enqueued.length, 1, "the row sent as it is is made");
+        // The row it held comes back marked, so its card offers As it is (codex on PR 1868).
+        const left = finished(h.events).proposal!;
+        const held = left.rows.find((row) => row.block === first!.block)!;
+        assert.deepEqual(held.disagrees, ["maren-kest"]);
+        await accept(h.send, left, { blocks: [held.block], without: [held.block], confirmedMicroUsd: held.estimatedMicroUsd });
+        assert.equal(h.enqueued.length, 2, "and goes once the author sends it as it is");
       },
       {
         illustrate: says((input) => MARENS(input)),
