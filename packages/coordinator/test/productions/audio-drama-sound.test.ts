@@ -140,3 +140,10 @@ describe("codex round 2 on PR 1872", () => {
     await assert.rejects(saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [cue], baseHash: null }), /cannot use/);
   });
 });
+
+describe("codex round 3 on PR 1872", () => {
+  it("prices no sound for a production that is not an audio drama", async () => {
+    const { store, deps } = await drama();
+    await assert.rejects(generateDramaSound(store, "the-ledger-of-nights", { ...bell, quoteOnly: true }, deps), /not an audio drama/);
+  });
+});
