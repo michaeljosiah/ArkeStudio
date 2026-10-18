@@ -212,7 +212,8 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-score--draft { padding-top: 12px; }
 .fy-ad-draft__row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 4px 0; font-size: 17px; line-height: 1.5; }
 .fy-ad-draft__who { font-size: 13px; font-weight: 600; text-align: right; padding-top: 3px; }
-.fy-ad-draft__row--added .fy-ad-draft__text { color: var(--muted-foreground); }
+.fy-ad-draft__row--added .fy-ad-draft__text, .fy-ad-draft__row--moved .fy-ad-draft__text { color: var(--muted-foreground); }
+.fy-ad-draft__row--moved .fy-ad-draft__who::after { content: " ↕"; color: var(--muted-foreground); }
 .fy-ad-draft__row--removed .fy-ad-draft__text, .fy-ad-draft__row--removed .fy-ad-draft__who { text-decoration: line-through; color: var(--muted-foreground); opacity: 0.7; }
 @media print { .fy-ad-draftbar { display: none; } }
 .fy-ad-draftbar__why { color: var(--warning); }

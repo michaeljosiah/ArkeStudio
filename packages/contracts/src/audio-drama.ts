@@ -654,3 +654,22 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
       key: noteKey(`e${episode}:${note.check}`, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
   return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
 }
+
+/**
+ * A placed sound a production cannot play (SPEC-057 R-43): not audio, retired, gone, or another
+ * production's. Checked wherever a script lands — a save, an Arke draft staged, a draft kept.
+ */
+export function unusableSound(
+  blocks: readonly EpisodeScriptBlock[],
+  artifacts: ReadonlyArray<{ id: string; kind: string; retiredAt?: unknown; production?: string | undefined }>,
+  productionId: string,
+): string | null {
+  for (const block of blocks) {
+    if ((block.kind !== "sound" && block.kind !== "ambience" && block.kind !== "music") || !block.soundArtifact) continue;
+    const artifact = artifacts.find((candidate) => candidate.id === block.soundArtifact);
+    if (!artifact || artifact.kind !== "audio" || artifact.retiredAt !== undefined || (artifact.production !== undefined && artifact.production !== productionId)) {
+      return `“${block.heard}” is placed with a sound this production cannot use. Choose its sound again.`;
+    }
+  }
+  return null;
+}

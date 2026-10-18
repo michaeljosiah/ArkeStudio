@@ -13,6 +13,7 @@ import {
   countWords,
   episodeScriptFile,
   settleDraftBlocks,
+  unusableSound,
   paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
@@ -427,14 +428,20 @@ export async function stageWorldChatProductionAuthoredAction(
       title: payload.action.title ?? current?.title ?? "",
       blocks: settleDraftBlocks(payload.action.blocks, current?.blocks ?? []),
     });
+    // Only sounds this production can play (codex on PR 1874), as a save is held to.
+    const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
+    if (sound) throw new Error(sound);
+    // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
+    // and keeping either would make the other stale.
+    const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
+    if (store.getBundle().proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path))) {
+      throw new Error(`A draft of episode ${episode}'s script is waiting. Keep or discard it in the score first.`);
+    }
     return gate.stage({
       kind: "episode-script",
       summary: `Episode ${episode} script: ${production.meta.title}`,
       ...context,
-      targets: [{
-        path: `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`,
-        content: `${JSON.stringify(record, null, 2)}\n`,
-      }],
+      targets: [{ path, content: `${JSON.stringify(record, null, 2)}\n` }],
     }, precondition);
   }
 

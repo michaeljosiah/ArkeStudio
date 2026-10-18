@@ -205,3 +205,11 @@ describe("codex round 1 on PR 1874", () => {
     assert.deepEqual(changedFields(was, { ...was, words: "Three." } as EpisodeScriptBlock), [], "the words are shown in the line itself");
   });
 });
+
+describe("codex round 2 on PR 1874", () => {
+  it("shows a block put elsewhere as moved", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const rows = draftRows([a, b, c], [a, c, b]);
+    assert.ok(rows.some((row) => row.state === "moved"), "Keep writes the new order, so the draft says so");
+  });
+});

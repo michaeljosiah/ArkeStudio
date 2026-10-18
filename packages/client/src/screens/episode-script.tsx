@@ -407,7 +407,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           )}
         </div>
         )}
-        {lines.length > 0 && (
+        {/* Never beside a draft (codex on PR 1874): Hear would make the saved words while the draft's show. */}
+        {lines.length > 0 && !draft && (
           <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
             scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
@@ -463,7 +464,7 @@ function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
   const notice = useGateNotices()[proposalId];
   const [unsent, setUnsent] = useState(false);
   const count = (state: string) => rows.filter((row) => row.state === state).length;
-  const parts = [["added", "added"], ["changed", "changed"], ["removed", "removed"]]
+  const parts = [["added", "added"], ["changed", "changed"], ["moved", "moved"], ["removed", "removed"]]
     .map(([state, label]) => [count(state!), label] as const).filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`);
   return (
     <div className="fy-ad-draftbar" role="region" aria-label="Arke's draft">
