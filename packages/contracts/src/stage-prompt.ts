@@ -14,7 +14,8 @@ import {
   type ResolvedShotStaging,
 } from "./staging.js";
 import { parseAspect } from "./manifest.js";
-import type { StagingFigure } from "./scene.js";
+import type { StagePose, StagingFigure } from "./scene.js";
+import { stagePoseHeight, stagePoseVerb, stageTurnWarnings } from "./stage-pose.js";
 import type { BenchReferenceToken } from "./bench.js";
 
 /**
@@ -53,9 +54,8 @@ export interface StageCameraWords {
 }
 
 /** A posed figure is shorter in frame than its sheet height; the size word must judge what the lens sees. */
-function framedSubjectHeight(figure: StagingFigure, pose: string): number {
-  const height = figure.height ?? 1.8;
-  return pose === "sit" ? height * .72 : pose === "lie" ? height * .5 : height;
+function framedSubjectHeight(figure: StagingFigure, pose: StagePose): number {
+  return (figure.height ?? 1.8) * stagePoseHeight(pose);
 }
 
 /** What the camera shows at one moment, in words. */
@@ -125,7 +125,12 @@ export function stageCameraLine(staging: ResolvedShotStaging, nameOf: (sheetId: 
   return `${span(offset, offset + durationSec)} · ${capital(start.size)}${who}${side}, ${start.angle}, ${motion}${ending}${eased}.`;
 }
 
-const POSE_VERBS: Record<string, string> = { stand: "stands", sit: "sits", lie: "lies down" };
+/** What a mark's hand or look is on, in the prompt's words: a person by name, a set as "the counter". */
+function targetOf(staging: ResolvedShotStaging, key: { hand?: { on: string }; look?: string }, nameOf: (sheetId: string) => string): string | null {
+  const on = key.hand?.on ?? key.look;
+  if (on === undefined) return null;
+  return staging.cast.some((figure) => figure.sheetId === on) ? nameOf(on) : `the ${on}`;
+}
 
 /** The named thing a point is at: a figure within 1.6 m, preferred, else a set item whose footprint is within 1 m. */
 function placeNear(staging: ResolvedShotStaging, self: string, x: number, z: number, at: number, durationSec: number, nameOf: (sheetId: string) => string): string | null {
@@ -164,29 +169,31 @@ export function stageActionLines(staging: ResolvedShotStaging, nameOf: (sheetId:
         lines.push({ at: 0, line: `${span(offset, offset + durationSec)} · ${name} ${verb}${from ? ` from ${from}` : ""}${to ? ` to ${to}` : ""}.` });
       } else {
         const at = placeNear(staging, figure.sheetId, figure.x, figure.z, 0, durationSec, nameOf);
-        lines.push({ at: 0, line: `${span(offset, offset + durationSec)} · ${name} ${POSE_VERBS[figure.pose ?? "stand"]}${at ? ` at ${at}` : ""}.` });
+        lines.push({ at: 0, line: `${span(offset, offset + durationSec)} · ${name} ${stagePoseVerb(figure.pose ?? "stand", null)}${at ? ` at ${at}` : ""}.` });
       }
       continue;
     }
     // A pose is said where the figure holds it (a wait, a mark it stays on, the end) or where it
     // changes; standing that is only the start of a walk is the walk. Consecutive holds in one
     // pose are one line, so a shuffle of a centimetre between two marks does not split a wait.
-    let pose = figure.pose ?? "stand";
-    let open: { from: number; to: number; pose: string; place: string | null } | null = null;
+    let pose: StagePose = figure.pose ?? "stand";
+    let open: { from: number; to: number; pose: StagePose; place: string | null; target: string | null } | null = null;
     const close = () => {
-      if (open) lines.push({ at: open.from, line: `${span(offset + open.from, offset + open.to)} · ${name} ${POSE_VERBS[open.pose]}${open.place ? ` at ${open.place}` : ""}.` });
+      if (open) lines.push({ at: open.from, line: `${span(offset + open.from, offset + open.to)} · ${name} ${stagePoseVerb(open.pose, open.target)}${open.place && open.target === null ? ` at ${open.place}` : ""}.` });
       open = null;
     };
     for (let index = 0; index < keys.length; index++) {
       const key = keys[index]!, next = keys[index + 1];
-      const keyPose = key.pose ?? pose;
+      const keyPose: StagePose = key.pose ?? pose;
+      const target = targetOf(staging, key, nameOf);
       const changed = keyPose !== pose;
       pose = keyPose;
       const travel = next ? Math.hypot(next.x - key.x, next.z - key.z) : 0;
       const departure = next && travel >= .05 ? stagePerformanceDeparture(key, next) : (next?.t ?? durationSec);
-      if (departure - key.t >= .25 || changed) {
-        if (open !== null && (open as { pose: string }).pose === keyPose && Math.abs((open as { to: number }).to - key.t) < .01) (open as { to: number }).to = departure;
-        else { close(); open = { from: key.t, to: Math.max(departure, key.t), pose: keyPose, place: placeNear(staging, figure.sheetId, key.x, key.z, key.t, durationSec, nameOf) }; }
+      if (departure - key.t >= .25 || changed || target !== null) {
+        const held = open as { pose: StagePose; to: number; target: string | null } | null;
+        if (held !== null && held.pose === keyPose && held.target === target && Math.abs(held.to - key.t) < .01) held.to = departure;
+        else { close(); open = { from: key.t, to: Math.max(departure, key.t), pose: keyPose, place: placeNear(staging, figure.sheetId, key.x, key.z, key.t, durationSec, nameOf), target }; }
       }
       if (!next || travel < .05) continue;
       close();
@@ -238,6 +245,7 @@ export function stagingPromptClause(
     stageCameraLine(staging, nameOf, durationSec, options.aspect ?? "16:9", options.lens, offset),
     ...stageActionLines(staging, nameOf, durationSec, offset).map(entry => entry.line),
     ...stageSpeedWarnings(staging, nameOf, durationSec),
+    ...stageTurnWarnings(staging, nameOf),
     ...(options.video ? [stagingFollowLine(options.video, options.follow ?? "camera-action")] : []),
   ].join("\n");
 }
