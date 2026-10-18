@@ -694,8 +694,32 @@ const sameText = (text: string) => text.replace(/\s+/g, " ").trim();
  * changes the paragraphs it touched, a move or a repeat changes nothing.
  */
 export function changedParagraphs(adapted: readonly string[], now: readonly string[]): number[] {
-  const present = new Set(now.map(sameText));
-  return adapted.flatMap((paragraph, i) => present.has(sameText(paragraph)) ? [] : [i + 1]);
+  const placed = alignParagraphs(adapted, now);
+  return adapted.flatMap((_, i) => placed.has(i + 1) ? [] : [i + 1]);
+}
+
+/**
+ * Each adapted paragraph's place now, one to one (codex on PR 1878): the longest run kept in order
+ * first, so a repeated paragraph is told by its occurrence, then any paragraph moved elsewhere.
+ */
+function alignParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
+  const a = adapted.map(sameText), b = now.map(sameText);
+  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  }
+  const placed = new Map<number, number>(), used = new Set<number>();
+  for (let i = 0, j = 0; i < a.length && j < b.length;) {
+    if (a[i] === b[j]) { placed.set(i + 1, j + 1); used.add(j); i++; j++; }
+    else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) i++;
+    else j++;
+  }
+  a.forEach((text, i) => {
+    if (placed.has(i + 1)) return;
+    const j = b.findIndex((candidate, at) => !used.has(at) && candidate === text);
+    if (j >= 0) { placed.set(i + 1, j + 1); used.add(j); }
+  });
+  return placed;
 }
 
 /** The blocks of a scene that rest on changed paragraphs: its lines' own, else the scene's pin. */
@@ -734,15 +758,7 @@ export function unusableSound(
  * matched once, in order. A changed paragraph has no place, and pins to it are let go.
  */
 export function remapParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
-  const places = new Map<string, number[]>();
-  now.forEach((paragraph, i) => { const key = sameText(paragraph); places.set(key, [...(places.get(key) ?? []), i + 1]); });
-  const map = new Map<number, number>();
-  adapted.forEach((paragraph, i) => {
-    const free = places.get(sameText(paragraph));
-    const next = free?.shift();
-    if (next !== undefined) map.set(i + 1, next);
-  });
-  return map;
+  return alignParagraphs(adapted, now);
 }
 
 /** Where an adapted chapter's exact text is kept, by the hash it was pinned at. */

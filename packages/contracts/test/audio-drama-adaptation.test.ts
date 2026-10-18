@@ -21,7 +21,8 @@ describe("changed paragraphs", () => {
     assert.deepEqual(changedParagraphs(v14, moved), [], "a move changes no words");
     const repeated = [...v14, v14[0]!];
     assert.deepEqual(changedParagraphs(v14, repeated), [], "a repeat changes no adapted paragraph");
-    assert.deepEqual(changedParagraphs([...v14, v14[0]!], v14), [], "a repeated paragraph still found is unchanged");
+    assert.deepEqual(changedParagraphs([...v14, v14[0]!], v14), [5], "a repeat is told by its occurrence: the second copy is gone");
+    assert.deepEqual(changedParagraphs(["X.", "A.", "X."], ["Y.", "A.", "X."]), [1], "the first copy was rewritten, not the second");
   });
 
   it("finds the lines resting on changed paragraphs, by their own pins or the scene's", () => {

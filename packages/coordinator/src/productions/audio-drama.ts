@@ -113,7 +113,7 @@ export async function saveEpisodeScript(
  * The exact text each scene is pinned to, kept by its hash (codex on PR 1878): a chapter edited in
  * place keeps its version number, so its history cannot say what the scene was made from.
  */
-async function keepAdaptedText(store: WorldStore, productionId: string, blocks: readonly EpisodeScriptBlock[]): Promise<void> {
+export async function keepAdaptedText(store: WorldStore, productionId: string, blocks: readonly EpisodeScriptBlock[]): Promise<void> {
   const bundle = store.getBundle();
   for (const block of blocks) {
     if (block.kind !== "heading" || !block.source?.hash) continue;
