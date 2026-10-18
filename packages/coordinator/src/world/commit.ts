@@ -484,6 +484,17 @@ export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
  * chapters and the draft as unreadable, so the world is raised before either is written.
  */
 export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
+/**
+ * An audio drama's episode scripts (SPEC-057 R-83, codex on PR 1870): a build before them reads
+ * the world and shows every script as absent, so any landing of one — a save, an accepted
+ * proposal, a restore or an adopted edit — raises the world first.
+ */
+export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
+/**
+ * An audio drama's takes (SPEC-057 R-29, codex on PR 1871): `drama-takes/` and the `episode` on a
+ * take's strict audiobook sidecar. A build before them drops each such artifact as unreadable.
+ */
+export const DRAMA_TAKE_SCHEMA_VERSION = 92;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -512,7 +523,7 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
         const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
         if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
       }
-      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown } } | null;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown; episode?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook") boundary = Math.max(boundary, AUDIOBOOK_TAKE_SCHEMA_VERSION);
@@ -520,6 +531,7 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.remakeOf !== undefined) boundary = Math.max(boundary, AUDIOBOOK_REMAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.recording !== undefined) boundary = Math.max(boundary, RECORDED_TAKE_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && (record.generation.grouped !== undefined || record.generation.loudness !== undefined)) boundary = Math.max(boundary, AUDIOBOOK_GROUPED_SCHEMA_VERSION);
+      if (file.path.startsWith("artifacts/") && record?.generation?.source === "audiobook" && record.generation.episode !== undefined) boundary = Math.max(boundary, DRAMA_TAKE_SCHEMA_VERSION);
       const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
@@ -953,6 +965,8 @@ export class Committer {
     const landsProseStyle = files.some((f) => classify(f.path).track === "prose-style" && f.newContent != null);
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
+      files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/drama-takes\//.test(f.path) && f.newContent != null) ? DRAMA_TAKE_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,

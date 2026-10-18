@@ -9,6 +9,8 @@ import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines, placeTake, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
+import { DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -110,5 +112,33 @@ describe("hearing an audio drama's lines (SPEC-057 R-25..R-31)", () => {
     assert.deepEqual(placeTake({ kept: take("old") }, take("new"), false), { kept: take("new") }, "the kept take no longer matched the line");
     assert.deepEqual(placeTake({ kept: take("a") }, take("a"), true), { kept: take("a"), waiting: take("a") });
     assert.deepEqual(placeTake({ kept: take("a") }, take("b", { misread: "x" }), false), { kept: take("a"), waiting: take("b", { misread: "x" }) });
+  });
+});
+
+describe("codex round 1 on PR 1871", () => {
+  it("refuses a press priced from a script that has since changed", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps } = await drama([a]);
+    await assert.rejects(hearDramaLines(store, id, { episode: 1, blocks: [a.id], scriptHash: "sha256:old" }, deps()), /script changed/);
+  });
+
+  it("takes up a line already paid for when its take was never recorded, sending nothing again", async () => {
+    const a = maren("The log said two hours.");
+    const { store, id, deps, sent, takes } = await drama([a]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    // The process stopped after the job landed and before the take: the landed file is still there.
+    const dir = ".staging/drama/recovered";
+    await mkdir(join(store.dir, dir), { recursive: true });
+    await writeFile(join(store.dir, dir, "line.mp3"), Buffer.from("audio:paid"));
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, productionId: id, model: "eleven_multilingual_v2",
+      params: { block: a.id, text: a.kind === "dialogue" ? a.words : "", voiceId: "v_8Kq2" }, landedFiles: [`${dir}/line.mp3`] } as unknown as Job;
+    const made = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: quoted.quote.token },
+      deps({ succeededJobs: (match) => [paid].filter(match) }));
+    assert.deepEqual(made, { disposition: "made", made: [a.id] });
+    assert.equal(sent.length, 0, "the line is not sent again");
+    assert.ok(takes()!.lines[a.id]!.kept);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_TAKE_SCHEMA_VERSION, "a build that cannot read takes refuses the world");
   });
 });

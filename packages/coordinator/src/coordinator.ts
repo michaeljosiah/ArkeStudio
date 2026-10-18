@@ -10503,7 +10503,7 @@ export class Coordinator {
           const transcribe = voice.localSpeechConfigured && localTranscriberAvailable(this.providerService.list())
             ? (bytes: Uint8Array, contentType: string) => voice.transcribe(bytes, contentType) : undefined;
           const result = await hearDramaLines(store, msg.productionId, {
-            episode: msg.episode, blocks: msg.blocks,
+            episode: msg.episode, blocks: msg.blocks, scriptHash: msg.scriptHash,
             ...(msg.quoteOnly !== undefined ? { quoteOnly: msg.quoteOnly } : {}),
             ...(msg.quoteToken !== undefined ? { quoteToken: msg.quoteToken } : {}),
             ...(msg.decisions !== undefined ? { decisions: msg.decisions } : {}),
@@ -10511,15 +10511,19 @@ export class Coordinator {
           }, {
             worldId: msg.worldId, narrator: room.narrator, models: this.opts.manifest?.models ?? [],
             enqueue: async (input) => {
-              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [input]);
+              // A designed app narrator rides with its binding, as the audiobook's reads do (codex on PR 1871).
+              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [bindDesignedNarrator(input, room.designedBinding)]);
               if (queued.jobIds[0] === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
+            succeededJobs: (match) => (this.jobQueue?.listJobs() ?? []).filter((job) => job.status === "succeeded" && match(job)),
             ...(transcribe !== undefined ? { transcribe } : {}),
           });
-          this.emit({ at: new Date().toISOString(), type: "drama.heard", ...ids, ...result });
+          // The world first, then the answer (codex on PR 1871): the press plays the takes it made.
           if (result.disposition === "made") await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ at: new Date().toISOString(), type: "drama.heard", ...ids, ...result });
         } catch (err) {
           refuse(describeCoordinatorError(err));
           await this.refreshWorldSnapshot(msg.worldId);
@@ -10559,7 +10563,13 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         // A decision on a take that no longer waits changes nothing; the refreshed world shows it.
-        await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep).catch(() => {});
+        // Anything else is said (codex on PR 1871), never swallowed.
+        try { await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep); }
+        catch (err) {
+          if (!(err instanceof Error && err.message === "no take is waiting on that line")) {
+            this.emit({ at: new Date().toISOString(), type: "command.failed", command: "decide-drama-take", requestId: null, reason: describeCoordinatorError(err) });
+          }
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

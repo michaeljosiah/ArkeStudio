@@ -5066,10 +5066,11 @@ export function hearDramaLines(
   productionId: string,
   episode: number,
   blocks: string[],
+  scriptHash: string,
   options: { quoteOnly?: boolean; quoteToken?: string; decisions?: Record<string, "narrator" | "leave-out">; retake?: boolean } = {},
 ): string | null {
   const requestId = ulid();
-  return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, ...options }) ? requestId : null;
+  return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, scriptHash, ...options }) ? requestId : null;
 }
 
 /** Price, then make, a sound for an audio drama's cue (SPEC-057 R-39..R-42); answered as `drama.sound`. */
