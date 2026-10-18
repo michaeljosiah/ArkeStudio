@@ -208,6 +208,18 @@ export function productionSetupProblems(
   if (audioDrama && (draft.scenes.length || draft.episodes.length || draft.arcs.length || draft.series)) {
     problems.push("An audio drama plans its episodes in its own plan. Remove the scenes, episodes, arcs and Series.");
   }
+  // The pilot cites chapters by their number in the story it adapts (SPEC-057 R-7). A number the
+  // story does not have is a misread or a stale plan, and would be shown as the pilot's source.
+  const pilot = audioDrama ? draft.audioDrama?.pilot : undefined;
+  if (pilot && pilot.chapters.length > 0) {
+    if (!draft.source) problems.push("An original drama's pilot names no chapters. Remove them, or choose a story under Adapt from.");
+    else {
+      const story = productions?.find((candidate) => candidate.meta.id === draft.source!.productionId);
+      const orders = new Set(story?.chapters.filter((chapter) => chapter.retired !== true).map((chapter) => chapter.order));
+      const missing = story ? pilot.chapters.filter((chapter) => !orders.has(chapter)) : [];
+      if (missing.length > 0) problems.push(`The pilot names chapter ${missing.join(", ")}, which the story does not have. Choose the pilot again.`);
+    }
+  }
   const episodic = draft.kind === "microdrama";
   if (!episodic && !audioDrama && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
   if (!episodic && !audioDrama && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");

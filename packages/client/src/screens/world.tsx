@@ -4786,6 +4786,9 @@ export function NewProductionScreen() {
   // The kind the row has selected, for whichever door was pressed; seeded from the door.
   const [videoKind, setVideoKind] = useState<string>(adaptFrom ? AUDIO_DRAMA_KIND : "film");
   const [title, setTitle] = useState("");
+  // Whether the name is still the one this step filled in. It follows the chosen story until the
+  // author types, so choosing A and then B never leaves B's drama named after A (codex on PR 1866).
+  const [titleFollows, setTitleFollows] = useState(true);
   // The story an audio drama adapts (design turn 230b): empty is an original drama.
   const [source, setSource] = useState(adaptFrom ?? "");
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
@@ -4822,10 +4825,10 @@ export function NewProductionScreen() {
   const stories = adaptableStories(world?.productions ?? []);
   const story = isAudioDrama && source ? stories.find((s) => s.id === source) ?? null : null;
   // A name the author has not typed follows the story it adapts, so a drama of Low Water starts
-  // as Low Water; anything typed is the author's and is never replaced.
+  // as Low Water, and an original drama starts unnamed; anything typed is never replaced.
   useEffect(() => {
-    if (story && title === "") setTitle(story.title);
-    // Only a newly chosen story names it: title is read, not watched.
+    if (titleFollows) setTitle(story?.title ?? "");
+    // Only a newly chosen story names it: the flag is read, not watched.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [story?.id]);
 
@@ -4969,7 +4972,11 @@ export function NewProductionScreen() {
             aria-label="Name"
             placeholder="Name it · working titles are fine"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              // Emptied, the field is the step's to fill again.
+              setTitleFollows(e.target.value === "");
+            }}
           />
           {/* Adapt from (design turn 230b, SPEC-057 R-2): an audio drama's one other question.
               A novel or Other has none, and a video asks it in setup. */}

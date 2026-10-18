@@ -134,6 +134,17 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.throws(() => applyProductionSetupUpdate(planned, { expectedRevision: 3, fields: { audioDrama: { episodes: 0, minutes: 25, keptFromListener: [] } } }));
   });
 
+  it("an audio drama's pilot names chapters its story has, and an original names none (SPEC-057 R-7)", () => {
+    const plan = (chapters: number[]) => ({ episodes: 6, minutes: 25, keptFromListener: [], pilot: { title: "The tide turns", chapters } });
+    const adapting = { ...draft(), kind: "audio-drama" as const, scenes: [], source: { productionId: "juju" } };
+    assert.deepEqual(productionSetupProblems({ ...adapting, audioDrama: plan([2]) }, [], productions), []);
+    assert.match(productionSetupProblems({ ...adapting, audioDrama: plan([3, 999]) }, [], productions).join(" "),
+      /pilot names chapter 3, 999, which the story does not have/, "a retired chapter is no longer the story's");
+    const original = { ...draft(), kind: "audio-drama" as const, scenes: [] };
+    assert.deepEqual(productionSetupProblems({ ...original, audioDrama: plan([]) }, []), []);
+    assert.match(productionSetupProblems({ ...original, audioDrama: plan([1]) }, []).join(" "), /original drama's pilot names no chapters/);
+  });
+
   it("an audio drama holds no video scenes, episodes, arcs or Series (SPEC-057 R-7)", () => {
     const drama = { ...draft(), kind: "audio-drama" as const, scenes: [] };
     assert.deepEqual(productionSetupProblems(drama, []), []);

@@ -49,7 +49,8 @@ function withStories(): ClientState {
       keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 5 }],
       pilot: { title: "The tide turns", chapters: [1] },
     } } };
-  state.world!.productions = [...state.world!.productions, novel, drama] as never;
+  const second = { ...structuredClone(novel), meta: { ...novel.meta, id: "undertow", title: "Undertow" }, chapters: [chapter("one", 1, 1000)] };
+  state.world!.productions = [...state.world!.productions, novel, second, drama] as never;
   return state;
 }
 
@@ -132,7 +133,7 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
     assert.match(m.container.querySelector(".fy-radio--on")!.textContent!, /Audio drama/, "the drama is the kind already chosen");
     const adapt = m.container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!;
     assert.equal(adapt.value, "low-water");
-    assert.deepEqual([...adapt.options].map(o => o.textContent), ["Nothing · an original drama", "Low Water · book · 2 chapters · 7,500 words"],
+    assert.deepEqual([...adapt.options].map(o => o.textContent), ["Nothing · an original drama", "Low Water · book · 2 chapters · 7,500 words", "Undertow · book · 1 chapter · 1,000 words"],
       "the drama made from it is never offered as a story to adapt");
     assert.doesNotMatch(text, /DEFAULTS · CHANGE LATER|FRAME|RATE|LENGTH/, "no frame, rate, episodes or length for a story for the ear");
     assert.equal(button(m.container, "Create"), undefined, "nothing is created before Arke has read it");
@@ -144,10 +145,25 @@ describe("Tell a story asks what kind of story (design turn 230b)", () => {
       "the name follows the story until the author types one");
   });
 
+  it("an untouched name follows the chosen story; a typed one stays (codex on PR 1866)", async () => {
+    const m = await mount(withStories(), { pathname: NEW, state: { adapt: { productionId: "low-water" } } });
+    const name = () => m.container.querySelector<HTMLInputElement>("#production-name")!;
+    const adapt = () => m.container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!;
+    assert.equal(name().value, "Low Water");
+    await choose(adapt(), "undertow");
+    assert.equal(name().value, "Undertow", "B's drama is not named after A");
+    await choose(adapt(), "");
+    assert.equal(name().value, "", "an original drama starts unnamed");
+    await fire(name(), "onChange", "Salt Road");
+    await choose(adapt(), "low-water");
+    assert.equal(name().value, "Salt Road", "what the author typed is theirs");
+  });
+
   it("an original audio drama is created directly, as a story of its kind with no frame", async () => {
     const m = await mount(withStories(), { pathname: NEW, state: { adapt: { productionId: "low-water" } } });
     await choose(m.container.querySelector<HTMLSelectElement>("select[aria-label='Adapt from']")!, "");
     assert.equal(button(m.container, "Plan with Arke"), undefined);
+    await fire(m.container.querySelector<HTMLInputElement>("#production-name")!, "onChange", "Low Water");
     await click(m.container, "Create");
     const create = m.sent.find((message): message is Extract<ClientMessage, { kind: "create-production" }> => message.kind === "create-production")!;
     assert.equal(create.medium, "story");
@@ -210,9 +226,17 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     assert.equal(m.setup().filter(command => command.action.operation === "send").length, 1, "never twice");
   });
 
-  it("an unseeded setup waits for the author", async () => {
+  it("a seeded setup reopened without the door's state still asks, once (codex on PR 1866)", async () => {
     const m = await mount(inSetup(dramaSetup()), `/w/${FIXTURE_WORLD_ID}/productions/setup/${SETUP}`);
+    assert.deepEqual(m.setup()[0]!.action, { operation: "resume" });
     await answer(m.setup()[0]!, dramaSetup());
+    assert.deepEqual(m.setup().filter(command => command.action.operation === "send").map(command => command.action),
+      [{ operation: "send", text: "An audio drama of Low Water." }]);
+  });
+
+  it("a setup a turn or the author has touched waits for the author", async () => {
+    const m = await mount(inSetup(dramaSetup(2)), `/w/${FIXTURE_WORLD_ID}/productions/setup/${SETUP}`);
+    await answer(m.setup()[0]!, dramaSetup(2));
     assert.equal(m.setup().some(command => command.action.operation === "send"), false);
   });
 

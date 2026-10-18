@@ -109,6 +109,12 @@ export class ProductionSetupService {
   async start(id: ConversationId, seed?: ProductionSetupSeed): Promise<ProductionSetupState> {
     return this.serial(id, async () => {
       await this.world.ensureSchemaVersion(PRODUCTION_SETUP_SCHEMA_VERSION, "production-setup");
+      // A seed only describes a setup about to begin. A retried start of one that began returns
+      // it, whatever has since become of the story the seed named: the seed is ignored there, so
+      // it must not be judged there either.
+      const begun = await this.log(id).readMeta()
+        && (await this.log(id).read()).events.some(envelope => envelope.event.type === "production-setup.updated");
+      if (begun) return (await this.read(id)).productionSetup!;
       // A seed is checked and fenced exactly as the same fields arriving in an update would be.
       if (seed?.source || seed?.kind) {
         const asUpdate: ProductionSetupUpdate = { expectedRevision: 1, fields: {

@@ -207,6 +207,16 @@ export async function createProductionFromPlan(
       productionId: plan.production.id, requestId: options.requestId,
     });
   }
+  // An audio drama prepared without setup's content — World Chat's production-create — starts
+  // from the default plan, as the door's Create does (SPEC-057 D-2), so it never opens planless.
+  if (shape.isAudioDrama && !content?.audioDrama) {
+    files.push({
+      path: `productions/${plan.production.id}/audio-drama.json`,
+      action: "create",
+      content: `${JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2)}\n`,
+      baseHash: null,
+    });
+  }
   if (plan.initialSeason) {
     files.push({
       path: `productions/${plan.production.id}/season.json`,
@@ -1701,6 +1711,11 @@ export function validateProductionMetadataChanges(
   });
   if (currentShape.isEpisodic !== nextShape.isEpisodic) {
     throw new Error("Changing whether a production is episodic requires a new production so its Season and Series identities stay coherent.");
+  }
+  // An audio drama's plan is its own record, written with it at schema 90 (SPEC-057 R-82). A
+  // production.json edit can neither make that record nor take it away, so it is a new production.
+  if (currentShape.isAudioDrama !== nextShape.isAudioDrama) {
+    throw new Error("Changing whether a production is an audio drama requires a new production so its plan is made with it.");
   }
   if (currentShape.hasChapters !== nextShape.hasChapters && production.chapters.length > 0) {
     throw new Error("The production medium cannot change while it has chapters.");

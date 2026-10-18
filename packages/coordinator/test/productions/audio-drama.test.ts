@@ -4,7 +4,8 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, productionShape, ulid, type ConversationId } from "@arke-studio/contracts";
 import { ProductionSetupService } from "../../src/productions/setup.js";
-import { createProduction } from "../../src/productions/ops.js";
+import { createProduction, createProductionFromPlan, planProductionCreation, validateProductionMetadataChanges } from "../../src/productions/ops.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
 import { AUDIO_DRAMA_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -59,6 +60,31 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= AUDIO_DRAMA_SCHEMA_VERSION, "raised before the first draft naming the kind");
     const again = await service.start(id, { kind: "film" });
     assert.equal(again.draft.kind, "audio-drama", "a seed never rewrites a setup that exists");
+    // A retried start is answered by the setup it began, even when its seed would now be refused.
+    const retried = await service.start(id, { kind: "audio-drama", source: { productionId: "saltlight" } });
+    assert.deepEqual(retried.draft.source, { productionId: "the-ledger-of-nights" });
+  });
+
+  it("a prepared create without setup's content still writes the default plan (World Chat's production-create)", async () => {
+    const store = await open();
+    const plan = planProductionCreation(store.getBundle(), { title: "Low Water", medium: "story", productionKind: "audio-drama" }, CLOCK);
+    await createProductionFromPlan(store, plan, { source: "test", requestId: ulid(), precondition: () => null });
+    const root = join(store.dir, "productions", plan.production.id);
+    assert.deepEqual(await json(join(root, "audio-drama.json")), { version: 1, plan: { episodes: 6, minutes: 25, keptFromListener: [] } });
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= AUDIO_DRAMA_SCHEMA_VERSION);
+    const drama = store.getBundle().productions.find(production => production.meta.id === plan.production.id)!;
+    assert.deepEqual((productionRecord(store.getBundle(), drama.meta.id) as { audioDrama?: unknown }).audioDrama, drama.audioDrama,
+      "get_production hands Arke the plan its entry context points at");
+  });
+
+  it("a kind edit can neither make nor unmake an audio drama", async () => {
+    const store = await open();
+    const book = await createProduction(store, { title: "Empty book", medium: "story" });
+    const drama = await createProduction(store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const of = (id: string) => store.getBundle().productions.find(production => production.meta.id === id)!;
+    assert.throws(() => validateProductionMetadataChanges(of(book), { productionKind: "audio-drama" }), /audio drama requires a new production/);
+    assert.throws(() => validateProductionMetadataChanges(of(drama), { productionKind: null }), /audio drama requires a new production/);
+    assert.doesNotThrow(() => validateProductionMetadataChanges(of(drama), { title: "Low Water, again" }));
   });
 
   it("creates what setup agreed: the plan and its source, with no season, episodes or scenes (R-7, R-9)", async () => {
@@ -128,6 +154,10 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     assert.match(brief, /propose one plan in fields\.audioDrama/);
     assert.match(brief, /Do not propose verdicts or an episode outline here/);
     assert.doesNotMatch(brief, /propose whether the screen keeps, cuts/, "a screen's verdicts are not asked of a drama");
+    const original = (await service.start(`cv_${ulid()}` as ConversationId, { kind: "audio-drama" })).draft;
+    const originalBrief = await productionSetupBrief(store.getBundle(), original, read, 400_000);
+    assert.doesNotMatch(originalBrief, /one short moment of the source/, "an original drama has no source to sample");
+    assert.match(originalBrief, /one short moment from what the author has told you of the drama/);
     const film = { ...drama, kind: "film" as const, audioDrama: undefined };
     const screen = await productionSetupBrief(store.getBundle(), film, read, 400_000);
     assert.doesNotMatch(screen, /This production is an audio drama/);

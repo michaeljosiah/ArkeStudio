@@ -128,10 +128,15 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   /*
    * Plan with Arke is the request (SPEC-057 R-3): a setup the door seeded with a story opens with
    * that story asked for, rather than an empty conversation waiting to be told what it already
-   * knows. Once, by the page that started it, and only into a draft no turn has touched.
+   * knows. Once per page, and only into a draft no turn has touched.
+   *
+   * Read from the saved draft, not the door's router state (codex on PR 1866): a start recorded
+   * just before the app closed reopens from In development with no state, and is still owed its
+   * ask. Only a seed makes a first revision an audio drama with a source, so the draft says it.
    */
   const seededAsk = useRef<string | null>(null);
-  const seededStory = seed?.source ? adaptableStories(world?.productions ?? []).find(story => story.id === seed.source!.productionId) : undefined;
+  const untouched = setup?.status === "draft" && setup.draft.revision === 1 && setup.draft.kind === AUDIO_DRAMA_KIND ? setup.draft.source : undefined;
+  const seededStory = untouched ? adaptableStories(world?.productions ?? []).find(story => story.id === untouched.productionId) : undefined;
   useEffect(() => {
     if (!seededStory || !setupId || seededAsk.current === setupId || pending || running || unavailable) return;
     if (!setup || setup.status !== "draft" || setup.draft.revision !== 1 || (workspace?.messages.length ?? 0) > 0) return;
