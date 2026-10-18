@@ -1,5 +1,6 @@
 import type { EpisodeScriptBlock } from "@arke-studio/contracts";
 import { saveEpisodeScript, subscribeEpisodeScriptSaveResults } from "./store.js";
+import { scriptSaveProblem } from "./episode-script.js";
 
 /**
  * An episode script's unsaved edits, kept when the score that held them goes away (codex on PR
@@ -20,9 +21,12 @@ export interface ParkedDraft {
 /** `carries`: the save `waitingOn` is this draft's own; otherwise it is an earlier copy's. */
 type Entry = { draft: ParkedDraft; waitingOn: string | null; carries: boolean };
 const parked = new Map<string, Entry>();
-const keyOf = (productionId: string, episode: number) => `${productionId}:${episode}`;
+// The world too (codex on PR 1870): two worlds can each hold `story` with an episode 1.
+const keyOf = (worldId: string, productionId: string, episode: number) => `${worldId}/${productionId}:${episode}`;
 
 function send(k: string, draft: ParkedDraft): void {
+  // A draft the coordinator would refuse unanswered waits, unsent, for the next score.
+  if (scriptSaveProblem(draft.title, draft.blocks) !== null) { parked.set(k, { draft, waitingOn: null, carries: false }); return; }
   const requestId = saveEpisodeScript(draft.worldId, draft.productionId, draft.episode, draft.title, draft.blocks, draft.baseHash);
   parked.set(k, { draft, waitingOn: requestId, carries: requestId !== null });
 }
@@ -41,14 +45,14 @@ subscribeEpisodeScriptSaveResults((result) => {
  * waits for its answer and goes on the base it returns; otherwise it is sent now.
  */
 export function parkDraft(draft: ParkedDraft, inFlight: string | null): void {
-  const k = keyOf(draft.productionId, draft.episode);
+  const k = keyOf(draft.worldId, draft.productionId, draft.episode);
   if (inFlight !== null) parked.set(k, { draft, waitingOn: inFlight, carries: false });
   else send(k, draft);
 }
 
 /** A draft that could not be sent for this episode, taken back by the score that opens it. */
-export function takeParked(productionId: string, episode: number): ParkedDraft | null {
-  const k = keyOf(productionId, episode);
+export function takeParked(worldId: string, productionId: string, episode: number): ParkedDraft | null {
+  const k = keyOf(worldId, productionId, episode);
   const entry = parked.get(k);
   if (!entry || entry.waitingOn !== null) return null;
   parked.delete(k);
