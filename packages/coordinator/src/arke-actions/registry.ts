@@ -433,6 +433,8 @@ const CLIENT_COMMAND_METADATA = {
   "delete-scene": action("production", "destructive", "scene-store", "destructive-change", ["scenes", "episodes", "takes", "routing"]),
   "scene-command": { ...action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]), inThreadCard: "stage" },
   "create-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"]),
+  // An audio drama episode script saved whole by the score (SPEC-057 R-83): the author's editor.
+  "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),

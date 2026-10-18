@@ -29,6 +29,9 @@ import {
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
+  EpisodeScriptSchema,
+  episodeScriptFile,
+  type EpisodeScript,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -182,7 +185,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
 // 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
 // 90: an audio drama — the setup kind and its audio-drama.json plan (SPEC-057, issue 1857).
-export const SUPPORTED_SCHEMA_VERSION = 90;
+// 91: an audio drama's episode scripts (SPEC-057 R-83, issue 1858).
+export const SUPPORTED_SCHEMA_VERSION = 91;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -952,7 +956,21 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     if (await exists(join(pdir, "setup-origin.json"))) {
       await tryParse(`productions/${id}/setup-origin.json`, raw => ProductionSetupOriginSchema.parse(JSON.parse(raw)));
     }
+    // An audio drama's episode scripts (SPEC-057 R-83), whole, with the hash a save is fenced on.
+    const episodeScripts: Array<{ file: string; hash: string; script: EpisodeScript }> = [];
+    for (const file of (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/scripts/${file}`;
+      const script = await tryParse(rel, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
+      // A file is the script of the episode it is named for (codex on PR 1870): a copied or renamed
+      // one would open as another episode and every save would land elsewhere, so it is reported.
+      if (script && file !== episodeScriptFile(script.episode)) {
+        problems.push({ path: toPortable(rel), message: `this file holds episode ${script.episode}'s script; it must be named ${episodeScriptFile(script.episode)}` });
+        continue;
+      }
+      if (script) episodeScripts.push({ file, hash: manifest[toPortable(rel)]!, script });
+    }
     productions.push({
+      ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },

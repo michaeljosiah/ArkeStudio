@@ -1,0 +1,108 @@
+/* An audio drama's episode, as its script (design turn 230d–f, SPEC-057 R-11..R-24). */
+.fy-ad-ep { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.fy-ad-ep .gap { flex: 1; }
+.fy-ad-ep__bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.fy-ad-ep__views { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--secondary); }
+.fy-ad-ep__views button { border: 0; background: none; color: var(--muted-foreground); font: 500 13px var(--font-sans); padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+.fy-ad-ep__views button[aria-current="page"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
+.fy-ad-ep__title { display: inline-flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-ep__title input { border: 0; background: none; color: var(--foreground); font: 600 14px var(--font-sans); width: 16ch; padding: 4px 2px; }
+.fy-ad-ep__scene, .fy-ad-score select { font: inherit; font-size: 13px; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
+.fy-ad-ep__ring { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-ep__ring b { color: var(--foreground); font-weight: 600; }
+.fy-ad-ep__ring svg { width: 18px; height: 18px; transform: rotate(-90deg); }
+.fy-ad-ep__ring circle { fill: none; stroke: var(--border); stroke-width: 2.5; }
+.fy-ad-ep__ring circle + circle { stroke: var(--foreground); }
+.fy-ad-ep__toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted-foreground); font: 500 13px var(--font-sans); padding: 6px 10px; border-radius: 7px; cursor: pointer; }
+.fy-ad-ep__toggle--on { background: var(--secondary); color: var(--foreground); }
+.fy-ad-ep__more { position: relative; display: inline-flex; }
+.fy-ad-ep__menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 180px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); box-shadow: var(--shadow-lg); padding: 6px; }
+.fy-ad-ep__menu button { display: block; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: 500 13px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-ad-ep__menu button:hover, .fy-ad-ep__menu button:focus-visible { background: var(--secondary); outline: none; }
+.fy-ad-ep__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.fy-ad-ep__body--source { grid-template-columns: minmax(0, 1fr) 360px; }
+.fy-ad-ep__foot { display: flex; gap: 12px; padding: 8px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+
+/* The score: the two bed lanes, who, the words, the take (230e). */
+.fy-ad-score { overflow: auto; padding: 24px 20px 120px; }
+.fy-ad-score__empty { padding: 48px 0; display: grid; gap: 12px; justify-items: start; color: var(--muted-foreground); }
+.fy-ad-score__row { position: relative; display: grid; grid-template-columns: 14px 14px 120px minmax(0, 1fr) 48px; column-gap: 10px; align-items: start; padding: 6px 0; max-width: 900px; }
+.fy-ad-score__row--on { background: var(--secondary); border-radius: 8px; }
+.fy-ad-score__row--heading { padding-top: 22px; }
+.fy-ad-score__row--heading > .fy-ad-score__heading { grid-column: 3 / -1; }
+.fy-ad-score__lane { align-self: stretch; position: relative; margin: -6px 0; }
+.fy-ad-score__bed { position: absolute; top: 0; bottom: 0; border-left: 1.5px solid var(--muted-foreground); margin-left: 6px; }
+.fy-ad-score__bed--start { top: 10px; }
+.fy-ad-score__bed--start::before { content: ""; position: absolute; left: -5px; top: -2px; width: 7px; height: 7px; border: 1.5px solid var(--muted-foreground); border-radius: 50%; background: var(--background); }
+.fy-ad-score__bed--foot::after { content: ""; position: absolute; left: -5px; bottom: 0; width: 9px; border-top: 1.5px solid var(--muted-foreground); }
+.fy-ad-score__who { text-align: right; padding-top: 6px; display: grid; justify-items: end; gap: 2px; }
+.fy-ad-score__who small { font-size: 11px; color: var(--muted-foreground); }
+.fy-ad-score__speaker { font: 600 13px var(--font-sans); border-bottom: 2px solid var(--fy-voice, var(--foreground)); padding-bottom: 1px; }
+.fy-ad-score__cuekind { font-size: 12px; color: var(--muted-foreground); }
+.fy-ad-score__words { min-width: 0; display: grid; gap: 2px; }
+.fy-ad-score__words textarea, .fy-ad-score__words input { border: 0; background: none; color: inherit; font: inherit; padding: 2px 0; resize: none; width: 100%; field-sizing: content; min-height: 0; }
+.fy-ad-score__words textarea:focus, .fy-ad-score__words input:focus { outline: none; }
+.fy-ad-score__dirwrap { display: inline-flex; align-items: baseline; font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-score__words .fy-ad-score__direction { width: auto; min-width: 6ch; font-size: 13px; color: var(--muted-foreground); }
+/* Only the spoken words are set large (R-13). */
+.fy-ad-score__line { display: flex; align-items: baseline; gap: 6px; }
+.fy-ad-score__words .fy-ad-score__line textarea { font: 400 var(--text-lg)/1.45 var(--font-sans); width: auto; min-width: 4ch; max-width: 100%; flex: 0 1 auto; }
+.fy-ad-score__cut { font-size: var(--text-lg); font-weight: 600; text-decoration: underline; }
+.fy-ad-score__row--breaks-in > .fy-ad-score__who::before { content: ""; position: absolute; left: 152px; top: -8px; width: 10px; height: 18px; border-left: 1.5px solid var(--muted-foreground); border-bottom: 1.5px solid var(--muted-foreground); border-bottom-left-radius: 6px; }
+.fy-ad-score__new { font-size: 11px; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; white-space: nowrap; }
+.fy-ad-score__cue { border-left: 2px solid var(--border); padding-left: 12px; display: grid; gap: 2px; font-size: 14px; color: var(--muted-foreground); }
+.fy-ad-score__cue textarea { color: var(--foreground); }
+.fy-ad-score__cue--missing { border-left-color: var(--warning); }
+.fy-ad-score__warn { color: var(--warning); font-weight: 600; font-size: 12px; }
+.fy-ad-score__silence { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-score__words .fy-ad-score__silence input[type="number"] { width: 4.5em; }
+.fy-ad-score__words .fy-ad-score__silence input:not([type]) { width: auto; min-width: 12ch; }
+.fy-ad-score__gap { border-top: 2px dotted var(--muted-foreground); height: 0; }
+.fy-ad-score__note { font-size: 13px; color: var(--muted-foreground); font-style: italic; }
+.fy-ad-score__take { padding-top: 8px; color: var(--muted-foreground); text-align: center; }
+.fy-ad-score__heading { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+.fy-ad-score__n { font: 600 18px var(--font-sans); color: var(--muted-foreground); padding-top: 3px; }
+.fy-ad-score__place { display: flex; align-items: baseline; gap: 10px; }
+.fy-ad-score__place input { border: 0; background: none; color: inherit; padding: 2px 0; field-sizing: content; min-width: 4ch; }
+.fy-ad-score__place input:first-child { font: 600 20px var(--font-sans); }
+.fy-ad-score__place input + input { font-size: 13px; color: var(--muted-foreground); }
+.fy-ad-score__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.fy-ad-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; font: 500 12px var(--font-sans); background: none; color: inherit; cursor: default; }
+button.fy-ad-chip { cursor: pointer; }
+.fy-ad-chip--warn { border-color: var(--warning); color: var(--warning); }
+.fy-ad-score__paras { width: 140px; }
+.fy-ad-score__tools { grid-column: 3 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0 2px; font-size: 13px; }
+.fy-ad-score__tools label { display: inline-flex; align-items: center; gap: 6px; }
+.fy-ad-score__tools .gap { flex: 1; }
+.fy-ad-score__add { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 0 154px; }
+.fy-ad-score__add button { border: 1px dashed var(--border); border-radius: 999px; background: none; color: var(--muted-foreground); font: 500 12px var(--font-sans); padding: 4px 10px; cursor: pointer; }
+
+/* Source (230e): the pinned chapter version, numbered by paragraph, the line's passage marked. */
+.fy-ad-source { border-left: 1px solid var(--border); overflow: auto; padding: 18px 20px 40px; font-size: 14px; line-height: 1.6; }
+.fy-ad-source header { display: flex; align-items: baseline; gap: 8px; }
+.fy-ad-source header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.fy-ad-source header small { color: var(--muted-foreground); }
+.fy-ad-source h3 { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; margin: 14px 0 10px; }
+.fy-ad-source__changed { color: var(--warning); font-size: 13px; }
+.fy-ad-source__from { font-size: 12px; color: var(--muted-foreground); }
+.fy-ad-source__none { color: var(--muted-foreground); }
+.fy-ad-source__paras { padding-left: 2.2em; margin: 0 0 16px; }
+.fy-ad-source__paras li { margin-bottom: 12px; }
+.fy-ad-source__paras li::marker { content: "¶" counter(list-item) "  "; color: var(--muted-foreground); font-size: 11px; }
+.fy-ad-source__para--on { background: var(--secondary); border-radius: 4px; }
+
+@media (max-width: 899px) {
+  .fy-ad-ep__body--source { grid-template-columns: minmax(0, 1fr); }
+  .fy-ad-source { border-left: 0; border-top: 1px solid var(--border); }
+  .fy-ad-score__row { grid-template-columns: 10px 10px 84px minmax(0, 1fr) 24px; column-gap: 6px; }
+  .fy-ad-score__add { margin-left: 0; }
+}
+
+/* Print is the radio script: the score alone, no chrome (R-11's PDF, through the print dialog).
+   Only while a score is on the page — every other screen prints as it always has (codex on PR 1870). */
+@media print {
+  body:has(.fy-ad-ep) * { visibility: hidden; }
+  body:has(.fy-ad-ep) .fy-ad-score, body:has(.fy-ad-ep) .fy-ad-score * { visibility: visible; }
+  .fy-ad-score { position: absolute; inset: 0 auto auto 0; overflow: visible; padding: 0; }
+  .fy-ad-score__tools, .fy-ad-score__add, .fy-ad-score__take { display: none; }
+}

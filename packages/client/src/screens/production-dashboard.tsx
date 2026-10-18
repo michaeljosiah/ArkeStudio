@@ -1,5 +1,6 @@
 import {
   beatPictureShotId,
+  estimateScriptSeconds,
   orderedShots,
   productionAspect,
   productionShape,
@@ -128,15 +129,22 @@ function AudioDramaEpisodesScreen() {
       <div>
         <div className="fy-listhead">Episodes</div>
         <ol className="fy-ad-home__episodes">
-          {episodes.map(n => (
-            <li key={n}>
-              <span className="fy-ad-home__n">{n}</span>
-              <span>
-                <b>Episode {n}</b>
-                <small>not written</small>
-              </span>
-            </li>
-          ))}
+          {episodes.map(n => {
+            // Each row opens its script (S-2): its title and length once it has one.
+            const script = production.episodeScripts?.find(entry => entry.script.episode === n)?.script;
+            const seconds = script ? estimateScriptSeconds(script.blocks) : 0;
+            return (
+              <li key={n}>
+                <button type="button" className="fy-ad-home__open" onClick={() => navigate(`/w/${worldId}/p/${prodId}/script/${n}`)}>
+                  <span className="fy-ad-home__n">{n}</span>
+                  <span>
+                    <b>Episode {n}{script?.title ? ` · ${script.title}` : ""}</b>
+                    <small>{script && script.blocks.length > 0 ? `about ${Math.max(1, Math.round(seconds / 60))} min written` : "not written"}</small>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ol>
       </div>
       {plan && plan.keptFromListener.length > 0 && (

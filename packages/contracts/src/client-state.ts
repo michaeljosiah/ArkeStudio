@@ -1,6 +1,6 @@
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
-import { AudioDramaRecordSchema } from "./audio-drama.js";
+import { AudioDramaRecordSchema, EpisodeScriptSchema } from "./audio-drama.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -170,6 +170,11 @@ export const ProductionBundleSchema = valueSchema(z
     narrative: ProductionNarrativeSchema.nullable().optional(),
     /** audio-drama.json — an audio drama's plan and source (SPEC-057 R-7), or null. */
     audioDrama: AudioDramaRecordSchema.nullable().optional(),
+    /**
+     * An audio drama's episode scripts (SPEC-057 R-11, R-83), whole, as a scene's script is: the
+     * score renders from these. `hash` is the file's, the base its next save is fenced on.
+     */
+    episodeScripts: z.array(z.object({ file: z.string().min(1), hash: z.string().min(1), script: EpisodeScriptSchema }).strict()).optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.

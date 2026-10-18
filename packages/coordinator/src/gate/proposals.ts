@@ -38,6 +38,7 @@ import {
   composePassage,
   countWords,
   passageDiff,
+  EpisodeScriptSchema,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -86,6 +87,8 @@ import { describeCoordinatorError } from "../errors/user-message.js";
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
   "prose-style": ProseStyleSchema,
+  // An episode script's blocks and relations, refused before acceptance as the scanner would (codex on PR 1870).
+  "episode-script": EpisodeScriptSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
@@ -1590,6 +1593,7 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
           track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
@@ -1689,6 +1693,7 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
           track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
@@ -1988,6 +1993,7 @@ function readVersion(path: string, raw: string): number | null {
       kind.track === "routing" ||
       kind.track === "season" ||
       kind.track === "episode" ||
+      kind.track === "episode-script" ||
       kind.track === "series"
     ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
