@@ -132,13 +132,55 @@ describe("codex round 1 on PR 1871", () => {
     const dir = ".staging/drama/recovered";
     await mkdir(join(store.dir, dir), { recursive: true });
     await writeFile(join(store.dir, dir, "line.mp3"), Buffer.from("audio:paid"));
-    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, productionId: id, model: "eleven_multilingual_v2",
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs", productionId: id, model: "eleven_multilingual_v2",
       params: { block: a.id, text: a.kind === "dialogue" ? a.words : "", voiceId: "v_8Kq2" }, landedFiles: [`${dir}/line.mp3`] } as unknown as Job;
     const made = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: quoted.quote.token },
-      deps({ succeededJobs: (match) => [paid].filter(match) }));
+      deps({ jobs: (match) => [paid].filter(match) }));
     assert.deepEqual(made, { disposition: "made", made: [a.id] });
     assert.equal(sent.length, 0, "the line is not sent again");
     assert.ok(takes()!.lines[a.id]!.kept);
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_TAKE_SCHEMA_VERSION, "a build that cannot read takes refuses the world");
+  });
+});
+
+describe("codex round 2 on PR 1871", () => {
+  it("refuses a line already being made rather than paying for it twice", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, sent } = await drama([a]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const running = { id: newId("jb"), status: "running", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs",
+      productionId: id, model: "eleven_multilingual_v2", params: { block: a.id, text: "Climb.", voiceId: "v_8Kq2" } } as unknown as Job;
+    await assert.rejects(hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: quoted.quote.token }, deps({ jobs: (match) => [running].filter(match) })), /already being made/);
+    assert.equal(sent.length, 0);
+  });
+
+  it("keeps and reports the lines made before a later one fails", async () => {
+    const a = maren("One."), b = maren("Two.");
+    const { store, id, deps, takes } = await drama([a, b]);
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id] }, deps());
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    let calls = 0;
+    const base = deps();
+    const failingSecond = deps({ waitForJob: async (jobId) => (++calls === 1 ? base.waitForJob(jobId) : ({ id: jobId, status: "failed" } as unknown as Job)) });
+    const made = await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id], quoteToken: quoted.quote.token }, failingSecond);
+    assert.equal(made.disposition, "made");
+    assert.ok(made.disposition === "made" && made.made.length === 1 && /1 of 2 made/.test(made.reason ?? ""));
+    assert.ok(takes()!.lines[a.id]!.kept, "the paid first line is kept");
+  });
+
+  it("decides only the waiting take the author heard", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, takes } = await drama([a]);
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const retake = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true, quoteToken: retake.disposition === "quoted" ? retake.quote.token : "" }, deps());
+    const waiting = takes()!.lines[a.id]!.waiting!;
+    await assert.rejects(decideDramaTake(store, id, 1, a.id, "new", "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV"), /no take is waiting/);
+    await decideDramaTake(store, id, 1, a.id, "new", waiting.artifactId);
+    assert.equal(takes()!.lines[a.id]!.kept!.artifactId, waiting.artifactId);
   });
 });

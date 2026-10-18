@@ -249,10 +249,15 @@ export type DramaTakeState = "none" | "kept" | "stand-in" | "out of date" | "new
 export function dramaTakeState(
   block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>,
   line: EpisodeTakes["lines"][string] | undefined,
+  /** The role's voice now, where it is known: a take in another voice is out of date (R-60). */
+  voice?: { provider: string; voiceId: string; model?: string | undefined },
 ): DramaTakeState {
   if (line?.waiting) return line.waiting.misread !== undefined ? "misread" : "new or kept?";
   if (!line?.kept) return "none";
   if (line.kept.textHash !== dramaLineHash(block)) return "out of date";
+  // A voice of its own now outdates a stand-in too (codex on PR 1871): Hear would not reuse it.
+  if (voice && (line.kept.standIn || line.kept.voice.provider !== voice.provider || line.kept.voice.voiceId !== voice.voiceId ||
+    (voice.model !== undefined && line.kept.voice.model !== voice.model))) return "out of date";
   return line.kept.standIn ? "stand-in" : "kept";
 }
 

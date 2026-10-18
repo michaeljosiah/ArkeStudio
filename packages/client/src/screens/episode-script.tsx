@@ -114,7 +114,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);
-    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); }
+    // A save that lands clears what an earlier one said (codex on PR 1871): Hear prices again.
+    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); setFailure(null); }
     else { setFailure(result.reason ?? "Not saved."); setDirty(false); setConflict(true); }
   }), [saving, version]);
 
@@ -343,7 +344,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                     </div>
                     {/* The take (230i): what this line's performance is, and what waits on it. */}
                     <span className="fy-ad-score__take">{(block.kind === "dialogue" || block.kind === "narration") && (
-                      <TakeCell block={block} line={takes?.lines[block.id]} worldId={world.meta.worldId} productionId={production.meta.id} episode={episode}
+                      <TakeCell block={block} line={takes?.lines[block.id]} voice={block.kind === "dialogue" ? world.sheets.find((sheet) => sheet.id === block.speaker)?.voice : undefined}
+                        worldId={world.meta.worldId} productionId={production.meta.id} episode={episode}
                         worldSlug={world.meta.slug} onRetake={() => { setLines([block.id]); setRetake(true); }} />
                     )}</span>
                   </>
