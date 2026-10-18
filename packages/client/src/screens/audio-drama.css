@@ -100,6 +100,24 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-take__acts button { font-size: 11px; color: var(--foreground); text-decoration: underline; }
 .fy-ad-score__row { grid-template-columns: 14px 14px 120px minmax(0, 1fr) 92px; }
 
+/* Add a sound (230w–y): the cue's sound, and the generate and record panels in the picker's dialog. */
+.fy-ad-score__sound { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fy-ad-ep__warn { color: var(--warning); }
+.fy-ad-gen { display: grid; gap: 12px; padding: 4px 2px; font-size: 13px; }
+.fy-ad-gen header { display: flex; align-items: baseline; gap: 12px; }
+.fy-ad-gen header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.fy-ad-gen label { display: grid; gap: 6px; }
+.fy-ad-gen textarea, .fy-ad-gen input { font: inherit; color: inherit; background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
+.fy-ad-gen textarea[readonly] { background: var(--secondary); }
+.fy-ad-gen__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.fy-ad-gen__row > span { color: var(--muted-foreground); min-width: 64px; }
+.fy-ad-gen__row label { display: inline-flex; align-items: center; gap: 6px; }
+.fy-ad-gen__row input[type="number"] { width: 6em; }
+.fy-ad-gen__check { display: inline-flex !important; grid-auto-flow: column; align-items: center; gap: 6px; }
+.fy-ad-gen__note { color: var(--muted-foreground); }
+.fy-ad-gen__fail { color: var(--destructive, var(--warning)); margin: 0; }
+.fy-ad-gen footer { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* Source (230e): the pinned chapter version, numbered by paragraph, the line's passage marked. */
 .fy-ad-source { border-left: 1px solid var(--border); overflow: auto; padding: 18px 20px 40px; font-size: 14px; line-height: 1.6; }
 .fy-ad-source header { display: flex; align-items: baseline; gap: 8px; }

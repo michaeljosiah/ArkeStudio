@@ -16,6 +16,9 @@ import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, More, X } from "../components/icons.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
+import { AddSoundDialog } from "../components/audio-drama-sound.js";
+import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
+import { mediaUrl } from "../lib/media.js";
 import { EmptyState, Screen } from "../components/layout.js";
 
 /** Minutes and seconds, as the listening ring reads (3:05). */
@@ -66,6 +69,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // The spoken lines selected to hear (230g): a click selects one, shift extends the run.
   const [lines, setLines] = useState<string[]>([]);
   const [retake, setRetake] = useState(false);
+  // The cue whose sound is being chosen (230w).
+  const [adding, setAdding] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
   const focusNext = useRef<{ id: string; at: number } | null>(null);
 
@@ -139,6 +144,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
     anchor.current = id;
     setLines([id]);
   };
+  // A required cue with no sound is amber, and counted here (R-38).
+  const missingSounds = blocks.filter((block) => (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.required && !block.soundArtifact).length;
   const newLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && scenes[i]?.source && !block.paragraphs?.length).length;
 
   const insertAfter = (kind: EpisodeScriptBlock["kind"]) => {
@@ -291,7 +298,25 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                             onChange={(event) => change(block.id, { heard: event.target.value.replace(/\n/g, " ") })} />
                           {(block.purpose || on) && <input aria-label="Why" placeholder="why it is heard" value={block.purpose ?? ""} maxLength={240}
                             onChange={(event) => change(block.id, { purpose: event.target.value || undefined } as Partial<EpisodeScriptBlock>)} />}
-                          {block.required && !block.soundArtifact && <small className="fy-ad-score__warn">No sound yet</small>}
+                          {/* The sound placed for it, or — with none — the one action, Add a sound (R-43). */}
+                          <span className="fy-ad-score__sound">
+                            {block.soundArtifact ? (() => {
+                              const artifact = world.artifacts.find((candidate) => candidate.id === block.soundArtifact);
+                              const label = artifact?.generation?.source === "sound" ? artifact.generation.name : artifact?.file ?? "a sound no longer here";
+                              return <>
+                                <button type="button" className="fy-ad-chip" disabled={!artifact} onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (!artifact) return;
+                                  loadPlaylist([{ id: artifact.id, url: mediaUrl(world.meta.slug, `artifacts/${artifact.file}`), title: label, lineId: block.id, speakerSheetId: "sound" }]);
+                                  void playPlaylistLine(0);
+                                }}>▶ {label}</button>
+                                {on && <button type="button" className="fy-linkbtn" onClick={(event) => { event.stopPropagation(); setAdding(block.id); }}>Change</button>}
+                              </>;
+                            })() : <>
+                              {block.required && <small className="fy-ad-score__warn">No sound yet</small>}
+                              <button type="button" className="fy-linkbtn" onClick={(event) => { event.stopPropagation(); setAdding(block.id); }}>Add a sound</button>
+                            </>}
+                          </span>
                         </div>
                       )}
                       {block.kind === "silence" && (
@@ -355,8 +380,16 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             : saving || dirty ? "Saving…" : version !== null ? `Saved · script v${version}` : "Not started"}
         </span>
         <span className="gap" />
+        {missingSounds > 0 && <span className="fy-ad-ep__warn">{missingSounds} required sound{missingSounds === 1 ? "" : "s"} missing</span>}
         {newLines > 0 && <span>{newLines} new line{newLines === 1 ? "" : "s"}</span>}
       </footer>
+      {adding !== null && (() => {
+        const cue = blocks.find((block) => block.id === adding);
+        return cue && (cue.kind === "sound" || cue.kind === "ambience" || cue.kind === "music") ? (
+          <AddSoundDialog open world={world} production={production} cue={cue} onClose={() => setAdding(null)}
+            onPlace={(artifactId) => change(cue.id, { soundArtifact: artifactId } as Partial<EpisodeScriptBlock>)} />
+        ) : null;
+      })()}
     </div>
   );
 }

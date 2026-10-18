@@ -262,7 +262,10 @@ export function ReferencePickerBody({
   only,
   budget = "model",
   worldChoices,
+  actions,
 }: {
+  /** Tiles after Upload that make a source rather than pick one — Generate, Record (SPEC-057 R-43). */
+  actions?: ReadonlyArray<{ label: string; onPress: () => void }>;
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
   worldChoices?: React.ReactNode;
@@ -574,6 +577,11 @@ export function ReferencePickerBody({
             </button>
           );
         })}
+        {actions?.map((action) => (
+          <button key={action.label} type="button" className="fy-refpicker__upload" onClick={action.onPress}>
+            {action.label}
+          </button>
+        ))}
         <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
           <Upload size={16} />
           Upload a file

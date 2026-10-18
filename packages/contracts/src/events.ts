@@ -111,6 +111,8 @@ export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 const base = { at: IsoDateTimeSchema };
 
 export const QueueCommandSchema = z.enum([
+  // An audio drama's sound for a cue (SPEC-057 R-41).
+  "generate-drama-sound",
   "design-voice",
   "hear-designed-voice",
   "dispatch-scene",
@@ -421,6 +423,25 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       quote: z.object({ token: z.string().min(1), estimatedMicroUsd: z.number().int().min(0), requests: z.array(DramaRequestSchema) }).strict().optional(),
       missing: z.array(z.object({ speaker: SlugSchema, name: z.string(), blocks: z.array(UlidSchema) }).strict()).optional(),
       made: z.array(UlidSchema).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** `generate-drama-sound` answered (SPEC-057 R-39..R-42): the price and what is sent, or the artifacts made. */
+  z
+    .object({
+      ...base,
+      type: z.literal("drama.sound"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["quoted", "made", "refused"]),
+      quote: z.object({
+        token: z.string().min(1),
+        estimatedMicroUsd: z.number().int().min(0),
+        requests: z.array(z.object({ engine: z.string(), prompt: z.string(), durationSec: z.number().optional(), loop: z.boolean().optional(),
+          estimatedMicroUsd: z.number().int().min(0) }).strict()),
+      }).strict().optional(),
+      artifactIds: z.array(z.string()).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
