@@ -275,6 +275,48 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
       },
     ));
 
+  // Issue 1658: the Looks sheet flagged the chosen looks against the chapter and Illustrate made 17
+  // pictures in them anyway.
+  it("holds a row whose chosen look the Looks sheet says disagrees with the chapter, and makes it only as it is", () => {
+    let flagged = false;
+    return withHarness(
+      async (h) => {
+        await acceptCharacterLook(h.store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Storm coat, hood up.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body" });
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000004" });
+        await h.send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000005" });
+        // Read again with the look chosen: the chapter's words now disagree with it.
+        flagged = true;
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000006" });
+        const record = await readAudiobook(h.store()!, LEDGER, CHAPTER);
+        assert.ok(record !== null && record !== "unreadable");
+        assert.equal(record.look?.characters["maren-kest"]?.lookId, LOOK_ID);
+        assert.equal(record.look?.characters["maren-kest"]?.conflicts?.length, 1, "the Looks sheet flags it");
+
+        const proposal = await proposed(h);
+        assert.ok(proposal.rows.length > 0);
+        assert.ok(proposal.rows.every((row) => row.disagrees?.length === 1 && row.disagrees[0] === row.who[0]!.name), "every row Maren rides in names her");
+        await accept(h.send, proposal, { confirmedMicroUsd: 10_000_000 });
+        assert.equal(h.enqueued.length, 0, "nothing is made in a look that dresses her against the chapter");
+
+        const left = finished(h.events).proposal!;
+        const first = left.rows[0]!;
+        await accept(h.send, left, { blocks: [first.block], without: [first.block], confirmedMicroUsd: first.estimatedMicroUsd });
+        assert.equal(h.enqueued.length, 1, "sent as it is when the author says so");
+      },
+      {
+        illustrate: says((input) => MARENS(input)),
+        look: async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [
+          { who: "maren-kest", text: "Oilskin coat, dark with salt.", ...(flagged ? { conflicts: [{ part: "Hood", chapter: "down", look: "up" }] } : {}) },
+          { who: "bray-half-hitch", text: "Three belts, a wet cap." },
+        ] }),
+        prepare: async (worldDir) => {
+          await mkdir(join(worldDir, "references", "maren-kest", "takes", LOOK_ID), { recursive: true });
+          await writeFile(join(worldDir, "references", "maren-kest", "takes", LOOK_ID, "look.png"), pngBytes());
+        },
+      },
+    );
+  });
+
   it("refuses a confirm below the total, and the run never begins", () =>
     withHarness(
       async (h) => {

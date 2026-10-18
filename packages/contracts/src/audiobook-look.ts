@@ -98,6 +98,16 @@ export function lookKey(who: { sheet?: string | undefined; name: string }): stri
 export const lookByAuthor = (line: { by?: "author" | undefined }): boolean => line.by === "author";
 
 /**
+ * Where the look chosen or carried for this chapter disagrees with the chapter's own words, as
+ * its Looks sheet shows them (issue 1658): a picture that rides that look would dress the person
+ * against the prose, so a proposal holds it rather than making it.
+ */
+export function chapterLookDisagreement(look: Pick<AudiobookLook, "characters"> | null | undefined, key: string): readonly LookConflict[] {
+  const line = look?.characters[key];
+  return line?.lookId === undefined ? [] : (line.conflicts ?? []).filter((conflict) => conflict.kind === "chapter");
+}
+
+/**
  * Which image of a look rides (design turn 193, R-118): the full-body image, or the close view
  * (head and shoulders). The frame decides — never both.
  */

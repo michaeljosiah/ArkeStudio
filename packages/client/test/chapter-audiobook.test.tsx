@@ -1755,6 +1755,27 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p1.0", "p3.0"], ["p1.0"], 120_000]);
   });
 
+  // Issue 1658: looks the Looks sheet flagged rode in 17 pictures with nothing on the card to say so.
+  it("holds a row whose chapter look disagrees with the chapter, names who, and sends it only as it is", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { disagrees: ["Maren"] }), row("p3.0", { at: 150 })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "disagrees");
+    assert.ok(card.className.includes("fy-ills__card--held"), "amber, as a held row is");
+    assert.equal(card.querySelector('[data-testid="illustration-skip"]'), null, "Review looks stands where Skip would");
+    assert.equal(card.querySelector('[data-testid="illustration-review-look"]')!.textContent, "Review looks");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.match(q(m, '[data-testid="illustration-headline"]')!.textContent!, /· 1 to make · 1 look disagrees$/);
+    assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "not priced in until it is sent");
+    await act(async () => (card.querySelector('[data-testid="illustration-as-is"]') as HTMLButtonElement).click());
+    assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "ready");
+    assert.equal(all(m, '[data-testid="illustration-disagrees"]')[0]!.textContent, "sent as it is");
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    const sent = sentOf(m, "accept-illustration")[0]!;
+    assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p0.0"], 80_000]);
+  });
+
   it("counts the pictures as they are made in the dock's one line and Stop keeps what is made", async () => {
     const m = await proposedMount();
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());

@@ -688,6 +688,20 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual([make.prompt, make.looks], [rewritten, { "maren-kest": HARBOUR_LOOK.id }]);
   });
 
+  // Issue 1658: the chapter's look was corrected, and Make again sent the old prompt, which named
+  // the old clothes, beside the new look's picture. The words won and the dress stayed orange.
+  it("follows the chapter's look as it is now, marks the prompt written for the old one and offers Update prompt", async () => {
+    extraArtifacts = [madeArtifact()];
+    const harbourChapter = { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } };
+    const m = await mount(2, { "p1.0": madeInStorm() }, harbourChapter);
+    assert.equal(q(m, '[data-testid="picture-card-only"]'), null, "the chapter's choice, not one of its own");
+    assert.match(text(q(m, '[data-key="maren-kest"]')), /Harbour coat/, "the row shows the look Make again will send");
+    assert.match(text(q(m, '[data-testid="picture-card-look-changed"]')), /^!\s*Look changed\s*prompt still says Storm coat$/);
+    await press(q(m, '[data-testid="picture-card-update-prompt"]'));
+    const rewrite = asked(m, "rewrite-audiobook-picture-prompt").at(-1)!;
+    assert.deepEqual(rewrite.changes, [{ key: "maren-kest", from: STORM_LOOK.id, to: HARBOUR_LOOK.id }]);
+  });
+
   it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {
     extraArtifacts = [madeArtifact()];
     const m = await mount(2, { "p1.0": madeInStorm() }, STORM_CHAPTER, { "p1.0": { "maren-kest": HARBOUR_LOOK.id } });

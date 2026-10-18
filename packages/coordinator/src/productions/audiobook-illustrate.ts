@@ -4,6 +4,7 @@ import {
   PICTURE_PROPOSAL_GAP_SEC,
   PICTURE_TITLE_MAX,
   audiobookTextHash,
+  chapterLookDisagreement,
   kitLookLibrary,
   lookLinesFor,
   normalizeSpeechText,
@@ -205,6 +206,9 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     // Rule 4 where a look image rides: no skin, cut or body in the words (2026-10-04).
     const held = { ...candidate.held, prompt: neutralWhereLooksRide(rewritten.get(candidate.index) ?? candidate.held.prompt, who) };
     const needs = who.filter((entry) => entry.kind === "character" && entry.reference === null).map((entry) => entry.name);
+    // A chapter look the Looks sheet flags would dress them against the prose (issue 1658); one
+    // chosen for this picture alone is the author's own call.
+    const disagrees = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(room.look, entry.key).length > 0).map((entry) => entry.name);
     const picks = ridingPicks(who);
     const keys = held.inFrame.map((person) => person.key);
     const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);
@@ -220,6 +224,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
       estimatedMicroUsd: pictureQuote(model, who.filter((entry) => entry.carried).length),
       ...(stamp !== undefined ? { look: stamp } : {}),
       ...(needs.length > 0 ? { needs } : {}),
+      ...(disagrees.length > 0 ? { disagrees } : {}),
       shot,
     };
   });

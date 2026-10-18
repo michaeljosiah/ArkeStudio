@@ -72,6 +72,15 @@ export function lookRows(look: AudiobookLook | null, numberOf: (key: string) => 
   return rows;
 }
 
+/**
+ * What a new look starts from: the chapter's own words for them (issue 1658). With a look chosen or
+ * carried in, the row's text is that look's clothing, the very line its conflict rows dispute, so
+ * the prose's reading kept beside it is what Make again should offer.
+ */
+function newLookLine(row: Row): string {
+  return row.line?.reading ?? row.text;
+}
+
 /** The words of one line, written on leaving the field when they changed (the author's from then on). */
 function Field({ row, label, disabled, onWrite }: { row: Row; label: string; disabled: boolean; onWrite: (target: LookTarget, text: string | null) => void }) {
   const [text, setText] = useState(row.text);
@@ -477,7 +486,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       orderOf={orderOf}
       off={off}
       onWrite={write}
-      onNewLook={(entry) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: entry.text })}
+      onNewLook={(entry) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: newLookLine(entry) })}
       onBrowse={(entry) => setBrowsing(entry.id)}
       closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
       onMakeClose={makeClose}
@@ -538,7 +547,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       </PageSheet>
       {browsing !== null && (() => {
         const row = rows.find((entry) => entry.id === browsing);
-        return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;
+        return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: newLookLine(row) }); }} />;
       })()}
       {making !== null && (
         <NewLookSheet open onClose={() => setMaking(null)} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />

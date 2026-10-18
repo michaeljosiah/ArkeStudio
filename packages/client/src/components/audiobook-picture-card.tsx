@@ -105,13 +105,18 @@ type LookMode = "only" | "chapter";
  * Who rides once the looks chosen for this picture alone are laid over the card (design turn 193d,
  * R-146): a person with a look of their own rides it — the frame takes its close view or its full
  * body, as the coordinator will — or the main photo; a person whose own look was let go rides the
- * chapter's choice again. Everyone else is as the card was drafted or made.
+ * chapter's choice again. Everyone else rides the chapter's choice as it is now: a picture made
+ * before the chapter's look changed would otherwise show, and Make again send, words for clothes
+ * the coordinator no longer dresses them in (issue 1658), with no Update prompt to offer.
  */
 export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined): PictureWho[] {
   return who.map((entry) => {
     if (entry.kind !== "character" || entry.sheet === undefined) return entry;
     const mine = own[entry.key];
-    if (mine === undefined && entry.only !== true) return entry;
+    if (mine === undefined && entry.only !== true) {
+      const chosen = chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
+      if (chapter === null || chosen === (entry.look?.lookId ?? MAIN_PHOTO_LOOK)) return entry;
+    }
     const target = mine ?? chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
     const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
     const { look: _look, only: _only, ...base } = entry;

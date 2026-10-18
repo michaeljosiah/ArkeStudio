@@ -64,10 +64,10 @@ describe("what the card says (191b)", () => {
       { block: "b", estimatedMicroUsd: 45_000, needs: ["Sereth"] },
       { block: "c", estimatedMicroUsd: 40_000 },
     ];
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 2, microUsd: 80_000, held: 1, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(["c"]), new Set()), { count: 1, microUsd: 40_000, held: 1, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 3, microUsd: 125_000, held: 0, refused: 0 });
-    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set(["b"])), { count: 2, microUsd: 80_000, held: 0, refused: 0 }, "a skipped row is never held");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 2, microUsd: 80_000, held: 1, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(["c"]), new Set()), { count: 1, microUsd: 40_000, held: 1, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 3, microUsd: 125_000, held: 0, disagree: 0, refused: 0 });
+    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set(["b"])), { count: 2, microUsd: 80_000, held: 0, disagree: 0, refused: 0 }, "a skipped row is never held");
   });
 
   it("holds a row a run's picture was refused for out of the total until the author tries it again (2026-10-04)", () => {
@@ -75,11 +75,24 @@ describe("what the card says (191b)", () => {
       { block: "a", estimatedMicroUsd: 40_000 },
       { block: "b", estimatedMicroUsd: 45_000, refused: "refused by the image safety check" },
     ];
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 0, refused: 1 }, "not counted as one to make");
-    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 0, refused: 0 }, "tried again, it is made and paid for");
-    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set()), { count: 1, microUsd: 40_000, held: 0, refused: 0 }, "skipped, it is neither");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 0, disagree: 0, refused: 1 }, "not counted as one to make");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 0, disagree: 0, refused: 0 }, "tried again, it is made and paid for");
+    assert.deepEqual(illustrationTotal(rows, new Set(["b"]), new Set()), { count: 1, microUsd: 40_000, held: 0, disagree: 0, refused: 0 }, "skipped, it is neither");
     assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set())), [true, false]);
     assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set(["b"]))), [true, true]);
+  });
+
+  // Issue 1658: Illustrate made 17 pictures in looks the chapter's Looks sheet flagged.
+  it("holds a row whose chapter look disagrees with the chapter until the author sends it as it is", () => {
+    const rows = [
+      { block: "a", estimatedMicroUsd: 40_000 },
+      { block: "b", estimatedMicroUsd: 45_000, disagrees: ["Ife"] },
+      { block: "c", estimatedMicroUsd: 40_000, needs: ["Ade"], disagrees: ["Ife"] },
+    ];
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set()), { count: 1, microUsd: 40_000, held: 1, disagree: 1, refused: 0 }, "a missing reference is said first");
+    assert.deepEqual(illustrationTotal(rows, new Set(), new Set(["b"])), { count: 2, microUsd: 85_000, held: 1, disagree: 0, refused: 0 }, "sent as it is, it is made and paid for");
+    assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set())), [true, false, false]);
+    assert.deepEqual(rows.map((row) => illustrationRowGoes(row, new Set(), new Set(["b", "c"]))), [true, true, true]);
   });
 
   it("says a price to the cent, rounded up, and free for nothing", () => {
