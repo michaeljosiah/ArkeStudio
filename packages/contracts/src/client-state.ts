@@ -1,6 +1,6 @@
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
-import { AudioDramaRecordSchema, EpisodeScriptSchema } from "./audio-drama.js";
+import { AudioDramaRecordSchema, EpisodeScriptSchema, EpisodeTakesSchema } from "./audio-drama.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -175,6 +175,8 @@ export const ProductionBundleSchema = valueSchema(z
      * score renders from these. `hash` is the file's, the base its next save is fenced on.
      */
     episodeScripts: z.array(z.object({ file: z.string().min(1), hash: z.string().min(1), script: EpisodeScriptSchema }).strict()).optional(),
+    /** Each episode's takes (SPEC-057 R-29): the kept take and any waiting, by script block. */
+    episodeTakes: z.array(EpisodeTakesSchema).optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.

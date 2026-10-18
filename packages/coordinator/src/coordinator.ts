@@ -26,6 +26,7 @@ import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { saveEpisodeScript } from "./productions/audio-drama.js";
+import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
@@ -10483,6 +10484,51 @@ export class Coordinator {
         } catch (err) {
           answer({ disposition: "refused", reason: describeCoordinatorError(err) });
         }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "hear-drama-lines": {
+        // An audio drama's lines heard (SPEC-057 R-25..R-31): priced first, a missing voice named
+        // back rather than substituted, and each line made kept as a take.
+        const store = this.opts.provider.openStore?.();
+        const voice = this.voiceService;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId, episode: msg.episode };
+        const refuse = (reason: string) => this.emit({ at: new Date().toISOString(), type: "drama.heard", ...ids, disposition: "refused", reason });
+        if (!store || store.worldId !== msg.worldId) return refuse("that world is not open");
+        if (voice === null) return refuse("no voice service");
+        try {
+          const room = await this.audiobookNarrator(store, voice, msg.productionId, true);
+          const transcribe = voice.localSpeechConfigured && localTranscriberAvailable(this.providerService.list())
+            ? (bytes: Uint8Array, contentType: string) => voice.transcribe(bytes, contentType) : undefined;
+          const result = await hearDramaLines(store, msg.productionId, {
+            episode: msg.episode, blocks: msg.blocks,
+            ...(msg.quoteOnly !== undefined ? { quoteOnly: msg.quoteOnly } : {}),
+            ...(msg.quoteToken !== undefined ? { quoteToken: msg.quoteToken } : {}),
+            ...(msg.decisions !== undefined ? { decisions: msg.decisions } : {}),
+            ...(msg.retake !== undefined ? { retake: msg.retake } : {}),
+          }, {
+            worldId: msg.worldId, narrator: room.narrator, models: this.opts.manifest?.models ?? [],
+            enqueue: async (input) => {
+              const queued = await this.enqueueBatch(msg.requestId, "voice-preview", [input]);
+              if (queued.jobIds[0] === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
+              return queued.jobIds[0];
+            },
+            waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            ...(transcribe !== undefined ? { transcribe } : {}),
+          });
+          this.emit({ at: new Date().toISOString(), type: "drama.heard", ...ids, ...result });
+          if (result.disposition === "made") await this.refreshWorldSnapshot(msg.worldId);
+        } catch (err) {
+          refuse(describeCoordinatorError(err));
+          await this.refreshWorldSnapshot(msg.worldId);
+        }
+        return;
+      }
+      case "decide-drama-take": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        // A decision on a take that no longer waits changes nothing; the refreshed world shows it.
+        await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

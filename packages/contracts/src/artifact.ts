@@ -226,6 +226,12 @@ export const ArtifactAudiobookGenerationSchema = z
     grouped: AudiobookGroupedSchema.optional(),
     /** The loudness the take was filed at (design turn 185). */
     loudness: AudiobookLoudnessSchema.optional(),
+    /**
+     * An audio drama's take (SPEC-057 R-29): the episode it was performed for. `chapterId` then
+     * names the episode's script (`episode-NN`), `chapterVersion` its version, and `block` the
+     * script block's id — the shape Audio Studio already reads takes by.
+     */
+    episode: z.number().int().min(1).max(200).optional(),
   })
   .strict();
 export type ArtifactAudiobookGeneration = z.infer<typeof ArtifactAudiobookGenerationSchema>;

@@ -52,7 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { EpisodeScriptBlockSchema } from "./audio-drama.js";
+import { EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2302,6 +2302,37 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * chapter save: `baseHash` is the file the editor read, null for an episode with no script yet,
    * and a save against a moved base is refused rather than merged. A direct save keeps the version.
    */
+  /**
+   * Hear an audio drama's lines (SPEC-057 R-25..R-28, design turn 230g/h). `quoteOnly` prices the
+   * selection and names any speaker with no voice, making nothing; a press then sends the token it
+   * was quoted. `decisions` say what to do about a speaker with no voice — nothing substitutes on
+   * its own. `retake` makes a new take beside a current one, to wait for the author.
+   */
+  z
+    .object({
+      kind: z.literal("hear-drama-lines"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      blocks: z.array(UlidSchema).min(1).max(400),
+      quoteOnly: z.boolean().optional(),
+      quoteToken: z.string().min(1).max(200).optional(),
+      decisions: z.record(SlugSchema, MissingVoiceChoiceSchema).optional(),
+      retake: z.boolean().optional(),
+    })
+    .strict(),
+  /** The author's answer to a take that waits (R-30): keep the new one, or the one kept before. */
+  z
+    .object({
+      kind: z.literal("decide-drama-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      block: UlidSchema,
+      keep: z.enum(["new", "kept"]),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("save-episode-script"),

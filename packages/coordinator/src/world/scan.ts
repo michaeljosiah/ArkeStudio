@@ -30,7 +30,9 @@ import {
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
   EpisodeScriptSchema,
+  EpisodeTakesSchema,
   type EpisodeScript,
+  type EpisodeTakes,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -961,8 +963,15 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       const script = await tryParse(rel, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
       if (script) episodeScripts.push({ file, hash: manifest[toPortable(rel)]!, script });
     }
+    // Its takes (SPEC-057 R-29), by episode.
+    const episodeTakes: EpisodeTakes[] = [];
+    for (const file of (await listDir(join(pdir, "drama-takes"))).filter((f) => f.endsWith(".json")).sort()) {
+      const takes = await tryParse(`productions/${id}/drama-takes/${file}`, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
+      if (takes) episodeTakes.push(takes);
+    }
     productions.push({
       ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
+      ...(episodeTakes.length > 0 ? { episodeTakes } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },

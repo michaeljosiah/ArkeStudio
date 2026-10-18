@@ -434,6 +434,9 @@ const CLIENT_COMMAND_METADATA = {
   "scene-command": { ...action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]), inThreadCard: "stage" },
   "create-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"]),
   // An audio drama episode script saved whole by the score (SPEC-057 R-83): the author's editor.
+  // Hearing lines spends on the author's press and its quote (SPEC-057 R-26); deciding a take is theirs.
+  "hear-drama-lines": humanOnly("Hearing lines spends at the author's press, against the quote they saw."),
+  "decide-drama-take": humanOnly(HUMAN_DECISION),
   "save-episode-script": humanOnly("A direct episode script save is the author's editor; Arke's script changes are reviewed proposals."),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
