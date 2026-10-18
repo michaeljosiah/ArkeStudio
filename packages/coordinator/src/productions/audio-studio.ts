@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaLineHash,
+  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DRAMA_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaTakeState,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
   AudioStudioProposalInputSchema, type AudioStudioProposalInput, type AudioStudioProposal,
-  type AudioSource, type AudioStudioSnapshot, type ChapterAudiobook, type DramaMixRecord,
+  type AudioSource, type AudioStudioSnapshot, type ChapterAudiobook, type DramaMixRecord, type EpisodeScriptBlock,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -136,12 +136,18 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
   let record: DramaMixRecord = { version: 1, episode };
   if (raw !== null) {
     const parsed = DramaMixRecordSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) throw new AudioArrangementRefusal("The episode's arrangement is unreadable; restore it before opening Audio Studio");
+    // A copy of another episode's mix never stands in for this one (codex on PR 1879).
+    if (!parsed.success || parsed.data.episode !== episode) throw new AudioArrangementRefusal("The episode's arrangement is unreadable; restore it before opening Audio Studio");
     record = parsed.data;
   }
   const script = episodeAudioScript(entry.hash, entry.script.blocks);
   const name = (slug: string) => bundle.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
-  const baseWith = (held: StudioRecord) => digest({ script: entry.hash, takes: takes ?? null, record: { ...held, audioStudioProposals: undefined } });
+  // A role's voice now, as Hear and Cast read it (codex on PR 1879): a recast puts its old takes out.
+  const cast = production.audioDrama?.cast ?? {};
+  const voice = (block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>) => block.kind === "narration"
+    ? cast[DRAMA_NARRATOR]?.voice : cast[block.speaker]?.voice ?? bundle.sheets.find((sheet) => sheet.id === block.speaker)?.voice;
+  const voices = Object.fromEntries(entry.script.blocks.flatMap((block) => block.kind === "dialogue" || block.kind === "narration" ? [[block.id, voice(block) ?? null]] : []));
+  const baseWith = (held: StudioRecord) => digest({ script: entry.hash, takes: takes ?? null, voices, record: { ...held, audioStudioProposals: undefined } });
   const soundFile = (artifactId: string) => {
     const artifact = bundle.artifacts.find((candidate) => candidate.id === artifactId);
     return artifact ? `artifacts/${artifact.file}` : undefined;
@@ -155,15 +161,21 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
       for (const block of entry.script.blocks) {
         if (block.kind === "dialogue" || block.kind === "narration") {
           const kept = takes?.lines[block.id]?.kept;
-          if (kept && kept.textHash === dramaLineHash(block)) files.add(kept.file);
+          const usable = kept ? dramaTakeState(block, { kept }, voice(block)) : "none";
+          if (kept && (usable === "kept" || usable === "stand-in")) files.add(kept.file);
         } else if ((block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact) {
           const file = soundFile(block.soundArtifact);
           if (file) files.add(file);
         }
       }
       const sources = new Map<string, AudioSource>();
-      for (const file of files) sources.set(file, await audioStudioSource(store, productionId, file, options));
-      return deriveEpisodeArrangement(script, entry.script.blocks, takes, soundFile, sources, name);
+      // One clip that will not decode leaves its place empty, not the episode shut (codex on PR 1879):
+      // the snapshot names it as unavailable, and the rest is there to repair it around.
+      for (const file of files) {
+        const source = await audioStudioSource(store, productionId, file, options).catch(() => null);
+        if (source) sources.set(file, source);
+      }
+      return deriveEpisodeArrangement(script, entry.script.blocks, takes, soundFile, sources, name, voice);
     },
     update: (change, beforeWrite) => oneAtATime(`${store.dir}/${path}`, async () => {
       const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);

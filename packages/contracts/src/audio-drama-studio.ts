@@ -2,7 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { AudioArrangementSchema, AudioStudioProposalSchema, type AudioArrangementState, type AudioArrangementTrack, type AudioSource } from "./audio-arrangement-schema.js";
 import { audioPassageId, audioSamples, newAudioClip, validateAudioArrangement, type AudioScript } from "./audio-arrangement.js";
-import { DRAMA_NARRATOR, dramaLineHash, type EpisodeScriptBlock, type EpisodeTakes } from "./audio-drama.js";
+import { DRAMA_NARRATOR, dramaLineHash, dramaTakeState, type EpisodeScriptBlock, type EpisodeTakes } from "./audio-drama.js";
 
 /**
  * An audio drama episode in Audio Studio (SPEC-057 R-67..R-70, design turn 230o): one arrangement
@@ -33,12 +33,16 @@ export const DRAMA_SCENE_GAP_SEC = 0.8;
 /** How early a line that cuts in starts, under the one it breaks (R-18). */
 export const DRAMA_CUT_IN_SEC = 0.4;
 
+type Voice = { provider: string; voiceId: string; model?: string | undefined };
+/** Where a block falls: from the episode's start before any line is heard, else after the last line. */
+type Cue = { at: number } | { passageId: string; edge: "end"; offset: number };
+
 /**
  * The episode's first arrangement, before anyone edits it (R-67, R-68):
  * - each line follows the reading sequence, after any silence, scene change or sound before it;
  * - a line that cuts in starts under the one it breaks: a sequence placement with a negative offset;
  * - a sound is anchored where it sits, and the next line waits for it;
- * - an ambience loops under its range, to its `until` or its scene's end; music plays from its cue.
+ * - an ambience loops from its cue to its `until` or its scene's end; music plays from its cue.
  * A line with no current kept take has no clip, and Audio Studio says so.
  */
 export function deriveEpisodeArrangement(
@@ -48,6 +52,8 @@ export function deriveEpisodeArrangement(
   soundFile: (artifactId: string) => string | undefined,
   sources: ReadonlyMap<string, AudioSource>,
   name: (speaker: string) => string,
+  /** The role's voice now (codex on PR 1879): a take in another voice is out of date, and left out. */
+  voice: (block: Spoken) => Voice | undefined = () => undefined,
 ): AudioArrangementState {
   const passages = script.passages.map((passage) => ({ ...passage, id: audioPassageId(passage.key, passage.textHash) }));
   const passageOf = new Map(passages.map((passage) => [passage.key, passage.id]));
@@ -57,59 +63,86 @@ export function deriveEpisodeArrangement(
     if (!held) { held = { id, name: label, gainDb: 0, muted: false }; state.tracks.push(held); }
     return held;
   };
-  let gap = 0;
-  let last: string | null = null;
-  blocks.forEach((block) => {
-    if (block.kind === "heading") { if (last !== null) gap += audioSamples(DRAMA_SCENE_GAP_SEC); return; }
-    if (block.kind === "silence") { gap += audioSamples(block.seconds); return; }
+  const sourceOf = (artifactId: string | undefined) => {
+    const file = artifactId ? soundFile(artifactId) : undefined;
+    return file === undefined ? undefined : sources.get(file);
+  };
+  // `gap` is what has passed since the last line ended; `clock` is the episode's time, in samples.
+  let gap = 0, clock = 0;
+  let last: { id: string; samples: number } | null = null, first: { id: string; at: number } | null = null;
+  // A cut-in breaks the line just before it, and only when that line was performed (codex on PR 1879).
+  let previousPerformed = false;
+  // A scene change is heard after anything at all, a sound-only cold open too (codex on PR 1879).
+  let begun = false;
+  const cues: Cue[] = [], times: number[] = [];
+  const here = (): Cue => last === null ? { at: gap } : { passageId: last.id, edge: "end", offset: gap };
+  const pass = (samples: number) => { gap += samples; clock += samples; };
+  blocks.forEach((block, index) => {
+    cues[index] = here(); times[index] = clock;
+    if (block.kind === "heading") { if (begun) pass(audioSamples(DRAMA_SCENE_GAP_SEC)); return; }
+    if (block.kind === "silence") { begun = true; pass(audioSamples(block.seconds)); return; }
     if (block.kind === "note" || block.kind === "ambience" || block.kind === "music") return;
     if (block.kind === "sound") {
-      const file = block.soundArtifact ? soundFile(block.soundArtifact) : undefined;
-      const source = file === undefined ? undefined : sources.get(file);
+      const source = sourceOf(block.soundArtifact);
       if (!source) return;
       const clip = newAudioClip(`sound:${block.id}`, track("sounds", "Sound").id, source, source.samples);
       clip.label = block.heard.slice(0, 200);
-      clip.placement = last === null ? { kind: "fixed", at: gap } : { kind: "passage", anchor: { passageId: last, edge: "end", offset: gap } };
+      const at = here();
+      clip.placement = "at" in at ? { kind: "fixed", at: at.at } : { kind: "passage", anchor: at };
       state.clips.push(clip);
-      gap += source.samples;
+      begun = true;
+      pass(source.samples);
       return;
     }
     if (!spoken(block)) return;
+    begun = true;
     const kept = takes?.lines[block.id]?.kept;
-    const source = kept && kept.textHash === dramaLineHash(block) ? sources.get(kept.file) : undefined;
+    const usable = kept ? dramaTakeState(block, { kept }, voice(block)) : "none";
+    const source = kept && (usable === "kept" || usable === "stand-in") ? sources.get(kept.file) : undefined;
     const passageId = passageOf.get(block.id)!;
-    if (!source) return;
+    if (!source) { previousPerformed = false; return; }
     const speaker = block.kind === "dialogue" ? block.speaker : DRAMA_NARRATOR;
     const lane = track(`voice:${speaker}`, block.kind === "dialogue" ? name(block.speaker) : "Narrator");
     const clip = newAudioClip(`line:${block.id}`, lane.id, source, source.samples);
     clip.label = block.words.slice(0, 200); clip.role = "speech"; clip.passageId = passageId;
-    const cutIn = block.kind === "dialogue" && block.overlapsPrevious && last !== null ? -audioSamples(DRAMA_CUT_IN_SEC) : 0;
-    clip.placement = { kind: "sequence", offset: gap + cutIn };
+    // Never before the broken line's own start (codex on PR 1879): a short take is cut in on less.
+    const cutIn = block.kind === "dialogue" && block.overlapsPrevious && previousPerformed && gap === 0 && last !== null
+      ? Math.min(audioSamples(DRAMA_CUT_IN_SEC), last.samples) : 0;
+    clip.placement = { kind: "sequence", offset: gap - cutIn };
     state.clips.push(clip);
-    last = passageId;
+    if (first === null) first = { id: passageId, at: gap };
+    clock += source.samples - cutIn;
+    last = { id: passageId, samples: source.samples };
+    previousPerformed = true;
     gap = 0;
   });
+  cues[blocks.length] = here(); times[blocks.length] = clock;
 
-  // Beds run under the lines from their cue: to the block named in `until`, else the scene's end.
+  // A bed starts at its cue, wherever that falls, and an ambience runs to the block it stops before
+  // or its scene's end (codex on PR 1879). A cue before the first line is placed from that line.
+  const boundary = (cue: Cue) => "at" in cue
+    ? first === null ? null : { passageId: first.id, edge: "start" as const, offset: cue.at - first.at }
+    : cue;
   blocks.forEach((block, index) => {
     if (block.kind !== "ambience" && block.kind !== "music") return;
-    const file = block.soundArtifact ? soundFile(block.soundArtifact) : undefined;
-    const source = file === undefined ? undefined : sources.get(file);
+    const source = sourceOf(block.soundArtifact);
     if (!source) return;
-    const sceneEnd = blocks.findIndex((candidate, at) => at > index && candidate.kind === "heading");
-    const stop = block.until ? blocks.findIndex((candidate) => candidate.id === block.until) : -1;
-    const end = stop > index ? stop : sceneEnd > index ? sceneEnd : blocks.length;
-    const under = blocks.slice(index + 1, end).filter(spoken).map((line) => passageOf.get(line.id)!);
-    if (under.length === 0) return;
+    const cue = cues[index]!;
+    const from = boundary(cue);
     const lane = block.kind === "ambience" ? track("ambience", "Ambience") : track("music", "Music");
     const clip = newAudioClip(`bed:${block.id}`, lane.id, source, source.samples);
     clip.label = block.heard.slice(0, 200); clip.role = "music"; clip.duckDb = 6;
     clip.gainDb = block.kind === "ambience" ? -12 : -10;
-    if (block.kind === "ambience") {
-      clip.loop = true;
-      clip.placement = { kind: "range", from: { passageId: under[0]!, edge: "start", offset: 0 }, to: { passageId: under.at(-1)!, edge: "end", offset: 0 } };
+    if (block.kind === "music") {
+      clip.placement = from ? { kind: "passage", anchor: from } : { kind: "fixed", at: "at" in cue ? cue.at : 0 };
     } else {
-      clip.placement = { kind: "passage", anchor: { passageId: under[0]!, edge: "start", offset: 0 } };
+      const sceneEnd = blocks.findIndex((candidate, at) => at > index && candidate.kind === "heading");
+      const stop = block.until ? blocks.findIndex((candidate) => candidate.id === block.until) : -1;
+      const end = stop > index ? stop : sceneEnd > index ? sceneEnd : blocks.length;
+      const to = boundary(cues[end]!);
+      if (!from || !to || times[end]! <= times[index]!) return;
+      clip.loop = true;
+      clip.placement = { kind: "range", from, to };
     }
     state.clips.push(clip);
   });

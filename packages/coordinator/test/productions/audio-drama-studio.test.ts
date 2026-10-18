@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
@@ -8,6 +8,9 @@ import { createProduction } from "../../src/productions/ops.js";
 import { saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
 import { hearDramaLines, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
 import { editAudioStudio, openAudioStudio } from "../../src/productions/audio-studio.js";
+import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
+import { DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -82,5 +85,23 @@ describe("an episode in Audio Studio (SPEC-057 R-67, R-68)", () => {
     const reopened = await openAudioStudio(store, id, "episode-001");
     assert.ok(reopened.saved && reopened.state.tracks.some((track) => track.id === "extra"));
     await assert.rejects(access(join(store.dir, "productions", id, ".audiobook")), "no chapter record is made");
+  });
+});
+
+describe("codex round 1 on PR 1879", () => {
+  it("fences the first episode mix, imports to an episode, and never reads another episode's mix", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await writeFile(join(store.dir, ".staging/sound/gull.wav"), second(0.5));
+    const failures = await importAudioStudioMedia(store, [join(store.dir, ".staging/sound/gull.wav")],
+      { productionId: id, chapterFile: "episode-001", base: opened.base, destination: { trackId: null, at: 0 } }, { abandoned: () => false });
+    assert.deepEqual(failures, []);
+    assert.ok((await openAudioStudio(store, id, "episode-001")).state.clips.some((clip) => clip.role === "sfx"), "the import is on the episode's timeline");
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_MIX_SCHEMA_VERSION, "a build without drama-mix refuses the world");
+    const path = join(store.dir, "productions", id, "drama-mix", "episode-001.json");
+    const record = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(path, JSON.stringify({ ...record, episode: 2 }));
+    await assert.rejects(openAudioStudio(store, id, "episode-001"), /unreadable/);
   });
 });

@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AudioArrangementCommand, AudioStudioImport } from "@arke-studio/contracts";
+import { episodeScriptFile, type AudioArrangementCommand, type AudioStudioImport } from "@arke-studio/contracts";
 import { fileArtifact, kindForFile } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { FfmpegRunner } from "../takes/export.js";
@@ -15,7 +15,10 @@ export async function importAudioStudioMedia(store: WorldStore, paths: readonly 
   if (paths.length > 16) throw new Error("Import up to 16 files at a time");
   const production = store.getBundle().productions.find(p => p.meta.id === target.productionId);
   const chapter = production?.chapters.find(c => c.file === target.chapterFile || c.id === target.chapterFile);
-  if (!chapter) throw new Error("This chapter is no longer open");
+  // An audio drama's episode is a studio subject too (codex on PR 1879).
+  const episode = /^episode-\d{3}$/.test(target.chapterFile) && production?.episodeScripts?.some(entry => episodeScriptFile(entry.script.episode) === `${target.chapterFile}.json`);
+  if (!chapter && !episode) throw new Error("This chapter is no longer open");
+  const subject = chapter?.id ?? target.chapterFile;
   const failures: Array<{ index: number; reason: string }> = [], placed: number[] = [];
   const commands: AudioArrangementCommand[] = [];
   const destination = target.destination;
@@ -43,7 +46,7 @@ export async function importAudioStudioMedia(store: WorldStore, paths: readonly 
   }
   if (options.abandoned()) throw new Error("The world closed during import");
   if (commands.length) try {
-    await editAudioStudio(store, target.productionId, chapter.id, target.base, { kind: "commands", label: "Import audio to timeline", commands }, options);
+    await editAudioStudio(store, target.productionId, subject, target.base, { kind: "commands", label: "Import audio to timeline", commands }, options);
   } catch (error) {
     for (const index of placed) failures.push({ index, reason: `Saved to Library; placement was not applied: ${error instanceof Error ? error.message : String(error)}. Use Library → Add to place the file.` });
   }
