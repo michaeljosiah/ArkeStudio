@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, productionShape, ulid, type ConversationId } from "@arke-studio/contracts";
-import { ProductionSetupService } from "../../src/productions/setup.js";
+import { ProductionSetupService, assertSourceReadForPlan } from "../../src/productions/setup.js";
 import { createProduction, createProductionFromPlan, planProductionCreation, validateProductionMetadataChanges } from "../../src/productions/ops.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
@@ -63,6 +63,28 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     // A retried start is answered by the setup it began, even when its seed would now be refused.
     const retried = await service.start(id, { kind: "audio-drama", source: { productionId: "saltlight" } });
     assert.deepEqual(retried.draft.source, { productionId: "the-ledger-of-nights" });
+  });
+
+  it("refuses a plan for a story until every active chapter of it has been read whole (R-5)", async () => {
+    const store = await open();
+    const service = new ProductionSetupService(store);
+    const draft = (await service.start(`cv_${ulid()}` as ConversationId, { kind: "audio-drama", source: { productionId: "the-ledger-of-nights" } })).draft;
+    const story = store.getBundle().productions.find(production => production.meta.id === "the-ledger-of-nights")!;
+    const chapters = story.chapters.filter(chapter => chapter.retired !== true);
+    assert.ok(chapters.length >= 2, "the fixture story has chapters to read");
+    const runId = newId("run");
+    const whole = (id: string, extra: object = {}) => ({ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [], at: CLOCK,
+      target: { requirement: "chapters", id: `the-ledger-of-nights:${id}` }, complete: true, ...extra }) as never;
+    const update = { expectedRevision: 1, fields: { audioDrama: { episodes: 6, minutes: 25, keptFromListener: [] } } };
+    const allButLast = chapters.slice(0, -1).map(chapter => whole(chapter.id));
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(`${chapters.at(-1)!.id}:beats`)]),
+      new RegExp(`${chapters.length - 1} of ${chapters.length} chapters read whole\\. Still to read with get_chapter \\(no section\\): ${chapters.at(-1)!.id}\\.`),
+      "a beats read is not a reading of the chapter");
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(chapters.at(-1)!.id, { complete: false })]),
+      /Still to read/, "nor is a page that is not the last");
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(chapters.at(-1)!.id)]));
+    assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), { expectedRevision: 1, fields: { title: "Low Water" } }, draft, []),
+      "only a plan has to rest on the reading");
   });
 
   it("a prepared create without setup's content still writes the default plan (World Chat's production-create)", async () => {

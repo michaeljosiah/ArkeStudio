@@ -18,6 +18,7 @@ import type {
   WorldChatStatus,
   WorldChatSummary,
 } from "@arke-studio/contracts";
+import { chaptersReadWhole } from "./source-reads.js";
 import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 import { foldWorldChatInputs } from "./input-fold.js";
@@ -329,9 +330,7 @@ export function foldConversation(
           // The chapters of the adapted story this reply read whole: a full get_chapter read's
           // target is `<story>:<chapter>`, and a section read (beats, plan) carries a third part.
           const source = e.productionSetup?.draft.source?.productionId;
-          const whole = source ? new Set(e.receipts.filter(receipt => receipt.tool === "target-read" && receipt.status === "complete" &&
-            receipt.complete !== false && receipt.target?.requirement === "chapters" &&
-            receipt.target.id.startsWith(`${source}:`) && receipt.target.id.split(":").length === 2).map(receipt => receipt.target!.id)) : new Set<string>();
+          const whole = source ? chaptersReadWhole(e.receipts, source) : new Set<string>();
           if (source && whole.size > 0) sourceReads[e.message.id] = { productionId: source, chapters: whole.size };
         }
         addMessage(e.message, envelope.seq);

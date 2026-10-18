@@ -4,6 +4,7 @@ import {
   ProductionSetupDraftSchema, applyProductionSetupUpdate, productionSetupProblems, adaptableStories,
   PRODUCTION_SETUP_BOUNDS, type ProductionSetupDraft,
 } from "../src/production-setup.js";
+import { AudioDramaPlanSchema } from "../src/audio-drama.js";
 
 export function draft(): ProductionSetupDraft {
   return ProductionSetupDraftSchema.parse({
@@ -143,6 +144,23 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     const original = { ...draft(), kind: "audio-drama" as const, scenes: [] };
     assert.deepEqual(productionSetupProblems({ ...original, audioDrama: plan([]) }, []), []);
     assert.match(productionSetupProblems({ ...original, audioDrama: plan([1]) }, []).join(" "), /original drama's pilot names no chapters/);
+  });
+
+  it("a changed Adapt from returns an audio drama to the default plan; the same one keeps it", () => {
+    const planned = { episodes: 4, minutes: 30, narrator: "narrated" as const, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 3 }], pilot: { title: "Gold", chapters: [1] } };
+    const drama = { ...draft(), kind: "audio-drama" as const, scenes: [], source: { productionId: "juju" }, audioDrama: planned };
+    assert.deepEqual(applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { source: { productionId: "other" } } }).audioDrama,
+      { episodes: 6, minutes: 25, keptFromListener: [] }, "a plan read from one story is not a plan for another");
+    assert.deepEqual(applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { source: null } }).audioDrama,
+      { episodes: 6, minutes: 25, keptFromListener: [] });
+    assert.deepEqual(applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { source: { productionId: "juju" } } }).audioDrama, planned);
+    assert.deepEqual(applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { source: { productionId: "other" }, audioDrama: planned } }).audioDrama,
+      planned, "a plan sent with the new story is that story's");
+  });
+
+  it("a pilot names each chapter once", () => {
+    assert.throws(() => AudioDramaPlanSchema.parse({ episodes: 6, minutes: 25, pilot: { title: "Gold", chapters: [3, 3] } }), /each chapter once/);
+    assert.deepEqual(AudioDramaPlanSchema.parse({ episodes: 6, minutes: 25, pilot: { title: "Gold", chapters: [3, 4] } }).pilot?.chapters, [3, 4]);
   });
 
   it("an audio drama holds no video scenes, episodes, arcs or Series (SPEC-057 R-7)", () => {

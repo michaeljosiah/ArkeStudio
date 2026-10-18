@@ -1,4 +1,4 @@
-import { WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
+import { DEFAULT_AUDIO_DRAMA_PLAN, WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
 import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
@@ -317,7 +317,7 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
-import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { bookAuthoringRefusal, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -1393,6 +1393,10 @@ function worldActionTargets(
 function actionPolicyRefusal(store: WorldStore, action: ModelWorldChatAction): string | null {
   const refusal = modelActionInputRefusal(action);
   if (refusal) return refusal;
+  if (action.kind === "production-overview" || action.kind === "production-prose-style") {
+    const refused = bookAuthoringRefusal(store.getBundle().productions.find((production) => production.meta.id === action.productionId));
+    if (refused) return refused;
+  }
   if (action.kind !== "production-scene-command") return null;
   const { productionId, sceneId } = action;
   const scene = store.getBundle().productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId);
@@ -2757,6 +2761,12 @@ async function sharedResourceProjection(
               label: "Initial season",
               detail: plan.initialSeason === null ? "None" : "Initial season",
             },
+            // What an audio drama is created holding (SPEC-057 D-2): the default plan, written
+            // verbatim by the authority, so what is approved is what is written (codex on PR 1866).
+            ...(productionShape(plan.production).isAudioDrama ? [{
+              label: "Audio drama plan",
+              detail: `${DEFAULT_AUDIO_DRAMA_PLAN.episodes} episodes, about ${DEFAULT_AUDIO_DRAMA_PLAN.minutes} minutes each · narrator, pilot and secrets not yet decided`,
+            }] : []),
             {
               label: "Series consequence",
               detail: plan.series.operation === "none"
@@ -2764,7 +2774,7 @@ async function sharedResourceProjection(
                 : `${plan.series.operation}: ${plan.series.record.title}`,
             },
           ],
-          expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
+          expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${productionShape(plan.production).isAudioDrama ? ", audio drama plan" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
           undoAvailable: true,
         },
       };

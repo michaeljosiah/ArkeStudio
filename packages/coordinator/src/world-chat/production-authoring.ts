@@ -24,6 +24,7 @@ import {
   type WorldChatProductionSceneAction,
   type WorldChatProductionSeasonAction,
   type WorldChatProductionSeriesAction,
+  type ProductionBundle,
 } from "@arke-studio/contracts";
 import type { ProposalManager } from "../gate/proposals.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -291,6 +292,16 @@ function proposedTargetStems(store: WorldStore, pattern: RegExp): string[] {
 }
 
 /** Materialise one typed Production Chat authored change into ProposalManager. */
+/**
+ * A book's overview and prose style are not an audio drama's (SPEC-057 R-82, codex on PR 1866):
+ * its plan and episode scripts hold what they would, and its pages never show story.json or
+ * prose-style.json, so an accepted one would be a second, unseen planning surface.
+ */
+export function bookAuthoringRefusal(production: ProductionBundle | undefined): string | null {
+  if (!production || !productionShape(production.meta).isAudioDrama) return null;
+  return `${production.meta.title} is an audio drama: its plan and episodes stand where a book's overview and prose style would. Propose no story overview or prose style for it.`;
+}
+
 export async function stageWorldChatProductionAuthoredAction(
   store: WorldStore,
   gate: ProposalManager,
@@ -360,6 +371,11 @@ export async function stageWorldChatProductionAuthoredAction(
       ...context,
       targets: [{ path: `series/${current.id}.json`, content: `${JSON.stringify(record, null, 2)}\n` }],
     }, precondition);
+  }
+
+  if (payload.kind === "world-chat-production-overview" || payload.kind === "world-chat-production-prose-style") {
+    const refused = bookAuthoringRefusal(production);
+    if (refused) throw new Error(refused);
   }
 
   if (payload.kind === "world-chat-production-overview") {

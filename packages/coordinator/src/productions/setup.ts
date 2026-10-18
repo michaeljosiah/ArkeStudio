@@ -3,8 +3,10 @@ import { join } from "node:path";
 import {
   ProductionSetupDraftSchema, ProductionSetupStateSchema, ProductionSetupOriginSchema, PRODUCTION_SETUP_SCHEMA_VERSION,
   AUDIO_DRAMA_KIND, DEFAULT_AUDIO_DRAMA_PLAN, adaptableStories, applyProductionSetupUpdate, ulid,
-  type ConversationId, type ProductionSetupCommand, type ProductionSetupState, type ProductionSetupUpdate, type WorldChatLoaded,
+  type ConversationId, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState, type ProductionSetupUpdate,
+  type WorldBundle, type WorldChatCheckReceipt, type WorldChatLoaded,
 } from "@arke-studio/contracts";
+import { chaptersReadWhole } from "../world-chat/source-reads.js";
 import { WriteQueue } from "../change-log.js";
 import { createProductionFromPlan } from "./ops.js";
 import { planProductionSetup, setupSourceDigest } from "./setup-plan.js";
@@ -13,6 +15,24 @@ import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
 import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+
+/**
+ * An audio drama's plan rests on the whole story (SPEC-057 R-5, codex on PR 1866): a plan
+ * proposed for a story it adapts is refused until this conversation has read every active chapter
+ * of it whole, and the refusal names what is left, so Arke reads on rather than plans blind.
+ */
+export function assertSourceReadForPlan(
+  bundle: WorldBundle, update: ProductionSetupUpdate, draft: ProductionSetupDraft, receipts: readonly WorldChatCheckReceipt[],
+): void {
+  if (!update.fields?.audioDrama || draft.kind !== AUDIO_DRAMA_KIND || !draft.source) return;
+  const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
+  if (!story) return;
+  const chapters = story.chapters.filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
+  const read = chaptersReadWhole(receipts, story.meta.id);
+  const unread = chapters.filter(chapter => !read.has(chapter.id));
+  if (unread.length === 0) return;
+  throw new Error(`Read all of “${story.meta.title}” before proposing the plan: ${chapters.length - unread.length} of ${chapters.length} chapters read whole. Still to read with get_chapter (no section): ${unread.slice(0, 40).map(chapter => chapter.id).join(", ")}${unread.length > 40 ? ", …" : ""}.`);
+}
 
 /** What a door may say about the production before setup opens (SPEC-057 R-3). */
 export type ProductionSetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;

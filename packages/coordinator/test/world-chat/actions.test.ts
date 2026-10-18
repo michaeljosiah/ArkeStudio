@@ -48,6 +48,7 @@ import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../s
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
 import { createEpisode, createProduction } from "../../src/productions/ops.js";
+import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
@@ -1344,6 +1345,46 @@ describe("World Chat authority adapters", () => {
     assert.equal(production.meta.frameRate, 25);
     assert.equal(production.season?.defaults?.episodeCount, 8);
     assert.deepEqual(w.store.getBundle().series.find((candidate) => candidate.id === "bell-watch")?.seasons, [production.meta.id]);
+  });
+
+  it("shows an audio drama's card the plan it is created holding (SPEC-057 D-2)", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [productions, series],
+      actions: [{ kind: "production-create", production: { title: "Low Water", medium: "story", productionKind: "audio-drama" }, checkReceiptIds: [productions.id, series.id] }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    if (card.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.deepEqual(card.shown.body.commands.find(command => command.label === "Audio drama plan")?.detail,
+      "6 episodes, about 25 minutes each · narrator, pilot and secrets not yet decided");
+    assert.match(card.shown.body.expectedResult, /audio drama plan/);
+    if (card.shown.productionPreview?.kind !== "production") assert.fail("expected typed production preview");
+    assert.equal(card.shown.productionPreview.episodes, 6);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const drama = w.store.getBundle().productions.find(production => production.meta.id === payload.plan.production.id)!;
+    assert.deepEqual(drama.audioDrama?.plan, { episodes: 6, minutes: 25, keptFromListener: [] }, "what was shown is what was written");
+  });
+
+  it("refuses a book's overview or prose style for an audio drama (SPEC-057 R-82)", async () => {
+    const w = await setup();
+    const drama = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const story = currentReceipt(w.store, "story", drama);
+    for (const action of [
+      { kind: "production-overview" as const, productionId: drama, changes: { logline: "A bell lies." }, checkReceiptIds: [story.id] },
+      { kind: "production-prose-style" as const, productionId: drama, changes: { pov: "close third" }, checkReceiptIds: [story.id] },
+    ]) {
+      assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: [story], actions: [action] })),
+        /Low Water is an audio drama/);
+    }
+    const book = await createProduction(w.store, { title: "Undertow", medium: "story" });
+    assert.equal(bookAuthoringRefusal(w.store.getBundle().productions.find(production => production.meta.id === book)), null);
   });
 
   it("refuses a prepared production creation after its world fences move instead of replanning", async () => {

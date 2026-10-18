@@ -1,4 +1,4 @@
-import { buildRenderPlan, PRESETS, productionShape, productionFrameRate, sceneCommandBatchCandidate,
+import { DEFAULT_AUDIO_DRAMA_PLAN, buildRenderPlan, PRESETS, productionShape, productionFrameRate, sceneCommandBatchCandidate,
   type Production, type ProductionCardPreview, type WorldBundle, type WorldChatPreparedAction } from "@arke-studio/contracts";
 import { sceneActionCommands } from "./action-sequencing.js";
 import { sceneCommandFrom } from "../productions/scene-commands.js";
@@ -8,7 +8,10 @@ export function productionCardPreview(world: WorldBundle, payload: WorldChatPrep
   if (payload.kind === "world-chat-production-create") {
     const plan = payload.plan;
     return metadataPreview(world, plan.production, plan.series.operation === "none" ? null : plan.series.record.title,
-      plan.initialSeason ? "Season" : null, plan.initialContent?.episodes.length ?? plan.initialSeason?.defaults?.episodeCount ?? 0);
+      plan.initialSeason ? "Season" : null, productionShape(plan.production).isAudioDrama
+        // An audio drama counts the episodes of the plan it is created holding (SPEC-057 D-2).
+        ? plan.initialContent?.audioDrama?.plan.episodes ?? DEFAULT_AUDIO_DRAMA_PLAN.episodes
+        : plan.initialContent?.episodes.length ?? plan.initialSeason?.defaults?.episodeCount ?? 0);
   }
   if (payload.kind === "world-chat-production-metadata") {
     const current = world.productions.find(p => p.meta.id === payload.action.productionId);

@@ -86,7 +86,12 @@ export interface RunDeps {
    * Checks a setup turn's update against the world before it is applied, and raises the world past
    * the builds that cannot read it (design turn 205): Adapt from named by Arke, as by the rail.
    */
-  checkSetupUpdate?: (update: ProductionSetupUpdate) => Promise<void>;
+  /**
+   * Checks a setup turn's update against the world. `draft` is the draft it would make, and
+   * `receipts` every read the conversation has made, this run's included, so a plan can be held
+   * to what was actually read (SPEC-057 R-5).
+   */
+  checkSetupUpdate?: (update: ProductionSetupUpdate, context: { draft: ProductionSetupDraft; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -1110,8 +1115,11 @@ export class WorldChatRunner {
         return { ok: false, problems: [{ code: "setup-stale", safeMessage: "Production so far changed while this reply was being written. Read the latest draft and try again." }] };
       }
       try {
-        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate);
         const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
+        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate, {
+          draft,
+          receipts: [...events.flatMap(({ event }) => event.type === "turn.completed" ? event.receipts : []), ...this.deps.receiptsFor(runId)],
+        });
         productionSetup = { draft, status: "draft", review: null };
       } catch (error) {
         return { ok: false, problems: [{ code: "setup-update", safeMessage: error instanceof Error ? error.message.slice(0, 500) : "The outline update could not be read." }] };

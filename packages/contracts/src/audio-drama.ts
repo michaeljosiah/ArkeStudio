@@ -26,7 +26,9 @@ export type KeptFromListener = z.infer<typeof KeptFromListenerSchema>;
 export const AudioDramaPilotSchema = z.object({
   title: z.string().trim().min(1).max(160),
   /** The source chapters, by number, the pilot is adapted from. */
-  chapters: z.array(z.number().int().min(1).max(2000)).max(20).default([]),
+  // Each chapter once: a repeat would have later pilot work read the same chapter twice.
+  chapters: z.array(z.number().int().min(1).max(2000)).max(20)
+    .refine(chapters => new Set(chapters).size === chapters.length, { message: "A pilot names each chapter once." }).default([]),
 }).strict();
 export type AudioDramaPilot = z.infer<typeof AudioDramaPilotSchema>;
 

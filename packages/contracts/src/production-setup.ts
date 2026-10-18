@@ -156,8 +156,13 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
   const seeded = seeding && !draft.target && update.fields?.target === undefined ? presetTarget("global-app") : null;
   const defaults = seeding ? { ...MICRODRAMA_DEFAULTS, ...seeded?.defaults, ...draft.defaults } : draft.defaults;
   // Becoming an audio drama starts from the default plan (SPEC-057 D-2) until Arke proposes one.
+  // So does changing the story it adapts: a pilot and secrets read from one story are not a plan
+  // for another, and must be proposed again from the new one (codex on PR 1866).
+  const sourceChanged = update.fields?.source !== undefined
+    && (update.fields.source?.productionId ?? null) !== (draft.source?.productionId ?? null);
+  const replanned = sourceChanged && (update.fields?.kind ?? draft.kind) === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined;
   const audioPlan = update.fields?.audioDrama === null ? undefined : update.fields?.audioDrama
-    ?? draft.audioDrama ?? (update.fields?.kind === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined);
+    ?? replanned ?? draft.audioDrama ?? (update.fields?.kind === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined);
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
