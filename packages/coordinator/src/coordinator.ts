@@ -366,6 +366,7 @@ import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { audioWaveform } from "./audio/waveform.js";
 import { audioStudioMedia, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
+import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
@@ -16296,8 +16297,9 @@ export class Coordinator {
           const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: episodeStudio.id };
           try {
             const opened = await openAudioStudio(store, msg.productionId, episodeStudio.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
-            const rendered = await this.audioStudioPreviews.render(store, { productionId: msg.productionId, chapterFile: episodeStudio.id, requestId: msg.requestId, base: opened.base }, this.opts.ffmpeg);
-            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
+            // Played or downloaded once, never held as an audition (codex on PR 1880): nothing waits to release it.
+            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { signal: store.closingSignal, ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}) });
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: { file: rendered.file, seconds: rendered.seconds, from: 0 }, issues: rendered.issues.map((issue) => issue.message) });
           } catch (err) {
             this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(err) });
           }

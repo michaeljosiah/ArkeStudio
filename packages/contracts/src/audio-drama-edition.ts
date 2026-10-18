@@ -115,13 +115,15 @@ export function listenerTranscript(
 export function dramaCredits(input: {
   title: string;
   roles: ReadonlyArray<{ role: string; voice: string; recorded?: boolean }>;
-  sounds: ReadonlyArray<{ name: string; engine: string }>;
+  /** How each was made: "generated with <engine>", or recorded or uploaded. */
+  sounds: ReadonlyArray<{ name: string; made: string }>;
 }): string {
   const lines = [input.title, "", "Cast"];
-  for (const role of input.roles) lines.push(`  ${role.role} — ${role.voice}${role.recorded ? " (recorded)" : ""}`);
+  // Each voice says what it is (codex on PR 1880): a recording, or generated.
+  for (const role of input.roles) lines.push(`  ${role.role} — ${role.voice} (${role.recorded ? "recorded" : "generated"})`);
   if (input.sounds.length > 0) {
     lines.push("", "Sound");
-    for (const sound of input.sounds) lines.push(`  ${sound.name} — generated with ${sound.engine}`);
+    for (const sound of input.sounds) lines.push(`  ${sound.name} — ${sound.made}`);
   }
   lines.push("", "Voices and sounds marked generated were made with AI.");
   return `${lines.join("\n")}\n`;

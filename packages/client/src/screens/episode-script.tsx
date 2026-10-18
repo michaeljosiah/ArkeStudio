@@ -520,10 +520,12 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
+  const [exportProblem, setExportProblem] = useState<string | null>(null);
   useEffect(() => subscribeAudiobookMix((answer) => {
     if (answer.requestId !== exporting) return;
     setExporting(null);
-    if (!answer.mix) return;
+    // A refused export says why (codex on PR 1880), as the show page's play does.
+    if (!answer.mix) { setExportProblem(answer.refused ?? "Not exported."); return; }
     const link = document.createElement("a");
     link.href = mediaUrl(world.meta.slug, answer.mix.file);
     link.download = `${production.meta.id}-${stem}.wav`;
@@ -543,7 +545,8 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
       connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
       passage={passage} onPassage={setPassage} conversation={null} propose={null}
-      onBack={() => navigate(`${base}/script/${episode}`)} onExport={() => setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem))}
+      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem}
+      onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />
   );
 }

@@ -92,7 +92,12 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
     const requestId = renderAudiobookMix(world.meta.worldId, production.meta.id, episodeScriptFile(episode).replace(/\.json$/, ""));
     if (requestId === null) setProblem("The studio is disconnected."); else setPlaying(requestId);
   };
-  const range = (list: typeof states) => list.length === 1 ? `Episode ${list[0]!.n}` : `Episodes ${list[0]!.n}–${list.at(-1)!.n}`;
+  // Runs kept apart (codex on PR 1880): with 1 and 3 written, the rest are Episodes 2, 4–6.
+  const range = (list: typeof states) => {
+    const runs: Array<[number, number]> = [];
+    for (const { n } of list) { const run = runs.at(-1); if (run && run[1] === n - 1) run[1] = n; else runs.push([n, n]); }
+    return `${list.length === 1 ? "Episode" : "Episodes"} ${runs.map(([from, to]) => from === to ? `${from}` : `${from}–${to}`).join(", ")}`;
+  };
   return (
     <div className="fy-prodmain fy-ad-show" data-screen="production-dashboard">
       <header className="fy-ad-show__hero">
@@ -226,7 +231,8 @@ function PublishDialog({ world, production, states, onClose }: {
     if (requestId === null) setFailure("The studio is disconnected."); else setPressed(requestId);
   };
   return (
-    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={onClose} width={640}>
+    // Never closed mid-publish (codex on PR 1880): Cancel would not stop it, and its answer would be lost.
+    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={() => { if (pressed === null) onClose(); }} width={640}>
       <div className="fy-ad-pub">
         <div className="fy-ad-pub__row">
           <label>Edition<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
@@ -260,7 +266,7 @@ function PublishDialog({ world, production, states, onClose }: {
         <footer className="fy-ad-pub__foot">
           <span>{chosen.length} episode{chosen.length === 1 ? "" : "s"} · {formatSeconds(seconds)}</span>
           <span className="gap" />
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" disabled={pressed !== null} onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={chosen.length === 0 || pressed !== null} onClick={publish}>{pressed ? "Publishing…" : "Publish edition"}</Button>
         </footer>
       </div>
