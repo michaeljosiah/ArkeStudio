@@ -192,7 +192,8 @@ export function SentList({ requests }: { requests: readonly DramaRequest[] }) {
         <li key={request.block} className={cx(request.cached && "fy-ad-heardlg__cached")}>
           <b>{request.speaker}</b> · {request.voice}{request.standIn ? " · stand-in" : ""} · {request.model}
           <code>{request.cached ? "already performed · not sent" : request.text}</code>
-          {request.note && (request.note.sent === "not sent"
+          {/* A performed line sends nothing: its note is not said to be sent (codex on PR 1873). */}
+          {request.note && !request.cached && (request.note.sent === "not sent"
             ? <small><s>note</s> · not sent: {request.note.reason}</small>
             : <small>note sent as instruction: {request.note.text}</small>)}
           {request.direction && (request.direction.sent === "not sent"
