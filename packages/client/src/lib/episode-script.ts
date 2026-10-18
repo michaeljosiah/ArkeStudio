@@ -225,7 +225,7 @@ export function scriptAsText(title: string, episode: number, blocks: readonly Ep
 
 /** One row of Arke's draft against the script (SPEC-057 R-54): kept, added, changed or removed. */
 export type DraftRow =
-  | { state: "same" | "added" | "removed"; block: EpisodeScriptBlock }
+  | { state: "same" | "added" | "removed" | "moved"; block: EpisodeScriptBlock }
   | { state: "changed"; block: EpisodeScriptBlock; was: EpisodeScriptBlock };
 
 /**
@@ -243,9 +243,14 @@ export function draftRows(current: readonly EpisodeScriptBlock[], proposed: read
       at++;
     }
   };
+  // A block kept but put elsewhere is a change too (codex on PR 1874): Keep writes the new order.
+  const keptOrder = current.filter((block) => kept.has(block.id)).map((block) => block.id);
+  const newOrder = proposed.filter((block) => before.has(block.id)).map((block) => block.id);
+  const moved = new Set(newOrder.filter((id, i) => keptOrder[i] !== id));
   for (const block of proposed) {
     const was = before.get(block.id);
     if (was) {
+      if (moved.has(block.id)) { rows.push(JSON.stringify(was) === JSON.stringify(block) ? { state: "moved", block } : { state: "changed", block, was }); continue; }
       flushRemoved(block.id);
       at++;
       rows.push(JSON.stringify(was) === JSON.stringify(block) ? { state: "same", block } : { state: "changed", block, was });

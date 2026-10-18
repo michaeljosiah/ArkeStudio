@@ -80,3 +80,18 @@ describe("codex round 1 on PR 1874", () => {
     }), /changed since it was read/);
   });
 });
+
+describe("codex round 2 on PR 1874", () => {
+  it("stages one draft of a script at a time, and none placing a sound the production cannot use", async () => {
+    const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The quay" };
+    const { store, id, gate, intent } = await drama([scene]);
+    const baseHash = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.hash;
+    const stage = (blocks: unknown[]) => stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash, checkReceiptIds: [], blocks: blocks as never },
+    });
+    await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay" }, { kind: "sound", heard: "A bell.", soundArtifact: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV" }]), /cannot use/);
+    await stage([{ id: scene.id, kind: "heading", place: "The quay, at night" }]);
+    await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay, at dawn" }]), /is waiting/);
+  });
+});

@@ -39,6 +39,7 @@ import {
   countWords,
   passageDiff,
   EpisodeScriptSchema,
+  unusableSound,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -1341,6 +1342,12 @@ export class ProposalManager {
         }
         const collision = this.collidingShotIds(file.path, file.content);
         if (collision) problems.push({ path: file.path, message: collision });
+        // A kept script's sounds are checked again as it lands (codex on PR 1874): one may have
+        // been retired or moved while the draft waited.
+        if (classify(file.path).track === "episode-script") {
+          const sound = unusableSound(EpisodeScriptSchema.parse(JSON.parse(file.content)).blocks, this.store.getBundle().artifacts, file.path.split("/")[1]!);
+          if (sound) problems.push({ path: file.path, message: sound });
+        }
         continue;
       }
       if (file.content !== undefined) {

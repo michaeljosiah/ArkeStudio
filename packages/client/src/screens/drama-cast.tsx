@@ -118,7 +118,10 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
   };
   const sheetVoice = role.sheet?.voice;
   const target = pending?.voice ?? (pending && sheetVoice ? sheetVoice : null);
-  const stale = pending && target ? takesOutOfDate(production, role.key, target) : [];
+  // The narrator's override cleared falls back to the app narrator, whose voice is not known here:
+  // every take made with the override is listed, rather than none (codex on PR 1873).
+  const stale = !pending ? [] : target ? takesOutOfDate(production, role.key, target)
+    : role.key === DRAMA_NARRATOR && role.voice ? takesOutOfDate(production, role.key, { provider: "", voiceId: "" }) : [];
   const confirm = () => {
     if (!pending) return;
     save({ voice: pending.voice ?? undefined });
