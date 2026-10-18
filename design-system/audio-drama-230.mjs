@@ -15,7 +15,7 @@ const STYLE = '<link rel="stylesheet" href="audio-drama-230.css">';
 // Turn 225's chat styles, derived from the master by turn 227's generator; the panel is the approved one.
 const CHAT_STYLE = '<link rel="stylesheet" href="chapter-page-227.chat.css">';
 const HEAD = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${CHAT_STYLE}${STYLE}`;
-const REV = 'Revision 2 · proposed';
+const REV = 'Revision 3 · proposed';
 
 // ----- Review page: every frame, in order, light and dark -----
 write('audio-drama-230.review.html', `<!doctype html><html lang="en"><head>${HEAD}<title>Audio drama · Turn 230</title>
@@ -25,7 +25,7 @@ ${FRAMES.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${es
 
 // ----- Prototype: the same drawings as states; anything carrying data-go moves between them -----
 const states = [...FRAMES, ...EXTRA];
-const JOURNEY = [['door', 'Door'], ['setup', 'Setup'], ['draft', 'Pilot'], ['select', 'Select'], ['hear', 'Hear'], ['audition', 'Audition'], ['review', 'Read-through'], ['cast', 'Cast'], ['quiet', 'Quiet scene'], ['map', 'Adaptation'], ['changed', 'Source changed'], ['studio', 'Audio Studio'], ['episodes', 'Episodes'], ['publish', 'Publish']];
+const JOURNEY = [['door', 'Door'], ['setup', 'Setup'], ['draft', 'Pilot'], ['select', 'Select'], ['hear', 'Hear'], ['audition', 'Audition'], ['review', 'Review'], ['cast', 'Cast'], ['quiet', 'Quiet scene'], ['map', 'Adaptation'], ['changed', 'Source changed'], ['studio', 'Audio Studio'], ['episodes', 'Episodes'], ['publish', 'Publish']];
 const PHONE = [['pepisodes', 'Episodes'], ['pscript', 'Script'], ['phear', 'Hear'], ['pcast', 'Cast'], ['psource', 'Source']];
 write('audio-drama-230.prototype.html', `<!doctype html><html lang="en"><head>${HEAD}<title>Audio drama prototype · Turn 230</title>
 <style>
@@ -97,7 +97,7 @@ if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + 
 write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN AUDIO DRAMA 230[\s\S]*?  \/\/ END AUDIO DRAMA 230(?:\r?\n)*/g, '\n');
-const entries = FRAMES.map(f => `  { group: "Audio drama · turn 230 · revision 2", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Audio drama", status: "drawn", checked: "2026-10-18", controls: [], notes: ["Proposed 17 October 2026, revised 18 October; not approved for implementation."] },`);
+const entries = FRAMES.map(f => `  { group: "Audio drama · turn 230 · revision 3", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Audio drama", status: "drawn", checked: "2026-10-18", controls: [], notes: ["Proposed 17 October 2026, revised 18 October; not approved for implementation."] },`);
 build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN AUDIO DRAMA 230\n' + entries.join('\n') + '\n  // END AUDIO DRAMA 230\n');
 write('build-review.mjs', build);
 console.log(`Placed turn 230 (${FRAMES.length} frames, ${rules.length} rules) and registered it with build-review.`);

@@ -1,6 +1,6 @@
 # Audio drama — adapting a novel for the ear · design turn 230
 
-Status: **Proposed · revision 2 · 18 October 2026.** For the owner's review, not approved for
+Status: **Proposed · revision 3 · 18 October 2026.** For the owner's review, not approved for
 implementation. Nothing here adds a production type to the app, generates audio or changes a novel.
 
 Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](audio-drama-230.review.html) ·
@@ -8,6 +8,28 @@ Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](aud
 [Research](../docs/research/audio-drama-adaptation.md).
 
 Turn 229 is the Stage uplift (PR 1828), renumbered from 228 when it merged; this turn sits above it.
+
+## Revision 3 (18 October 2026)
+
+The owner asked whether the process had been over-complicated. In seven places it had, and revision 3
+removes them:
+
+1. **Step two (230b)** asks only the kind, the name and Adapt from. Arke proposes the number and
+   length of episodes after reading the novel; an author cannot know that number in advance.
+2. **Setup (230c)** asks one question, the narrator, settled by example. Everything else arrives
+   as one plan to accept or change. The five-step list is gone.
+3. **Hear** is one press when every speaker has a voice, with the price on the button. The dialog
+   (230h) appears only when a decision is waiting, and What's sent sits one tap inside it.
+4. **First takes keep themselves (230i).** The author is asked only when a new take would replace
+   a kept one, or when a take was misread.
+5. **One Review**, in the script and in Audio Studio. Each note says what it rests on: the script
+   version or the heard interval. The names Read-through and Listen-through are gone.
+6. **Cast (230k)** has one note on how each role sounds. The narrator's version shows only for
+   characters the narrator quotes, and the direction layers sit behind What's sent.
+7. **The side menu** is Episodes, Adaptation, Cast and Artifacts; Dashboard and Overview repeated
+   Episodes.
+
+Keeping an old script after the novel changes now takes an optional reason (230n).
 
 ## Revision 2 (18 October 2026)
 
@@ -48,7 +70,7 @@ The design is built around those four jobs, not around the record types.
 | 5 | **An Adaptation page with a map**: chapters by words, episodes by minutes, one ribbon per decision. Source is also a side column in the script. | An Overview section plus a contextual Source drawer. | "What happened to chapter 5?" and "Where did this scene come from?" need a lasting home. On a map, a move is a crossing ribbon and a cut is a ribbon into Cut. A table hides both. |
 | 6 | **A kind under Tell a story** (revision 2). Step two asks What kind of story?: Novel, Audio drama or Other. | Admit Audio Drama in Story setup. | Revision 1 drew a fourth LISTEN door; the owner asked whether audio drama should sit under Story, and it should. The work is writing first, it builds on Story's writing room, cast and Audio Studio, and a separate listening door would split listening across two doors, because the audiobook already sits under Story. On this point this turn now agrees with turn 228's notes. |
 | 7 | **Kept from the listener**: facts with their reveal episode, produced at setup and used by review, cast labels and transcripts. | Knowledge ceiling inside the specialists' context packet. | A mystery is an authored decision. It should be visible and editable, not hidden in a prompt. |
-| 8 | **Read-through** (script) and **Listen-through** (audio) are named differently and live in different places. | One review flow, labelled "Script reviewed · audio not assessed". | Different names and places make it hard to mistake one for the other. Listen-through states which interval it heard. |
+| 8 | **One Review** (revision 3). Each note says whether it rests on the script, by version, or on audio heard, by interval. | One review flow, labelled "Script reviewed · audio not assessed". | Revision 1 named two reviews; the simplification pass found that was two concepts for one job. This now agrees with turn 228's notes, with the evidence carried on each note rather than on the flow. |
 | 9 | **A missing voice blocks Hear.** The author chooses: a voice, the narrator standing in, or leaving the line out. | Same intent. | This changes SPEC-047 R-12. Today the audiobook shows the substitution on its door and then reads the line in the narrator's voice. |
 | 10 | Rail: **Dashboard · Cast · Develop · Overview · Adaptation · Episodes · Artifacts**. Episodes is the show page. | Overview · Episodes · Cast · Listen · Artifacts. | It matches Story's rail. Listening happens on the show page (turn 199), so Listen is not a separate destination. Adaptation appears only when the production adapts something. |
 
@@ -72,20 +94,20 @@ Maren and Odile in the lamp room after midnight (episode 2, scene 3).
 | Frame | Step |
 |---|---|
 | 230a | Create something new: Tell a story now names audio drama. |
-| 230b | What kind of story?: Novel, Audio drama or Other; for an audio drama, Adapt from, Episodes and Length. |
-| 230c | Setup: Arke has read all 18 chapters and shows the same moment with and without a narrator. Kept from the listener. The pilot is chosen. |
+| 230b | What kind of story?: Novel, Audio drama or Other, then the name and Adapt from. |
+| 230c | Setup: Arke has read all 18 chapters, asks one question by example (the narrator), then proposes one plan: episodes, secrets kept from the listener, the pilot. |
 | 230d | Arke's draft of the pilot scene waits in the page. Chat says what changed and what it read. |
 | 230e | A line opens its source paragraph and the decision behind it: Hear. |
 | 230f | A cue: what is heard, its purpose, required or optional, and no sound yet. |
 | 230g | Ten lines selected: Hear, or Ask Arke with audio-specific asks. |
-| 230h | Hear 10 lines: voices, requests, Sent as, context not read. Sereth has no voice, so nothing plays until the author chooses. |
-| 230i | Audition in context: candidates beside their lines, one transcript check, Keep 9 of 10. |
-| 230j | Read-through: script notes beside their lines; script only, audio not heard. |
-| 230k | Cast: actor direction and the narrator's portrayal, with layered direction and Sent as. |
+| 230h | Hear 10 lines: the dialog appears only because Sereth has no voice; What's sent is one tap away. |
+| 230i | Takes beside their lines: first takes kept, one replacement to choose, one misread line to retake. |
+| 230j | Review: notes beside their lines, each resting on script v3; no audio heard yet. |
+| 230k | Cast: one note on how each role sounds; the narrator's version where the narrator quotes them. |
 | 230l | The quiet scene: silence, an interruption that keeps a secret, two takes out of date. |
 | 230m | Adaptation: the map, with chapter 5 (Cut) opened. |
 | 230n | Source changed: chapter 6 v14, v15 and the script. Keep the script with a reason, or Ask Arke to revise. |
-| 230o | Audio Studio: episode 1 as one arrangement, with a listen-through note on a heard interval. |
+| 230o | Audio Studio: episode 1 as one arrangement, with a review note on a heard interval. |
 | 230p | Episodes: the show page, with episode 2 performing in the background. |
 | 230q | Publish an edition: what is included, frozen and held back. |
 | 230r–v | Phone: script, Hear sheet, Source sheet, Episodes, Cast sheet. |
@@ -115,7 +137,7 @@ waiting as a tracked edit, and Cast beside the pilot.
 | The chapter writing room: the held bar, tracked edits, review notes with Fix, Intentional and Dismiss, versions | 230d, 230j, prototype Fix | A radio-script document with stable line ids, beds, silence, interruptions, channels and Heard as |
 | Voices, voice direction with Sent as, grouped requests, quotes, Activity, transcript checks, recorded takes | 230h, 230i | A Hear dialog over any selection; a blocking choice for missing voices; a take column in the script |
 | Character narration note, used by the Performed reading | 230k | Actor direction for this production; per-line layered direction |
-| Audio Studio for a chapter: sequence, passage and fixed placement; Current and Suggested; stereo render | 230o | An episode as the unit; scenes as ruler regions; the listen-through strip |
+| Audio Studio for a chapter: sequence, passage and fixed placement; Current and Suggested; stereo render | 230o | An episode as the unit; scenes as ruler regions; the review strip of heard intervals |
 | SPEC-052 verdicts (Keep, Cut, Merge, Show, Expand, Invent) in design; Target built | 230m | The Adaptation page and map; Hear as the audio name for Show; the source-change compare |
 | The audiobook show page; story editions | 230p, 230q | Audio-drama editions with listener transcripts, credits, the production script and stems |
 | Builder Chat (turn 225); chapter-review specialists | 230d | Adaptation, script, performance and listening specialists behind the same single Arke |
