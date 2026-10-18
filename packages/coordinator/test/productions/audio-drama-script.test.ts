@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { access, readFile, rename } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { ulid, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { createProduction } from "../../src/productions/ops.js";
-import { readDramaSource, saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { dramaSourceSnapshotPath } from "@arke-studio/contracts";
+import { keepAllAdaptedText, readDramaSource, saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { EPISODE_SCRIPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -88,5 +90,22 @@ describe("codex round 1 on PR 1878", () => {
     const kept = await readDramaSource(store, id, chapter.hash!);
     assert.ok(kept.length > 0, "the adapted text is there to compare with, whatever the chapter becomes");
     await assert.rejects(readDramaSource(store, id, "sha256:never-pinned"), /was not kept/);
+  });
+});
+
+describe("codex round 3 on PR 1878", () => {
+  it("keeps the pinned text of a script saved before snapshots existed, when the world opens", async () => {
+    const { store, id } = await drama();
+    const story = store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+    const chapter = story.chapters[0]!;
+    const pin: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The quay",
+      source: { story: story.meta.id, chapter: chapter.id, version: chapter.version ?? 1, hash: chapter.hash! } };
+    await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [pin], baseHash: null });
+    const snapshot = dramaSourceSnapshotPath(id, chapter.hash!);
+    const raw = await readFile(join(store.dir, snapshot), "utf8");
+    await store.commit({ kind: "drama-source-snapshot", source: "test", files: [{ path: snapshot, action: "delete", baseHash: `sha256:${createHash("sha256").update(raw).digest("hex")}` }] });
+    await assert.rejects(readDramaSource(store, id, chapter.hash!), /was not kept/);
+    await keepAllAdaptedText(store);
+    assert.ok((await readDramaSource(store, id, chapter.hash!)).length > 0);
   });
 });
