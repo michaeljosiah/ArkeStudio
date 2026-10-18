@@ -11,6 +11,7 @@ export * from "./beats.js";
 export * from "./scene-flow.js";
 export * from "./scene-operations.js";
 export * from "./staging.js";
+export * from "./stage-prompt.js";
 export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";

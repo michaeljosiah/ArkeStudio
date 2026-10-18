@@ -2,6 +2,7 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { estimateSpeechMicroUsd, freeCreditLeft, SAMPLING_CHOICE_NAMES, samplingSummary, speechPriceCopy } from "@arke-studio/contracts";
 import { castVoiceSummary, planCastCharacterAudio, planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { benchLineLanguage, castNameFor, DEFAULT_REFERENCE_WHO, referenceRouteModel, referenceRouteRefusal, referenceSheetId } from "@arke-studio/contracts";
+import { STAGE_FOLLOWS, STAGE_FOLLOW_LABELS, stageBriefForRouting, stageBriefWithFollow, stageRoutingCitations } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { BodyLayer } from "../components/body-layer.js";
@@ -387,6 +388,24 @@ function BenchWorkspace({
       mode,
     });
   };
+  // A model switch reroutes a staged subject's references, and the coordinator rewrites the
+  // brief's References and follow lines for what rides on the new route (issue 1817). The draft
+  // here is those same words still being typed, so it is put in step the same way when the new
+  // routing comes back; otherwise the box would go on citing a playblast that no longer rides.
+  const ridingKey = session.composer.activeTokens.join("|");
+  useEffect(() => {
+    if (subject === undefined) return;
+    const references = session.subjectTokens.flatMap((token) => session.tokenRegistry.find((candidate) => candidate.token === token) ?? []);
+    const nameOf = (sheetId: string) => world?.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const citations = stageRoutingCitations(references, session.composer.activeTokens, nameOf);
+    setDraft((current) => {
+      const follow = current.params.kind === "video" ? current.params.follow ?? "camera-action" : "camera-action";
+      const brief = stageBriefForRouting(current.brief, { ...citations, follow });
+      return brief === current.brief ? current : { ...current, brief };
+    });
+    // The routing is the trigger; the references and names it reads are fixed for a session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ridingKey, session.id]);
   useEffect(() => {
     if (rebuiltSession !== session.id) return;
     // The coordinator broadcasts the rebuilt workspace before its correlated answer. Applying
@@ -2186,6 +2205,33 @@ function BenchWorkspace({
                 {subject !== undefined && (
                   <span className="fy-bench__chip fy-bench__chip--fact" title="the shot's sound">
                     {videoParams?.sound === false ? "sound · off" : "sound · on"}
+                  </span>
+                )}
+                {/* How closely a staged clip follows its blockout (issue 1817, design turn 229h).
+                    Present only when the Stage's playblast is attached; the choice rewrites the
+                    brief's closing line, so the words sent and the param recorded agree. */}
+                {subject !== undefined && videoParams?.follow !== undefined && (
+                  <span className="fy-bench__follow" role="radiogroup" aria-label="Follow" data-testid="bench-follow">
+                    <span className="fy-bench__followlabel">follow</span>
+                    {STAGE_FOLLOWS.map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={videoParams.follow === value}
+                        className={cx("fy-bench__followopt", videoParams.follow === value && "fy-bench__followopt--on")}
+                        title={value === "camera" ? "The move only; the figures are placeholders" : "The move, the timing and the blocking"}
+                        onClick={() =>
+                          compose({
+                            ...draft,
+                            brief: stageBriefWithFollow(draft.brief, value),
+                            params: { ...draft.params, kind: "video", follow: value } as BenchParams,
+                          })
+                        }
+                      >
+                        {STAGE_FOLLOW_LABELS[value]}
+                      </button>
+                    ))}
                   </span>
                 )}
                 {/* Sound exists only where the route publishes the choice. Wan and minimax

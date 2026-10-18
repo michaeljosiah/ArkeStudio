@@ -562,6 +562,40 @@ describe("references (R-23; design 142a)", () => {
   });
 });
 
+describe("Follow, for a staged clip (issue 1817; design 229h)", () => {
+  const staged = (): BenchSession => {
+    const session = shotSession("video");
+    const composer = session.composer as unknown as { params: Record<string, unknown>; brief: string; activeTokens: string[] };
+    composer.params = { ...composer.params, follow: "camera-action" };
+    // The playblast rides: a follow line for a video that does not is taken out (issue 1817).
+    composer.activeTokens = ["Image 1", "Video 1"];
+    composer.brief = "Maren listens at the rail.\n\n0.0–4.0 s · Medium on Maren, from the front, eye level, locked off.\nFollow @Video 1 precisely for camera position, movement, timing and blocking.";
+    return session;
+  };
+
+  it("is offered only when the Stage's playblast is attached, as a two-way choice", async () => {
+    const plain = await openBench(shotSession("video"));
+    assert.equal(plain.container.querySelector('[data-testid="bench-follow"]'), null, "no blockout, no Follow");
+    await act(async () => plain.root.unmount());
+    const bench = await openBench(staged());
+    const options = all(bench, '[data-testid="bench-follow"] [role="radio"]');
+    assert.deepEqual(options.map((option) => option.textContent), ["Camera + action", "Camera only"]);
+    assert.deepEqual(options.map((option) => option.getAttribute("aria-checked")), ["true", "false"]);
+    assert.equal(q(bench, ".fy-bench__followlabel").textContent, "follow");
+  });
+
+  it("rewrites the brief's closing line and records the choice", async () => {
+    const bench = await openBench(staged());
+    await act(async () => all(bench, '[data-testid="bench-follow"] [role="radio"]')[1]!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    const composed = bench.sent.filter((message): message is Extract<ClientMessage, { kind: "bench-compose" }> => message.kind === "bench-compose").at(-1);
+    assert.ok(composed, "the choice is composed");
+    assert.equal(composed.brief?.split("\n").at(-1), "Use @Video 1 only for camera position and movement. The figures in it are placeholders; do not copy their poses or body mechanics.");
+    assert.match(composed.brief ?? "", /^Maren listens at the rail\./, "the author's words are untouched");
+    assert.equal((composed.params as { follow?: string } | undefined)?.follow, "camera");
+  });
+});
+
 describe("the prompt, the chips and the dispatch row (design 142)", () => {
   it("has no eyebrow and no line beneath; the shot's facts lead the chips as bare values", async () => {
     const bench = await openBench(shotSession("video"));
