@@ -147,6 +147,10 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   // A picture a run could not make (2026-10-04): held with its reason, made again only on Try again.
   const refused = !held && !disagreeing && row.refused !== undefined && !without;
   const said = row.refused ?? reason;
+  // A refused row's one press is Try again, and it says every hold it lets go (issue 1875): it
+  // sends the row as Without and As it is do, so a press that named only the retry sent a missing
+  // reference without, or a disputed look as it is, unsaid.
+  const retry = ["Try again", ...((row.needs?.length ?? 0) > 0 ? ["without"] : []), ...(disagrees.size > 0 ? ["as it is"] : [])].join(" · ");
   const people = row.who.filter((entry) => entry.kind === "character");
   const lacking = people.find((entry) => entry.sheet !== undefined && entry.reference === null);
   const time = clock(row.at, estimated);
@@ -189,13 +193,13 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           </span>
         ))}
         {people.length === 0 && <span className="fy-ills__note">{row.who.length > 0 ? "place only" : "no reference rides"}</span>}
-        {held && !skipped && (
+        {held && !skipped && row.refused === undefined && (
           <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-without">
             {/* One press sends both: where a look disagrees too, the press says so (codex on PR 1868). */}
             {disagrees.size > 0 ? "Without · as it is" : "Without"}
           </Button>
         )}
-        {disagreeing && !skipped && (
+        {disagreeing && !skipped && row.refused === undefined && (
           <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-as-is">
             As it is
           </Button>
@@ -206,7 +210,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-row-reason">{said}</p>
           {row.refused !== undefined && !skipped && (
             <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-retry">
-              {without ? "Hold" : "Try again"}
+              {without ? "Hold" : retry}
             </Button>
           )}
         </div>

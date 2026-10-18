@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs
 import { join } from "node:path";
 import { z } from "zod";
 import {
-  DramaEditionSchema, dramaCredits, dramaRoleName, episodeReadiness, episodeScriptFile, episodeScriptText, listenerTranscript, productionShape,
+  DramaEditionSchema, dramaCredits, dramaRoleName, dramaRoleVoice, episodeReadiness, episodeScriptFile, episodeScriptText, listenerTranscript, productionShape,
   type DramaDelivery, type DramaEdition,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -31,7 +31,7 @@ export class DramaEditionService {
       const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
       if (!entry) throw new Error(`Episode ${episode} has no script.`);
       const takes = production.episodeTakes?.find((candidate) => candidate.episode === episode);
-      const ready = episodeReadiness(entry.script.blocks, takes, name);
+      const ready = episodeReadiness(entry.script.blocks, takes, name, (line) => dramaRoleVoice(production.audioDrama?.cast, bundle.sheets, line));
       if (!ready.ready) throw new Error(`Episode ${episode} is not ready: ${ready.reasons.join(" · ")}.`);
       return { episode, entry, takes };
     });

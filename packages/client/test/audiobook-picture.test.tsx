@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
+import { madePicture } from "../src/components/audiobook-made-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -551,6 +552,25 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.equal(text(q(m, '[data-testid="suggest-generate"]')), "Generating…");
   });
 
+  it("prices Make again for someone the picture went without, now that their look rides, and confirms that price (issue 1876)", async () => {
+    // Made with the Vigil alone: Maren had nothing to carry then. The chapter dresses her in the storm coat now.
+    const without = artifact("ar_01J8G0000000000000000PICMD", "made-maren.png", {
+      origin: { by: "system" },
+      generation: {
+        source: "bench", sessionId: "se_01J8G00000000000000000MADE", takeId: "tk_01J8G00000000000000000MADE", takeNumber: 1,
+        brief: pictureBench(PROMPT, [{ name: "The Vigil", kind: "place", token: "Image 1" }], "Grey dusk."),
+        references: [{ token: "Image 1", kind: "image", source: { source: "world-file", path: VIGIL, hash: "sha256:0" } }],
+        keyframes: [], provider: "openai", model: "gpt-image-2", params: { kind: "image", count: 1, aspect: "16:9" }, costMicroUsd: 50_000,
+      },
+    } as unknown as Partial<ArtifactSidecar>);
+    extraArtifacts = [without];
+    const m = await mount(2, { "p1.0": made(SHOT) }, STORM_CHAPTER);
+    assert.deepEqual(all(m, '[data-testid="suggest-who"]').map((el) => [el.dataset.key, el.dataset.state]), [["maren-kest", "carried"], ["the-vigil", "carried"]], "she rides at Make again, as the coordinator will send her");
+    assert.equal(text(q(m, '[data-testid="picture-card-model"]')), "GPT Image 2 · ~$0.06", "a picture and two references, not the one it was made with");
+    await press(q(m, '[data-testid="suggest-generate"]'));
+    assert.equal(asked(m, "make-audiobook-picture")[0]!.confirmedMicroUsd, 55_000, "never below what Make again spends, which the coordinator refuses as the price moved");
+  });
+
   it("keeps the shot a suggestion was made from on the picture it makes", async () => {
     const m = await mount(2);
     await press(q(m, '[data-testid="suggest-picture"]'));
@@ -713,9 +733,28 @@ describe("a made picture on its block (turn 194g)", () => {
     // A supporting character carried first, the bare lead after, and room for one: the lead's look rides, as Make sends it.
     const support = { key: "odile-sarn", name: "Odile", sheet: "odile-sarn", kind: "character" as const, reference: "references/odile-sarn/head-front.png", carried: true };
     assert.deepEqual(withOwnLooks([support, bare], {}, harbour, kits, undefined, budget(1)).map((entry) => [entry.key, entry.carried]), [["odile-sarn", false], ["maren-kest", true]]);
-    // Nobody gained or lost a picture: the drafted budget stands, one it left out included.
+    // One a made picture went without, whose picture the model has room for, rides at Make again (issue 1876).
     const left = { ...bare, reference: "references/maren-kest/head-front.png" };
-    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, false);
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, true);
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(0))[0]!.carried, false);
+  });
+
+  it("with no chapter look, someone the card went without rides the main photo they have now (codex on PR 1877)", () => {
+    const kits = state().world!.referenceKits;
+    const budget = { model: GPT_IMAGE, billing: () => undefined };
+    const bare = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
+    const [now] = withOwnLooks([bare], {}, null, kits, undefined, budget);
+    assert.match(now!.reference ?? "", /^references\/maren-kest\//, "her main photo, as Make again sends it");
+    assert.equal(now!.carried, true, "and counted in what Make again costs");
+    const drafted = { ...bare, reference: `references/maren-kest/${STORM_LOOK.file}`, carried: true, look: { lookId: STORM_LOOK.id, view: "full" as const } };
+    assert.deepEqual(withOwnLooks([drafted], {}, null, kits, undefined, budget), [drafted], "one with a picture is left as drafted");
+  });
+
+  it("a made picture on an unverified model carries no reference, as the coordinator floors it (codex on PR 1877)", () => {
+    extraArtifacts = [madeArtifact()];
+    const world = state().world!;
+    assert.equal(madePicture(world, [{ ...GPT_IMAGE, unverified: true } as ManifestModel], made(SHOT), null, "p1.0")?.model.references, 0);
+    assert.equal(madePicture(world, [GPT_IMAGE], made(SHOT), null, "p1.0")?.model.references, 4);
   });
 
   it("re-resolves the chosen look against the kit as it is, so a close view accepted since is what the card shows (codex on PR 1868)", () => {

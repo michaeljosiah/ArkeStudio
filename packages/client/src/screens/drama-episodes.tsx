@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
-  DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
+  DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
   type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -43,7 +43,7 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   close();
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, readiness: episodeReadiness(blocks, takes, name),
+    voiceless: voiceless.size, draft, scenes, readiness: episodeReadiness(blocks, takes, name, (line) => dramaRoleVoice(production.audioDrama?.cast, world.sheets, line)),
   };
 }
 

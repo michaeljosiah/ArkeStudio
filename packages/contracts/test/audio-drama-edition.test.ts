@@ -30,6 +30,12 @@ describe("episode readiness (R-72)", () => {
     assert.deepEqual(held.reasons, ["1 line not performed", "1 take out of date", "1 take waits for a decision", "1 sound missing"]);
     assert.deepEqual(episodeReadiness([a], undefined, name).reasons, ["not performed"]);
   });
+
+  it("holds back a take in a voice the role no longer has, as the mix leaves it out", () => {
+    const a = line("maren", "Climb.");
+    const recast = episodeReadiness([a], takes({ [a.id]: { kept: take(a) } }), name, () => ({ provider: "elevenlabs", voiceId: "recast" }));
+    assert.deepEqual(recast.reasons, ["1 take out of date"]);
+  });
 });
 
 describe("the listener's transcript and the credits (R-74, R-75)", () => {

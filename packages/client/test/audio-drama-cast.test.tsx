@@ -232,7 +232,9 @@ describe("the show page and Publish (230p, 230q)", () => {
     const production = state.world!.productions.find((p) => p.meta.id === "low-water-drama")!;
     production.episodeTakes = [{ version: 1, episode: 1, lines: Object.fromEntries(blocks.filter((block) => kept.includes(block.id)).map((block) => [block.id, { kept: {
       artifactId: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV", file: "artifacts/a.wav", textHash: dramaLineHash(block as never),
-      voice: { provider: "elevenlabs", model: "m", voiceId: "v" }, estimatedMicroUsd: 0, madeAt: "2026-10-18T12:00:00.000Z" } }])) }] as never;
+      // Made in the role's voice now, so it is current (R-60).
+      voice: state.world!.sheets.find((sheet) => sheet.id === (block as { speaker?: string }).speaker)?.voice ?? { provider: "elevenlabs", model: "m", voiceId: "v" },
+      estimatedMicroUsd: 0, madeAt: "2026-10-18T12:00:00.000Z" } }])) }] as never;
     return state;
   };
 

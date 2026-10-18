@@ -541,7 +541,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   return (
     <AudioStudioWorkspace worldId={world.meta.worldId} productionId={production.meta.id} chapterId={stem} chapterFile={stem} slug={world.meta.slug}
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
-      connection={connection} stamp={`${stored.hash}:${JSON.stringify(takes ?? null).length}`} rows={rows} timing={NO_TIMING}
+      connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
       passage={passage} onPassage={setPassage} conversation={null} propose={null}
       onBack={() => navigate(`${base}/script/${episode}`)} onExport={() => setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem))}
       exportDisabled={connection !== "open" || exporting !== null} />

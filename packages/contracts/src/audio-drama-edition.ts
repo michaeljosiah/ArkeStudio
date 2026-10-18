@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { SlugSchema, UlidSchema } from "./ids.js";
 import {
-  dramaLineHash, dramaRoleName,
+  DRAMA_NARRATOR, dramaRoleName, dramaTakeState,
   type AudioDramaRecord, type EpisodeScriptBlock, type EpisodeTakes, type ScriptHeading,
 } from "./audio-drama.js";
 
@@ -42,6 +42,17 @@ export type DramaEdition = z.infer<typeof DramaEditionSchema>;
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
+type Voice = { provider: string; voiceId: string; model?: string | undefined };
+
+/** A role's voice as takes compare it (R-60): this production's, else the character's; none for the app narrator. */
+export function dramaRoleVoice(
+  cast: Readonly<Record<string, { voice?: Voice | undefined }>> | undefined,
+  sheets: ReadonlyArray<{ id: string; voice?: Voice | undefined }>,
+  block: Spoken,
+): Voice | undefined {
+  if (block.kind === "narration") return cast?.[DRAMA_NARRATOR]?.voice;
+  return cast?.[block.speaker]?.voice ?? sheets.find((sheet) => sheet.id === block.speaker)?.voice;
+}
 
 /**
  * Whether an episode can go out (R-72), and why not: every line performed in a current take, no
@@ -51,6 +62,8 @@ export function episodeReadiness(
   blocks: readonly EpisodeScriptBlock[],
   takes: EpisodeTakes | undefined,
   name: (speaker: string) => string,
+  /** The role's voice now: a take in another voice is out of date, as the mix leaves it out. */
+  voice: (line: Spoken) => Voice | undefined = () => undefined,
 ): { ready: boolean; reasons: string[]; notes: string[] } {
   const lines = blocks.filter(spoken);
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -61,7 +74,7 @@ export function episodeReadiness(
     if (entry?.waiting) waiting++;
     const kept = entry?.kept;
     if (!kept) missing++;
-    else if (kept.textHash !== dramaLineHash(line)) stale++;
+    else if (dramaTakeState(line, { kept }, voice(line)) === "out of date") stale++;
     else if (kept.standIn && line.kind === "dialogue") standIns.add(name(line.speaker));
   }
   const sounds = blocks.filter((block) => (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.required && !block.soundArtifact).length;

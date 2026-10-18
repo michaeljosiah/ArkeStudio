@@ -1,5 +1,5 @@
 import {
-  DRAMA_NARRATOR, narrationQuotes, sheetSound,
+  DRAMA_NARRATOR, dramaRoleVoice, narrationQuotes, sheetSound,
   type AudiobookReader, type DramaRole, type EpisodeScriptBlock, type ProductionBundle, type Sheet, type WorldBundle,
 } from "@arke-studio/contracts";
 
@@ -89,9 +89,7 @@ export function dramaCastRoles(world: WorldBundle, production: ProductionBundle)
 
 /** A role's voice as takes compare it: this production's, else the character's; none for the app narrator. */
 export function roleVoice(production: ProductionBundle, sheets: readonly Sheet[], block: Spoken): { provider: string; voiceId: string } | undefined {
-  const cast = production.audioDrama?.cast ?? {};
-  if (block.kind === "narration") return cast[DRAMA_NARRATOR]?.voice;
-  return cast[block.speaker]?.voice ?? sheets.find((sheet) => sheet.id === block.speaker)?.voice;
+  return dramaRoleVoice(production.audioDrama?.cast, sheets, block);
 }
 
 /** The kept takes a new voice would put out of date (R-60), listed before it is confirmed. */
