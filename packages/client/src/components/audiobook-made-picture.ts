@@ -92,7 +92,10 @@ export function madePicture(
       provider: model.provider,
       id: model.id,
       name: model.displayName,
-      references: model.accepts.referenceImages,
+      // What the coordinator lets the model carry (`referenceBudgetFor`): an unverified model carries
+      // none whatever its row declares, so the card neither shows a reference riding nor prices one
+      // that Make again will not send (codex on PR 1877).
+      references: model.unverified === true ? 0 : model.accepts.referenceImages,
       ...(model.pricing.kind === "included-plan" ? { plan: "included-plan" as const } : {}),
     },
     ...(aspect !== undefined ? { aspect } : {}),

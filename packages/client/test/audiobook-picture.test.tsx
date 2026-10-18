@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
 import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
+import { madePicture } from "../src/components/audiobook-made-picture.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -736,6 +737,24 @@ describe("a made picture on its block (turn 194g)", () => {
     const left = { ...bare, reference: "references/maren-kest/head-front.png" };
     assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, true);
     assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(0))[0]!.carried, false);
+  });
+
+  it("with no chapter look, someone the card went without rides the main photo they have now (codex on PR 1877)", () => {
+    const kits = state().world!.referenceKits;
+    const budget = { model: GPT_IMAGE, billing: () => undefined };
+    const bare = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
+    const [now] = withOwnLooks([bare], {}, null, kits, undefined, budget);
+    assert.match(now!.reference ?? "", /^references\/maren-kest\//, "her main photo, as Make again sends it");
+    assert.equal(now!.carried, true, "and counted in what Make again costs");
+    const drafted = { ...bare, reference: `references/maren-kest/${STORM_LOOK.file}`, carried: true, look: { lookId: STORM_LOOK.id, view: "full" as const } };
+    assert.deepEqual(withOwnLooks([drafted], {}, null, kits, undefined, budget), [drafted], "one with a picture is left as drafted");
+  });
+
+  it("a made picture on an unverified model carries no reference, as the coordinator floors it (codex on PR 1877)", () => {
+    extraArtifacts = [madeArtifact()];
+    const world = state().world!;
+    assert.equal(madePicture(world, [{ ...GPT_IMAGE, unverified: true } as ManifestModel], made(SHOT), null, "p1.0")?.model.references, 0);
+    assert.equal(madePicture(world, [GPT_IMAGE], made(SHOT), null, "p1.0")?.model.references, 4);
   });
 
   it("re-resolves the chosen look against the kit as it is, so a close view accepted since is what the card shows (codex on PR 1868)", () => {

@@ -125,7 +125,14 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
     const mine = own[entry.key];
     // Re-resolved even where the look is the one drafted: a close view accepted since is the
     // picture Make again sends, and the card shows it (codex on PR 1868).
-    if (mine === undefined && entry.only !== true && chapter === null) return entry;
+    if (mine === undefined && entry.only !== true && chapter === null) {
+      // With no chapter look, someone the card went without rides their main photo once they have
+      // one, as Make again sends it, so its price counts them (issue 1876, codex on PR 1877).
+      if (entry.reference !== null) return entry;
+      const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
+      const photo = kit === undefined ? null : mainPhotoFor(kit);
+      return photo === null ? entry : { ...entry, reference: `references/${entry.sheet}/${photo.file}` };
+    }
     const target = mine ?? chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
     const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
     const { look: _look, only: _only, ...base } = entry;
