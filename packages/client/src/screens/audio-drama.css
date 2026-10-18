@@ -139,10 +139,11 @@ button.fy-ad-chip { cursor: pointer; }
   .fy-ad-score__add { margin-left: 0; }
 }
 
-/* Print is the radio script: the score alone, no chrome (R-11's PDF, through the print dialog). */
+/* Print is the radio script: the score alone, no chrome (R-11's PDF, through the print dialog).
+   Only while a score is on the page — every other screen prints as it always has (codex on PR 1870). */
 @media print {
-  body * { visibility: hidden; }
-  .fy-ad-score, .fy-ad-score * { visibility: visible; }
+  body:has(.fy-ad-ep) * { visibility: hidden; }
+  body:has(.fy-ad-ep) .fy-ad-score, body:has(.fy-ad-ep) .fy-ad-score * { visibility: visible; }
   .fy-ad-score { position: absolute; inset: 0 auto auto 0; overflow: visible; padding: 0; }
   .fy-ad-score__tools, .fy-ad-score__add, .fy-ad-score__take { display: none; }
 }
