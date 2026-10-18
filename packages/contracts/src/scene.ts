@@ -133,7 +133,19 @@ export type StagingFigure = z.infer<typeof StagingFigureSchema>;
  * it is and, for a room, which sides are open and where its doors and windows are.
  */
 export const STAGE_KIT_KINDS = ["room", "doorway", "window", "stairs", "counter", "booth", "table", "armchair", "sofa", "bed", "planter", "tree", "lamp", "car", "street", "facade"] as const;
-export const StageKitSchema = z
+type StageSide = "front" | "back" | "left" | "right";
+// The kit, the set, its light and the atmosphere are spelled out and annotated (TS7056): inferred,
+// they ride into every frame, event and card that carries a scene, and the engine's declaration
+// bundle refused the arke-actions registry as too long to serialize once the look grew them.
+export interface StageKit {
+  kind: (typeof STAGE_KIT_KINDS)[number];
+  open?: StageSide[] | undefined;
+  ceiling?: boolean | undefined;
+  openings?: Array<{ wall: StageSide; kind: "door" | "window" | "glass"; at: number; w: number; h: number; sill?: number | undefined }> | undefined;
+  seats?: number | undefined;
+  steps?: number | undefined;
+}
+export const StageKitSchema: z.ZodType<StageKit, z.ZodTypeDef, unknown> = z
   .object({
     kind: z.enum(STAGE_KIT_KINDS),
     /** A room's sides with no wall, so the camera can stand outside it. */
@@ -158,10 +170,86 @@ export const StageKitSchema = z
     steps: z.number().int().min(2).max(40).optional(),
   })
   .strict();
-export type StageKit = z.infer<typeof StageKitSchema>;
+
+/**
+ * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 229a/229e). The
+ * renderer owns how each one looks; the world records only the word.
+ */
+export const STAGE_MATERIALS = ["plaster", "concrete", "stone", "marble", "wood", "metal", "glass", "fabric", "leather", "foliage", "pot", "lamp", "screen", "neon", "road", "paint", "grass", "water"] as const;
+export const StageMaterialSchema = z.enum(STAGE_MATERIALS);
+export type StageMaterial = z.infer<typeof StageMaterialSchema>;
+const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/i, "a colour is #rrggbb");
+
+/** A practical light on the set (issue 1825, design turn 229e): a lamp, a neon, a window, the sun. */
+export interface StageLight {
+  name: string;
+  kind: "point" | "spot" | "area" | "sun";
+  colour: string;
+  kelvin?: number | undefined;
+  strength: number;
+  reach?: number | undefined;
+  shadow?: boolean | undefined;
+  x: number;
+  y: number;
+  z: number;
+  aim?: string | [number, number, number] | undefined;
+}
+export const StageLightSchema: z.ZodType<StageLight, z.ZodTypeDef, unknown> = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    kind: z.enum(["point", "spot", "area", "sun"]),
+    colour: HexColourSchema,
+    /** Colour temperature the colour was chosen from, kept so the form can say it. */
+    kelvin: z.number().int().min(1000).max(20000).optional(),
+    strength: z.number().finite().min(0).max(500),
+    /** How far the light carries, metres; absent is unlimited. */
+    reach: z.number().finite().positive().max(500).optional(),
+    shadow: z.boolean().optional(),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    z: z.number().finite(),
+    /** Where a spot, area light or the sun points; a set's name or a point. */
+    aim: z.union([z.string().min(1).max(80), z.tuple([z.number().finite(), z.number().finite(), z.number().finite()])]).optional(),
+  })
+  .strict();
+
+/** The scene's time, sky, haze and shading for the Lit look (issue 1825). */
+export interface SceneAtmosphere {
+  time?: "day" | "dusk" | "night" | "interior" | undefined;
+  sky?: "clear" | "overcast" | "night-city" | "studio" | undefined;
+  haze?: number | undefined;
+  shading?: "soft" | "off" | undefined;
+}
+export const SceneAtmosphereSchema: z.ZodType<SceneAtmosphere, z.ZodTypeDef, unknown> = z
+  .object({
+    time: z.enum(["day", "dusk", "night", "interior"]).optional(),
+    sky: z.enum(["clear", "overcast", "night-city", "studio"]).optional(),
+    haze: z.number().finite().min(0).max(0.2).optional(),
+    shading: z.enum(["soft", "off"]).optional(),
+  })
+  .strict();
 
 /** Set massing: a translucent box, named so the label reads on the floor. */
-export const StagingSetSchema = z
+export interface StagingSet {
+  name: string;
+  shape?: "box" | "sphere" | "cylinder" | "mesh" | undefined;
+  group?: string | undefined;
+  vertices?: Array<[number, number, number]> | undefined;
+  triangles?: number[] | undefined;
+  y?: number | undefined;
+  rotation?: [number, number, number] | undefined;
+  solid?: boolean | undefined;
+  kit?: StageKit | undefined;
+  material?: StageMaterial | undefined;
+  surfaces?: Record<string, StageMaterial> | undefined;
+  colour?: string | undefined;
+  x: number;
+  z: number;
+  w: number;
+  h: number;
+  d: number;
+}
+export const StagingSetSchema: z.ZodType<StagingSet, z.ZodTypeDef, unknown> = z
   .object({
     name: z.string().min(1),
     shape: z.enum(["box", "sphere", "cylinder", "mesh"]).optional(),
@@ -172,6 +260,11 @@ export const StagingSetSchema = z
     rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
     solid: z.boolean().optional(),
     kit: StageKitSchema.optional(),
+    /** A plain set's material, or a kit item's default for parts its surfaces do not name (issue 1825). */
+    material: StageMaterialSchema.optional(),
+    /** A kit item's materials by part surface ("floor", "glass") or wall ("right wall"). */
+    surfaces: z.record(z.string().min(1).max(40), StageMaterialSchema).refine((value) => Object.keys(value).length <= 16, "at most 16 surfaces").optional(),
+    colour: HexColourSchema.optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),
@@ -179,7 +272,6 @@ export const StagingSetSchema = z
     d: z.number(),
   })
   .strict();
-export type StagingSet = z.infer<typeof StagingSetSchema>;
 
 /**
  * The location plate (issue 1818, design turn 229c): a picture of the empty place the set is
@@ -220,6 +312,8 @@ export const SceneBlockingSchema = z
     cast: z.array(StagingFigureSchema),
     sets: z.array(StagingSetSchema),
     plate: ScenePlateSchema.optional(),
+    lights: z.array(StageLightSchema).max(24).optional(),
+    atmosphere: SceneAtmosphereSchema.optional(),
   })
   .strict();
 export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
@@ -317,10 +411,19 @@ export const ShotStagingSchema = z
         rig: StageRigSchema.optional(),
         seed: z.number().int().min(0).optional(),
         rigIntensity: z.number().min(0).max(2).optional(),
+        /** The look the playblast was exported in (issue 1825); absent is Greybox, as every older one was. */
+        look: z.enum(["greybox", "lit", "plate"]).optional(),
         /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
         blocking: z.discriminatedUnion("owner", [
           z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),
-          z.object({ owner: z.literal("shot") }).strict(),
+          z.object({
+            owner: z.literal("shot"),
+            /**
+             * A Lit or Plate playblast of a shot's own marks still shows the scene's lights,
+             * atmosphere and plate: the scene blocking version it was drawn under (issue 1825).
+             */
+            sceneVersion: z.number().int().min(1).nullable().optional(),
+          }).strict(),
         ]).optional(),
       })
       .strict()

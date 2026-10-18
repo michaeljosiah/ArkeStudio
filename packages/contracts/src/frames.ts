@@ -2748,6 +2748,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
       referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2),
+      /** The look the frames were drawn in (issue 1825); absent is Greybox. */
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
     })
     .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
@@ -2771,6 +2773,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourcePath: z.string().min(1).optional(),
       openingFrameSourcePath: z.string().min(1).optional(),
       referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2).optional(),
+      /** The look the frames were drawn in (issue 1825); absent is Greybox. */
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */

@@ -346,3 +346,22 @@ it("refuses an incomplete or invalid reference set before any artifact lands", a
     assert.deepEqual(await readdir(join(worldDir, "artifacts")), before);
   } finally { await provider.close(); }
 });
+
+describe("the look a playblast was drawn in (issue 1825)", () => {
+  it("records Lit on the pin and fences the world for it; Greybox stays unrecorded", async () => {
+    const { provider, send, shot, stage, refusals, bundle } = await harness();
+    try {
+      await stage();
+      const staged = shot();
+      await send({
+        kind: "stage-playblast", worldId: WORLD_ID, productionId: PRODUCTION, sceneFile: SCENE_FILE, sceneId: SCENE,
+        baseVersion: staged.scene.version, shotId: SHOT, durationSec: 4, aspect: "16:9", stagingVersion: 1,
+        sourcePath: await playblastFile(), openingFrameSourcePath: await openingFrameFile(), referenceFrames: await referenceFrameFiles(),
+        look: "lit",
+      });
+      assert.deepEqual(refusals(), []);
+      assert.equal(shot().shot.staging?.playblast?.look, "lit");
+      assert.ok(bundle().meta.schemaVersion >= 86, "an older reader refuses a pin it would drop the scene over");
+    } finally { await provider.close(); }
+  });
+});

@@ -148,6 +148,7 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   // and so does Read replies (turn 183); a chapter's Arke dock keeps open or closed per view
   // (turn 194), and the books whose linked names are turned off (SPEC-056 D-5); the model picker remembers the last three models picked on this device (turn 195);
   // the audiobook's show page reads back the place the player kept, a chapter and a time (turn 199);
+  // the Stage remembers which look it is drawn in, Greybox, Lit or Plate (issue 1825);
   // effects review retains a validated version/receipt reference, comparison and position (SPEC-053
   // R-38), which convey no authority without the coordinator's matching human review grant.
   // Each strips that one word; keys, auth and decryption still fail.
@@ -169,6 +170,8 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
     [join("lib", "reply-reads.ts"), "localStorage"],
     [join("lib", "recent-models.ts"), "localStorage"],
     [join("lib", "audiobook-place.ts"), "localStorage"],
+    // Issue 1825: the Stage's look (Greybox, Lit or Plate) on this device, never world state.
+    [join("lib", "stage-look-preference.ts"), "localStorage"],
     [join("components", "update-announcement.tsx"), "sessionStorage"],
   ]);
   const offenders = [];
