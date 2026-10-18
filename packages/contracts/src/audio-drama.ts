@@ -218,6 +218,10 @@ export type DraftScriptBlock = z.infer<typeof DraftScriptBlockSchema>;
  * none, becomes a new ULID; and a bed's `until` follows the block it named.
  */
 export function settleDraftBlocks(draft: readonly DraftScriptBlock[], current: readonly EpisodeScriptBlock[]): EpisodeScriptBlock[] {
+  // A key used twice could bind a bed's `until` to either block (codex on PR 1874): refused.
+  const keys = draft.flatMap((block) => block.id === undefined ? [] : [block.id]);
+  const twice = keys.find((key, i) => keys.indexOf(key) !== i);
+  if (twice !== undefined) throw new Error(`The draft names block ${twice} twice. Give each block its own id or key.`);
   const known = new Set(current.map((block) => block.id));
   const used = new Set<string>();
   const renamed = new Map<string, string>();

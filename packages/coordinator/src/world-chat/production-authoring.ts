@@ -431,6 +431,14 @@ export async function stageWorldChatProductionAuthoredAction(
     // Only sounds this production can play (codex on PR 1874), as a save is held to.
     const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
     if (sound) throw new Error(sound);
+    // A scene's source must be a chapter there is (codex on PR 1874): a pin the score cannot open is refused.
+    for (const block of record.blocks) {
+      if (block.kind !== "heading" || !block.source) continue;
+      const { story, chapter } = block.source;
+      if (!store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.some((candidate) => candidate.id === chapter)) {
+        throw new Error(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
+      }
+    }
     // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
     // and keeping either would make the other stale.
     const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
