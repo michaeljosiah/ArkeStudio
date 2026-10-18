@@ -394,6 +394,13 @@ export function carriesStageConstruction(raw: string): boolean {
   } catch { return false; }
 }
 
+/** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
+export const STAGE_PLATE_SCHEMA_VERSION = 84;
+export function carriesStagePlate(raw: string): boolean {
+  try { return parseSceneRecord(raw).blocking?.plate !== undefined; }
+  catch { return false; }
+}
+
 /** Evaluator-versioned playblast pins must not make a scene disappear in older readers (#1128). */
 export function carriesStageEvaluatorVersion(raw: string): boolean {
   try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.evaluatorVersion !== undefined); }

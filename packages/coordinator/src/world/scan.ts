@@ -173,7 +173,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 79: immutable, leased agent media evidence and durable coverage receipts.
 // 80: local measured speech evidence and transcript-grounded content review receipts.
 // 82: expanded provider vocal events in persisted cadence plans and reactions.
-export const SUPPORTED_SCHEMA_VERSION = 83;
+// 84: a Stage location plate on the scene's strict blocking (issue 1818, design turn 229c).
+export const SUPPORTED_SCHEMA_VERSION = 84;
 
 export class WorldOpenError extends Error {
   constructor(
