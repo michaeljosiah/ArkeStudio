@@ -6,8 +6,10 @@ import {
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
-import { Button, cx } from "../components/ui.js";
-import { Lock, Play } from "../components/icons.js";
+import { Button, IconButton, cx } from "../components/ui.js";
+import { Chat, Lock, Play } from "../components/icons.js";
+import { HeldBar } from "../components/held-bar.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
@@ -77,6 +79,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const listing = useRef<string | null>(null);
   const chat = useGlobalChat();
   const surface = chat?.forPage() ?? null;
+  // On a phone the next episode is under the thumb, with Chat beside it (230u, R-80).
+  const phone = useMediaQuery("(max-width: 599px)");
   useEffect(() => subscribeDramaEditions((answer) => { if (answer.requestId === listing.current) setEditions(answer.editions); }), []);
   useEffect(() => { listing.current = listDramaEditions(world.meta.worldId, production.meta.id); }, [world.meta.worldId, production.meta.id, publishing]);
   // The episode heard as its studio arrangement mixes it (R-67).
@@ -194,6 +198,15 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
             </div>
           ))}
         </section>
+      )}
+      {phone && (
+        <HeldBar className="fy-ad-show__thumb">
+          {/* The next episode to hear, or with none ready the next to work on. */}
+          {next ? <Button variant="primary" disabled={playing !== null} onClick={() => play(next.n)}><Play size={14} /> Episode {next.n} · {formatSeconds(next.seconds)}</Button>
+            : planned[0] ? <Button variant="primary" onClick={() => navigate(`${base}/script/${planned[0]!.n}`)}>Episode {planned[0].n} script</Button> : null}
+          <span className="gap" />
+          <IconButton label="Chat" disabled={!surface} onClick={() => surface && chat!.open(surface)}><Chat size={18} /></IconButton>
+        </HeldBar>
       )}
       {publishing && <PublishDialog world={world} production={production} states={planned} onClose={() => setPublishing(false)} />}
     </div>

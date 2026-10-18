@@ -5,6 +5,7 @@ import { requestVoiceCatalogue, requestCataloguePreview, stopCataloguePreview, u
 import { dismissPlayback, playbackSnapshot, playClip, usePlayback } from "../lib/audio.js";
 import { voicePreviewMediaUrl } from "../lib/media.js";
 import { BodyLayer } from "./body-layer.js";
+import { useOverlay } from "../lib/overlays.js";
 import { cx } from "./ui.js";
 import { X } from "./icons.js";
 
@@ -46,6 +47,8 @@ export function VoicePickerDialog({ open, worldId, chosenId, chosenProvider, cho
   const activeRef = useRef(active);
   const [heard, setHeard] = useState<Set<string>>(() => new Set());
   const dialog = useRef<HTMLDivElement>(null);
+  // Opened from a phone's Cast sheet (230v), it stands in front: the sheet is put away meanwhile.
+  useOverlay("layer", open, () => dialog.current);
   const search = useRef<HTMLInputElement>(null);
   const playback = usePlayback();
   const stop = useCallback(() => {

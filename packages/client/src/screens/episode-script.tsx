@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
@@ -14,7 +14,10 @@ import {
   blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
-import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Users, X } from "../components/icons.js";
+import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
+import { HeldBar } from "../components/held-bar.js";
+import { PageSheet } from "../components/page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
@@ -78,6 +81,11 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // stored script nor sent again, until they take the saved one, keep theirs, or edit again.
   const [conflict, setConflict] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The scene moved to by its chip or the scene menu: in view, not selected for editing.
+  const [sceneInView, setSceneInView] = useState<string | null>(null);
+  // A phone (230r–v, R-79): one column, the scenes as chips, a tool bar under the thumb, and the
+  // columns as sheets that hold the focus and leave the page inert.
+  const phone = useMediaQuery("(max-width: 599px)");
   // One column beside the score at a time (230j): the source, the scene's cast, or the review.
   const [side, setSide] = useState<"source" | "cast" | "review" | null>(null);
   const toggle = (which: "source" | "cast" | "review") => setSide(side === which ? null : which);
@@ -149,7 +157,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const estimate = estimateScriptSeconds(blocks);
   const headings = blocks.filter((block): block is ScriptHeading => block.kind === "heading");
   const selectedIndex = blocks.findIndex((block) => block.id === selected);
-  const selectedScene = selectedIndex >= 0 ? scenes[selectedIndex] : headings[0] ?? null;
+  const selectedScene = selectedIndex >= 0 ? scenes[selectedIndex] : headings.find((heading) => heading.id === sceneInView) ?? headings[0] ?? null;
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
   const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
   const spokenIds = blocks.filter((block) => block.kind === "dialogue" || block.kind === "narration").map((block) => block.id);
@@ -167,6 +175,13 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // A required cue with no sound is amber, and counted here (R-38).
   const missingSounds = blocks.filter((block) => (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.required && !block.soundArtifact).length;
   const newLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && scenes[i]?.source && !block.paragraphs?.length).length;
+  const goScene = (id: string) => {
+    setSelected(null); setLines([]); setSceneInView(id);
+    document.querySelector(`[data-block="${id}"]`)?.scrollIntoView({ block: "start" });
+  };
+  // On a phone, Hear is the selection, or with none the scene in view (230r).
+  const sceneLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && (headings.length === 0 || scenes[i]?.id === selectedScene?.id)).map((block) => block.id);
+  const hearLines = lines.length > 0 ? lines : sceneLines;
 
   const insertAfter = (kind: EpisodeScriptBlock["kind"]) => {
     const at = selectedIndex >= 0 ? selectedIndex + 1 : blocks.length;
@@ -214,55 +229,85 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
     setTimeout(() => URL.revokeObjectURL(link.href), 1_000);
   };
 
+  // A column beside the score, or on a phone the same column as a sheet over it (230t, 230v).
+  const asSheet = (label: string, column: ReactNode) => phone
+    ? <PageSheet open headless title={label} onClose={() => setSide(null)} className="fy-ad-sheet">{column}</PageSheet>
+    : column;
+  const more = (
+    <span className="fy-ad-ep__more">
+      <IconButton label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><More size={16} /></IconButton>
+      {menuOpen && (
+        <div role="menu" className="fy-ad-ep__menu" onClick={() => setMenuOpen(false)}>
+          {phone && <button type="button" role="menuitem" disabled={!stored} onClick={() => navigate(`${base}/script/${episode}?view=audio-studio`)}>Audio Studio</button>}
+          {phone && <button type="button" role="menuitem" onClick={() => toggle("review")}>Review</button>}
+          <button type="button" role="menuitem" onClick={download}>Download script</button>
+          <button type="button" role="menuitem" onClick={() => window.print()}>Print</button>
+        </div>
+      )}
+    </span>
+  );
+  const sceneNumber = selectedScene ? headings.indexOf(selectedScene) + 1 : 0;
   return (
     <div className="fy-ad-ep" data-screen="episode-script">
-      <header className="fy-ad-ep__bar">
-        <IconButton label="Previous episode" disabled={episode <= 1} onClick={() => navigate(`${base}/script/${episode - 1}`)}><ChevronLeft size={16} /></IconButton>
-        <IconButton label="Next episode" disabled={episode >= episodes} onClick={() => navigate(`${base}/script/${episode + 1}`)}><ChevronRight size={16} /></IconButton>
-        <nav className="fy-ad-ep__views" aria-label="Episode views">
-          <button type="button" onClick={() => navigate(base)}>Episodes</button>
-          <button type="button" aria-current="page">Script</button>
-          <button type="button" disabled={!stored} onClick={() => navigate(`${base}/script/${episode}?view=audio-studio`)}>Audio Studio</button>
-        </nav>
-        <label className="fy-ad-ep__title">
-          <span>Episode {episode}</span>
-          <input aria-label="Episode title" value={title} placeholder="Title" maxLength={160}
-            onChange={(event) => { setTitle(event.target.value); setDirty(true); }} />
-        </label>
-        {headings.length > 0 && (
-          <select aria-label="Scene" className="fy-ad-ep__scene" value={selectedScene?.id ?? ""} onChange={(event) => {
-            setSelected(event.target.value);
-            document.querySelector(`[data-block="${event.target.value}"]`)?.scrollIntoView({ block: "start" });
-          }}>
-            {headings.map((heading, i) => <option key={heading.id} value={heading.id}>{i + 1} · {heading.place}</option>)}
-          </select>
-        )}
-        <span className="gap" />
-        {/* The listening ring (230d): what the script will run, against the plan's target. */}
-        <span className="fy-ad-ep__ring" title="Estimated listening time">
-          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8"
-            style={{ strokeDasharray: `${Math.min(1, estimate / Math.max(1, (plan?.minutes ?? 25) * 60)) * 50.3} 50.3` }} /></svg>
-          <b>{clock(estimate)}</b><span>/ {plan?.minutes ?? 25}:00</span>
-        </span>
-        <button type="button" className={cx("fy-ad-ep__toggle", side === "source" && "fy-ad-ep__toggle--on")} aria-pressed={side === "source"} onClick={() => toggle("source")}>
-          <BookOpen size={14} />Source
-        </button>
-        <button type="button" className={cx("fy-ad-ep__toggle", side === "cast" && "fy-ad-ep__toggle--on")} aria-pressed={side === "cast"} onClick={() => toggle("cast")}>
-          <Users size={14} />Cast
-        </button>
-        <button type="button" className={cx("fy-ad-ep__toggle", side === "review" && "fy-ad-ep__toggle--on")} aria-pressed={side === "review"} onClick={() => toggle("review")}>
-          <ListCheck size={14} />Review
-        </button>
-        <span className="fy-ad-ep__more">
-          <IconButton label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><More size={16} /></IconButton>
-          {menuOpen && (
-            <div role="menu" className="fy-ad-ep__menu" onClick={() => setMenuOpen(false)}>
-              <button type="button" role="menuitem" onClick={download}>Download script</button>
-              <button type="button" role="menuitem" onClick={() => window.print()}>Print</button>
+      {phone ? (
+        <>
+          <header className="fy-ad-ep__bar fy-ad-ep__bar--phone">
+            <IconButton label="Episodes" onClick={() => navigate(base)}><ChevronLeft size={18} /></IconButton>
+            <div className="fy-ad-ep__ptitle">
+              <b>{selectedScene?.place || title || `Episode ${episode}`}</b>
+              <small>Episode {episode}{sceneNumber > 0 ? ` · scene ${sceneNumber}` : ""} · ≈ {clock(estimate)}</small>
             </div>
+            <IconButton label="Source" aria-pressed={side === "source"} onClick={() => toggle("source")}><BookOpen size={18} /></IconButton>
+            {more}
+          </header>
+          {headings.length > 0 && (
+            <nav className="fy-ad-ep__chips" aria-label="Scenes">
+              {headings.map((heading, i) => (
+                <button key={heading.id} type="button" aria-current={heading.id === selectedScene?.id ? "true" : undefined} onClick={() => goScene(heading.id)}>
+                  {heading.id === selectedScene?.id ? `${i + 1} · ${heading.place}` : i + 1}
+                </button>
+              ))}
+            </nav>
           )}
-        </span>
-      </header>
+        </>
+      ) : (
+        <header className="fy-ad-ep__bar">
+          <IconButton label="Previous episode" disabled={episode <= 1} onClick={() => navigate(`${base}/script/${episode - 1}`)}><ChevronLeft size={16} /></IconButton>
+          <IconButton label="Next episode" disabled={episode >= episodes} onClick={() => navigate(`${base}/script/${episode + 1}`)}><ChevronRight size={16} /></IconButton>
+          <nav className="fy-ad-ep__views" aria-label="Episode views">
+            <button type="button" onClick={() => navigate(base)}>Episodes</button>
+            <button type="button" aria-current="page">Script</button>
+            <button type="button" disabled={!stored} onClick={() => navigate(`${base}/script/${episode}?view=audio-studio`)}>Audio Studio</button>
+          </nav>
+          <label className="fy-ad-ep__title">
+            <span>Episode {episode}</span>
+            <input aria-label="Episode title" value={title} placeholder="Title" maxLength={160}
+              onChange={(event) => { setTitle(event.target.value); setDirty(true); }} />
+          </label>
+          {headings.length > 0 && (
+            <select aria-label="Scene" className="fy-ad-ep__scene" value={selectedScene?.id ?? ""} onChange={(event) => goScene(event.target.value)}>
+              {headings.map((heading, i) => <option key={heading.id} value={heading.id}>{i + 1} · {heading.place}</option>)}
+            </select>
+          )}
+          <span className="gap" />
+          {/* The listening ring (230d): what the script will run, against the plan's target. */}
+          <span className="fy-ad-ep__ring" title="Estimated listening time">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8"
+              style={{ strokeDasharray: `${Math.min(1, estimate / Math.max(1, (plan?.minutes ?? 25) * 60)) * 50.3} 50.3` }} /></svg>
+            <b>{clock(estimate)}</b><span>/ {plan?.minutes ?? 25}:00</span>
+          </span>
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "source" && "fy-ad-ep__toggle--on")} aria-pressed={side === "source"} onClick={() => toggle("source")}>
+            <BookOpen size={14} />Source
+          </button>
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "cast" && "fy-ad-ep__toggle--on")} aria-pressed={side === "cast"} onClick={() => toggle("cast")}>
+            <Users size={14} />Cast
+          </button>
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "review" && "fy-ad-ep__toggle--on")} aria-pressed={side === "review"} onClick={() => toggle("review")}>
+            <ListCheck size={14} />Review
+          </button>
+          {more}
+        </header>
+      )}
       {drafted && draft && (
         <DraftBar rows={draft} busy={dirty || saving !== null || conflict} proposalId={drafted.proposal.id}
           title={drafted.episodeScripts![scriptPath]!.title !== title ? drafted.episodeScripts![scriptPath]!.title : null}
@@ -415,25 +460,25 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         </div>
         )}
         {/* Never beside a draft (codex on PR 1874): Hear would make the saved words while the draft's show. */}
-        {lines.length > 0 && !draft && (
+        {lines.length > 0 && !draft && !phone && (
           <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
             scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
             onHeard={() => setRetake(false)} />
         )}
-        {side === "source" && (
+        {side === "source" && asSheet("Source", (
           <SourceColumn world={world} story={selectedScene?.source ? world.productions.find((p) => p.meta.id === selectedScene.source!.story) ?? null : source}
             heading={selectedScene ?? null} block={selectedIndex >= 0 ? blocks[selectedIndex]! : null} onClose={() => setSide(null)} />
-        )}
-        {side === "cast" && (
+        ))}
+        {side === "cast" && asSheet("Cast", (
           <CastColumn world={world} production={production} base={base} onClose={() => setSide(null)}
             blocks={headings.length === 0 ? blocks : blocks.filter((_, i) => scenes[i]?.id === selectedScene?.id)} />
-        )}
-        {side === "review" && (
+        ))}
+        {side === "review" && asSheet("Review", (
           // The saved script it names as evidence, never an unsaved draft (codex on PR 1873).
           <ReviewColumn world={world} production={production} episode={episode} version={stored?.script.version ?? 1} blocks={stored?.script.blocks ?? []} onClose={() => setSide(null)}
-            onPick={(id) => { setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
-        )}
+            onPick={(id) => { setSide(phone ? null : side); setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
+        ))}
       </div>
       <footer className="fy-ad-ep__foot">
         <span role="status">
@@ -450,6 +495,25 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         {missingSounds > 0 && <span className="fy-ad-ep__warn">{missingSounds} required sound{missingSounds === 1 ? "" : "s"} missing</span>}
         {newLines > 0 && <span>{newLines} new line{newLines === 1 ? "" : "s"}</span>}
       </footer>
+      {phone && !draft && (
+        // The tool bar (230r): Hear, Ask Arke, Cast and the keyboard, each a 44 px target.
+        <HeldBar className="fy-ad-ep__tools">
+          {hearLines.length > 0 ? (
+            <HearBar compact worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={hearLines} script={blocks}
+              scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
+              takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
+              onHeard={() => setRetake(false)} />
+          ) : <Button variant="primary" disabled>Hear</Button>}
+          <button type="button" className="fy-ad-ep__tool" disabled={!chatSurface} onClick={() => chatSurface && chat!.open(chatSurface)}>Ask Arke</button>
+          <span className="gap" />
+          <IconButton label="Cast" aria-pressed={side === "cast"} onClick={() => toggle("cast")}><Users size={18} /></IconButton>
+          <IconButton label="Type" onClick={() => {
+            const target = selectedIndex >= 0 ? blocks[selectedIndex] : undefined;
+            if (target && (target.kind === "dialogue" || target.kind === "narration")) document.querySelector<HTMLTextAreaElement>(`[data-words="${target.id}"]`)?.focus();
+            else insertAfter("dialogue");
+          }}><Pencil size={18} /></IconButton>
+        </HeldBar>
+      )}
       {adding !== null && (() => {
         const cue = blocks.find((block) => block.id === adding);
         return cue && (cue.kind === "sound" || cue.kind === "ambience" || cue.kind === "music") ? (
