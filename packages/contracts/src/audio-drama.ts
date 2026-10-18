@@ -699,7 +699,8 @@ export function affectedBlocks(scene: readonly EpisodeScriptBlock[], pinned: rea
   const moved = new Set(changed);
   const sceneHit = (pinned ?? []).some((n) => moved.has(n));
   return scene.flatMap((block) => {
-    if (block.kind !== "dialogue" && block.kind !== "narration") return [];
+    // A cue rests on its passage as a line does (codex on PR 1878).
+    if (block.kind === "heading" || block.kind === "note" || block.kind === "silence") return [];
     const own = block.paragraphs ?? [];
     return (own.length > 0 ? own.some((n) => moved.has(n)) : sceneHit) ? [block.id] : [];
   });
@@ -722,4 +723,25 @@ export function unusableSound(
     }
   }
   return null;
+}
+
+/**
+ * Where each paragraph of the adapted version now stands (codex on PR 1878): by its words, each
+ * matched once, in order. A changed paragraph has no place, and pins to it are let go.
+ */
+export function remapParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
+  const places = new Map<string, number[]>();
+  now.forEach((paragraph, i) => { const key = sameText(paragraph); places.set(key, [...(places.get(key) ?? []), i + 1]); });
+  const map = new Map<number, number>();
+  adapted.forEach((paragraph, i) => {
+    const free = places.get(sameText(paragraph));
+    const next = free?.shift();
+    if (next !== undefined) map.set(i + 1, next);
+  });
+  return map;
+}
+
+/** Where an adapted chapter's exact text is kept, by the hash it was pinned at. */
+export function dramaSourceSnapshotPath(productionId: string, hash: string): string {
+  return `productions/${productionId}/source-snapshots/${hash.replace(/^sha256:/, "").replace(/[^a-zA-Z0-9]/g, "")}.md`;
 }

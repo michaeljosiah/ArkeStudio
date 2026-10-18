@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
@@ -12,6 +12,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { DRAMA_ADAPTATION_SCHEMA_VERSION, DRAMA_CAST_SCHEMA_VERSION, DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /** Hearing an audio drama's lines (SPEC-057 R-25..R-31): priced, never substituted unasked, kept as takes. */
@@ -307,10 +308,17 @@ describe("a chapter's verdict (SPEC-057 R-61)", () => {
   it("keeps what became of a chapter in the production, fenced at its schema, and clears it", async () => {
     const { store, id } = await drama([maren("Climb.")]);
     const record = () => store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
-    await setDramaVerdict(store, id, "ch-5", { verdict: "show", reason: "Heard, not told." });
-    assert.deepEqual(record().verdicts, { "ch-5": { verdict: "show", reason: "Heard, not told." } });
+    await assert.rejects(setDramaVerdict(store, id, "ch-5", { verdict: "cut" }), /not in the story/, "a drama adapting nothing has no chapters");
+    // Adapting the fixture's novel: its chapters take verdicts.
+    const path = `productions/${id}/audio-drama.json`;
+    const live = await readFile(join(store.dir, path), "utf8");
+    await store.commit({ kind: "audio-drama", source: "test", files: [{ path, action: "replace", baseHash: sha256(live),
+      content: JSON.stringify({ ...JSON.parse(live), source: { productionId: "the-ledger-of-nights" } }, null, 2) + "\n" }] });
+    const chapter = store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!.chapters[0]!.id;
+    await setDramaVerdict(store, id, chapter, { verdict: "show", reason: "Heard, not told." });
+    assert.deepEqual(record().verdicts, { [chapter]: { verdict: "show", reason: "Heard, not told." } });
     assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_ADAPTATION_SCHEMA_VERSION);
-    await setDramaVerdict(store, id, "ch-5", null);
+    await setDramaVerdict(store, id, chapter, null);
     assert.equal(record().verdicts, undefined);
   });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { affectedBlocks, changedParagraphs, type EpisodeScriptBlock } from "../src/audio-drama.js";
+import { affectedBlocks, changedParagraphs, remapParagraphs, type EpisodeScriptBlock } from "../src/audio-drama.js";
 import { ulid } from "../src/ids.js";
 
 /** Changed source (SPEC-057 R-64, R-65): which paragraphs of the adapted version are gone now. */
@@ -30,5 +30,18 @@ describe("changed paragraphs", () => {
     const unpinned: EpisodeScriptBlock = { id: ulid(), kind: "narration", words: "She poured." };
     assert.deepEqual(affectedBlocks([pinned, other, unpinned], [1, 2, 3], [2]), [pinned.id, unpinned.id]);
     assert.deepEqual(affectedBlocks([pinned, other, unpinned], [3], [4]), []);
+  });
+});
+
+describe("codex round 1 on PR 1878", () => {
+  it("renumbers paragraphs that moved, and lets a changed one go", () => {
+    const v14 = ["A.", "B.", "C."];
+    const v15 = ["New.", "A.", "C.", "B, rewritten."];
+    assert.deepEqual([...remapParagraphs(v14, v15)], [[1, 2], [3, 3]]);
+  });
+
+  it("counts a cue resting on a changed paragraph", () => {
+    const cue: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", paragraphs: [2] };
+    assert.deepEqual(affectedBlocks([cue], [], [2]), [cue.id]);
   });
 });

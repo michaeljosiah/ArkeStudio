@@ -2358,6 +2358,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       value: DramaRoleSchema.nullable(),
     })
     .strict(),
+  /** The exact chapter text a scene was adapted from, by the hash it was pinned at (SPEC-057 R-65). */
+  z
+    .object({
+      kind: z.literal("read-drama-source"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      hash: z.string().min(1).max(200),
+    })
+    .strict(),
   /** What became of a source chapter (SPEC-057 R-61): kept in `audio-drama.json`; null clears it. */
   z
     .object({

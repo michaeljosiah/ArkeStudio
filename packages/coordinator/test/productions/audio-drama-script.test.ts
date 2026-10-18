@@ -4,7 +4,7 @@ import { access, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { createProduction } from "../../src/productions/ops.js";
-import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { readDramaSource, saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { EPISODE_SCRIPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -74,5 +74,19 @@ describe("saving an episode script (SPEC-057 R-83)", () => {
     assert.ok(saved.hash);
     const read = store.getBundle().productions.find(production => production.meta.id === id)!.episodeScripts![0]!.script.blocks;
     assert.deepEqual(read.map(block => "paragraphs" in block ? block.paragraphs : (block as { source?: { paragraphs?: number[] } }).source?.paragraphs), [[3, 9], [3], [9]]);
+  });
+});
+
+describe("codex round 1 on PR 1878", () => {
+  it("keeps the exact chapter text a scene is pinned to, by its hash", async () => {
+    const { store, id } = await drama();
+    const story = store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+    const chapter = story.chapters[0]!;
+    const pin: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The quay",
+      source: { story: story.meta.id, chapter: chapter.id, version: chapter.version ?? 1, hash: chapter.hash! } };
+    await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [pin], baseHash: null });
+    const kept = await readDramaSource(store, id, chapter.hash!);
+    assert.ok(kept.length > 0, "the adapted text is there to compare with, whatever the chapter becomes");
+    await assert.rejects(readDramaSource(store, id, "sha256:never-pinned"), /was not kept/);
   });
 });

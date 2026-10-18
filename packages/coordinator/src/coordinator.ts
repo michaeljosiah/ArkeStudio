@@ -25,7 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
-import { decideDramaNote, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
+import { decideDramaNote, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -10657,6 +10657,15 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         await new ProseAuthoringService(store).editPlan(msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "read-drama-source": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { body: string } | { reason: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "drama.source", requestId: msg.requestId, ...result });
+        if (!store || store.worldId !== msg.worldId) { answer({ reason: "that world is not open" }); return; }
+        try { answer({ body: await readDramaSource(store, msg.productionId, msg.hash) }); }
+        catch (err) { answer({ reason: describeCoordinatorError(err) }); }
         return;
       }
       case "read-chapter-version": {

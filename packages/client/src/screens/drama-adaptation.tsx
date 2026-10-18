@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, chapterParagraphs, changedParagraphs, productionShape,
+  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
   type DramaChapterDecision, type DramaVerdict, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
 import { CUT, adaptationMap, layoutMap, type MapChapter, type MapScene } from "../lib/adaptation.js";
 import { blockLine } from "../lib/episode-script.js";
 import {
-  openChapter, readChapterVersion, saveEpisodeScript, setDramaVerdict, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
+  openChapter, readChapterVersion, readDramaSource, saveEpisodeScript, setDramaVerdict, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
 } from "../lib/store.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -29,6 +29,10 @@ export function DramaAdaptationScreen() {
   if (!world || !production) return <Screen id="drama-adaptation"><EmptyState title="Opening the adaptation…" /></Screen>;
   if (!productionShape(production.meta).isAudioDrama) return <Screen id="drama-adaptation"><EmptyState title="Adaptation is an audio drama's." /></Screen>;
   if (!production.audioDrama?.source) return <Screen id="drama-adaptation"><EmptyState title="This drama adapts no story." /></Screen>;
+  // The story may since have gone (codex on PR 1878): said, rather than an empty map.
+  if (!world.productions.some((candidate) => candidate.meta.id === production.audioDrama!.source!.productionId)) {
+    return <Screen id="drama-adaptation"><EmptyState title="The story this drama adapts is no longer here." /></Screen>;
+  }
   return <Adaptation world={world} production={production} />;
 }
 
@@ -66,7 +70,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
           <span className="fy-ad-map__chip">Planned {map.counts.planned}</span>
           <span className="fy-ad-map__chip">Not planned {map.counts.notPlanned}</span>
           {map.counts.changed > 0 && <span className="fy-ad-map__chip fy-ad-map__chip--warn">{map.counts.changed} changed</span>}
-          {map.counts.notPlanned > 0 && surface && (
+          {(map.counts.notPlanned > 0 || map.episodes.some((episode) => !episode.planned)) && surface && (
             <Button size="sm" variant="primary" onClick={() => ask(`Plan the unplanned episodes of this audio drama from the chapters not yet planned, with production-episode-script for each episode.`)}>Plan with Arke</Button>
           )}
         </header>
@@ -171,7 +175,8 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
   const [verdict, setVerdict] = useState<DramaVerdict>(chapter.verdict ?? "keep");
   const [reason, setReason] = useState(chapter.decision?.reason ?? "");
   const [leavesOut, setLeavesOut] = useState(chapter.decision?.leavesOut ?? "");
-  useEffect(() => { setEditing(false); setVerdict(chapter.verdict ?? "keep"); setReason(chapter.decision?.reason ?? ""); setLeavesOut(chapter.decision?.leavesOut ?? ""); }, [chapter.id]);
+  // Follows the stored decision too (codex on PR 1878): a cleared one is not saved back from a stale draft.
+  useEffect(() => { setEditing(false); setVerdict(chapter.verdict ?? "keep"); setReason(chapter.decision?.reason ?? ""); setLeavesOut(chapter.decision?.leavesOut ?? ""); }, [chapter.id, JSON.stringify(chapter.decision ?? null)]);
   const scenes = map.episodes.flatMap((episode) => episode.scenes).filter((scene) => scene.chapter === chapter.id);
   const save = () => {
     const value: DramaChapterDecision = { verdict, ...(reason.trim() ? { reason: reason.trim() } : {}), ...(leavesOut.trim() ? { leavesOut: leavesOut.trim() } : {}) };
@@ -221,8 +226,8 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
   );
 }
 
-/** A chapter's text, as one version or as it is now. */
-function useChapterText(world: WorldBundle, story: ProductionBundle | null, chapter: MapChapter | undefined, version: number | "now"): string[] | null | string {
+/** A chapter's text: as adapted (its kept text by hash, else its version), or as it is now. */
+function useChapterText(world: WorldBundle, production: ProductionBundle, story: ProductionBundle | null, chapter: MapChapter | undefined, version: number | "now", hash?: string): string[] | null | string {
   const [text, setText] = useState<string[] | string | null>(null);
   useEffect(() => {
     if (!story || !chapter) return;
@@ -238,10 +243,13 @@ function useChapterText(world: WorldBundle, story: ProductionBundle | null, chap
       });
     };
     let stop = () => {};
+    const byVersion = () => readChapterVersion(world.meta.worldId, story.meta.id, chapter.file, version as number).then(done, (error: Error) => fail(error.message));
     if (version === "now") stop = now();
-    else readChapterVersion(world.meta.worldId, story.meta.id, chapter.file, version).then(done, (error: Error) => fail(error.message));
+    // The exact text pinned (codex on PR 1878): an edit in place keeps the version number.
+    else if (hash) readDramaSource(world.meta.worldId, production.meta.id, hash).then(done, byVersion);
+    else void byVersion();
     return () => { live = false; stop(); };
-  }, [story?.meta.id, chapter?.id, chapter?.hash, version]);
+  }, [story?.meta.id, chapter?.id, chapter?.hash, version, hash]);
   return text;
 }
 
@@ -256,8 +264,10 @@ function Compare({ world, production, map, scene, ask, onClose }: {
 }) {
   const chapter = map.chapters.find((candidate) => candidate.id === scene.chapter);
   const pin = scene.heading.source!;
-  const adapted = useChapterText(world, map.story, chapter, pin.version);
-  const now = useChapterText(world, map.story, chapter, "now");
+  const adapted = useChapterText(world, production, map.story, chapter, pin.version, pin.hash);
+  const now = useChapterText(world, production, map.story, chapter, "now");
+  // The script as Compare opened it (codex on PR 1878): Keep refuses if it moved meanwhile.
+  const [openedHash] = useState(() => production.episodeScripts?.find((entry) => entry.script.episode === scene.episode)?.hash ?? null);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -274,11 +284,29 @@ function Compare({ world, production, map, scene, ask, onClose }: {
     if (result.disposition === "saved") onClose(); else setFailure(result.reason ?? "Not kept.");
   }), [saving]);
   const keep = () => {
-    if (!stored || !chapter) return;
-    // Only the scene's pin moves (R-65): the version considered, and why; its lines and takes stay.
-    const blocks = stored.script.blocks.map((block): EpisodeScriptBlock => block.id === scene.heading.id && block.kind === "heading"
-      ? { ...block, source: { ...block.source!, version: chapter.version, ...(chapter.hash ? { hash: chapter.hash } : {}), ...(reason.trim() ? { keptReason: reason.trim() } : {}) } }
-      : block);
+    if (!stored || !chapter || !Array.isArray(adapted) || !Array.isArray(now)) return;
+    if (stored.hash !== openedHash) { setFailure("The script changed while you were comparing. Compare again."); return; }
+    // Only the scene's pin moves (R-65): the version considered, and why — and its paragraph
+    // numbers, renumbered for the text now, a changed paragraph let go (codex on PR 1878). The lines'
+    // words are untouched, so their takes are too (R-66).
+    const places = remapParagraphs(adapted, now);
+    const renumber = (pins: readonly number[] | undefined) => (pins ?? []).flatMap((n) => places.has(n) ? [places.get(n)!] : []);
+    const inScene = new Set([scene.heading.id, ...scene.blocks.map((block) => block.id)]);
+    const blocks = stored.script.blocks.map((block): EpisodeScriptBlock => {
+      if (!inScene.has(block.id)) return block;
+      if (block.kind === "heading" && block.id === scene.heading.id) {
+        const { keptReason: _was, paragraphs, ...source } = block.source!;
+        const moved = renumber(paragraphs);
+        return { ...block, source: { ...source, version: chapter.version, ...(chapter.hash ? { hash: chapter.hash } : {}),
+          ...(moved.length > 0 ? { paragraphs: moved } : {}), ...(reason.trim() ? { keptReason: reason.trim() } : {}) } };
+      }
+      if ("paragraphs" in block && block.paragraphs?.length) {
+        const { paragraphs, ...rest } = block;
+        const moved = renumber(paragraphs);
+        return (moved.length > 0 ? { ...rest, paragraphs: moved } : rest) as EpisodeScriptBlock;
+      }
+      return block;
+    });
     const requestId = saveEpisodeScript(world.meta.worldId, production.meta.id, scene.episode, stored.script.title, blocks, stored.hash);
     if (requestId === null) setFailure("The studio is disconnected."); else setSaving(requestId);
   };

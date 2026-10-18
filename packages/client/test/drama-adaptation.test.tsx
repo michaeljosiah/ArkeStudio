@@ -7,7 +7,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { DramaAdaptationScreen } from "../src/screens/drama-adaptation.js";
 import { CUT, adaptationMap, layoutMap } from "../src/lib/adaptation.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -22,8 +22,8 @@ Object.assign(globalThis, {
   requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
 });
 
-const heading = (chapter: string, version: number, place: string): EpisodeScriptBlock =>
-  ({ id: ulid(), kind: "heading", place, source: { story: "low-water", chapter, version, hash: `sha256:${chapter}-v${version}` } });
+const heading = (chapter: string, version: number, place: string, paragraphs?: number[]): EpisodeScriptBlock =>
+  ({ id: ulid(), kind: "heading", place, source: { story: "low-water", chapter, version, hash: `sha256:${chapter}-v${version}`, ...(paragraphs ? { paragraphs } : {}) } });
 const line = (words: string): EpisodeScriptBlock => ({ id: ulid(), kind: "dialogue", speaker: "maren-kest", words });
 
 /** Four chapters: 1 and 2 kept in order, 3 cut, 4 moved ahead into episode 1; chapter 2 rewritten since. */
@@ -43,7 +43,7 @@ function world(): ClientState {
       { file: "episode-001.json", hash: "sha256:e1", script: { version: 2, episode: 1, title: "Low Water", blocks: [
         heading("tide", 4, "The quay"), line("One."), heading("wax", 1, "The cylinder"), line("Two.")] } },
       { file: "episode-002.json", hash: "sha256:e2", script: { version: 9, episode: 2, title: "The Tide Log", blocks: [
-        heading("low", 14, "The lamp room"), line("Your brother hated that tower.")] } },
+        heading("low", 14, "The lamp room", [2]), line("Your brother hated that tower.")] } },
     ] };
   state.world!.productions = [...state.world!.productions, novel, drama] as never;
   return state;
@@ -116,9 +116,16 @@ describe("the Adaptation page (230m/n)", () => {
     const compare = [...container.querySelectorAll("button")].find((button) => button.textContent === "Compare")!;
     await act(async () => props(compare).onClick!({}));
     assert.match(container.querySelector(".fy-ad-cmp__bar")!.textContent!, /Chapter 2 · v14 → v15/);
-    const read = sent.find((message) => message.kind === "read-chapter-version") as { version: number } | undefined;
-    assert.equal(read?.version, 14, "the chapter as adapted is read at its pinned version");
-    assert.ok(sent.some((message) => message.kind === "open-chapter"), "the chapter now is opened");
+    const read = sent.find((message) => message.kind === "read-drama-source") as { requestId: string; hash: string } | undefined;
+    assert.equal(read?.hash, "sha256:low-v14", "the chapter as adapted is its exact pinned text");
+    const opened = sent.find((message) => message.kind === "open-chapter") as { requestId: string } | undefined;
+    assert.ok(opened, "the chapter now is opened");
+    const AT = "2026-10-18T12:00:00.000Z";
+    await act(async () => __applyEventForTest({ type: "drama.source", at: AT, requestId: read!.requestId as never, body: "Odile poured.\n\nYour brother hated that tower." }));
+    await act(async () => __applyEventForTest({ type: "chapter.open-result", at: AT, requestId: opened!.requestId as never, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water", chapterId: "low", disposition: "opened", body: "A new first paragraph.\n\nOdile poured.\n\nYour brother loved that tower." }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.match(container.textContent!, /1 line · 0 kept takes/, "the scene's line rests on the changed paragraph");
     assert.equal(container.querySelectorAll(".fy-ad-cmp__col").length, 3);
     await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Keep the script")!).onClick!({}));
     const save = sent.find((message) => message.kind === "save-episode-script") as Extract<ClientMessage, { kind: "save-episode-script" }>;
