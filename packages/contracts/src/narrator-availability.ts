@@ -15,8 +15,9 @@ export const NARRATOR_UNAVAILABLE_MAX = 300;
  * Judged as the coordinator judges the book's narrator: against the world's voices that can
  * narrate now, never the app narrator's copy of another world's (SPEC-049 R-12). A provider whose
  * credential has faulted counts even where its catalogue rows are not marked, as a prebuilt cloud
- * voice's are not. With no catalogue yet, only a fault can say; an empty one is a list that did
- * not load, not one that dropped the voice.
+ * voice's are not. With no catalogue yet, only a fault can say. An empty one, no voice service or a
+ * list that did not load, resolves no narrator, so Read is refused and Direct and the chapter hold
+ * on it, the coordinator and the window alike (codex on PR 1869).
  */
 export function bookNarratorUnavailable(
   narrator: { provider: string; model?: string | undefined; voiceId: string } | undefined,
@@ -26,7 +27,8 @@ export function bookNarratorUnavailable(
   if (narrator === undefined) return null;
   const status = providers.find((entry) => entry.id === narrator.provider);
   if (status !== undefined && status.fault !== null && credentialFaulted(status)) return readerUnavailableWords(narrator.provider, status.fault);
-  if (catalogue === null || catalogue.length === 0) return null;
+  if (catalogue === null) return null;
+  if (catalogue.length === 0) return "the voice list didn't load";
   const model = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId);
   const row = catalogue.find((voice) => voice.provider === narrator.provider && voice.model === model && voice.voiceId === narrator.voiceId && voice.narratorCopy !== true && supportsVoiceUse(voice, "narration"));
   if (row === undefined) return `${providerName(narrator.provider)} doesn't list this voice now`;

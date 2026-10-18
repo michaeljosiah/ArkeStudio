@@ -1612,6 +1612,49 @@ describe("the director reads the book (design turn 184)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
     assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 5", "Maren's voice, Low tide, is ElevenLabs'");
   });
+
+  it("a block's own read waits only on its own reader's lane (codex on PR 1869)", async () => {
+    const cast = inkbound("cast");
+    const m = await mount(voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } }));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": "“You hear it too,”", "p1.1": "she said.", "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(Object.keys(texts), texts), voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    const reread = async (index: number, key: string) => {
+      await act(async () => all(m, ".fy-ab__block")[index]!.click());
+      await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+      assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, [key]);
+      await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    };
+    // The narrator's made paragraph read again alone: George reads it here, whatever Maren's lane is doing.
+    await reread(1, "p0.0");
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading…/, "another block's lane holds nothing of this read");
+  });
+
+  it("Make again of a made block waits on that block's own lane (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    const texts = { title: "Chapter 2 · The counting of bells", "p0.0": "Maren counted the bells.", "p1.0": LINE, "p3.0": "Six, and the tide <br> not yet called." };
+    await answerOpen(m, { audiobook: record(NARRATION_KEYS, texts) });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [{ ...RACHEL, attributes: [], local: false, canClone: false, usedBy: [] }] }));
+    await act(async () => all(m, ".fy-ab__block")[1]!.click());
+    await act(async () => q(m, '[data-testid="audiobook-make-again"]')!.click());
+    assert.deepEqual((m.sent.findLast((message) => message.kind === "read-audiobook-chapter") as Extract<ClientMessage, { kind: "read-audiobook-chapter" }>).blocks, ["p0.0"]);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 1, blocks: 1 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 1", "the block it reads again, though made");
+  });
+
+  it("the chapter holds Direct and Read on a book narrator an empty voice list cannot resolve (codex on PR 1869)", async () => {
+    const m = await mount(voiced(withBook(inkbound(), { narrator: RACHEL })));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [] }));
+    assert.equal((q(m, '[data-testid="read-audiobook"]') as HTMLButtonElement).disabled, true);
+    assert.match(text(m), /Rachel unavailable · the voice list didn't load/);
+    assert.equal((await menuItem(m, "direct-audiobook"))!.getAttribute("aria-disabled"), "true");
+  });
 });
 
 /**

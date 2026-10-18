@@ -35,9 +35,9 @@ describe("the book narrator's availability (issue 1661)", () => {
     assert.equal(bookNarratorUnavailable(NARRATOR, [{ ...row, narratorCopy: true }]), "Google doesn't list this voice now", "the app narrator's copy of another world's voice is not this world's (SPEC-049 R-12)");
   });
 
-  it("a catalogue not yet asked, or one that did not load, says nothing of the voice", () => {
+  it("a catalogue not yet asked says nothing of the voice; one that came back empty resolves no narrator (codex on PR 1869)", () => {
     assert.equal(bookNarratorUnavailable(NARRATOR, null, [ok]), null);
-    assert.equal(bookNarratorUnavailable(NARRATOR, [], [ok]), null);
+    assert.equal(bookNarratorUnavailable(NARRATOR, [], [ok]), "the voice list didn't load");
   });
 
   it("puts a refused payment in the author's words and leaves any other reason as the reader said it", () => {

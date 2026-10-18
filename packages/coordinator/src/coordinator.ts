@@ -1632,10 +1632,9 @@ export class Coordinator {
     // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
     const saved = book === null || book === "unreadable" ? undefined : book.narrator;
-    // A catalogue that did not load says nothing of the voice, but a narrator it cannot resolve
-    // cannot read either: Read refuses one, so Direct and the door hold on it too (codex on PR 1869).
-    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list())
-      ?? (saved !== undefined && (own === null || own.fallback) ? "the voice list didn't load" : null);
+    // One rule with the window's: a narrator the catalogue cannot resolve, an empty one included,
+    // cannot read, so Read refuses it and Direct and the door hold on it (codex on PR 1869).
+    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list());
     if (requireAvailable && saved !== undefined && unavailable !== null) {
       throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
     }

@@ -1048,9 +1048,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     }
     if (reading_) {
       // A lane paused under the read holds its requests where they are (issue 1661): said here,
-      // where the read is watched, rather than only on the Activity panel. Any reader of a block
-      // still to make, the cast's as well as the narrator's (codex on PR 1869).
-      const readers = new Set(rows.filter((row) => row.state !== "made").map((row) => row.speaker.provider));
+      // where the read is watched, rather than only on the Activity panel. The lanes are this
+      // run's readers, the cast's as well as the narrator's: the blocks a block's read asked for,
+      // made or not, else those the chapter's read makes (codex on PR 1869).
+      const asked = only.current;
+      const readers = new Set(rows.filter((row) => (asked !== null ? asked.includes(row.block.key) : row.state !== "made" && row.state !== "awaiting")).map((row) => row.speaker.provider));
       const lane = state?.app.queues.find((queue) => queue.paused && readers.has(queue.provider));
       const waiting = lane === undefined ? null : readerUnavailableWords(lane.provider, lane.reason ?? "paused");
       return whole(
