@@ -49,6 +49,8 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
   // is the R-47 test: a capability a local provider declares must land in exactly one drawn row,
   // so a local music provider turns that assertion red rather than rendering nowhere.
   { label: "Music", capabilities: ["music"], cloudOnly: true },
+  // Sound effects and ambiences for an audio drama's cues (SPEC-057 R-39): cloud only, as music is.
+  { label: "Sound effects", capabilities: ["sound-effect"], cloudOnly: true },
   { label: "Language", capabilities: ["llm"] },
 ];
 

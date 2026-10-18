@@ -239,6 +239,24 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
     },
+    {
+      // Read 2026-10-18 (SPEC-057 R-39): https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert —
+      // 0.5–30 s, `loop` on v2 only. https://elevenlabs.io/pricing/api — $0.12/minute = 2,000 micro-USD/second.
+      id: "eleven_text_to_sound_v2", provider: "elevenlabs", capability: "sound-effect",
+      displayName: "ElevenLabs Sound Effects v2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 30, audioFormat: "mp3", maxPromptChars: 450 },
+      pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    },
+    {
+      // Read 2026-10-18 (SPEC-057 R-40): https://elevenlabs.io/docs/api-reference/music/compose —
+      // a prompt up to 10 minutes. https://elevenlabs.io/pricing/api — $0.15/minute = 2,500 micro-USD/second.
+      id: "music_v1", provider: "elevenlabs", capability: "music",
+      displayName: "Eleven Music",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 300, audioFormat: "mp3", maxPromptChars: 2000 },
+      pricing: { kind: "perSecond", microUsdPerSecond: 2500 },
+    },
     // New cloud creative choices start with Flash; saved routing and casting win first.
     geminiSpeechModel("flash"),
     geminiSpeechModel("lite"),

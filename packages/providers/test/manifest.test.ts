@@ -1255,7 +1255,8 @@ describe("the reference route's own ceiling (probed 2026-08-16)", () => {
 describe("direct voice models declare the exact provider wire spelling", () => {
   it("resolves explicit app aliases before sending an ElevenLabs model id", () => {
     for (const m of SHIPPED_MANIFEST.models.filter((x) => x.provider === "elevenlabs")) {
-      assert.match(m.providerModelId ?? m.id, /^eleven_[a-z0-9_]+$/, `${m.id} has a valid provider spelling`);
+      // Eleven Music is spelled `music_v1` on the wire (api-reference/music/compose), not `eleven_*`.
+      assert.match(m.providerModelId ?? m.id, /^(?:eleven_[a-z0-9_]+|music_v[0-9_]+)$/, `${m.id} has a valid provider spelling`);
     }
     assert.equal(model("eleven-v3").providerModelId, "eleven_v3");
     // v4's app id is its wire id; nothing maps it on the way out.
