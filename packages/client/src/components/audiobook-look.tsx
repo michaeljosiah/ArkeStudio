@@ -11,6 +11,7 @@ import {
   type CharacterLook,
   type ChapterAudiobook,
   type LookCharacter,
+  type LookConflict,
   type LookTarget,
   type ReferenceKit,
 } from "@arke-studio/contracts";
@@ -73,12 +74,12 @@ export function lookRows(look: AudiobookLook | null, numberOf: (key: string) => 
 }
 
 /**
- * What a new look starts from: the chapter's own words for them (issue 1658). With a look chosen or
- * carried in, the row's text is that look's clothing, the very line its conflict rows dispute, so
- * the prose's reading kept beside it is what Make again should offer.
+ * What Make again on a conflict starts from. Against the chapter, the chapter's own words for them
+ * (issue 1658): the row's text is the look's clothing, the very line the conflict disputes. Against
+ * the photo, the line itself, since it is the photo that is wrong (codex on PR 1868).
  */
-function newLookLine(row: Row): string {
-  return row.line?.reading ?? row.text;
+function newLookLine(row: Row, conflict: LookConflict): string {
+  return conflict.kind === "chapter" ? (row.line?.reading ?? row.text) : row.text;
 }
 
 /** The words of one line, written on leaving the field when they changed (the author's from then on). */
@@ -135,7 +136,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
   orderOf: (file: string) => number | null;
   off: boolean;
   onWrite: (target: LookTarget, text: string | null) => void;
-  onNewLook: (row: Row) => void;
+  onNewLook: (row: Row, conflict?: LookConflict) => void;
   onBrowse: (row: Row) => void;
   closeState: (look: CharacterLook) => CloseViewState;
   onMakeClose: (row: Row, look: CharacterLook) => void;
@@ -191,7 +192,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
                 {conflict.kind === "chapter" ? "chapter" : "photo"} {conflict.a} · {conflict.kind === "chapter" ? "look" : "line"} {conflict.b}
               </span>
               {sheet !== undefined && (
-                <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onNewLook(row)} data-testid="look-conflict-make">
+                <button type="button" className="fy-sugg__make" disabled={off} onClick={() => onNewLook(row, conflict)} data-testid="look-conflict-make">
                   {chosen !== null ? "Make again" : "Make a look"}
                 </button>
               )}
@@ -486,7 +487,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       orderOf={orderOf}
       off={off}
       onWrite={write}
-      onNewLook={(entry) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: newLookLine(entry) })}
+      onNewLook={(entry, conflict) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: conflict === undefined ? entry.text : newLookLine(entry, conflict) })}
       onBrowse={(entry) => setBrowsing(entry.id)}
       closeState={(chosen) => closeStateFor(row.sheet!, chosen)}
       onMakeClose={makeClose}
@@ -547,7 +548,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       </PageSheet>
       {browsing !== null && (() => {
         const row = rows.find((entry) => entry.id === browsing);
-        return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: newLookLine(row) }); }} />;
+        return row?.sheet === undefined ? null : <SavedLookCollection worldId={worldId} productionId={productionId} sheetId={row.sheet} name={row.label ?? row.id} chapterOrder={chapterOrder} currentId={row.line?.lookId ?? null} sourceOrder={row.line?.from === undefined ? null : orderOf(row.line.from)} onClose={() => setBrowsing(null)} onChoose={(id) => { choose(row, id); setBrowsing(null); }} onNewLook={() => { setBrowsing(null); setMaking({ key: row.id, name: row.label ?? row.id, sheet: row.sheet!, line: row.text }); }} />;
       })()}
       {making !== null && (
         <NewLookSheet open onClose={() => setMaking(null)} worldId={worldId} productionId={productionId} chapterFile={chapterFile} chapterOrder={chapterOrder} who={{ key: making.key, name: making.name, sheet: making.sheet }} line={making.line} />

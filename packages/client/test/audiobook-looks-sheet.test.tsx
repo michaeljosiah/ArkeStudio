@@ -168,6 +168,12 @@ describe("a character with looks (193a)", () => {
     assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), reading, "from the chapter's own words, not the look's");
     assert.equal(sentOf(m, "generate-character-looks").length, 0, "nothing is made until Make");
   });
+
+  it("Make again on a photo conflict starts from the line, which is right, not the chapter's words (codex on PR 1868)", async () => {
+    await mount(LOOK({ text: STORM.prompt, lookId: STORM.id, reading: "Hood down, rain in her hair.", conflicts: [{ kind: "photo", part: "Hood", a: "down", b: "up" }] }));
+    await press(bodyAll('[data-testid="look-conflict-make"]')[0]);
+    assert.equal(fieldValue(bodyAll('[data-testid="new-look-clothing"]')[0]!), STORM.prompt);
+  });
 });
 
 describe("making a look from the sheet", () => {

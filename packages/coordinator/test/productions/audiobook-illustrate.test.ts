@@ -317,6 +317,38 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
     );
   });
 
+  it("holds a row whose look came to disagree after the proposal, unless sent as it is (codex on PR 1868)", () => {
+    let flagged = false;
+    return withHarness(
+      async (h) => {
+        await acceptCharacterLook(h.store()!, "maren-kest", { id: LOOK_ID, file: `takes/${LOOK_ID}/look.png`, kind: "costume", prompt: "Storm coat, hood up.", takeId: LOOK_ID, artDirectionVersion: 1, framing: "full-body" });
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000004" });
+        await h.send({ kind: "choose-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, key: "maren-kest", sheet: "maren-kest", lookId: LOOK_ID, requestId: "01J00000000000000000000005" });
+        const proposal = await proposed(h);
+        assert.ok(proposal.rows.length > 1 && proposal.rows.every((row) => row.disagrees === undefined), "nothing flagged when it was proposed");
+        // Review looks, read again: the sheet flags the look while the card is still open.
+        flagged = true;
+        await h.send({ kind: "derive-audiobook-look", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, requestId: "01J00000000000000000000006" });
+        const [first, second] = proposal.rows;
+        await accept(h.send, proposal, { blocks: [first!.block, second!.block], without: [second!.block], confirmedMicroUsd: first!.estimatedMicroUsd + second!.estimatedMicroUsd });
+        const last = progressOf(h.events).at(-1)!.progress;
+        assert.deepEqual(last.failed, [{ block: first!.block, reason: "a look disagrees with the chapter · review looks" }], "not made, nor paid for, in a look the chapter now disputes");
+        assert.equal(h.enqueued.length, 1, "the row sent as it is is made");
+      },
+      {
+        illustrate: says((input) => MARENS(input)),
+        look: async () => ({ place: { text: "The rail desk at dawn, grey light." }, characters: [
+          { who: "maren-kest", text: "Oilskin coat, dark with salt.", ...(flagged ? { conflicts: [{ part: "Hood", chapter: "down", look: "up" }] } : {}) },
+          { who: "bray-half-hitch", text: "Three belts, a wet cap." },
+        ] }),
+        prepare: async (worldDir) => {
+          await mkdir(join(worldDir, "references", "maren-kest", "takes", LOOK_ID), { recursive: true });
+          await writeFile(join(worldDir, "references", "maren-kest", "takes", LOOK_ID, "look.png"), pngBytes());
+        },
+      },
+    );
+  });
+
   it("refuses a confirm below the total, and the run never begins", () =>
     withHarness(
       async (h) => {

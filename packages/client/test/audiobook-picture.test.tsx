@@ -702,15 +702,20 @@ describe("a made picture on its block (turn 194g)", () => {
     assert.deepEqual(rewrite.changes, [{ key: "maren-kest", from: STORM_LOOK.id, to: HARBOUR_LOOK.id }]);
   });
 
-  it("a person drafted with nothing to carry rides the chapter's look where the model has room, and the limit still holds (codex on PR 1868)", () => {
+  it("who rides is said again for everyone when someone gains a picture: a lead given a look takes a supporting slot (codex on PR 1868)", () => {
     const kits = state().world!.referenceKits;
     const harbour = { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } };
+    const budget = (limit: number) => ({ model: { ...GPT_IMAGE, accepts: { ...GPT_IMAGE.accepts, referenceImages: limit } }, billing: (sheet: string) => (sheet === "maren-kest" ? "lead" : "support") });
     const bare = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
-    const riding = withOwnLooks([bare], {}, harbour, kits, undefined, 2)[0]!;
+    const riding = withOwnLooks([bare], {}, harbour, kits, undefined, budget(2))[0]!;
     assert.deepEqual([riding.reference, riding.carried], [`references/maren-kest/${HARBOUR_LOOK.file}`, true], "never `over the limit` for a look the model can carry");
-    assert.equal(withOwnLooks([bare], {}, harbour, kits, undefined, 0)[0]!.carried, false, "a model that takes no picture carries none");
+    assert.equal(withOwnLooks([bare], {}, harbour, kits, undefined, budget(0))[0]!.carried, false, "a model that takes no picture carries none");
+    // A supporting character carried first, the bare lead after, and room for one: the lead's look rides, as Make sends it.
+    const support = { key: "odile-sarn", name: "Odile", sheet: "odile-sarn", kind: "character" as const, reference: "references/odile-sarn/head-front.png", carried: true };
+    assert.deepEqual(withOwnLooks([support, bare], {}, harbour, kits, undefined, budget(1)).map((entry) => [entry.key, entry.carried]), [["odile-sarn", false], ["maren-kest", true]]);
+    // Nobody gained or lost a picture: the drafted budget stands, one it left out included.
     const left = { ...bare, reference: "references/maren-kest/head-front.png" };
-    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, 2)[0]!.carried, false, "one the drafted budget left out stays out");
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, false);
   });
 
   it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {

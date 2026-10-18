@@ -13,7 +13,10 @@ import {
   mainPhotoFor,
   pictureOwnLooks,
   priceLabel,
+  referenceBudget,
   type AudiobookLook,
+  type BudgetCandidate,
+  type ManifestModel,
   type PictureOwnLooks,
   type PictureShot,
   type PictureSuggestion,
@@ -22,7 +25,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks } from "../lib/store.js";
+import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -109,11 +112,13 @@ type LookMode = "only" | "chapter";
  * before the chapter's look changed would otherwise show, and Make again send, words for clothes
  * the coordinator no longer dresses them in (issue 1658), with no Update prompt to offer.
  *
- * A person drafted with nothing to carry was never weighed against the model's limit, so their
- * drafted `carried` says nothing of the picture they ride now: they ride where `limit` leaves room
- * (codex on PR 1868), and the coordinator weighs everyone again at Make.
+ * Who rides is the model's reference budget to say. Where someone has a picture now who had none
+ * when the card was drafted, or the other way round, it is said again for everyone, ranked as the
+ * coordinator ranks at Make (`pictureWho`): a lead given a look takes a supporting character's
+ * slot rather than wait for a spare one (codex on PR 1868). `budget` is the model as Make weighs
+ * it, and each sheet's billing.
  */
-export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined, limit = Number.POSITIVE_INFINITY): PictureWho[] {
+export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined, budget?: { model: ManifestModel; billing: (sheetId: string) => string | undefined }): PictureWho[] {
   const resolved = who.map((entry): PictureWho => {
     if (entry.kind !== "character" || entry.sheet === undefined) return entry;
     const mine = own[entry.key];
@@ -133,12 +138,14 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
     const photo = kit === undefined ? null : mainPhotoFor(kit);
     return { ...base, reference: photo === null ? null : `references/${entry.sheet}/${photo.file}`, carried: photo !== null && entry.carried, ...tag };
   });
-  let room = limit - resolved.filter((entry) => entry.carried).length;
-  return resolved.map((entry, index) => {
-    if (who[index]!.reference !== null || entry.reference === null || entry.carried || room <= 0) return entry;
-    room -= 1;
-    return { ...entry, carried: true };
+  if (budget === undefined || resolved.every((entry, index) => (entry.reference === null) === (who[index]!.reference === null))) return resolved;
+  const candidates: BudgetCandidate[] = resolved.flatMap((entry, index) => {
+    if (entry.sheet === undefined) return [];
+    const billing = budget.billing(entry.sheet);
+    return [{ sheetId: entry.sheet, kind: entry.kind === "place" ? "location" as const : "character" as const, ...(billing !== undefined ? { billing } : {}), appearanceOrder: index, hasReference: entry.reference !== null }];
   });
+  const carried = new Set(referenceBudget(candidates, budget.model).carried.filter((candidate) => candidate.referenceRole === "primary").map((candidate) => candidate.sheetId));
+  return resolved.map((entry) => ({ ...entry, carried: entry.reference !== null && entry.sheet !== undefined && carried.has(entry.sheet) }));
 }
 
 /**
@@ -345,6 +352,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   /** Update prompt on its way: the request, and the look each person's words are being rewritten for. */
   const [updating, setUpdating] = useState<{ id: string; to: Record<string, string> } | null>(null);
   const asks = useAudiobookAsks();
+  const models = useStore().state?.app.manifest?.models;
   const labels = useMemo(() => characterLabels(world.sheets), [world.sheets]);
   const chapterLook = chapter?.look ?? null;
   const chosenIn = (key: string): string | null => chapterLook?.characters[key]?.lookId ?? null;
@@ -416,7 +424,10 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const own: PictureOwnLooks = Object.fromEntries(
     [...Object.entries(held).filter(([key]) => !(key in pressedOwn)), ...Object.entries(pressedOwn).flatMap(([key, lookId]) => (lookId === null ? [] : [[key, lookId] as const]))],
   );
-  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, suggestion.model.references);
+  // The model as Make weighs it, at the references the card was drafted under, and each sheet's billing.
+  const model = models?.find((candidate) => candidate.provider === suggestion.model.provider && candidate.id === suggestion.model.id);
+  const admission = model === undefined ? undefined : { model: { ...model, accepts: { ...model.accepts, referenceImages: suggestion.model.references } }, billing: (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.billing };
+  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, admission);
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.

@@ -162,6 +162,7 @@ import {
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   pictureLookFor,
+  chapterLookDisagreement,
   kitLookLibrary,
   ridingPicks,
   PICTURE_PROMPT_MAX,
@@ -1716,7 +1717,7 @@ export class Coordinator {
    * lands, the record sent to the windows each time. A picture that fails is held with its reason
    * and the run goes on; Stop cancels the one in hand, keeps what is made and spends nothing more.
    */
-  private async runIllustration(store: WorldStore, run: { productionId: string; chapter: { id: string; file: string; order: number }; proposal: IllustrationProposal; rows: IllustrationRow[]; confirmedMicroUsd: number; control: AbortController; key: string }): Promise<void> {
+  private async runIllustration(store: WorldStore, run: { productionId: string; chapter: { id: string; file: string; order: number }; proposal: IllustrationProposal; rows: IllustrationRow[]; without: ReadonlySet<string>; confirmedMicroUsd: number; control: AbortController; key: string }): Promise<void> {
     const { productionId, chapter, proposal, rows, control, key } = run;
     const ids = { worldId: store.worldId, productionId, chapterId: chapter.id };
     const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: run.confirmedMicroUsd };
@@ -1753,6 +1754,12 @@ export class Coordinator {
           // The chapter's look as it stands now: a look chosen since the proposal rides (R-119); and a
           // look held on the block for its picture alone rides for that person in its place (R-146).
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
+          // A look the Looks sheet has come to flag since the proposal holds the row as the card
+          // would have (issue 1658), unless the author sent it as it is (codex on PR 1868).
+          if (!run.without.has(row.block) && who.some((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0)) {
+            progress.failed.push({ block: row.block, reason: "a look disagrees with the chapter · review looks" });
+            continue;
+          }
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
@@ -15906,7 +15913,7 @@ export class Coordinator {
         const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: msg.confirmedMicroUsd };
         this.makingIllustrations.set(key, { control, ...ids, progress });
         try {
-          await this.runIllustration(store, { productionId: msg.productionId, chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, proposal, rows, confirmedMicroUsd: msg.confirmedMicroUsd, control, key });
+          await this.runIllustration(store, { productionId: msg.productionId, chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, proposal, rows, without, confirmedMicroUsd: msg.confirmedMicroUsd, control, key });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.makingIllustrations.delete(key);
