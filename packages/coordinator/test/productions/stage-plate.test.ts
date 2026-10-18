@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { orderedShots, SceneRecordSchema, type ScenePlate, type SceneRecord } from "@arke-studio/contracts";
+import { orderedShots, SceneRecordSchema, stageFrameKey, type ScenePlate, type SceneRecord } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
-import { STAGE_KIT_SCHEMA_VERSION, STAGE_LOOK_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { STAGE_KIT_SCHEMA_VERSION, STAGE_LOOK_SCHEMA_VERSION, STAGE_PLATE_SCHEMA_VERSION, STAGE_WORDS_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -106,5 +106,29 @@ describe("the scene's lights and atmosphere (issue 1825)", () => {
     const dark = await sceneOnDisk(store);
     assert.equal(dark.blocking?.lights, undefined);
     assert.equal(dark.blocking?.atmosphere, undefined);
+  });
+});
+
+describe("the camera in words (issue 1820)", () => {
+  it("fences a worded key and solves it again when the shot is retimed", async () => {
+    const store = await open();
+    const first = await sceneOnDisk(store);
+    const shotId = orderedShots(first)[0]!.id;
+    const cast = [{ sheetId: "maren-kest", x: 0, z: 0 }];
+    const performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 4, x: 0, z: 3 }] }];
+    const words = { subject: "maren-kest", size: "medium" as const, angle: "eye" as const, side: "left" as const, aspect: "16:9" };
+    const staged = { version: 1, cast, sets: [], keys: [], performances };
+    const opening = stageFrameKey(staged, words, 0, 4, "16:9", undefined)!;
+    const end = stageFrameKey(staged, words, 4, 4, "16:9", undefined)!;
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: first.version,
+      command: { kind: "edit-stage", shotId, staging: { cast, sets: [], keys: [opening, end], performances } } as never });
+    assert.ok(store.getBundle().meta.schemaVersion >= STAGE_WORDS_SCHEMA_VERSION);
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-shot", shotId, change: { durationSec: 8 } } as never });
+    const after = orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === shotId)!;
+    assert.equal(after.staging?.keys.at(-1)?.t, 8);
+    assert.deepEqual(after.staging?.keys.at(-1)?.frame, words, "the words stay on the key");
+    assert.ok((after.staging?.version ?? 0) > (orderedShots(before).find((shot) => shot.id === shotId)!.staging?.version ?? 0));
   });
 });

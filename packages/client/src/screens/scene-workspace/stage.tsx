@@ -48,6 +48,8 @@ import { PlateChip, PlateForm, platePicture, type PlateCandidate } from "./stage
 import { STAGE_LOOKS, STAGE_LOOK_LABELS, type StageLook } from "@arke-studio/contracts";
 import { AddSetMenu, KitRows, type AddSetChoice } from "./stage-kit-form.js";
 import { AtmosphereRows, LightForm, MaterialRow, SurfaceRows } from "./stage-light-form.js";
+import { CameraWords } from "./stage-words-form.js";
+import { stageFrameKey, type StageFrameWords } from "@arke-studio/contracts";
 import { stageLightDefault, type SceneAtmosphere, type StageLight } from "@arke-studio/contracts";
 import { STAGE_KIT_SIZES } from "@arke-studio/contracts";
 import { stagePlateKey, type ScenePlate } from "@arke-studio/contracts";
@@ -87,12 +89,19 @@ function sortedKeys(keys: readonly StagingKey[]): StagingKey[] {
 
 const DEFAULT_POSE = { p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] };
 
+function withoutWords(key: StagingKey): StagingKey {
+  const { frame: _frame, ...rest } = key;
+  return rest;
+}
+
 /** Insert-or-update at the playhead: the Blender workflow, move the playhead then the camera. */
 function withKeyAt(staging: ResolvedShotStaging, at: number, patch: Partial<StagingKey>, fov=34, aspect=16/9): { staging: ResolvedShotStaging; index: number } {
   const keys = staging.keys;
   const near = keys.findIndex((key) => Math.abs(key.t - at) < 0.12);
   if (near >= 0) {
-    return { staging: { ...staging, keys: keys.map((key, index) => (index === near ? { ...key, ...patch } : key)) }, index: near };
+    // Moving a worded key by hand makes it numbers again: the words no longer say where it is (issue 1820).
+    const moves = "p" in patch || "l" in patch;
+    return { staging: { ...staging, keys: keys.map((key, index) => (index === near ? { ...(moves ? withoutWords(key) : key), ...patch } : key)) }, index: near };
   }
   // Only the edited channel changes; the rest of the pose is what was playing at the playhead.
   const made: StagingKey = { ...stageCameraKeyAt(staging, at, staging.keys.at(-1)?.t ?? DEFAULT_SHOT_SEC, fov, aspect), ...patch, t: round(at) };
@@ -220,6 +229,8 @@ export function SceneStage({
   const [plateSelected, setPlateSelected] = useState(false);
   // A light is the scene's too, selected in the panel (issue 1825).
   const [lightSelected, setLightSelected] = useState<number | null>(null);
+  // The camera form shows the words first; the numbers sit behind Edit as numbers (issue 1820).
+  const [numbers, setNumbers] = useState(false);
   // Greybox · Lit · Plate (issue 1825): how a person likes to see the Stage, remembered on this
   // device and never written to the world; the playblast records the look it was exported in.
   const [preferredLook, setLookState] = useState<StageLook>(readStageLook);
@@ -452,8 +463,10 @@ export function SceneStage({
     const {authorship: _authorship, ...edited} = change(current);
     setDraft(edited);
   };
-  const patchKey = (which: number, change: Partial<StagingKey>) =>
-    patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...key, ...change } : key)) }));
+  const patchKey = (which: number, change: Partial<StagingKey>) => {
+    const moves = !("frame" in change) && ["p", "l", "anchor", "track", "anchorSpace"].some((field) => field in change);
+    patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...(moves ? withoutWords(key) : key), ...change } : key)) }));
+  };
 
   const plateView = useMemo(() => {
     const plate = scene.blocking?.plate;
@@ -1396,6 +1409,26 @@ export function SceneStage({
               {(selection?.kind === "rig" || selection?.kind === "aim") && activeKey !== null ? (
                 <div className="fy-swstage__block">
                   <Eyebrow title="Camera" meta={keyName(active, keys.length)} />
+                  <CameraWords
+                    words={activeKey.frame}
+                    cast={working.cast.map((figure) => ({ sheetId: figure.sheetId, name: nameOf(figure.sheetId) }))}
+                    defaultSubject={activeKey.track ?? activeKey.anchor}
+                    shotLensMm={shotLensMm}
+                    at={(() => { const pose = sampleStageCamera(working, activeKey.t, durationSec); return `${pose.p.map((value) => value.toFixed(2)).join(" ")} · aim ${pose.l.map((value) => value.toFixed(2)).join(" ")}`; })()}
+                    numbers={numbers || activeKey.frame === undefined}
+                    disabled={frozen}
+                    onWords={(words: StageFrameWords) => {
+                      const resolved = stageFrameKey(working, { ...words, aspect }, activeKey.t, durationSec, aspect, framing.lens);
+                      if (resolved === null) return;
+                      patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => position === active ? {
+                        ...resolved, t: key.t,
+                        ...(key.easeIn === undefined ? {} : { easeIn: key.easeIn }),
+                        ...(key.easeOut === undefined ? {} : { easeOut: key.easeOut }),
+                        ...(key.roll === undefined ? {} : { roll: key.roll }),
+                      } : key) }));
+                    }}
+                    onNumbers={() => setNumbers((on) => !on)}
+                  />
                   <Row label="move">
                     <select className="fy-swstage__select" aria-label="Camera move" value="" disabled={frozen || !working.cast.length} onChange={event => {
                       const move = event.target.value as StageCameraMove;
@@ -1410,6 +1443,7 @@ export function SceneStage({
                       {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
                     </select>
                   </Row>
+                  {numbers || activeKey.frame === undefined ? <>
                   <Row label="height">
                     <Stepper label="Camera height" value={activeKey.p[1]} unit="m" step={0.1} decimals={2} disabled={frozen} less="Lower" more="Raise" onCommit={(value) => setKeyAxis(1, value ?? activeKey.p[1])} />
                   </Row>
@@ -1462,6 +1496,7 @@ export function SceneStage({
                   <Row label="ease out">
                     <Stepper label="Ease out" value={activeKey.easeOut ?? 0} step={0.05} min={0} max={0.5} disabled={frozen || !stageCameraRest(working!.keys, active)} onCommit={(value) => patchKey(active, { easeOut: value })} />
                   </Row>
+                  </> : null}
                 </div>
               ) : null}
 
