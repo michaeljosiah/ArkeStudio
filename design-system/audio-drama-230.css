@@ -491,3 +491,32 @@
 
 .ad230 .pl.fx.bedrow{border-left-color:transparent;padding-left:0}
 .ad230 textarea.reason{height:auto;min-height:64px;padding:9px 12px;resize:vertical;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--foreground);background:var(--background);width:100%;box-sizing:border-box}
+
+/* Add a sound: turn 69's reference picker in single-pick mode, filtered to audio. */
+.ad230 .pick{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.ad230 .tile{position:relative;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--background);display:flex;flex-direction:column}
+.ad230 .tile.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground)}
+.ad230 .tile .art{height:72px;background:var(--muted);display:flex;align-items:center;justify-content:center;gap:2px;position:relative}
+.ad230 .tile .art i{display:block;width:2px;border-radius:1px;background:color-mix(in srgb,var(--foreground) 45%,transparent)}
+.ad230 .tile .art .pb{position:absolute;left:8px;bottom:8px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--foreground);color:var(--background)}
+.ad230 .tile .art .pb svg{width:10px;height:10px}
+.ad230 .tile .art .rad{position:absolute;right:8px;top:8px;width:16px;height:16px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--muted-foreground);background:var(--background)}
+.ad230 .tile.on .art .rad{box-shadow:inset 0 0 0 5px var(--foreground)}
+.ad230 .tile .art .tag{position:absolute;left:38px;bottom:10px;font:var(--type-meta);background:color-mix(in srgb,var(--background) 80%,transparent);border-radius:5px;padding:0 5px}
+.ad230 .tile .nm{padding:8px 10px 10px;display:flex;flex-direction:column;gap:2px;font:var(--type-label)}
+.ad230 .tile .nm small{font:var(--type-meta);color:var(--muted-foreground)}
+.ad230 .tile.dash{border-style:dashed;background:none;align-items:center;justify-content:center;gap:6px;min-height:118px;font:var(--type-label);text-align:center;padding:10px}
+.ad230 .tile.dash svg{width:16px;height:16px;color:var(--muted-foreground)}
+.ad230 .tile.dash small{font:var(--type-meta);color:var(--muted-foreground)}
+.ad230 .lanes2{display:flex;align-items:center;gap:10px}
+.ad230 .search2{height:32px;border:1px solid var(--border);border-radius:var(--radius-pill);display:flex;align-items:center;gap:8px;padding:0 12px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground);min-width:220px}
+.ad230 .search2 svg{width:13px;height:13px}
+.ad230 .gform{display:grid;grid-template-columns:120px minmax(0,1fr);gap:12px 16px;align-items:start;font:var(--type-ui);font-weight:var(--weight-regular)}
+.ad230 .gform>span{font:var(--type-label);color:var(--muted-foreground);padding-top:9px}
+.ad230 .gform .ro{padding:8px 0;color:var(--muted-foreground)}
+.ad230 .gform textarea{min-height:70px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--foreground);background:var(--background);resize:vertical;width:100%;box-sizing:border-box}
+.ad230 .gform .inp{height:36px;border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;padding:0 12px;color:var(--foreground)}
+.ad230 .gform .row3{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ad230 .sw{width:34px;height:20px;border-radius:10px;background:var(--muted);position:relative;border:1px solid var(--border);flex:none}
+.ad230 .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted-foreground)}
+.ad230 .sw.on{background:var(--foreground)}.ad230 .sw.on::after{left:16px;background:var(--background)}

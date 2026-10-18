@@ -1,6 +1,6 @@
 # Audio drama — adapting a novel for the ear · design turn 230
 
-Status: **Proposed · revision 3 · 18 October 2026.** For the owner's review, not approved for
+Status: **Proposed · revision 4 · 18 October 2026.** For the owner's review, not approved for
 implementation. Nothing here adds a production type to the app, generates audio or changes a novel.
 
 Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](audio-drama-230.review.html) ·
@@ -8,6 +8,34 @@ Baseline: `origin/main` at f3dc79960, in an isolated worktree. [Review page](aud
 [Research](../docs/research/audio-drama-adaptation.md).
 
 Turn 229 is the Stage uplift (PR 1828), renumbered from 228 when it merged; this turn sits above it.
+
+## Revision 4 (18 October 2026)
+
+The owner asked what generating sounds with ElevenLabs would change. ElevenLabs' sound-effects API
+(`POST /v1/sound-generation`) has these limits:
+
+- Each call returns one file.
+- A generation is at most 30 s, with a `loop` flag for seamless loops.
+- There is no seed, so the same sound cannot be asked for again.
+- Full music belongs to the separate Music API (up to 5 minutes).
+
+Arke's Chat refuses sound effects today, so sound generation is new work. No core decision changes,
+but sounds become artifacts:
+
+- **Add a sound (230w)** reuses Arke's one reference picker from turn 69, filtered to audio and
+  ranked against the cue's words. Its last tiles are Generate, Record and Upload.
+- **Generate (230x)** opens inside the same dialog. It shows the script's words, the prompt Arke
+  writes from them (editable), the engine, the length, Loop and the name the sound is saved as,
+  with the price on the button.
+- **Ambience (230y)** is generated as two seamless loops of different lengths, so a long scene
+  does not audibly repeat.
+
+Recurring sounds are one artifact placed by every cue. Sounds are generated close and dry, and the
+mix adds distance. The Library's impossible 48-second loop is fixed.
+
+Sources: ElevenLabs [sound-effects API](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert),
+[sound-effects capability](https://elevenlabs.io/docs/capabilities/sound-effects),
+[music capability](https://elevenlabs.io/docs/capabilities/music), [API pricing](https://elevenlabs.io/pricing/api).
 
 ## Revision 3 (18 October 2026)
 
@@ -99,6 +127,9 @@ Maren and Odile in the lamp room after midnight (episode 2, scene 3).
 | 230d | Arke's draft of the pilot scene waits in the page. Chat says what changed and what it read. |
 | 230e | A line opens its source paragraph and the decision behind it: Hear. |
 | 230f | A cue: what is heard, its purpose, required or optional, and no sound yet. |
+| 230w | Add a sound: the reference picker (turn 69), this production's and the world's sounds ranked against the cue; Generate, Record, Upload. |
+| 230x | Generate a sound in the same dialog: the script's words, what's sent, the engine, length, loop, saved as an artifact. |
+| 230y | Generate an ambience: two seamless loops, 30 s and 23 s. |
 | 230g | Ten lines selected: Hear, or Ask Arke with audio-specific asks. |
 | 230h | Hear 10 lines: the dialog appears only because Sereth has no voice; What's sent is one tap away. |
 | 230i | Takes beside their lines: first takes kept, one replacement to choose, one misread line to retake. |
