@@ -17,6 +17,7 @@ export * from "./stage-kit.js";
 export * from "./stage-look.js";
 export * from "./stage-framing.js";
 export * from "./stage-pose.js";
+export * from "./stage-direction.js";
 export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";
