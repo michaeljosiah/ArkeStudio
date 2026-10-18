@@ -1,8 +1,8 @@
 import { access, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote, quoteSpeech,
-  sheetSound, voiceFormatForModel, voiceSourceFor,
+  DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote,
+  productionShape, quoteSpeech, sheetSound, voiceFormatForModel, voiceSourceFor,
   type AudiobookReader, type ClonedVoice, type DramaRequest, type DramaTake, type EpisodeScriptBlock, type EpisodeTakes, type Job, type ManifestModel,
   type MissingVoiceChoice, type SpeechQuote,
 } from "@arke-studio/contracts";
@@ -72,6 +72,8 @@ export async function hearDramaLines(
   const bundle = store.getBundle();
   const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) throw new Error("that production is no longer in this world");
+  // Only an audio drama speaks its scripts (codex on PR 1871): stray script files on another kind are never spent on.
+  if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama.`);
   const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === input.episode);
   const script = entry?.script;
   if (!script) throw new Error("this episode has no script yet");
@@ -134,7 +136,8 @@ export async function hearDramaLines(
     const source = voiceSourceFor(bundle.clonedVoices ?? [], model.provider, model.id, voice.voiceId);
     if (source.kind === "missing-clone") throw new Error(`${speakerName}'s cloned voice has lost its recording. Choose another voice.`);
     const kept = takes?.lines[block.id]?.kept;
-    const cached = !input.retake && kept !== undefined && kept.textHash === dramaLineHash(block) &&
+    // A stand-in is the line's only while it still stands in (codex on PR 1871).
+    const cached = !input.retake && kept !== undefined && kept.textHash === dramaLineHash(block) && !!kept.standIn === standIn &&
       kept.voice.provider === voice.provider && kept.voice.model === voice.model && kept.voice.voiceId === voice.voiceId;
     // Direction is how, never what (R-13): a tag ahead of the words where the reader writes tags,
     // an instruction beside them where it takes one, and otherwise not sent — said so, by name.
@@ -186,7 +189,8 @@ export async function hearDramaLines(
   try {
     for (const entry of toMake) {
       try {
-        const take = (input.retake ? null : await recoverLine(store, productionId, input.episode, script.version, entry, deps))
+        // A paid retake is recovered too (codex on PR 1871): it waits beside the kept take, as made.
+        const take = await recoverLine(store, productionId, input.episode, script.version, entry, deps)
           ?? await performLine(store, productionId, input.episode, script.version, entry, deps);
         await recordTake(store, productionId, input.episode, entry.block.id, take, input.retake === true);
         made.push(entry.block.id);
@@ -218,9 +222,13 @@ async function recoverLine(store: WorldStore, productionId: string, episode: num
     const filed = bundle.artifacts.find((artifact) => artifact.generation?.source === "audiobook" && artifact.generation.jobId === job.id);
     if (filed) {
       if (taken.has(filed.id)) continue;
+      // Heard again for its words (codex on PR 1871): a filed misread still waits for the author.
+      const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", filed.file))).then((data) => new Uint8Array(data), () => null);
+      const misread = bytes ? await heardOtherWords(bytes, voiceFormatForModel(entry.model), entry, deps) : undefined;
       return {
         artifactId: filed.id, file: `artifacts/${filed.file}`, textHash: dramaLineHash(entry.block), voice: entry.voice,
-        ...(entry.standIn ? { standIn: true } : {}), estimatedMicroUsd: entry.quote?.expectedMicroUsd ?? 0, madeAt: store.now(),
+        ...(entry.standIn ? { standIn: true } : {}), ...(misread !== undefined ? { misread } : {}),
+        estimatedMicroUsd: entry.quote?.expectedMicroUsd ?? 0, madeAt: store.now(),
       };
     }
     const landed = job.landedFiles?.[0];
@@ -261,17 +269,7 @@ async function fileTake(store: WorldStore, productionId: string, episode: number
   const stem = episodeScriptFile(episode).replace(/\.json$/, "");
   const landed = join(store.dir, fromPortable(job.landedFiles![0]!));
   const bytes = new Uint8Array(await readFile(toExtendedLength(landed)));
-  // A take that says other words waits for the author with what was heard (R-30); without a
-  // transcriber on this machine the check is not made, and the take is kept as made.
-  let misread: string | undefined;
-  if (deps.transcribe) {
-    try {
-      const heard = await deps.transcribe(bytes, format === "wav" ? "audio/wav" : format === "flac" ? "audio/flac" : "audio/mpeg");
-      const compared = compareAudioTranscript({ audioHash: `sha256:${sha256(Buffer.from(bytes)).replace(/^sha256:/, "")}`, authoredText: entry.block.words,
-        transcriber: { id: "voxa-whisper", version: "runtime-unreported" }, observedText: heard });
-      if (compared.status === "compared" && compared.result === "mismatch") misread = heard.slice(0, 2_000);
-    } catch { /* an unavailable check is no verdict */ }
-  }
+  const misread = await heardOtherWords(bytes, format, entry, deps);
   const textHash = dramaLineHash(entry.block);
   const artifact = await fileGeneratedArtifact(store, {
     sourcePath: landed,
@@ -292,6 +290,20 @@ async function fileTake(store: WorldStore, productionId: string, episode: number
     ...(entry.standIn ? { standIn: true } : {}), ...(misread !== undefined ? { misread } : {}),
     estimatedMicroUsd: entry.quote?.expectedMicroUsd ?? 0, madeAt: store.now(),
   };
+}
+
+/**
+ * What a take was heard to say, when it was not its line (R-30); without a transcriber on this
+ * machine the check is not made, and the take is kept as made.
+ */
+async function heardOtherWords(bytes: Uint8Array, format: string, entry: Planned, deps: DramaHearDeps): Promise<string | undefined> {
+  if (!deps.transcribe) return undefined;
+  try {
+    const heard = await deps.transcribe(bytes, format === "wav" ? "audio/wav" : format === "flac" ? "audio/flac" : "audio/mpeg");
+    const compared = compareAudioTranscript({ audioHash: `sha256:${sha256(Buffer.from(bytes)).replace(/^sha256:/, "")}`, authoredText: entry.block.words,
+      transcriber: { id: "voxa-whisper", version: "runtime-unreported" }, observedText: heard });
+    return compared.status === "compared" && compared.result === "mismatch" ? heard.slice(0, 2_000) : undefined;
+  } catch { return undefined; /* an unavailable check is no verdict */ }
 }
 
 /**
@@ -322,6 +334,8 @@ async function recordTake(store: WorldStore, productionId: string, episode: numb
 
 /** The author's answer to a waiting take (R-30): the new one is kept, or the kept one stays. */
 export async function decideDramaTake(store: WorldStore, productionId: string, episode: number, block: string, keep: "new" | "kept", waiting?: string): Promise<void> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production || !productionShape(production.meta).isAudioDrama) throw new Error("that production is not an audio drama");
   await writeTakes(store, productionId, episode, (takes) => {
     const line = takes.lines[block];
     if (!line?.waiting) throw new Error("no take is waiting on that line");

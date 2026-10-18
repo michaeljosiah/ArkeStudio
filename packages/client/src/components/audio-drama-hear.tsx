@@ -53,7 +53,15 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
   const [pressed, setPressed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const revision = JSON.stringify(script.filter((block) => lines.includes(block.id)));
-  const quote = useHearQuote(worldId, productionId, episode, lines, decisions, revision, retake, scriptHash);
+  const fresh = useHearQuote(worldId, productionId, episode, lines, decisions, revision, retake, scriptHash);
+  // A press answered with a new price (another window made or revoiced a line) replaces the old
+  // one, so the next press sends the token it was given (codex on PR 1871).
+  const [pressQuote, setPressQuote] = useState<Quote | null>(null);
+  const selection = JSON.stringify([lines, revision, retake, scriptHash]);
+  // Choices for a missing voice belong to the selection that asked for them (codex on PR 1871).
+  useEffect(() => { setDecisions({}); }, [JSON.stringify(lines)]);
+  useEffect(() => { setPressQuote(null); }, [selection, JSON.stringify(decisions)]);
+  const quote = pressQuote ?? fresh;
   const quoted = quote?.disposition === "quoted" ? quote : null;
   const missing = quoted?.missing ?? [];
   const price = quoted?.quote?.estimatedMicroUsd ?? 0;
@@ -92,7 +100,7 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
     if (result.requestId !== pressed) return;
     setPressed(null);
     if (result.disposition === "refused") { setFailure(result.reason ?? "Not heard."); return; }
-    if (result.disposition === "quoted") { setOpen(true); return; }
+    if (result.disposition === "quoted") { setPressQuote(result); setOpen(true); return; }
     setOpen(false);
     onHeard?.();
     if (result.reason) setFailure(result.reason);

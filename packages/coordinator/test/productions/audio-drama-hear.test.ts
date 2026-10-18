@@ -247,3 +247,29 @@ describe("codex round 2 on PR 1871", () => {
     assert.equal(takes()!.lines[a.id]!.kept!.artifactId, waiting.artifactId);
   });
 });
+
+describe("codex round 3 on PR 1871", () => {
+  it("recovers a paid retake as the take that waits, sending nothing again", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps, sent, takes } = await drama([a]);
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const kept = takes()!.lines[a.id]!.kept!;
+    const before = sent.length;
+    await mkdir(join(store.dir, ".staging/drama/retake"), { recursive: true });
+    await writeFile(join(store.dir, ".staging/drama/retake/line.mp3"), Buffer.from("audio:retake"));
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "voice-preview", id: "drama" }, worldId: store.worldId, provider: "elevenlabs",
+      productionId: id, model: "eleven_multilingual_v2", params: { block: a.id, text: "Climb.", voiceId: "v_8Kq2" }, landedFiles: [".staging/drama/retake/line.mp3"] } as unknown as Job;
+    const retake = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], retake: true, quoteToken: retake.disposition === "quoted" ? retake.quote.token : "" },
+      deps({ jobs: (match) => [paid].filter(match) }));
+    assert.equal(sent.length, before, "the retake is not bought twice");
+    assert.equal(takes()!.lines[a.id]!.kept!.artifactId, kept.artifactId);
+    assert.ok(takes()!.lines[a.id]!.waiting, "the recovered retake waits for the author");
+  });
+
+  it("refuses to hear a production that is not an audio drama", async () => {
+    const { store, deps } = await drama([maren("Climb.")]);
+    await assert.rejects(hearDramaLines(store, "the-ledger-of-nights", { episode: 1, blocks: [ulid()] }, deps()), /not an audio drama/);
+  });
+});

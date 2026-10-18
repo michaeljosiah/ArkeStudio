@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
-import { frameViewWord, ridesLabel } from "../src/components/audiobook-picture-card.js";
+import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -686,6 +686,44 @@ describe("a made picture on its block (turn 194g)", () => {
     await press(q(m, '[data-testid="suggest-generate"]'));
     const make = asked(m, "make-audiobook-picture").at(-1)!;
     assert.deepEqual([make.prompt, make.looks], [rewritten, { "maren-kest": HARBOUR_LOOK.id }]);
+  });
+
+  // Issue 1658: the chapter's look was corrected, and Make again sent the old prompt, which named
+  // the old clothes, beside the new look's picture. The words won and the dress stayed orange.
+  it("follows the chapter's look as it is now, marks the prompt written for the old one and offers Update prompt", async () => {
+    extraArtifacts = [madeArtifact()];
+    const harbourChapter = { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } };
+    const m = await mount(2, { "p1.0": madeInStorm() }, harbourChapter);
+    assert.equal(q(m, '[data-testid="picture-card-only"]'), null, "the chapter's choice, not one of its own");
+    assert.match(text(q(m, '[data-key="maren-kest"]')), /Harbour coat/, "the row shows the look Make again will send");
+    assert.match(text(q(m, '[data-testid="picture-card-look-changed"]')), /^!\s*Look changed\s*prompt still says Storm coat$/);
+    await press(q(m, '[data-testid="picture-card-update-prompt"]'));
+    const rewrite = asked(m, "rewrite-audiobook-picture-prompt").at(-1)!;
+    assert.deepEqual(rewrite.changes, [{ key: "maren-kest", from: STORM_LOOK.id, to: HARBOUR_LOOK.id }]);
+  });
+
+  it("who rides is said again for everyone when someone gains a picture: a lead given a look takes a supporting slot (codex on PR 1868)", () => {
+    const kits = state().world!.referenceKits;
+    const harbour = { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } };
+    const budget = (limit: number) => ({ model: { ...GPT_IMAGE, accepts: { ...GPT_IMAGE.accepts, referenceImages: limit } }, billing: (sheet: string) => (sheet === "maren-kest" ? "lead" : "support") });
+    const bare = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
+    const riding = withOwnLooks([bare], {}, harbour, kits, undefined, budget(2))[0]!;
+    assert.deepEqual([riding.reference, riding.carried], [`references/maren-kest/${HARBOUR_LOOK.file}`, true], "never `over the limit` for a look the model can carry");
+    assert.equal(withOwnLooks([bare], {}, harbour, kits, undefined, budget(0))[0]!.carried, false, "a model that takes no picture carries none");
+    // A supporting character carried first, the bare lead after, and room for one: the lead's look rides, as Make sends it.
+    const support = { key: "odile-sarn", name: "Odile", sheet: "odile-sarn", kind: "character" as const, reference: "references/odile-sarn/head-front.png", carried: true };
+    assert.deepEqual(withOwnLooks([support, bare], {}, harbour, kits, undefined, budget(1)).map((entry) => [entry.key, entry.carried]), [["odile-sarn", false], ["maren-kest", true]]);
+    // Nobody gained or lost a picture: the drafted budget stands, one it left out included.
+    const left = { ...bare, reference: "references/maren-kest/head-front.png" };
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, budget(2))[0]!.carried, false);
+  });
+
+  it("re-resolves the chosen look against the kit as it is, so a close view accepted since is what the card shows (codex on PR 1868)", () => {
+    const kits = state().world!.referenceKits;
+    // Drafted while the storm coat had only its full body; the kit now holds its close view.
+    const drafted = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: `references/maren-kest/${STORM_LOOK.file}`, carried: true, look: { lookId: STORM_LOOK.id, view: "full" as const } };
+    const [now] = withOwnLooks([drafted], {}, STORM_CHAPTER, kits, "Close-up on Maren at the rail", undefined);
+    assert.deepEqual([now!.reference, now!.look, now!.carried], [`references/maren-kest/${STORM_LOOK.closeFile}`, { lookId: STORM_LOOK.id, view: "close" }, true]);
   });
 
   it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {

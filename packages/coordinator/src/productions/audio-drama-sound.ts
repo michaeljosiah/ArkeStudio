@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { estimateMicroUsd, ulid, type Job, type ManifestModel } from "@arke-studio/contracts";
+import { estimateMicroUsd, productionShape, ulid, type Job, type ManifestModel } from "@arke-studio/contracts";
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -75,7 +75,10 @@ function plan(input: DramaSoundInput, models: readonly ManifestModel[]): Request
 }
 
 export async function generateDramaSound(store: WorldStore, productionId: string, input: DramaSoundInput, deps: DramaSoundDeps): Promise<DramaSoundResult> {
-  if (!store.getBundle().productions.some((production) => production.meta.id === productionId)) throw new Error("that production is no longer in this world");
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) throw new Error("that production is no longer in this world");
+  // A drama's sounds are a drama's (codex on PR 1872): nothing is priced or bought for another kind.
+  if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama.`);
   const requests = plan(input, deps.models);
   const shown = requests.map((request) => ({
     engine: request.model.displayName, prompt: input.prompt,

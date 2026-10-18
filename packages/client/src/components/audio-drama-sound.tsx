@@ -115,6 +115,8 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
   const [quote, setQuote] = useState<DramaSound | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // A sound made only in part (one loop of two) is said before it is placed (codex on PR 1872).
+  const [partial, setPartial] = useState<string | null>(null);
   const asked = useRef<string | null>(null);
   const durationSec = cue.kind === "ambience" || automatic ? null : seconds;
   const input = { cue: cue.kind, heard: cue.heard, prompt: prompt.trim() || cue.heard, durationSec, ...(cue.kind === "sound" && loop ? { loop } : {}), name: name.trim() || CUE_LABEL[cue.kind] };
@@ -128,7 +130,8 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
     if (result.requestId === asked.current) { setQuote(result); if (result.disposition === "refused") setFailure(result.reason ?? "Not priced."); }
     if (result.requestId === making) {
       setMaking(null);
-      if (result.disposition === "made" && result.artifactIds?.[0]) onMade(result.artifactIds[0]);
+      if (result.disposition === "made" && result.artifactIds?.[0] && result.reason) { setPartial(result.artifactIds[0]); setFailure(result.reason); }
+      else if (result.disposition === "made" && result.artifactIds?.[0]) onMade(result.artifactIds[0]);
       else setFailure(result.reason ?? "Not made.");
     }
   }), [making, key]);
@@ -157,6 +160,7 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
       {failure && <p role="alert" className="fy-ad-gen__fail">{failure}</p>}
       <footer>
         <Button variant="ghost" onClick={onBack}>Back</Button>
+        {partial && <Button variant="secondary" onClick={() => onMade(partial)}>Place it</Button>}
         <Button variant="primary" disabled={!priced || making !== null} onClick={() => {
           setFailure(null);
           const requestId = generateDramaSound(world.meta.worldId, production.meta.id, { ...input, quoteToken: priced!.token });

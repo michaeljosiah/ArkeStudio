@@ -125,7 +125,7 @@ function Face({ who, slug }: { who: PictureWho; slug: string }) {
   return who.reference === null ? <i className="fy-ills__fig fy-ills__fig--none" aria-hidden="true" /> : <img className={cx("fy-ills__fig", !who.carried && "fy-ills__fig--over")} src={mediaUrl(slug, who.reference)} alt="" />;
 }
 
-function Card({ row, estimated, words, skipped, without, reason, slug, disabled, onSkip, onWithout, onMakeLook }: {
+function Card({ row, estimated, words, skipped, without, reason, slug, disabled, onSkip, onWithout, onMakeLook, onLook }: {
   row: IllustrationRow;
   estimated: boolean;
   words: string | undefined;
@@ -137,10 +137,15 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   onSkip: () => void;
   onWithout: () => void;
   onMakeLook: (who: PictureWho) => void;
+  onLook: () => void;
 }) {
   const held = (row.needs?.length ?? 0) > 0 && !without;
+  // A look the Looks sheet flags would dress someone against the chapter (issue 1658): held until
+  // the look is put right, or sent as it is.
+  const disagrees = new Set(row.disagrees ?? []);
+  const disagreeing = !held && disagrees.size > 0 && !without;
   // A picture a run could not make (2026-10-04): held with its reason, made again only on Try again.
-  const refused = !held && row.refused !== undefined && !without;
+  const refused = !held && !disagreeing && row.refused !== undefined && !without;
   const said = row.refused ?? reason;
   const people = row.who.filter((entry) => entry.kind === "character");
   const lacking = people.find((entry) => entry.sheet !== undefined && entry.reference === null);
@@ -148,7 +153,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   // The frame word in the slot's corner (193h, rule 11): what the brief said the picture is.
   const frame = row.shot === undefined ? null : (frameWord(row.shot.frame) ?? (row.shot.frame === "" ? null : row.shot.frame));
   return (
-    <article className={cx("fy-ills__card", skipped && "fy-ills__card--off", (held || refused) && !skipped && "fy-ills__card--held")} data-testid="illustration-row" data-block={row.block} data-state={skipped ? "skipped" : held ? "held" : refused ? "refused" : "ready"}>
+    <article className={cx("fy-ills__card", skipped && "fy-ills__card--off", (held || disagreeing || refused) && !skipped && "fy-ills__card--held")} data-testid="illustration-row" data-block={row.block} data-state={skipped ? "skipped" : held ? "held" : disagreeing ? "disagrees" : refused ? "refused" : "ready"}>
       <div className="fy-ills__th">
         {frame !== null && <span className="fy-mono fy-ills__frame" data-testid="illustration-frame" title={row.shot?.frame}>{frame}</span>}
         <span className="fy-mono fy-ills__tm">{time}</span>
@@ -164,6 +169,10 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           <Button variant="ghost" disabled={disabled || lacking === undefined} onClick={() => lacking !== undefined && onMakeLook(lacking)} data-testid="illustration-needs">
             Make a look
           </Button>
+        ) : disagreeing && !skipped ? (
+          <Button variant="ghost" onClick={onLook} data-testid="illustration-review-look">
+            Review looks
+          </Button>
         ) : (
           <Button variant="ghost" disabled={disabled} onClick={onSkip} data-testid="illustration-skip">
             {skipped ? "Put back" : "Skip"}
@@ -176,12 +185,19 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
             <Face who={entry} slug={slug} />
             {entry.name}
             {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : entry.sheet === undefined ? "identity not linked · check the character" : "no look"}</span>}
+            {entry.reference !== null && disagrees.has(entry.key) && <span className="fy-ills__note" data-testid="illustration-disagrees">{without ? "sent as it is" : "look disagrees with the chapter"}</span>}
           </span>
         ))}
         {people.length === 0 && <span className="fy-ills__note">{row.who.length > 0 ? "place only" : "no reference rides"}</span>}
         {held && !skipped && (
           <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-without">
-            Without
+            {/* One press sends both: where a look disagrees too, the press says so (codex on PR 1868). */}
+            {disagrees.size > 0 ? "Without · as it is" : "Without"}
+          </Button>
+        )}
+        {disagreeing && !skipped && (
+          <Button variant="ghost" disabled={disabled} onClick={onWithout} data-testid="illustration-as-is">
+            As it is
           </Button>
         )}
       </div>
@@ -233,6 +249,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
     `${total.count} to make`,
     ...(skipped.size > 0 ? [`${skipped.size} skipped`] : []),
     ...(total.held > 0 ? [`${total.held} need${total.held === 1 ? "s" : ""} a look`] : []),
+    ...(total.disagree > 0 ? [`${total.disagree} look${total.disagree === 1 ? " disagrees" : "s disagree"}`] : []),
     ...(total.refused > 0 ? [`${total.refused} refused`] : []),
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
@@ -269,6 +286,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
                 onSkip={() => onSkip(row.block)}
                 onWithout={() => onWithout(row.block)}
                 onMakeLook={onMakeLook}
+                onLook={onLook}
               />
             ))}
           </div>

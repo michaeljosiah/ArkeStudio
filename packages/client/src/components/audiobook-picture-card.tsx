@@ -13,7 +13,10 @@ import {
   mainPhotoFor,
   pictureOwnLooks,
   priceLabel,
+  referenceBudget,
   type AudiobookLook,
+  type BudgetCandidate,
+  type ManifestModel,
   type PictureOwnLooks,
   type PictureShot,
   type PictureSuggestion,
@@ -22,7 +25,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
-import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks } from "../lib/store.js";
+import { chooseAudiobookLook, rewriteAudiobookPicturePrompt, useAudiobookAsks, useStore } from "../lib/store.js";
 import type { PictureSuggestionState } from "./audiobook-suggest.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { Button, Checkbox, Textarea, cx } from "./ui.js";
@@ -105,13 +108,23 @@ type LookMode = "only" | "chapter";
  * Who rides once the looks chosen for this picture alone are laid over the card (design turn 193d,
  * R-146): a person with a look of their own rides it — the frame takes its close view or its full
  * body, as the coordinator will — or the main photo; a person whose own look was let go rides the
- * chapter's choice again. Everyone else is as the card was drafted or made.
+ * chapter's choice again. Everyone else rides the chapter's choice as it is now: a picture made
+ * before the chapter's look changed would otherwise show, and Make again send, words for clothes
+ * the coordinator no longer dresses them in (issue 1658), with no Update prompt to offer.
+ *
+ * Who rides is the model's reference budget to say. Where someone has a picture now who had none
+ * when the card was drafted, or the other way round, it is said again for everyone, ranked as the
+ * coordinator ranks at Make (`pictureWho`): a lead given a look takes a supporting character's
+ * slot rather than wait for a spare one (codex on PR 1868). `budget` is the model as Make weighs
+ * it, and each sheet's billing.
  */
-export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined): PictureWho[] {
-  return who.map((entry) => {
+export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined, budget?: { model: ManifestModel; billing: (sheetId: string) => string | undefined }): PictureWho[] {
+  const resolved = who.map((entry): PictureWho => {
     if (entry.kind !== "character" || entry.sheet === undefined) return entry;
     const mine = own[entry.key];
-    if (mine === undefined && entry.only !== true) return entry;
+    // Re-resolved even where the look is the one drafted: a close view accepted since is the
+    // picture Make again sends, and the card shows it (codex on PR 1868).
+    if (mine === undefined && entry.only !== true && chapter === null) return entry;
     const target = mine ?? chapter?.characters[entry.key]?.lookId ?? MAIN_PHOTO_LOOK;
     const kit = kits.find((candidate) => candidate.sheetId === entry.sheet);
     const { look: _look, only: _only, ...base } = entry;
@@ -124,6 +137,14 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
     const photo = kit === undefined ? null : mainPhotoFor(kit);
     return { ...base, reference: photo === null ? null : `references/${entry.sheet}/${photo.file}`, carried: photo !== null && entry.carried, ...tag };
   });
+  if (budget === undefined || resolved.every((entry, index) => (entry.reference === null) === (who[index]!.reference === null))) return resolved;
+  const candidates: BudgetCandidate[] = resolved.flatMap((entry, index) => {
+    if (entry.sheet === undefined) return [];
+    const billing = budget.billing(entry.sheet);
+    return [{ sheetId: entry.sheet, kind: entry.kind === "place" ? "location" as const : "character" as const, ...(billing !== undefined ? { billing } : {}), appearanceOrder: index, hasReference: entry.reference !== null }];
+  });
+  const carried = new Set(referenceBudget(candidates, budget.model).carried.filter((candidate) => candidate.referenceRole === "primary").map((candidate) => candidate.sheetId));
+  return resolved.map((entry) => ({ ...entry, carried: entry.reference !== null && entry.sheet !== undefined && carried.has(entry.sheet) }));
 }
 
 /**
@@ -330,6 +351,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   /** Update prompt on its way: the request, and the look each person's words are being rewritten for. */
   const [updating, setUpdating] = useState<{ id: string; to: Record<string, string> } | null>(null);
   const asks = useAudiobookAsks();
+  const models = useStore().state?.app.manifest?.models;
   const labels = useMemo(() => characterLabels(world.sheets), [world.sheets]);
   const chapterLook = chapter?.look ?? null;
   const chosenIn = (key: string): string | null => chapterLook?.characters[key]?.lookId ?? null;
@@ -401,7 +423,10 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const own: PictureOwnLooks = Object.fromEntries(
     [...Object.entries(held).filter(([key]) => !(key in pressedOwn)), ...Object.entries(pressedOwn).flatMap(([key, lookId]) => (lookId === null ? [] : [[key, lookId] as const]))],
   );
-  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame);
+  // The model as Make weighs it, at the references the card was drafted under, and each sheet's billing.
+  const model = models?.find((candidate) => candidate.provider === suggestion.model.provider && candidate.id === suggestion.model.id);
+  const admission = model === undefined ? undefined : { model: { ...model, accepts: { ...model.accepts, referenceImages: suggestion.model.references } }, billing: (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.billing };
+  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, admission);
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
