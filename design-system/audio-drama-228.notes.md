@@ -1,6 +1,6 @@
 # Audio Drama — adapting for the ear · design turn 228
 
-Status: **Proposed · revision 1 · 17 October 2026.** For author review, not approved for implementation. This turn adds no production type to the running app and generates no audio.
+Status: **Superseded by [turn 230](audio-drama-230.notes.md) on 18 October 2026** (SPEC-057, epic #1856). Was: proposed · revision 1 · 17 October 2026. For author review, not approved for implementation. This turn adds no production type to the running app and generates no audio.
 
 Baseline: fetched and fast-forward checked against `origin/main`, **7f6b82b62**. The shared checkout contains unrelated work; this turn lives on `codex/audio-drama-design` in an isolated worktree. [Interactive design](audio-drama-228.review.html) · [Design master](Arke%20Studio.dc.html#t228) · [Research](../docs/research/audio-drama-adaptation.md).
 

@@ -1,0 +1,94 @@
+[
+ [
+  "Review status",
+  "18 October 2026. Revision 4, approved by the owner on 18 October 2026. Implementation is tracked in epic #1856 (slices #1857–#1864) against SPEC-057, which amends SPEC-023 R-2, SPEC-047 R-12 and R-185–R-186, SPEC-048 R-25, SPEC-050 R-26 and SPEC-052 R-1, R-11 and R-19. This turn supersedes turn 228. Revision 4 follows a check of ElevenLabs’ sound-effects documentation: sounds become reusable artifacts chosen in Arke’s existing reference picker, and generating one shows exactly what is sent (230w–230y). Revision 2 made an audio drama a kind of Story production, chosen under Tell a story, instead of a fourth door. Revision 3 follows the owner’s question whether the process was over-complicated, and removes seven things: Episodes and Length from step two; the step list in setup; the dialog before every listen; keeping every take by hand; two named reviews; layered direction on the Cast page; Dashboard and Overview from the side menu. It also makes the reason for keeping an old script optional. An independent proposal for the Audio Drama production type. It takes turn 228’s notes and the audio drama research as requirements, not as a layout: none of turn 228’s drawings, prototype, styles or screenshots were opened. Low Water is a novel invented for these drawings and set in The Undersong; durations, voices and prices are fixtures. Nothing is generated, heard or charged, and no novel is modified."
+ ],
+ [
+  "Under Tell a story",
+  "An audio drama is a Story production of its own kind, as a micro drama is a Video production of its own kind: medium story, kind audio-drama, with episodes where a novel has chapters. It is chosen under WRITE · Tell a story, whose line now names it (Novel, novella, episodic fiction, audio drama or audiobook) (230a). Step two asks What kind of story? (Novel, Audio drama or Other), then only the name and Adapt from (the world’s stories, or nothing) (230b). It does not ask for episodes or length: nobody knows how many episodes a novel makes before it has been read, so Arke proposes both in setup; one episode makes a single play. With Adapt from set, the press is Plan with Arke and opens the existing setup conversation; with nothing set it is Create. A Story’s ⋯ gains Adapt…, which opens step two with that story set. The audiobook stays what it is: the novel read aloud, made inside the novel’s production. The audio drama is a separate production with its own script, linked to the novel and never writing to it. The door keeps three cards."
+ ],
+ [
+  "Setup asks one question",
+  "The setup conversation reads the whole novel before it proposes anything and says so in one receipt line (✓ read Low Water v14 · 18 of 18 chapters · nothing written). It asks the author one question, and answers it by example: one moment of the novel adapted with a narrator and in the room (230c). Everything else arrives as one plan, proposed by Arke, which the author accepts or changes: the number and length of episodes, the narrator default for each scene’s Heard as (Narrated, In the room or A recording), what is kept from the listener, and the pilot scene. Kept from the listener lists the facts the drama must not give away and the episode each may be revealed in; review, cast labels and transcripts obey it. There is no step list. Verdicts and episodes beyond the pilot are planned afterwards, on the Adaptation page (230m): a deliberate change to SPEC-052 R-11’s order for this kind, because how inner life becomes sound is judged better by ear than in a table."
+ ],
+ [
+  "Pilot first",
+  "Before every episode is planned, Arke adapts one scene the author chooses, and suggests a second of the opposite temper (a fast scene, then a quiet one). The draft waits in the page as grey text with Draft · blocks · estimate · Discard · Keep (turn 227v’s grammar), and Chat says what changed and why in its own words, with a receipt of what it read (230d). Planned but unwritten scenes show as one dashed row."
+ ],
+ [
+  "One document per episode",
+  "An episode is one script, with its scenes as headings inside it; the bar’s scene picker jumps between them. The episode is also the unit of Audio Studio, so a transition or a bed can cross a scene boundary in one arrangement. An episode has three views: Episode · Script · Audio Studio. There is no separate Performances view: the take is the last column of the script."
+ ],
+ [
+  "The script reads like a score",
+  "Five columns: an ambience lane, a music lane, who or what makes the sound, the words, the take. Only words to be spoken are set at reading size (--text-lg). Direction sits in parentheses on its own line above the words, in muted body text, and is never sent as words. Sound, ambience, music and silence are quieter rows with their own label in the speaker column. An ambience or music bed enters as a row and runs as a line down its lane for exactly the rows it plays under; a bed that stops has a foot. Silence is a row with its length and, optionally, what happens in it. An interruption is a marked dash where the line is cut and a hook on the line that lands on it: a relation between two lines, never punctuation. Channel (off-mic, radio, recording) sits under the speaker’s name, because it belongs to how the voice is heard, not to the words. A speaker’s name carries its voice colour as its underline, turn 227’s one use of speaker colour; nothing else is coloured by speaker. A line with no source in the novel is marked new."
+ ],
+ [
+  "Scene headings",
+  "A heading is number, place and time, then three chips: Heard as, the source chapter (which opens Source) and the estimated length. The bar shows the episode’s estimated listening time against its target as a ring (turn 227’s goal ring, in minutes); it counts spoken words, silences and cue lengths, and the realised time comes from the mix."
+ ],
+ [
+  "Side columns",
+  "Source, Cast and Review open beside the page, one at a time, 360 px, toggled from the bar. Source shows the exact version of the novel the scene was adapted from, read-only and numbered by paragraph; selecting a line highlights what it came from and shows the decision: verdict, what it became, why, Change and Ask Arke. Open in Low Water goes to the Story (230e). Cast shows the scene’s speakers with Actor direction, This scene and the narrator’s take. Review holds the review’s notes (230j)."
+ ],
+ [
+  "Cues are inspectable",
+  "Selecting a sound, ambience or music row opens what is heard, its purpose, its placement, Required or Optional, and its sound (230f). A cue with no sound has one action, Add a sound, which opens the sound picker (230w). A required cue with no sound is amber in the script and counted in the foot; it blocks an edition until it has a sound or is made optional."
+ ],
+ [
+  "Sounds are artifacts",
+  "Every sound in an audio drama is an artifact of the production or of the world, named and saved, so it can be used again. A recurring sound, such as the harbour bell, is one artifact placed by every cue that needs it and never generated twice: a generator cannot be asked for the same sound again, and ElevenLabs’ API takes no seed. Add a sound opens Arke’s one reference picker (turn 69, built) in single-pick mode, filtered to audio and ranked against the cue’s words, as 132c ranks voices against a written voice (230w). It has All, This production and World artifacts lanes, a search, Sound, Ambience and Music chips, and tiles with a waveform, play, length and how many cues use the sound. Its last tiles make a new one: Generate, Record and Upload a file. Use sound places the picked artifact; a sound used again shows where else it plays. Generate opens in the same dialog, never over it (230x). It shows the script’s words, which stay in the script and the listener transcript, and what is sent: a concrete prompt Arke writes from them, which the author can edit. It also shows the engine, the length (Automatic, or 0.5–30 s), Loop, the name it is saved as, and the price on the button. Sound and ambience go to ElevenLabs Sound Effects; a music row goes to Eleven Music, which makes up to 5 minutes. One generation makes at most 30 s, so an ambience is generated as seamless loops: two layers of different lengths by default (30 s and 23 s), so a long scene does not audibly repeat (230y). Audio Studio loops them under the scene. Sounds are generated close and dry; distance and room are mix treatments, so one bell can be near in one scene and far in another. The first sound fills an empty cue; further generations are alternates in the picker. A saved sound keeps its prompt, engine, length and price. Editions credit generated sound by engine. Prices come from the live quote: ElevenLabs’ published rates disagree with each other. On a phone the picker is a sheet."
+ ],
+ [
+  "Hear lines in one press",
+  "Selecting lines offers Hear N lines, Ask Arke, Source and Cast (230g). When every speaker has a voice, the button carries the price (Hear 10 lines · $0.06) and one press makes and plays the lines; the quiet scene’s Perform 2 lines · $0.01 is that case (230l). A dialog opens only when a decision is waiting: a speaker with no voice, or a price above the author’s limit. The button shows the waiting decision as an amber dot. The dialog holds that decision, the voices already cast and the price (230h); What’s sent (the requests, context lines not read, each line’s mapped direction) is one tap away. Ask Arke’s menu has its own field, then Clearer by ear, Tighten, More tension, Give it to the narrator and Say it with sound, then Review these lines and Open in Chat. Dialogue mode is used only where the reader declares it; otherwise lines are requested per voice and assembled in script order with their pauses and interruptions."
+ ],
+ [
+  "No silent substitution",
+  "A speaker with no voice blocks the press until the author chooses one of three: Choose a voice, Narrator stands in or Leave the line out. The dialog’s foot names the speaker. A stand-in take is labelled stand-in in the script, in Audio Studio and in the edition, and holds an edition back until it is recast or kept as a stand-in. This departs from SPEC-047 R-12, under which the audiobook names the substitution on its door and then reads the speaker in the narrator’s voice: for a drama the narrator standing in is the author’s choice, line by line."
+ ],
+ [
+  "First takes keep themselves",
+  "A line’s first take is kept as it arrives; there is nothing for it to replace. The author is asked only twice: when a new take would replace one already kept (new or kept?), and when a take’s transcript differs from its words (flagged with what was heard, with Retake) (230i). Takes play in script order beside their lines, pauses and interruptions included. Done leaves anything undecided marked in the take column. A kept take whose words or direction later change is out of date and keeps playing until the author performs it again (230l); nothing is re-performed on its own."
+ ],
+ [
+  "One review, honest about its evidence",
+  "Review is one thing, in the script and in Audio Studio alike. Each note says what it rests on: the script, by version, or audio heard, by its exact interval. Its header says how much audio has been heard: none on the pilot’s first review (230j), 0:00–14:40 in Audio Studio (230o). An audio note exists only for an interval that was actually heard, so a script review can never pass for a listen. It checks fidelity to the novel, clarity by ear (who is speaking, where we are), pacing, emotion as written, mystery against Kept from the listener and, on heard audio, intelligibility. A note is numbered, quotes its lines and is decided Fix, Intentional or Dismiss (turn 227r); a passed check is listed, closed. Fix arrives as Arke’s tracked edit in the page (turn 227e) or, in Audio Studio, as turn 226’s Current and Suggested."
+ ],
+ [
+  "Cast",
+  "Cast lists every speaking role, the narrator among them as an optional role, plus unnamed and crowd roles with each line named (230k). Columns: Voice (from the character, or set for this production), How they sound, Lines. How they sound is one note per role for this production, starting from the character’s sheet; a line’s own delivery lives in the script’s parentheses. Where the narrator quotes a character, the role also says how the narrator does it: the character’s existing narration note, shown only for characters the narrator actually quotes. The narrator’s version never reaches the actor’s request, and the actor’s note never reaches the narrator’s. What’s sent shows the combined request for a line when the author wants it; the layers are not on the surface. A hidden identity shows its public label, a lock and the episode it is revealed in; transcripts, credits and file names use the public label until then. Change voice… lists the takes it would put out of date before it is confirmed."
+ ],
+ [
+  "Adaptation",
+  "An adapting production has an Adaptation page in its rail, after Episodes (230m). It draws the novel’s chapters at left, sized by words, and the episodes’ scenes at right, sized by listening time; a ribbon is one decision. Crossing ribbons are moves, a ribbon into Cut is an omission, a ribbon that widens is expansion, and unplanned chapters and episodes are dashed. Chips filter by verdict; selecting a chapter or a scene lights its ribbons and opens its decisions: what it became, where it went, what it leaves out, and why. Verdicts reuse SPEC-052 R-19’s Keep, Cut, Merge, Expand and Invent, with Show heard as Hear (inner life turned into something the listener hears)."
+ ],
+ [
+  "Source changed",
+  "A new version of an adapted chapter marks only the scenes made from it, on the Adaptation page and on the scene’s heading (230l). Compare shows the chapter then, the chapter now and the script, with the affected lines marked (230n). Keep the script records the version considered and, if the author gives one, a reason; Ask Arke to revise stages a tracked edit. Neither touches a kept take."
+ ],
+ [
+  "Audio Studio",
+  "Turn 226’s Audio Studio, an episode at a time (230o). Scenes are named regions on the ruler. The script preview reads the radio script. A review strip above the timeline shows the whole episode: scenes as segments, what has been heard solid, what has not hatched, notes pinned, and the visible window. An interruption is a speech placement that starts before the previous line ends (Cuts in 0.4 s before Maren ends). The Inspector shows the open note and the clip; a fix is a proposal with Show, Keep current and Apply."
+ ],
+ [
+  "Episodes",
+  "The production’s side menu is Episodes, Adaptation (when it adapts something), Cast and Artifacts; Story’s Dashboard and Overview would repeat what Episodes shows. Episodes is the home: the show page of turn 199, hero, Episode 1 first, the cast as portraits (a missing voice and a hidden identity marked), then the episodes with a strip of their scenes and Script · Cast · Performed · Mixed (230p). Work running in the background shows on its own row, as Activity reports it. Unplanned episodes are one dashed row with Plan with Arke."
+ ],
+ [
+  "Publish an edition",
+  "An edition names its episodes. One that is not ready is held back, with its reasons on its row (230q). It includes episode audio, a listener transcript (spoken words and meaningful sound, no directions), credits, the production script as PDF, and stems only where the arrangement has separable tracks. It freezes the novel version, scripts, voices and arrangement; later edits never change it. Podcast · stereo and Archive · WAV are delivery profiles, not a loudness promise."
+ ],
+ [
+  "Phone",
+  "The script is one column with beds as lines at its left edge, scenes as a scrolling row of chips, and Hear, Ask Arke and Cast in a 44 px bar at the foot (230r). Hear, Source and Cast are sheets (230s, 230t, 230v); choosing a voice for a missing speaker happens in the Cast sheet. Episodes keeps Episode 1 under the thumb (230u). Audio Studio keeps turn 226’s phone layout."
+ ],
+ [
+  "Arke",
+  "Arke is the production’s Builder Chat (turn 225). It hands bounded work to adaptation, script, performance and listening specialists, but the author sees one Arke: a reply in its own words, a receipt of what it read, and changes that wait in the page. No new chat, tab or panel. A specialist never promotes something Kept from the listener into a line."
+ ],
+ [
+  "Built and new",
+  "Built: the door and step two, the setup conversation with Adapt from and the Target card, the chapter writing room’s held bar, review notes and tracked edits, voices and voice direction with Sent as, grouped requests, quotes and Activity, character narration notes, recorded takes, Audio Studio for a chapter, the show page, Builder Chat. Built also: the reference picker (turn 69), which already shows audio. New: sound generation through ElevenLabs Sound Effects and Eleven Music (Chat refuses sound effects today); sounds as named, reusable artifacts; an audio-drama kind of Story (no new medium), offered on Tell a story’s step two; the radio script document with stable line ids, beds, silence, interruptions and channels; Heard as; Kept from the listener; the Adaptation page and source-change compare; production-level actor direction; the Hear dialog’s blocking choice; the review strip of heard intervals; an episode as Audio Studio’s unit; audio-drama editions with transcripts and credits."
+ ]
+]
