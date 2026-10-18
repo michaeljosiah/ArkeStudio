@@ -56,8 +56,9 @@ describe("the listener's transcript and the credits (R-74, R-75)", () => {
 
   it("credits the voices, the recordings and each generated sound by its engine, and says AI was used", () => {
     const credits = dramaCredits({ title: "Low Water", roles: [{ role: "Maren Kest", voice: "Coral · elevenlabs" }, { role: "Ilo Kest", voice: "your recording", recorded: true }],
-      sounds: [{ name: "Harbour bell", engine: "eleven_text_to_sound_v2" }] });
-    assert.match(credits, /Maren Kest — Coral · elevenlabs/);
+      sounds: [{ name: "Harbour bell", made: "generated with eleven_text_to_sound_v2" }, { name: "gull.wav", made: "recorded or uploaded" }] });
+    assert.match(credits, /Maren Kest — Coral · elevenlabs \(generated\)/);
+    assert.match(credits, /gull\.wav — recorded or uploaded/);
     assert.match(credits, /Ilo Kest — your recording \(recorded\)/);
     assert.match(credits, /Harbour bell — generated with eleven_text_to_sound_v2/);
     assert.match(credits, /made with AI/);

@@ -259,4 +259,16 @@ describe("the show page and Publish (230p, 230q)", () => {
     assert.match(dom.document.body.textContent!, /Episode 1.*not performed/);
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
   });
+
+  it("keeps gaps in the episodes not planned, and Cancel waits for a publish in flight (codex on PR 1880)", async () => {
+    const a = line("maren-kest", "One.");
+    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);
+    const production = state.world!.productions.find((p) => p.meta.id === "low-water-drama")!;
+    production.episodeScripts = [...production.episodeScripts!, { file: "episode-003.json", hash: "sha256:three", script: { version: 1, episode: 3, title: "", blocks: [line("bray", "Three.")] } }] as never;
+    const { container } = await mount(state, "home");
+    assert.match(container.textContent!, /Episodes 2, 4–6 · not planned/);
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
+    assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLButtonElement).disabled, true);
+  });
 });

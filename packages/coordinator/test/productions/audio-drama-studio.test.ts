@@ -127,3 +127,21 @@ describe("codex round 1 on PR 1879", () => {
     await assert.rejects(openAudioStudio(store, id, "episode-001"), /unreadable/);
   });
 });
+
+describe("codex round 1 on PR 1880", () => {
+  it("leaves a line omitted on purpose out of the transcript, and skips a damaged receipt", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Not this." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, a, b]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const passage = opened.state.passages.find((candidate) => candidate.key === b.id)!;
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Leave out", commands: [{ kind: "omit-passage", id: passage.id, label: "Not this.", acknowledged: true }] } as never);
+    const root = await tempDir("drama-editions");
+    const editions = new DramaEditionService(root);
+    const edition = await editions.publish(store, id, { name: "Cut", delivery: "archive", episodes: [1] });
+    assert.equal(await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n");
+    await mkdir(join(root, "broken"));
+    await writeFile(join(root, "broken", "edition.json"), "{");
+    assert.equal((await editions.list(store.worldId, id)).length, 1, "the damaged receipt is skipped");
+  });
+});
