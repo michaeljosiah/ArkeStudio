@@ -294,7 +294,7 @@ describe("Illustrate this chapter: made one at a time (R-102)", () => {
 
         const proposal = await proposed(h);
         assert.ok(proposal.rows.length > 0);
-        assert.ok(proposal.rows.every((row) => row.disagrees?.length === 1 && row.disagrees[0] === row.who[0]!.name), "every row Maren rides in names her");
+        assert.ok(proposal.rows.every((row) => row.disagrees?.length === 1 && row.disagrees[0] === row.who[0]!.key), "every row Maren rides in names her");
         await accept(h.send, proposal, { confirmedMicroUsd: 10_000_000 });
         assert.equal(h.enqueued.length, 0, "nothing is made in a look that dresses her against the chapter");
 

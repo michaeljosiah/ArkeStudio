@@ -208,7 +208,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const needs = who.filter((entry) => entry.kind === "character" && entry.reference === null).map((entry) => entry.name);
     // A chapter look the Looks sheet flags would dress them against the prose (issue 1658); one
     // chosen for this picture alone is the author's own call.
-    const disagrees = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(room.look, entry.key).length > 0).map((entry) => entry.name);
+    const disagrees = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(room.look, entry.key).length > 0).map((entry) => entry.key);
     const picks = ridingPicks(who);
     const keys = held.inFrame.map((person) => person.key);
     const stamp = pictureLookFor(room.look, who.filter((person) => person.kind === "character").map((person) => person.key), picks, library);

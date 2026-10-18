@@ -327,8 +327,9 @@ export const IllustrationRowSchema = z
      */
     needs: z.array(z.string().min(1).max(120)).max(24).optional(),
     /**
-     * People whose chapter look would ride although the chapter's Looks sheet says the chapter's
-     * own words disagree with it (issue 1658): `Ife · look disagrees with the chapter`. Held like
+     * The keys of people whose chapter look would ride although the chapter's Looks sheet says the
+     * chapter's own words disagree with it (issue 1658): `Ife · look disagrees with the chapter`.
+     * Keys rather than names, as two sheets may share a name (codex on PR 1868). Held like
      * a row missing a reference, until the look is put right and the chapter illustrated again,
      * or the author sends it as it is by naming it in `without`. A look chosen for the picture
      * alone is the author's own call and never counts.

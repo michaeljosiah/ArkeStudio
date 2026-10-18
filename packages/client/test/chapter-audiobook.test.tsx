@@ -1759,7 +1759,7 @@ describe("Illustrate this chapter (turn 191)", () => {
   it("holds a row whose chapter look disagrees with the chapter, names who, and sends it only as it is", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
-    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { disagrees: ["Maren"] }), row("p3.0", { at: 150 })] } }));
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { disagrees: ["maren-kest"] }), row("p3.0", { at: 150 })] } }));
     const card = all(m, '[data-testid="illustration-row"]')[0]!;
     assert.equal(card.dataset.state, "disagrees");
     assert.ok(card.className.includes("fy-ills__card--held"), "amber, as a held row is");

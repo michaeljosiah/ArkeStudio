@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { audiobookTextHash, kitLookLibrary, lookDigest, pictureBench, pictureLookFor, type ArtifactSidecar, type ChapterAudiobook, type ClientMessage, type ClientState, type ManifestModel, type PictureShot, type PictureSuggestion, type ProductionBundle } from "@arke-studio/contracts";
 import { BlockPicturePanel, pictureBrief, picturesByTab, useChapterPictures } from "../src/components/audiobook-picture.js";
-import { frameViewWord, ridesLabel } from "../src/components/audiobook-picture-card.js";
+import { frameViewWord, ridesLabel, withOwnLooks } from "../src/components/audiobook-picture-card.js";
 import { AudiobookBlocks, type BlockRow } from "../src/screens/chapter-audiobook.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, useStore } from "../src/lib/store.js";
@@ -700,6 +700,17 @@ describe("a made picture on its block (turn 194g)", () => {
     await press(q(m, '[data-testid="picture-card-update-prompt"]'));
     const rewrite = asked(m, "rewrite-audiobook-picture-prompt").at(-1)!;
     assert.deepEqual(rewrite.changes, [{ key: "maren-kest", from: STORM_LOOK.id, to: HARBOUR_LOOK.id }]);
+  });
+
+  it("a person drafted with nothing to carry rides the chapter's look where the model has room, and the limit still holds (codex on PR 1868)", () => {
+    const kits = state().world!.referenceKits;
+    const harbour = { ...STORM_CHAPTER, characters: { "maren-kest": { name: "Maren", sheet: "maren-kest", text: "Harbour coat, brass buttons.", lookId: HARBOUR_LOOK.id } } };
+    const bare = { key: "maren-kest", name: "Maren", sheet: "maren-kest", kind: "character" as const, reference: null, carried: false };
+    const riding = withOwnLooks([bare], {}, harbour, kits, undefined, 2)[0]!;
+    assert.deepEqual([riding.reference, riding.carried], [`references/maren-kest/${HARBOUR_LOOK.file}`, true], "never `over the limit` for a look the model can carry");
+    assert.equal(withOwnLooks([bare], {}, harbour, kits, undefined, 0)[0]!.carried, false, "a model that takes no picture carries none");
+    const left = { ...bare, reference: "references/maren-kest/head-front.png" };
+    assert.equal(withOwnLooks([left], {}, harbour, kits, undefined, 2)[0]!.carried, false, "one the drafted budget left out stays out");
   });
 
   it("says why an Update prompt was refused on the mark, and the prompt stays as it was", async () => {

@@ -185,7 +185,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
             <Face who={entry} slug={slug} />
             {entry.name}
             {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : entry.sheet === undefined ? "identity not linked · check the character" : "no look"}</span>}
-            {entry.reference !== null && disagrees.has(entry.name) && <span className="fy-ills__note" data-testid="illustration-disagrees">{without ? "sent as it is" : "look disagrees with the chapter"}</span>}
+            {entry.reference !== null && disagrees.has(entry.key) && <span className="fy-ills__note" data-testid="illustration-disagrees">{without ? "sent as it is" : "look disagrees with the chapter"}</span>}
           </span>
         ))}
         {people.length === 0 && <span className="fy-ills__note">{row.who.length > 0 ? "place only" : "no reference rides"}</span>}

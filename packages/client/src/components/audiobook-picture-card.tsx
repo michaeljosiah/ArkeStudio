@@ -108,9 +108,13 @@ type LookMode = "only" | "chapter";
  * chapter's choice again. Everyone else rides the chapter's choice as it is now: a picture made
  * before the chapter's look changed would otherwise show, and Make again send, words for clothes
  * the coordinator no longer dresses them in (issue 1658), with no Update prompt to offer.
+ *
+ * A person drafted with nothing to carry was never weighed against the model's limit, so their
+ * drafted `carried` says nothing of the picture they ride now: they ride where `limit` leaves room
+ * (codex on PR 1868), and the coordinator weighs everyone again at Make.
  */
-export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined): PictureWho[] {
-  return who.map((entry) => {
+export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOwnLooks>, chapter: AudiobookLook | null, kits: readonly ReferenceKit[], frame: string | undefined, limit = Number.POSITIVE_INFINITY): PictureWho[] {
+  const resolved = who.map((entry): PictureWho => {
     if (entry.kind !== "character" || entry.sheet === undefined) return entry;
     const mine = own[entry.key];
     if (mine === undefined && entry.only !== true) {
@@ -128,6 +132,12 @@ export function withOwnLooks(who: readonly PictureWho[], own: Readonly<PictureOw
     }
     const photo = kit === undefined ? null : mainPhotoFor(kit);
     return { ...base, reference: photo === null ? null : `references/${entry.sheet}/${photo.file}`, carried: photo !== null && entry.carried, ...tag };
+  });
+  let room = limit - resolved.filter((entry) => entry.carried).length;
+  return resolved.map((entry, index) => {
+    if (who[index]!.reference !== null || entry.reference === null || entry.carried || room <= 0) return entry;
+    room -= 1;
+    return { ...entry, carried: true };
   });
 }
 
@@ -406,7 +416,7 @@ export function PictureCard({ world, worldId, state, onEdit, offline, picture = 
   const own: PictureOwnLooks = Object.fromEntries(
     [...Object.entries(held).filter(([key]) => !(key in pressedOwn)), ...Object.entries(pressedOwn).flatMap(([key, lookId]) => (lookId === null ? [] : [[key, lookId] as const]))],
   );
-  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame);
+  const riding = chapter === undefined ? suggestion.who : withOwnLooks(suggestion.who, own, chapterLook, world.referenceKits, shot?.frame, suggestion.model.references);
   // Whose look is not the one the prompt was written for (rule 8): their clothing words are marked
   // until Update prompt rewrites them. The prompt was written for what the card was drafted or made
   // with, and since an Update prompt, for what it rewrote it for.
