@@ -27,8 +27,8 @@ async function drama(blocks: EpisodeScriptBlock[]) {
     enqueue: async (input) => {
       sent.push(input);
       await mkdir(join(store.dir, input.landing!.dir), { recursive: true });
-      await writeFile(join(store.dir, input.landing!.dir, input.landing!.name), Buffer.from(`audio:${String(input.params["text"])}`));
-      return newId("job");
+      await writeFile(join(store.dir, input.landing!.dir, input.landing!.name!), Buffer.from(`audio:${String(input.params["text"])}`));
+      return newId("jb");
     },
     waitForJob: async (jobId) => {
       const input = sent.at(-1)!;

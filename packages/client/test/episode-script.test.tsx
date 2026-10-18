@@ -193,7 +193,7 @@ describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
     assert.deepEqual([asked.blocks, asked.quoteOnly], [[a.id, b.id], true], "shift extends the run; the first ask only prices it");
     await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
       episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 3680, requests: [request(a.id), request(b.id)] }, missing: [] }));
-    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /^Hear 2 lines · /.test(button.textContent ?? ""))!;
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines · "))!;
     assert.ok(hear, "the price is on the button");
     assert.equal(hear.querySelector(".fy-ad-hear__dot"), null, "nothing waits on the author");
     await click(hear);
