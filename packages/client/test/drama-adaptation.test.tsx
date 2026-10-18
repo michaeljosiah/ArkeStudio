@@ -123,7 +123,7 @@ describe("the Adaptation page (230m/n)", () => {
     const AT = "2026-10-18T12:00:00.000Z";
     await act(async () => __applyEventForTest({ type: "drama.source", at: AT, requestId: read!.requestId as never, body: "Odile poured.\n\nYour brother hated that tower." }));
     await act(async () => __applyEventForTest({ type: "chapter.open-result", at: AT, requestId: opened!.requestId as never, worldId: FIXTURE_WORLD_ID,
-      productionId: "low-water", chapterId: "low", disposition: "opened", body: "A new first paragraph.\n\nOdile poured.\n\nYour brother loved that tower." }));
+      productionId: "low-water", chapterId: "low", disposition: "opened", hash: "sha256:low-v15", body: "A new first paragraph.\n\nOdile poured.\n\nYour brother loved that tower." }));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.match(container.textContent!, /1 line · 0 kept takes/, "the scene's line rests on the changed paragraph");
     assert.equal(container.querySelectorAll(".fy-ad-cmp__col").length, 3);

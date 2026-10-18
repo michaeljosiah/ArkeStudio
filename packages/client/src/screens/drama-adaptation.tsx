@@ -226,8 +226,8 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
   );
 }
 
-/** A chapter's text: as adapted (its kept text by hash, else its version), or as it is now. */
-function useChapterText(world: WorldBundle, production: ProductionBundle, story: ProductionBundle | null, chapter: MapChapter | undefined, version: number | "now", hash?: string): string[] | null | string {
+/** A chapter's text: as adapted (its kept text by hash, else its version), or as it is now, with the hash read. */
+function useChapterText(world: WorldBundle, production: ProductionBundle, story: ProductionBundle | null, chapter: MapChapter | undefined, version: number | "now", hash?: string, onHash?: (hash: string | null) => void): string[] | null | string {
   const [text, setText] = useState<string[] | string | null>(null);
   useEffect(() => {
     if (!story || !chapter) return;
@@ -239,7 +239,7 @@ function useChapterText(world: WorldBundle, production: ProductionBundle, story:
       if (!requestId) { fail("Not connected."); return () => {}; }
       return subscribeChapterOpenResults((result) => {
         if (result.requestId !== requestId) return;
-        if (result.disposition === "opened") done(result.body ?? ""); else fail("The chapter could not be read.");
+        if (result.disposition === "opened") { onHash?.(result.hash ?? null); done(result.body ?? ""); } else fail("The chapter could not be read.");
       });
     };
     let stop = () => {};
@@ -265,7 +265,9 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   const chapter = map.chapters.find((candidate) => candidate.id === scene.chapter);
   const pin = scene.heading.source!;
   const adapted = useChapterText(world, production, map.story, chapter, pin.version, pin.hash);
-  const now = useChapterText(world, production, map.story, chapter, "now");
+  // The chapter's hash as read (codex on PR 1878): Keep waits until the text shown is the chapter's now.
+  const [readHash, setReadHash] = useState<string | null>(null);
+  const now = useChapterText(world, production, map.story, chapter, "now", undefined, setReadHash);
   // The script as Compare opened it (codex on PR 1878): Keep refuses if it moved meanwhile.
   const [openedHash] = useState(() => production.episodeScripts?.find((entry) => entry.script.episode === scene.episode)?.hash ?? null);
   const [reason, setReason] = useState("");
@@ -286,6 +288,7 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   const keep = () => {
     if (!stored || !chapter || !Array.isArray(adapted) || !Array.isArray(now)) return;
     if (stored.hash !== openedHash) { setFailure("The script changed while you were comparing. Compare again."); return; }
+    if (chapter.hash !== undefined && readHash !== chapter.hash) { setFailure("The chapter changed while you were comparing. Compare again."); return; }
     // Only the scene's pin moves (R-65): the version considered, and why — and its paragraph
     // numbers, renumbered for the text now, a changed paragraph let go (codex on PR 1878). The lines'
     // words are untouched, so their takes are too (R-66).
