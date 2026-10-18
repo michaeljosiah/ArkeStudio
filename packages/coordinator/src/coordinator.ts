@@ -21406,6 +21406,10 @@ export class Coordinator {
     this.readModel.setStageReviews(human.stageReviews);
     this.readModel.setWorldChat(
       projectWorkspace(loaded, new Map(), {
+        sourceStory: (productionId) => {
+          const story = bundle.productions.find(production => production.meta.id === productionId);
+          return story ? { title: story.meta.title, chapters: story.chapters.filter(chapter => chapter.retired !== true).length } : null;
+        },
         productionPlan: (request) => {
           const exports = [...this.exportReads.values()].filter(e => e.worldId === store.worldId && e.productionId === request.productionId)
             .map(({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint, deliveryKind }) => ({ id, worldId, productionId, episodeId, status, output, createdAt, sourceFingerprint, deliveryKind }));

@@ -9,7 +9,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
-  ADAPTATION_KINDS, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
+  ADAPTATION_KINDS, AUDIO_DRAMA_KIND, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
@@ -23,6 +23,16 @@ import { Button } from "../components/ui.js";
 import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
+import { AudioDramaPlanCard, NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
+
+type SetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
+
+/** How the Format reads back, in the words the door used (design turn 230c). */
+function formatLine(draft: ProductionSetupDraft): string {
+  return draft.kind === AUDIO_DRAMA_KIND
+    ? `story · audio drama · ${draft.audioDrama?.episodes ?? 0} episodes`
+    : `${draft.kind} · ${draft.aspect} · ${draft.scenes.length} scenes`;
+}
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
@@ -42,6 +52,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const { state, connection } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
+  // What the door already answered — an audio drama and the story it adapts (SPEC-057 R-3). Read
+  // only by a start: a setup that exists is never rewritten by the page that reopens it.
+  const seed = (location.state as { seed?: SetupSeed } | null)?.seed;
   const onSetupPage = !embedded || location.pathname === `/w/${worldId}/productions/setup/${setupId}` || location.pathname === `/w/${worldId}/chat/${setupId}`;
   const workspace = state?.worldChat?.conversationId === setupId ? state.worldChat : null;
   const setup = workspace?.productionSetup;
@@ -98,7 +111,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     const key = `${worldId}/${setupId}`;
     if (opened.current === key) return;
     opened.current = key;
-    command({ operation: world.conversations.some(conversation => conversation.id === setupId) ? "resume" : "start" });
+    const exists = world.conversations.some(conversation => conversation.id === setupId);
+    command(exists ? { operation: "resume" } : { operation: "start", ...(seed ? { seed } : {}) });
   }, [world, worldId, setupId, connection]);
   useEffect(() => {
     if (connection !== "open") {
@@ -111,8 +125,22 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
   }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
+  /*
+   * Plan with Arke is the request (SPEC-057 R-3): a setup the door seeded with a story opens with
+   * that story asked for, rather than an empty conversation waiting to be told what it already
+   * knows. Once, by the page that started it, and only into a draft no turn has touched.
+   */
+  const seededAsk = useRef<string | null>(null);
+  const seededStory = seed?.source ? adaptableStories(world?.productions ?? []).find(story => story.id === seed.source!.productionId) : undefined;
+  useEffect(() => {
+    if (!seededStory || !setupId || seededAsk.current === setupId || pending || running || unavailable) return;
+    if (!setup || setup.status !== "draft" || setup.draft.revision !== 1 || (workspace?.messages.length ?? 0) > 0) return;
+    seededAsk.current = setupId;
+    command({ operation: "send", text: `An audio drama of ${seededStory.title}.`, ...(modelId ? { modelId } : {}) });
+  }, [seededStory?.id, setupId, setup?.status, setup?.draft.revision, workspace?.messages.length, pending, running, unavailable]);
   if (!setupId) return <p role="alert">This production setup address is invalid.</p>;
   const draft = setup?.draft;
+  const audioDrama = draft?.kind === AUDIO_DRAMA_KIND;
   const problems = draft ? productionSetupProblems(draft, world?.sheets ?? [], world?.productions ?? []) : [];
   const stories = adaptableStories(world?.productions ?? []);
   const update = (fields: NonNullable<Extract<ProductionSetupCommand["action"], { operation: "update" }>["update"]["fields"]>) => {
@@ -150,7 +178,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
           </div>
           <HeldBar className="fy-production-setup__composer">
-            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? `${draft.kind} · ${draft.aspect} · ${draft.scenes.length} scenes` : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
+            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? formatLine(draft) : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
             {harnessModelsNeedAWord(state) && <HarnessModelStatus state={state} />}
             <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               // A setup is not yet a production, so there is nowhere to remember a model: the chip
@@ -174,18 +202,21 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 placeholder="A working title is enough" onBlur={event => { if (event.target.value !== draft.title) update({ title: event.target.value }); }} /></label>
               <label>Format<select value={draft.kind} onChange={event => {
                 const kind = event.target.value as ProductionSetupDraft["kind"];
-                update({ kind, aspect: kind === "microdrama" ? "9:16" : "16:9" });
+                // An audio drama has no frame; leaving one drops its plan, which no screen reads.
+                update(kind === AUDIO_DRAMA_KIND ? { kind } : { kind, aspect: kind === "microdrama" ? "9:16" : "16:9", ...(audioDrama ? { audioDrama: null } : {}) });
               }}>
                 <option value="microdrama">Micro drama</option><option value="film">Film · short</option>
-                <option value="music-video">Music video</option><option value="other">Other</option>
+                <option value="music-video">Music video</option><option value={AUDIO_DRAMA_KIND}>Story · audio drama</option>
+                <option value="other">Other</option>
               </select></label>
-              <div className="fy-production-setup__delivery">
+              {/* A story for the ear is delivered in no frame and at no rate (SPEC-057 R-82). */}
+              {!audioDrama && <div className="fy-production-setup__delivery">
                 <label>Aspect<input key={`aspect-${draft.revision}`} defaultValue={draft.aspect} maxLength={40}
                   onBlur={event => { if (event.target.value !== draft.aspect) update({ aspect: event.target.value }); }} /></label>
                 <label>Frame rate<select value={draft.frameRate} onChange={event => update({ frameRate: Number(event.target.value) as 24 | 25 | 30 })}>
                   {[24, 25, 30].map(rate => <option key={rate} value={rate}>{rate} fps</option>)}
                 </select></label>
-              </div>
+              </div>}
               {/* Adapt from (design turn 205, SPEC-052 R-1): a story of this world the production is
                   made from. Offered for a micro drama or a film while the world has a story with
                   chapters, and kept in view while a source is set, so it can always be cleared. */}
@@ -198,6 +229,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             </fieldset>
             {/* Where it will be watched, and the numbers that follow (design turn 205, SPEC-052 R-6). */}
             {draft.kind === "microdrama" && <ProductionTargetCard draft={draft} update={update} disabled={!!pending || running || locked} />}
+            {audioDrama && draft.audioDrama && <AudioDramaPlanCard plan={draft.audioDrama} disabled={!!pending || running || locked}
+              onChange={plan => update({ audioDrama: plan })} />}
             {/* The production's own models (design turn 153), written with the production. Each
                 row follows Settings until chosen here — Settings, not the world: the world's
                 choice was for making the world. */}
@@ -212,13 +245,20 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             {draft.logline && <p>{draft.logline}</p>}
             <ProductionSetupOutline draft={draft} sheetName={id => world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
             {problems.length > 0 && <div className="fy-production-setup__problems" role="status"><h3>Still to resolve</h3><ul>{problems.map((problem, i) => <li key={i}>{problem}</li>)}</ul>
-              {draft.kind !== "microdrama" && (draft.episodes.length > 0 || draft.arcs.length > 0 || draft.series) && <Button disabled={!!pending || locked || running}
+              {/* An audio drama keeps its plan and nothing of a screen's outline (SPEC-057 R-7). */}
+              {audioDrama && (draft.scenes.length > 0 || draft.episodes.length > 0 || draft.arcs.length > 0 || draft.series) && <Button disabled={!!pending || locked || running}
+                onClick={() => command({ operation: "update", update: { expectedRevision: draft.revision,
+                  removeEpisodes: draft.episodes.map(episode => episode.key), removeScenes: draft.scenes.map(scene => scene.key),
+                  fields: { arcs: [], series: null, defaults: null } } })}>
+                Keep the plan only
+              </Button>}
+              {draft.kind !== "microdrama" && !audioDrama && (draft.episodes.length > 0 || draft.arcs.length > 0 || draft.series) && <Button disabled={!!pending || locked || running}
                 onClick={() => command({ operation: "update", update: { expectedRevision: draft.revision,
                   removeEpisodes: draft.episodes.map(episode => episode.key), fields: { arcs: [], series: null, defaults: null } } })}>
                 Keep scenes without episodes
               </Button>}
             </div>}
-            {setup.review && <SetupReview setup={setup} />}
+            {setup.review && (audioDrama ? <AudioDramaReview setup={setup} sourceTitle={stories.find(story => story.id === draft.source?.productionId)?.title} /> : <SetupReview setup={setup} />)}
             {setup.problem && <p role="status">{setup.problem}</p>}
             {locked ? <p role="status">Resolving creation… This draft is saved. Reopen the world if recovery is needed.</p> :
               <div className="fy-production-setup__actions">
@@ -237,6 +277,20 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   );
 }
 
+
+/** What Create will write for an audio drama: its plan, and nothing of a book's or a screen's. */
+function AudioDramaReview({ setup, sourceTitle }: { setup: ProductionSetupState; sourceTitle: string | undefined }) {
+  const plan = setup.review!.plan;
+  const drama = plan.initialContent?.audioDrama?.plan;
+  return <section className="fy-production-setup__review" aria-label="Review production">
+    <h3>Ready to create · {plan.production.title}</h3>
+    <p>Story · audio drama{sourceTitle ? ` · adapts ${sourceTitle}` : ""}</p>
+    {drama && <p>{drama.episodes} episodes · about {drama.minutes} minutes each · {drama.narrator ? NARRATOR_LABEL[drama.narrator].toLowerCase() : "narrator not decided"}</p>}
+    {drama?.pilot && <p>Pilot: {[drama.pilot.title, pilotChapters(drama.pilot.chapters)].filter(Boolean).join(" · ")}</p>}
+    {drama && drama.keptFromListener.length > 0 && <p>{drama.keptFromListener.length} kept from the listener</p>}
+    <p>No voices, sounds or music will be generated.</p>
+  </section>;
+}
 
 function SetupReview({ setup }: { setup: ProductionSetupState }) {
   const plan = setup.review!.plan;

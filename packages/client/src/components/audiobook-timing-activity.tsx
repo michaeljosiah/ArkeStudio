@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { ulid, type ClientState } from "@arke-studio/contracts";
+import { productionShape, ulid, type ClientState } from "@arke-studio/contracts";
 import {
   send,
   subscribeAudiobookWordTiming,
@@ -37,7 +37,7 @@ export function useWordTimingActivity(
   const worldId = state.world?.meta.worldId;
   const productionIds =
     state.world?.productions
-      .filter((production) => production.meta.format === "story")
+      .filter((production) => productionShape(production.meta).hasChapters)
       .map((production) => production.meta.id) ?? [];
   const key = JSON.stringify(productionIds);
   useEffect(() => {

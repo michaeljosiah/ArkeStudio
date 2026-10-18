@@ -218,6 +218,8 @@ export function workingLabel(tool: string): string {
 
 export interface ProjectOptions {
   productionPlan?: (request: ProductionPlanRequest) => ProductionPlanCard;
+  /** The story a setup adapts, as its receipt names it: its title and how many chapters it has. */
+  sourceStory?: (productionId: string) => { title: string; chapters: number } | null;
   humanDecisions?: HumanDecisionCard[];
   humanDecisionProblems?: string[];
   sheetName?: (slug: string) => string | null;
@@ -301,6 +303,16 @@ export function projectPoints(
  * nothing in canon" mean opposite things to somebody deciding whether an idea is new, and the
  * line under a reply is exactly where that distinction is read.
  */
+/**
+ * How much of the adapted story a setup reply read (SPEC-057 R-5): "read Low Water · 18 of 18
+ * chapters · nothing written". A partial read says so by its count; setup never writes the world.
+ */
+export function wordSourceRead(read: NonNullable<WorldChatLoaded["sourceReads"]>[string], story: ProjectOptions["sourceStory"]): string {
+  const known = story?.(read.productionId) ?? null;
+  const of = known ? ` of ${Math.max(known.chapters, read.chapters)}` : "";
+  return `read ${known?.title ?? read.productionId} · ${read.chapters}${of} chapter${read.chapters === 1 && !of ? "" : "s"} · nothing written`;
+}
+
 export function wordReceipt(receipt: WorldChatCheckReceipt): string {
   const what = receipt.querySummary ? ` ${receipt.querySummary}` : "";
   switch (receipt.status) {
@@ -421,7 +433,10 @@ export function projectWorkspace(
       role: m.role,
       text: m.text,
       // Not a look at the world, so not a check the person is shown beside the reply.
-      receipts: (receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
+      receipts: [
+        ...(receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
+        ...(loaded.sourceReads?.[m.id] ? [wordSourceRead(loaded.sourceReads[m.id]!, options.sourceStory)] : []),
+      ],
       refusals: wordRefusals(loaded.refusals[m.id] ?? []),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),

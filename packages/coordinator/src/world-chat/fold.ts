@@ -110,6 +110,7 @@ export function foldConversation(
 
   const messages: WorldChatMessage[] = [];
   const productionPlans: NonNullable<WorldChatLoaded["productionPlans"]> = {};
+  const sourceReads: NonNullable<WorldChatLoaded["sourceReads"]> = {};
   const imageDisclosures = new Map<string, NonNullable<WorldChatLoaded["imageDisclosures"]>[number]>();
   const imageReceipts = new Map<string, NonNullable<WorldChatLoaded["imageReceipts"]>[number]>();
   const mediaReceipts = new Map<string, NonNullable<WorldChatLoaded["mediaReceipts"]>[number]>();
@@ -324,6 +325,15 @@ export function foldConversation(
       case "turn.completed":
         if (e.productionPlan) productionPlans[e.message.id] = e.productionPlan;
         if (e.productionSetup) productionSetup = e.productionSetup;
+        {
+          // The chapters of the adapted story this reply read whole: a full get_chapter read's
+          // target is `<story>:<chapter>`, and a section read (beats, plan) carries a third part.
+          const source = e.productionSetup?.draft.source?.productionId;
+          const whole = source ? new Set(e.receipts.filter(receipt => receipt.tool === "target-read" && receipt.status === "complete" &&
+            receipt.complete !== false && receipt.target?.requirement === "chapters" &&
+            receipt.target.id.startsWith(`${source}:`) && receipt.target.id.split(":").length === 2).map(receipt => receipt.target!.id)) : new Set<string>();
+          if (source && whole.size > 0) sourceReads[e.message.id] = { productionId: source, chapters: whole.size };
+        }
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         // Keyed by the reply that made it, so the card renders beside the sentence describing it.
@@ -672,6 +682,7 @@ export function foldConversation(
     ),
     hasMore: shown.length < windowed.length,
     ...(Object.keys(productionPlans).length ? { productionPlans: Object.fromEntries(shown.flatMap(m => productionPlans[m.id] ? [[m.id, productionPlans[m.id]!]] : [])) } : {}),
+    ...(Object.keys(sourceReads).length ? { sourceReads: Object.fromEntries(shown.flatMap(m => sourceReads[m.id] ? [[m.id, sourceReads[m.id]!]] : [])) } : {}),
     ...(inputQueue.revision > 0 ? { inputQueue: projectWorldChatInputQueue(inputQueue) } : {}),
     candidates: [...candidates.values()],
     actions: actionCards,

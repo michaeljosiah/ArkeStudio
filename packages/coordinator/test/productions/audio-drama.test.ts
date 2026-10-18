@@ -9,6 +9,8 @@ import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
 import { AUDIO_DRAMA_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
+import { projectWorkspace, wordSourceRead } from "../../src/world-chat/project.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -81,6 +83,33 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     assert.equal(await exists(join(root, "narrative.json")), false);
     assert.equal(await exists(join(root, "scenes")), false);
     assert.equal(store.getBundle().productions.find(production => production.meta.id === productionId)!.audioDrama?.plan.narrator, "narrated");
+  });
+
+  it("says how much of the story a setup reply read, a partial read by its count (R-5)", () => {
+    const setupId = `cv_${ulid()}` as ConversationId;
+    const runId = newId("run"), turnId = newId("turn"), messageId = newId("msg");
+    const read = (id: string, complete = true) => ({ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [], at: CLOCK,
+      target: { requirement: "chapters", id }, complete });
+    const setup = { status: "draft", review: null, draft: {
+      schemaVersion: 1, setupId, worldId: "w", revision: 2, title: "Low Water", kind: "audio-drama", aspect: "16:9", frameRate: 24,
+      narrative: {}, arcs: [], references: [], openQuestions: [], episodes: [], scenes: [], source: { productionId: "low-water" },
+      audioDrama: { episodes: 6, minutes: 25, keptFromListener: [] },
+    } };
+    const envelope = (seq: number, event: unknown) => ({ schemaVersion: 1, seq, eventId: `ce_${ulid()}`, at: CLOCK, event }) as never;
+    const { view } = foldConversation(setupId, CLOCK, [
+      envelope(1, { type: "conversation.created", title: "Low Water", entryContext: { kind: "production-setup", setupId } }),
+      envelope(2, { type: "turn.completed", productionSetup: setup,
+        message: { id: messageId, turnId, role: "studio", text: "Read.", attachmentIds: [], createdAt: CLOCK },
+        run: { id: runId, turnId, basedOnConversationSeq: 1, status: "completed", adapter: "fake", harnessCleanup: "not-required",
+          contextDigest: `sha256:${"a".repeat(64)}`, startedAt: CLOCK, endedAt: CLOCK },
+        receipts: [read("low-water:tide"), read("low-water:bell"), read("low-water:tide"), read("low-water:tide:beats"),
+          read("low-water:salt", false), read("undertow:one")],
+        candidates: [], groups: [], tombstones: [] }),
+    ]);
+    assert.deepEqual(view.sourceReads, { [messageId]: { productionId: "low-water", chapters: 2 } }, "whole chapters of the source, each once");
+    const projected = projectWorkspace(view, new Map(), { sourceStory: id => id === "low-water" ? { title: "Low Water", chapters: 3 } : null });
+    assert.deepEqual(projected.messages[0]!.receipts, ["read Low Water · 2 of 3 chapters · nothing written"]);
+    assert.equal(wordSourceRead({ productionId: "gone", chapters: 1 }, () => null), "read gone · 1 chapter · nothing written");
   });
 
   it("tells Arke to read, ask one question by example and propose one plan, only for an audio drama (R-5..R-8)", async () => {

@@ -28,6 +28,7 @@ import {
   type VoiceCandidate,
   type WorldBundle,
   voiceDisplayLabel,
+  productionShape,
 } from "@arke-studio/contracts";
 import { CharacterHeader } from "./character-reference.js";
 import { CharacterNarration } from "../components/character-narration.js";
@@ -669,7 +670,7 @@ export function CharacterVoiceScreen() {
               <div className="fy-voice-narration-books">
                 <label>Book context <select aria-label="Narration book" value={bookId ?? ""} onChange={event => setParams(event.target.value ? { book: event.target.value } : {}, { replace: true })}>
                   <option value="">Character default</option>
-                  {world.productions.filter(p => p.meta.format === "story").map(p => <option key={p.meta.id} value={p.meta.id}>{p.meta.title}</option>)}
+                  {world.productions.filter(p => productionShape(p.meta).hasChapters).map(p => <option key={p.meta.id} value={p.meta.id}>{p.meta.title}</option>)}
                 </select></label>
                 {bookId === null && <div className="fy-character-narration__effective" data-testid="narration-default-effective">
                   <span>Default character direction</span>

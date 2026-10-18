@@ -1504,6 +1504,11 @@ export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 export const WorldChatLoadedSchema = z
   .object({
     productionPlans: z.record(MessageIdSchema, ProductionPlanRequestSchema).optional(),
+    /**
+     * How many chapters of the story a setup adapts each reply read in full, keyed by the reply
+     * (SPEC-057 R-5). The reply's receipt says "18 of 18 chapters", or a partial read says so.
+     */
+    sourceReads: z.record(MessageIdSchema, z.object({ productionId: z.string().min(1).max(200), chapters: z.number().int().min(1) }).strict()).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),

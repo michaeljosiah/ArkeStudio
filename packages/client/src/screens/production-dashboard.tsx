@@ -17,7 +17,8 @@ import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait } from "../components/portrait.js";
 import { Button } from "../components/ui.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { ChevronRight } from "../components/icons.js";
+import { ChevronRight, Lock } from "../components/icons.js";
+import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
@@ -54,7 +55,64 @@ export function ProductionHomeScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
   if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
+  if (production && productionShape(production.meta).isAudioDrama) return <AudioDramaEpisodesScreen />;
   return <ProductionDashboardScreen />;
+}
+
+/**
+ * An audio drama's home (design turn 230p, SPEC-057 R-7): its episodes as the plan sets them out,
+ * the pilot among them, and what the listener is not told yet. Scripts, takes and listening join
+ * this page as they are built; until then it is the plan, read back.
+ */
+function AudioDramaEpisodesScreen() {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  if (!world || !production) return <Screen id="production-dashboard"><EmptyState title="Opening production…" /></Screen>;
+  const plan = production.audioDrama?.plan ?? null;
+  const source = production.audioDrama?.source ? world.productions.find(p => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
+  const episodes = plan ? Array.from({ length: plan.episodes }, (_, i) => i + 1) : [];
+  return (
+    <div className="fy-prodmain fy-ad-home" data-screen="production-dashboard">
+      <div className="fy-h1row">
+        <h1 className="fy-h1">{production.meta.title}</h1>
+        <span className="fy-h1row__meta">
+          {plan ? `${plan.episodes} episode${plan.episodes === 1 ? "" : "s"} · about ${plan.minutes} minutes each${plan.narrator ? ` · ${NARRATOR_LABEL[plan.narrator].toLowerCase()}` : ""}` : "no plan"}
+        </span>
+      </div>
+      {production.audioDrama?.source && (
+        <div className="fy-h1row__meta">
+          Adapts{" "}
+          {source ? <button type="button" className="fy-linkbtn" onClick={() => navigate(`/w/${worldId}/p/${source.meta.id}`)}>{source.meta.title}</button>
+            : `${production.audioDrama.source.productionId} · no longer here`}
+        </div>
+      )}
+      <div>
+        <div className="fy-listhead">Episodes</div>
+        <ol className="fy-ad-home__episodes">
+          {episodes.map(n => (
+            <li key={n}>
+              <span className="fy-ad-home__n">{n}</span>
+              <span>
+                <b>Episode {n}</b>
+                <small>{n === 1 && plan?.pilot ? `pilot · ${[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}` : "not written"}</small>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      {plan && plan.keptFromListener.length > 0 && (
+        <div>
+          <div className="fy-listhead">Kept from the listener</div>
+          <ul className="fy-ad-home__kept">
+            {plan.keptFromListener.map((kept, i) => (
+              <li key={`${i}:${kept.fact}`}><Lock size={13} /><span>{kept.fact}</span><small>until ep {kept.revealEpisode}</small></li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ProductionDashboardScreen() {
