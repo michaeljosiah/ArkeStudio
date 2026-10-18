@@ -484,6 +484,12 @@ export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
  * chapters and the draft as unreadable, so the world is raised before either is written.
  */
 export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
+/**
+ * An audio drama's episode scripts (SPEC-057 R-83, codex on PR 1870): a build before them reads
+ * the world and shows every script as absent, so any landing of one — a save, an accepted
+ * proposal, a restore or an adopted edit — raises the world first.
+ */
+export const EPISODE_SCRIPT_SCHEMA_VERSION = 91;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -953,6 +959,7 @@ export class Committer {
     const landsProseStyle = files.some((f) => classify(f.path).track === "prose-style" && f.newContent != null);
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
+      files.some((f) => classify(f.path).track === "episode-script" && f.newContent != null) ? EPISODE_SCRIPT_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,

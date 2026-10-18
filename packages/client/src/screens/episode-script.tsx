@@ -38,9 +38,10 @@ export function EpisodeScriptScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const episode = Number(episodeParam);
   if (!world || !production) return <Screen id="episode-script"><EmptyState title="Opening the script…" /></Screen>;
-  if (!Number.isInteger(episode) || episode < 1) return <Screen id="episode-script"><EmptyState title="This episode address is invalid." /></Screen>;
+  if (!Number.isInteger(episode) || episode < 1 || episode > 200) return <Screen id="episode-script"><EmptyState title="This episode address is invalid." /></Screen>;
   if (!productionShape(production.meta).isAudioDrama) return <Screen id="episode-script"><EmptyState title="Scripts are an audio drama's." /></Screen>;
-  return <EpisodeScript key={`${production.meta.id}:${episode}`} world={world} production={production} episode={episode} />;
+  // Keyed by the world too (codex on PR 1870): two worlds can each hold this slug and episode.
+  return <EpisodeScript key={`${world.meta.worldId}/${production.meta.id}:${episode}`} world={world} production={production} episode={episode} />;
 }
 
 function EpisodeScript({ world, production, episode }: { world: WorldBundle; production: ProductionBundle; episode: number }) {
@@ -60,6 +61,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [dirty, setDirty] = useState(parked !== null);
   const [saving, setSaving] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // A refused save (codex on PR 1870): the author's text stays on screen, neither replaced by the
+  // stored script nor sent again, until they take the saved one, keep theirs, or edit again.
+  const [conflict, setConflict] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -72,11 +76,11 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // Another window's save, or Arke's accepted proposal, arrives in the bundle: adopted while this
   // copy holds nothing unsaved, never over the author's own typing.
   useEffect(() => {
-    if (dirty || saving || !stored || stored.hash === baseHash) return;
+    if (dirty || saving || conflict || !stored || stored.hash === baseHash) return;
     setBlocks(stored.script.blocks); setTitle(stored.script.title); setBaseHash(stored.hash); setVersion(stored.script.version);
   }, [stored?.hash]);
 
-  const edit = (next: EpisodeScriptBlock[]) => { setBlocks(mendRelations(next)); setDirty(true); setFailure(null); };
+  const edit = (next: EpisodeScriptBlock[]) => { setBlocks(mendRelations(next)); setDirty(true); setFailure(null); setConflict(false); };
   const change = (id: string, patch: Partial<EpisodeScriptBlock>) =>
     edit(blocks.map((block) => block.id === id ? ({ ...block, ...patch } as EpisodeScriptBlock) : block));
 
@@ -96,17 +100,17 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   }, [dirty, saving, blocks, title, baseHash, failure]);
   // Leaving with edits unsent — inside the pause, behind a save in flight, or disconnected — parks
   // them rather than dropping them (codex on PR 1870).
-  const latest = useRef({ blocks, title, baseHash, dirty, saving });
-  latest.current = { blocks, title, baseHash, dirty, saving };
+  const latest = useRef({ blocks, title, baseHash, dirty, saving, conflict });
+  latest.current = { blocks, title, baseHash, dirty, saving, conflict };
   useEffect(() => () => {
     const now = latest.current;
-    if (now.dirty) parkDraft({ worldId: world.meta.worldId, productionId: production.meta.id, episode, title: now.title, blocks: now.blocks, baseHash: now.baseHash }, now.saving);
+    if (now.dirty || now.conflict) parkDraft({ worldId: world.meta.worldId, productionId: production.meta.id, episode, title: now.title, blocks: now.blocks, baseHash: now.baseHash }, now.saving);
   }, []);
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);
-    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); }
-    else { setFailure(result.reason ?? "Not saved."); setDirty(false); }
+    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); }
+    else { setFailure(result.reason ?? "Not saved."); setDirty(false); setConflict(true); }
   }), [saving, version]);
 
   useEffect(() => {
@@ -352,9 +356,12 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
       <footer className="fy-ad-ep__foot">
         <span role="status">
           {failure ? <>Not saved · {failure} <button type="button" className="fy-linkbtn" onClick={() => {
-            setFailure(null); setDirty(false);
+            setFailure(null); setDirty(false); setConflict(false);
             if (stored) { setBlocks(stored.script.blocks); setTitle(stored.script.title); setBaseHash(stored.hash); setVersion(stored.script.version); }
-          }}>Take the saved script</button></>
+          }}>Take the saved script</button>
+          {conflict && stored && stored.hash !== baseHash && <> · <button type="button" className="fy-linkbtn" onClick={() => {
+            setFailure(null); setConflict(false); setBaseHash(stored.hash); setDirty(true);
+          }}>Keep mine</button></>}</>
             : saving || dirty ? "Saving…" : version !== null ? `Saved · script v${version}` : "Not started"}
         </span>
         <span className="gap" />
@@ -472,7 +479,8 @@ function SourceColumn({ world, story, heading, block, onClose }: {
   const pin = heading?.source;
   const chapter = pin && story ? story.chapters.find((c) => c.id === pin.chapter) : undefined;
   const [text, setText] = useState<{ key: string; paragraphs: string[] } | { key: string; failure: string } | null>(null);
-  const key = pin && chapter ? `${story!.meta.id}:${chapter.id}:${pin.version}` : null;
+  // The hash too (codex on PR 1870): a direct chapter save changes the prose under the same version.
+  const key = pin && chapter ? `${story!.meta.id}:${chapter.id}:${pin.version}:${chapter.hash ?? ""}` : null;
   useEffect(() => {
     if (!key || !pin || !chapter || !story) return;
     let live = true;
