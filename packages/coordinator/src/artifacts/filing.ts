@@ -544,6 +544,20 @@ function generatedIdentity(
       links: [generation.chapterId, ...(generation.sheetId !== undefined ? [generation.sheetId] : [])],
     };
   }
+  if (generation.source === "sound") {
+    // A sound made for an audio drama's cue (SPEC-057 R-41): one job made it once, so a replayed
+    // filing finds it; the name it was saved as, then the job's tail, so two of one name are two.
+    return {
+      producedBy: "sound",
+      isSame: (artifact) =>
+        artifact.generation?.source === "sound" &&
+        artifact.generation.productionId === generation.productionId &&
+        artifact.generation.jobId === generation.jobId &&
+        artifact.generation.durationSec === generation.durationSec,
+      stem: `${slugify(generation.name).slice(0, 60) || generation.cue}-${(generation.jobId ?? originalStem).slice(-6).toLowerCase()}`,
+      links: [],
+    };
+  }
   return {
     producedBy: "character-reference",
     // The job, not the take: the legacy tile path records no take at all, and one succeeded job

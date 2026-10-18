@@ -262,7 +262,10 @@ export function ReferencePickerBody({
   only,
   budget = "model",
   worldChoices,
+  actions,
 }: {
+  /** Tiles after Upload that make a source rather than pick one — Generate, Record (SPEC-057 R-43). */
+  actions?: ReadonlyArray<{ label: string; onPress: () => void }>;
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
   worldChoices?: React.ReactNode;
@@ -442,7 +445,7 @@ export function ReferencePickerBody({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`${worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
+            {`${only === "audio" ? "World sounds" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
           </button>
           {offered(characters ?? []).length > 0 && (
             <button
@@ -468,7 +471,7 @@ export function ReferencePickerBody({
           <Search size={13} />
           <input
             className="fy-refpicker__search"
-            placeholder={world.some((source) => source.group) ? "Search images" : "Search artifacts"}
+            placeholder={only === "audio" ? "Search sounds" : world.some((source) => source.group) ? "Search images" : "Search artifacts"}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -497,10 +500,11 @@ export function ReferencePickerBody({
         {capacityChip}
       </div>
 
+      {/* Grouping is not proof of images (codex on PR 1872): the audio picker groups by cue. */}
       {sources.some((source) => source.group) && (
-        <div className="fy-refpicker__lanes" role="group" aria-label="Image category">
+        <div className="fy-refpicker__lanes" role="group" aria-label={only === "audio" ? "Sound category" : "Image category"}>
           {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
-            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? "All images"}</button>
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? (only === "audio" ? "All sounds" : "All images")}</button>
           ))}
         </div>
       )}
@@ -574,6 +578,11 @@ export function ReferencePickerBody({
             </button>
           );
         })}
+        {actions?.map((action) => (
+          <button key={action.label} type="button" className="fy-refpicker__upload" onClick={action.onPress}>
+            {action.label}
+          </button>
+        ))}
         <button type="button" className="fy-refpicker__upload" onClick={onUpload}>
           <Upload size={16} />
           Upload a file

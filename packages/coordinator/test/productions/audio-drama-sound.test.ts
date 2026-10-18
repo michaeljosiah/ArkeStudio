@@ -1,0 +1,149 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { createProduction } from "../../src/productions/ops.js";
+import { generateDramaSound, type DramaSoundDeps, type DramaSoundInput } from "../../src/productions/audio-drama-sound.js";
+import type { EnqueueInput } from "../../src/queue/dispatcher.js";
+import { WorldStore } from "../../src/world/store.js";
+import { SOUND_ARTIFACT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
+
+/** A sound for an audio drama's cue (SPEC-057 R-39..R-42): priced, made against its token, kept as artifacts. */
+const CLOCK = "2026-10-18T12:00:00.000Z";
+async function drama() {
+  const store = await WorldStore.open(await makeTempWorld(), { clock: () => CLOCK });
+  closeOnCleanup(() => store.close());
+  const id = await createProduction(store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+  const sent: EnqueueInput[] = [];
+  const deps: DramaSoundDeps = {
+    worldId: store.worldId, models: SHIPPED_MANIFEST.models,
+    enqueue: async (input) => {
+      sent.push(input);
+      await mkdir(join(store.dir, input.landing!.dir), { recursive: true });
+      await writeFile(join(store.dir, input.landing!.dir, input.landing!.name!), Buffer.from(`mp3:${sent.length}`));
+      return newId("jb");
+    },
+    waitForJob: async (jobId) => {
+      const input = sent.at(-1)!;
+      return { id: jobId, status: "succeeded", landedFiles: [`${input.landing!.dir}/${input.landing!.name!}`] } as unknown as Job;
+    },
+  };
+  return { store, id, sent, deps };
+}
+const bell: DramaSoundInput = { cue: "sound", heard: "One deep stroke of the harbour bell.", prompt: "One deep stroke of a harbour bell. Close and dry.", durationSec: 4, name: "Harbour bell" };
+
+describe("a sound for an audio drama's cue (SPEC-057 R-39..R-42)", () => {
+  it("prices a sound by its length at the catalogue rate and makes nothing until pressed with the token", async () => {
+    const { store, id, sent, deps } = await drama();
+    const quoted = await generateDramaSound(store, id, { ...bell, quoteOnly: true }, deps);
+    assert.equal(quoted.disposition, "quoted");
+    if (quoted.disposition !== "quoted") return;
+    assert.equal(quoted.quote.estimatedMicroUsd, 8_000, "4 s at $0.12 a minute");
+    assert.deepEqual(quoted.quote.requests.map((r) => [r.engine, r.durationSec]), [["ElevenLabs Sound Effects v2", 4]]);
+    const stale = await generateDramaSound(store, id, { ...bell, quoteToken: "not-the-token" }, deps);
+    assert.equal(stale.disposition, "quoted", "a press against another quote is quoted again, never made");
+    assert.equal(sent.length, 0);
+    const made = await generateDramaSound(store, id, { ...bell, quoteToken: quoted.quote.token }, deps);
+    assert.equal(made.disposition, "made");
+    if (made.disposition !== "made") return;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.capability, "sound-effect");
+    assert.deepEqual(sent[0]!.params, { text: bell.prompt, durationSec: 4 }, "what is sent is the edited prompt, not the script's words");
+    const artifact = store.getBundle().artifacts.find((a) => a.id === made.artifactIds[0])!;
+    assert.equal(artifact.production, id, "a production artifact");
+    assert.equal(artifact.generation?.source === "sound" && artifact.generation.heard, bell.heard, "the script's words are kept as they were");
+  });
+
+  it("makes an ambience as two seamless loops of 30 s and 23 s, the second naming the first (R-42)", async () => {
+    const { store, id, sent, deps } = await drama();
+    const rain: DramaSoundInput = { cue: "ambience", heard: "Rain on the lamp-room glass.", prompt: "Rain on glass. Close and dry.", durationSec: null, name: "Lamp room rain" };
+    const quoted = await generateDramaSound(store, id, { ...rain, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    assert.deepEqual(quoted.quote.requests.map((r) => [r.durationSec, r.loop]), [[30, true], [23, true]]);
+    const made = await generateDramaSound(store, id, { ...rain, quoteToken: quoted.quote.token }, deps);
+    assert.ok(made.disposition === "made" && made.artifactIds.length === 2);
+    if (made.disposition !== "made") return;
+    assert.deepEqual(sent.map((input) => input.params), [{ text: rain.prompt, durationSec: 30, loop: true }, { text: rain.prompt, durationSec: 23, loop: true }]);
+    const second = store.getBundle().artifacts.find((a) => a.id === made.artifactIds[1])!;
+    assert.equal(second.generation?.source === "sound" && second.generation.pair, made.artifactIds[0]);
+  });
+
+  it("composes music with Eleven Music, and refuses a sound over 30 s rather than cutting it", async () => {
+    const { store, id, sent, deps } = await drama();
+    const cello: DramaSoundInput = { cue: "music", heard: "A cello, solo, enters under.", prompt: "A cello, solo. Instrumental.", durationSec: 45, name: "Cello" };
+    const quoted = await generateDramaSound(store, id, { ...cello, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted" && quoted.quote.estimatedMicroUsd === 112_500, "45 s at $0.15 a minute");
+    await generateDramaSound(store, id, { ...cello, quoteToken: quoted.disposition === "quoted" ? quoted.quote.token : "" }, deps);
+    assert.deepEqual([sent[0]!.capability, sent[0]!.model, sent[0]!.params], ["music", "music_v1", { prompt: cello.prompt, durationSec: 45 }]);
+    await assert.rejects(generateDramaSound(store, id, { ...bell, durationSec: 31, quoteOnly: true }, deps), /0\.5 to 30 seconds/);
+  });
+});
+
+describe("codex round 1 on PR 1872", () => {
+  it("refuses What's sent past the model's limit before anything is priced or sent", async () => {
+    const { store, id, sent, deps } = await drama();
+    await assert.rejects(generateDramaSound(store, id, { ...bell, prompt: "x".repeat(451), quoteOnly: true }, deps), /takes 450/);
+    assert.equal(sent.length, 0);
+  });
+
+  it("keeps the first ambience loop, said, when the second is not made; the world is fenced for sounds", async () => {
+    const { store, id, sent, deps } = await drama();
+    const ambience: DramaSoundInput = { cue: "ambience", heard: "Harbour at night.", prompt: "Harbour at night. Close and dry.", durationSec: null, name: "Harbour" };
+    const quoted = await generateDramaSound(store, id, { ...ambience, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const failing: DramaSoundDeps = { ...deps, waitForJob: async (jobId) => sent.length === 1 ? deps.waitForJob(jobId) : ({ id: jobId, status: "failed" } as unknown as Job) };
+    const made = await generateDramaSound(store, id, { ...ambience, quoteToken: quoted.quote.token }, failing);
+    assert.equal(made.disposition, "made");
+    if (made.disposition !== "made") return;
+    assert.equal(made.artifactIds.length, 1, "the paid first loop is placed, not orphaned");
+    assert.match(made.reason ?? "", /second loop was not made/);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= SOUND_ARTIFACT_SCHEMA_VERSION);
+  });
+});
+
+describe("codex round 2 on PR 1872", () => {
+  it("sends the length an automatic sound was priced at", async () => {
+    const { store, id, sent, deps } = await drama();
+    const auto = { ...bell, durationSec: null };
+    const quoted = await generateDramaSound(store, id, { ...auto, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted" && quoted.quote.requests[0]!.durationSec === 10);
+    if (quoted.disposition !== "quoted") return;
+    await generateDramaSound(store, id, { ...auto, quoteToken: quoted.quote.token }, deps);
+    assert.equal(sent[0]!.params["durationSec"], 10, "what is sent is what was priced");
+  });
+
+  it("files a sound paid for and landed before the process stopped, buying nothing again", async () => {
+    const { store, id, sent, deps } = await drama();
+    const quoted = await generateDramaSound(store, id, { ...bell, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    await mkdir(join(store.dir, ".staging/drama-sound/landed"), { recursive: true });
+    await writeFile(join(store.dir, ".staging/drama-sound/landed/paid.mp3"), Buffer.from("mp3:paid"));
+    const paid = { id: newId("jb"), status: "succeeded", target: { kind: "drama-sound", id: "sound/Harbour bell" }, worldId: store.worldId, productionId: id,
+      provider: "elevenlabs", model: "eleven_text_to_sound_v2", params: { text: bell.prompt, durationSec: 4 }, landedFiles: [".staging/drama-sound/landed/paid.mp3"] } as unknown as Job;
+    const made = await generateDramaSound(store, id, { ...bell, quoteToken: quoted.quote.token }, { ...deps, jobs: (match) => [paid].filter(match) });
+    assert.equal(made.disposition, "made");
+    assert.equal(sent.length, 0, "nothing is sent again");
+  });
+
+  it("refuses a script placing a sound this production cannot use", async () => {
+    const { store, id } = await drama();
+    const cue: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "A bell.", soundArtifact: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV" };
+    await assert.rejects(saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [cue], baseHash: null }), /cannot use/);
+  });
+});
+
+describe("codex round 3 on PR 1872", () => {
+  it("prices no sound for a production that is not an audio drama", async () => {
+    const { store, deps } = await drama();
+    await assert.rejects(generateDramaSound(store, "the-ledger-of-nights", { ...bell, quoteOnly: true }, deps), /not an audio drama/);
+  });
+});

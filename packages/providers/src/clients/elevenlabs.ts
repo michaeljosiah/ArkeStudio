@@ -78,7 +78,8 @@ export class ElevenLabsClient implements ProviderClient {
       const missing = /missing the permission (\w+)/i.exec(probe.message)?.[1];
       if (probe.auth && missing === "user_read") {
         const reason = "this key cannot read the subscription (it lacks the User: Read permission), so its plan is unknown";
-        return [{ capability: "voice-tts", available: true }, { capability: "voice-clone", available: false, reason }, { capability: "voice-conversion", available: false, reason }];
+        return [{ capability: "voice-tts", available: true }, { capability: "voice-clone", available: false, reason }, { capability: "voice-conversion", available: false, reason },
+          { capability: "sound-effect", available: true }, { capability: "music", available: true }];
       }
       const said = probe.message.replace(/^elevenlabs: /, "").replace(/ \(HTTP \d+\)$/, "");
       const reason = probe.auth ? `ElevenLabs rejected this key: ${said}` : `ElevenLabs could not be reached: ${probe.message}`;
@@ -86,6 +87,8 @@ export class ElevenLabsClient implements ProviderClient {
         { capability: "voice-tts", available: false, reason },
         { capability: "voice-clone", available: false, reason },
         { capability: "voice-conversion", available: false, reason },
+        { capability: "sound-effect", available: false, reason },
+        { capability: "music", available: false, reason },
       ];
     }
     const sub = probe.value.body as {
@@ -110,12 +113,17 @@ export class ElevenLabsClient implements ProviderClient {
     const models = await tryProbe(() => jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/models`, { headers: this.headers(key) }));
     const conversionAvailable = !overQuota && models.ok && Array.isArray(models.value.body) && models.value.body.some(
       (m: { model_id?: string; can_do_voice_conversion?: boolean }) => m.model_id === "eleven_multilingual_sts_v2" && m.can_do_voice_conversion === true);
+    // Sound and music are paid from the same account as speech (SPEC-057 R-39, R-40).
+    const sound: CapabilityProbe = { ...tts, capability: "sound-effect" };
+    const music: CapabilityProbe = { ...tts, capability: "music" };
     return [tts, clone, conversionAvailable ? { capability: "voice-conversion", available: true, zeroRetention: sub?.tier === "enterprise" } : {
-      capability: "voice-conversion", available: false, reason: "The account did not expose the Multilingual speech-to-speech model, or its quota is exhausted." }];
+      capability: "voice-conversion", available: false, reason: "The account did not expose the Multilingual speech-to-speech model, or its quota is exhausted." }, sound, music];
   }
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
     if (request.capability === "voice-conversion") return this.convert(key, request);
+    if (request.capability === "sound-effect") return this.sound(key, request);
+    if (request.capability === "music") return this.music(key, request);
     if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("elevenlabs: unsupported synthesis capability");
     const remoteId = `elevenlabs-${++this.counter}-${Date.now()}`;
     const voiceId = String(request.params["voiceId"] ?? "");
@@ -171,6 +179,66 @@ export class ElevenLabsClient implements ProviderClient {
     if (!data.length) throw new Error("elevenlabs: conversion returned empty audio");
     return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sts-${++this.counter}-${Date.now()}`,
       acceptedAt: new Date().toISOString(), artifacts: [{ name: "conversion.mp3", contentType: "audio/mpeg", data }] };
+  }
+
+  /**
+   * A sound or an ambience from words (SPEC-057 R-39): text-to-sound v2, 0.5–30 seconds, or the
+   * model's own length when none is set. A length past 30 is refused here, never sent.
+   */
+  private async sound(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    const text = String(request.params["text"] ?? "").trim();
+    if (!text) throw new ProviderRequestRejectedError("elevenlabs: a sound needs words");
+    // `durationSec` is the shared length every music and sound path prices by (codex on PR 1872).
+    const duration = request.params["durationSec"] ?? request.params["durationSeconds"];
+    if (duration !== undefined && duration !== null && (typeof duration !== "number" || duration < 0.5 || duration > 30)) {
+      throw new ProviderRequestRejectedError("elevenlabs: a sound effect is 0.5 to 30 seconds");
+    }
+    const influence = request.params["promptInfluence"];
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/sound-generation?output_format=mp3_44100_128`, {
+      method: "POST",
+      headers: this.headers(key),
+      body: JSON.stringify({
+        text, model_id: request.model,
+        ...(typeof duration === "number" ? { duration_seconds: duration } : {}),
+        ...(request.params["loop"] === true ? { loop: true } : {}),
+        ...(typeof influence === "number" ? { prompt_influence: influence } : {}),
+      }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
+    });
+    if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "sound generation");
+    const data = new Uint8Array(await res.arrayBuffer());
+    if (!data.length) throw new Error("elevenlabs: the sound came back empty");
+    return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sound-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
+      artifacts: [{ name: "sound.mp3", contentType: "audio/mpeg", data }] };
+  }
+
+  /**
+   * Music from a prompt (SPEC-057 R-40): Eleven Music, up to the row's five minutes. Instrumental
+   * unless the Bench sends lyrics, which ride in the prompt and let the voice sing (codex on PR 1872).
+   */
+  private async music(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    const style = String(request.params["prompt"] ?? request.params["text"] ?? "").trim();
+    const lyrics = typeof request.params["lyrics"] === "string" ? request.params["lyrics"].trim() : "";
+    if (!style && !lyrics) throw new ProviderRequestRejectedError("elevenlabs: music needs a prompt");
+    const prompt = lyrics ? `${style}${style ? "\n\n" : ""}Lyrics:\n${lyrics}` : style;
+    // The style and lyrics together are what Eleven Music limits (codex on PR 1872): refused here,
+    // before anything is sent, rather than by ElevenLabs after.
+    if (prompt.length > 2_000) throw new ProviderRequestRejectedError(`elevenlabs: Eleven Music takes 2,000 characters of style and lyrics together; this is ${prompt.length}`);
+    const seconds = request.params["durationSec"] ?? request.params["durationSeconds"];
+    if (seconds !== undefined && seconds !== null && (typeof seconds !== "number" || seconds < 3 || seconds > 300)) {
+      throw new ProviderRequestRejectedError("elevenlabs: music is 3 seconds to 5 minutes here");
+    }
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/music?output_format=mp3_44100_128`, {
+      method: "POST",
+      headers: this.headers(key),
+      body: JSON.stringify({ prompt, model_id: request.model, force_instrumental: lyrics === "", ...(typeof seconds === "number" ? { music_length_ms: Math.round(seconds * 1000) } : {}) }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
+    });
+    if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "music generation");
+    const data = new Uint8Array(await res.arrayBuffer());
+    if (!data.length) throw new Error("elevenlabs: the music came back empty");
+    return { remoteId: res.headers.get("request-id") ?? `elevenlabs-music-${++this.counter}-${Date.now()}`, acceptedAt: new Date().toISOString(),
+      artifacts: [{ name: "music.mp3", contentType: "audio/mpeg", data }] };
   }
 
   async poll(_key: string, _remoteId: string): Promise<PollResult> {

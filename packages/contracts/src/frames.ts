@@ -2324,6 +2324,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       retake: z.boolean().optional(),
     })
     .strict(),
+  /**
+   * Make a sound for an audio drama's cue (SPEC-057 R-39..R-42, design turn 230x/y): priced first
+   * (`quoteOnly`), made against the token quoted. An ambience is made as two seamless loops; music
+   * with Eleven Music. Each is saved as a production artifact under `name`.
+   */
+  z
+    .object({
+      kind: z.literal("generate-drama-sound"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      cue: z.enum(["sound", "ambience", "music"]),
+      heard: z.string().max(600),
+      prompt: z.string().trim().min(1).max(2_000),
+      durationSec: z.number().min(0.5).max(300).nullable(),
+      loop: z.boolean().optional(),
+      name: z.string().trim().min(1).max(120),
+      quoteOnly: z.boolean().optional(),
+      quoteToken: z.string().min(1).max(200).optional(),
+    })
+    .strict(),
   /** The author's answer to a take that waits (R-30): keep the new one, or the one kept before. */
   z
     .object({

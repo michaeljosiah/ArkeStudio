@@ -23,6 +23,8 @@ export const CapabilitySchema = z.enum([
   "image",
   "video",
   "music",
+  /** A sound effect or an ambience from words (SPEC-057 R-39): ElevenLabs' text-to-sound. */
+  "sound-effect",
   "llm",
   "voice-tts",
   "voice-conversion",
@@ -145,7 +147,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   elevenlabs: {
     displayName: "ElevenLabs",
-    capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
+    capabilities: ["voice-tts", "voice-clone", "voice-conversion", "sound-effect", "music"],
     local: false,
     credential: "in-app",
   },

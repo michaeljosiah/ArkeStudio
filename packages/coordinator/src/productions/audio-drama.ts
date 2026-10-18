@@ -19,6 +19,14 @@ export async function saveEpisodeScript(
   const path = `productions/${productionId}/scripts/${episodeScriptFile(input.episode)}`;
   // Parsed here so a broken relation (a cut with no line breaking in) is refused before it lands.
   const record = EpisodeScriptSchema.parse({ version: 1, episode: input.episode, title: input.title, blocks: input.blocks });
+  // A placed sound must be one this production can play (codex on PR 1872): audio, here, not retired.
+  for (const block of record.blocks) {
+    if ((block.kind !== "sound" && block.kind !== "ambience" && block.kind !== "music") || !block.soundArtifact) continue;
+    const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === block.soundArtifact);
+    if (!artifact || artifact.kind !== "audio" || artifact.retiredAt !== undefined || (artifact.production !== undefined && artifact.production !== productionId)) {
+      throw new Error(`“${block.heard}” is placed with a sound this production cannot use. Choose its sound again.`);
+    }
+  }
   const result = await store.commit({
     kind: "episode-script-save",
     source: options.source ?? "editor",

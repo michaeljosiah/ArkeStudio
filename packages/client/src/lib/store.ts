@@ -1071,6 +1071,14 @@ export function subscribeDramaHeard(listener: (result: DramaHeard) => void): () 
   return () => dramaHeardListeners.delete(listener);
 }
 
+/** A sound for an audio drama's cue (SPEC-057 R-39..R-42): a quote, or the artifacts made. */
+export type DramaSound = Extract<DomainEvent, { type: "drama.sound" }>;
+const dramaSoundListeners = new Set<(result: DramaSound) => void>();
+export function subscribeDramaSound(listener: (result: DramaSound) => void): () => void {
+  dramaSoundListeners.add(listener);
+  return () => dramaSoundListeners.delete(listener);
+}
+
 /** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
 export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
 const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
@@ -1775,6 +1783,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "drama.heard") {
       for (const listener of dramaHeardListeners) listener(event);
+    }
+    if (event.type === "drama.sound") {
+      for (const listener of dramaSoundListeners) listener(event);
     }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
@@ -5065,6 +5076,16 @@ export function hearDramaLines(
 ): string | null {
   const requestId = ulid();
   return send({ kind: "hear-drama-lines", requestId, worldId, productionId, episode, blocks, scriptHash, ...options }) ? requestId : null;
+}
+
+/** Price, then make, a sound for an audio drama's cue (SPEC-057 R-39..R-42); answered as `drama.sound`. */
+export function generateDramaSound(
+  worldId: string,
+  productionId: string,
+  input: { cue: "sound" | "ambience" | "music"; heard: string; prompt: string; durationSec: number | null; loop?: boolean; name: string; quoteOnly?: boolean; quoteToken?: string },
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "generate-drama-sound", requestId, worldId, productionId, ...input }) ? requestId : null;
 }
 
 /** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */

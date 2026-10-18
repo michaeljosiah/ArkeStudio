@@ -27,6 +27,7 @@ import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdap
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
 import { saveEpisodeScript } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
+import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
@@ -5725,7 +5726,8 @@ export class Coordinator {
     // An audiobook block's job (turn 146), or a heard block's (R-45): the press that queued it is
     // waiting, and files the take or the heard file itself once it hears; a job that ends before
     // it waits is held for it.
-    this.audiobookJobs.settle(job, job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook");
+    // So is an audio drama's sound (SPEC-057 R-41): the press that made it files it.
+    this.audiobookJobs.settle(job, (job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook") || job.target.kind === "drama-sound");
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string" && !this.failedReads.has(job.params["requestId"])) {
         const requestId = job.params["requestId"];
@@ -10549,6 +10551,39 @@ export class Coordinator {
         } catch (err) {
           refuse(describeCoordinatorError(err));
           await this.refreshWorldSnapshot(msg.worldId);
+        }
+        return;
+      }
+      case "generate-drama-sound": {
+        // A sound for an audio drama's cue (SPEC-057 R-39..R-42): priced, then made against the
+        // token quoted, and saved as production artifacts.
+        const store = this.opts.provider.openStore?.();
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, requestId: msg.requestId };
+        const refuse = (reason: string) => this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, disposition: "refused", reason });
+        if (!store || store.worldId !== msg.worldId) return refuse("that world is not open");
+        try {
+          const result = await generateDramaSound(store, msg.productionId, {
+            cue: msg.cue, heard: msg.heard, prompt: msg.prompt, durationSec: msg.durationSec, name: msg.name,
+            ...(msg.loop !== undefined ? { loop: msg.loop } : {}),
+            ...(msg.quoteOnly !== undefined ? { quoteOnly: msg.quoteOnly } : {}),
+            ...(msg.quoteToken !== undefined ? { quoteToken: msg.quoteToken } : {}),
+          }, {
+            worldId: msg.worldId, models: this.opts.manifest?.models ?? [],
+            enqueue: async (input) => {
+              const queued = await this.enqueueBatch(msg.requestId, "generate-drama-sound", [input]);
+              if (queued.jobIds[0] === undefined) throw new Error(queued.reason ?? "the sound job could not be queued");
+              return queued.jobIds[0];
+            },
+            waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
+          });
+          // Only while this world is still the open one (codex on PR 1872): a sound finishing after
+          // the author moved on never reopens the world they left.
+          if (result.disposition === "made" && this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, ...result });
+        } catch (err) {
+          refuse(describeCoordinatorError(err));
+          if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
         }
         return;
       }
