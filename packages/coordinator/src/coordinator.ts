@@ -11471,10 +11471,19 @@ export class Coordinator {
           fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation.");
           return;
         }
+        // The build is a tool session on its own leased surface (issue 1823); a server that cannot
+        // start leaves the single-reply build, which needs none.
+        const served = await this.worldQuery.start().then(() => true, () => false);
+        const worldQuery = this.worldQuery;
         this.trackBackground(this.stageConstructor.run(store, msg, {
           adapter, sessionInput: this.sessionInput, model: configured,
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
           emit, current: () => this.opts.provider.openStore?.() === store,
+          ...(served ? { tools: {
+            url: (token: string) => worldQuery.leasedUrl(token),
+            attach: (token: string, tools: Parameters<WorldQueryServer["attachTools"]>[1]) => worldQuery.attachTools(token, tools),
+            detach: (token: string) => worldQuery.detachTools(token),
+          } } : {}),
         }).catch(error => fail(describeCoordinatorError(error))));
         return;
       }

@@ -1,6 +1,6 @@
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   DEFAULT_SHOT_SEC,
   STAGE_FRAMED_HEIGHT,
@@ -24,6 +24,7 @@ import {
   STAGE_POSES,
   STAGE_TURN_LIMIT_DPS,
   StageConstructionDraftSchema,
+  stageShot,
   type StageConstructionDraft,
   type StageInspectionFrame,
   type DomainEvent,
@@ -36,11 +37,24 @@ import type { WorldStore } from "../world/store.js";
 import { readContainedImageReferences } from "../world/reference-files.js";
 import { decodePng } from "../references/png.js";
 import { imageFormatOf } from "../queue/verify.js";
+import type { LeasedTools } from "../harness/world-query.js";
+import { StageDraftTools, STAGE_RENDER_BUDGET } from "./stage-tools.js";
 
 type Request = Extract<ClientMessage, { kind: "stage-construct" }>;
 type ConstructionEvent = Extract<DomainEvent, { type: "stage.construction" }>;
+/** What a Stage authorship record holds of the frames a build inspected (StageAuthorshipSchema). */
+const MAX_INSPECTED_FRAMES = 24;
 const fingerprint = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
+
+/** Whether a reply is a whole draft, as the single-reply build asked for. */
+function wholeDraft(final: string, durationSec: number, aspect: string, lens: string | undefined): boolean {
+  try {
+    return StageConstructionDraftSchema.safeParse(stageSolveDraftWords(extractJson(final), durationSec, aspect, lens)).success;
+  } catch {
+    return false;
+  }
+}
 
 /** One bounded Stage draft, with the existing renderer returning inspection frames between turns. */
 export class StageConstructor {
@@ -98,6 +112,11 @@ export class StageConstructor {
       scratchRoot: string;
       emit: (event: ConstructionEvent) => void;
       current: () => boolean;
+      /**
+       * The leased tool surface a build is served on (issue 1823). Without one — no MCP server
+       * could be started — the build is the single reply with two inspection rounds it was.
+       */
+      tools?: { url(token: string): string | null; attach(token: string, tools: LeasedTools): void; detach(token: string): void };
     },
   ): Promise<void> {
     if (this.active) throw new Error("Another Stage construction is running. Stop it first.");
@@ -107,11 +126,16 @@ export class StageConstructor {
     const active: NonNullable<StageConstructor["active"]> = { request, abort, round: 0 };
     this.active = active;
     const dir = join(deps.scratchRoot, `stage-${request.requestId}`);
-    const timeLimit = new Error("Stage construction reached its five-minute limit.");
+    // A tool build looks as often as it needs, so it gets more time and tokens than one reply did.
+    const toolBuild = deps.tools !== undefined;
+    const timeLimit = new Error(toolBuild ? "Stage construction reached its eight-minute limit." : "Stage construction reached its five-minute limit.");
+    const tokenLimit = toolBuild ? 200_000 : 30_000;
     const timer = setTimeout(
       () => abort.abort(timeLimit),
-      300_000,
+      toolBuild ? 480_000 : 300_000,
     );
+    let toolToken: string | null = null;
+    let tooled: StageDraftTools | undefined;
     let sessionId: string | undefined;
     let latest: StageConstructionDraft | undefined;
     let inspectedFrames = 0;
@@ -120,7 +144,7 @@ export class StageConstructor {
       if (sessionId) void deps.adapter.interrupt?.(sessionId).catch(() => {});
     };
     abort.signal.addEventListener("abort", interrupt, { once: true });
-    const emit = (status: ConstructionEvent["status"], detail: string, draft?: StageConstructionDraft) =>
+    const emit = (status: ConstructionEvent["status"], detail: string, draft?: StageConstructionDraft, step?: { label: string; detail?: string; calls: number }) =>
       deps.emit({
         type: "stage.construction",
         at: store.now(),
@@ -133,6 +157,7 @@ export class StageConstructor {
         detail,
         round: active.round,
         ...(draft ? { draft } : {}),
+        ...(step ? { step: { label: step.label.slice(0, 200), ...(step.detail ? { detail: step.detail.slice(0, 200) } : {}) }, calls: step.calls } : {}),
       });
     const context = () => {
       const bundle = store.getBundle();
@@ -233,15 +258,80 @@ export class StageConstructor {
         "stage-designer": { ...configured.agents?.["stage-designer"], model: deps.model },
       };
       configured.researchWeb = false;
+      if (deps.tools) {
+        const token = randomBytes(32).toString("hex");
+        const url = deps.tools.url(token);
+        if (url !== null) {
+          toolToken = token;
+          configured.worldQueryUrl = url;
+        }
+      }
+      // Every read across the build, for the tool build's check that the sources were read.
+      const everRead = new Set<string>();
+      // The tools are served before the session opens: an adapter lists them while it creates the
+      // session (Codex calls tools/list from createSession), and a lease not yet registered answers
+      // 404, failing every build before either the tools or the single-reply fallback could run.
+      if (toolToken !== null) {
+        tooled = new StageDraftTools({
+          scene: source.scene,
+          shotId: source.shot.id,
+          aspect: source.aspect,
+          lens: effectiveFraming(source.scene, source.shot).lens,
+          durationSec: duration,
+          sheets: source.sheets.map((sheet) => ({ id: sheet.id, name: sheet.name })),
+          preserve: request.preserve,
+          original,
+          shotStaged: source.shot.staging !== undefined,
+          openingKeys: stageShot(source.shot, { cast: [], sets: [], durationSec: duration, framing: effectiveFraming(source.scene, source.shot), aspect: source.aspect }).keys,
+          lights: source.scene.blocking?.lights ?? [],
+          atmosphere: source.scene.blocking?.atmosphere,
+        }, {
+          step: (label, detail, draft, calls) => {
+            if (draft !== null) latest = draft;
+            emit("working", label, draft ?? undefined, { label, ...(detail === undefined ? {} : { detail }), calls });
+          },
+          render: async (draft, _times) => {
+            active.round += 1;
+            const round = active.round;
+            const frames = await new Promise<StageInspectionFrame[]>((resolve, reject) => {
+              const stopped = () => { delete active.receive; reject(abort.signal.reason); };
+              abort.signal.addEventListener("abort", stopped, { once: true });
+              active.receive = (received) => { abort.signal.removeEventListener("abort", stopped); resolve(received); };
+              emit("inspect", "Rendering the camera views…", draft);
+            });
+            assertCurrent();
+            const saved: Array<{ name: string; frame: StageInspectionFrame }> = [];
+            for (const [index, frame] of frames.entries()) {
+              const bytes = Buffer.from(frame.png, "base64");
+              if (bytes.length < 24 || bytes.readUInt32BE(16) > 2048 || bytes.readUInt32BE(20) > 2048 || imageFormatOf(bytes)?.extension !== ".png" || frame.at > duration)
+                throw new Error("A Stage inspection frame is invalid.");
+              decodePng(bytes);
+              const name = `render-${round}-${index}-${frame.view}.png`;
+              await writeFile(join(dir, name), bytes);
+              saved.push({ name, frame });
+            }
+            return saved;
+          },
+          sourcesRead: () => {
+            const missing = sourceImages.map((image) => image.name).filter((name) => ![...everRead].some((summary) => summary.includes(name)));
+            return { read: missing.length === 0, missing };
+          },
+        });
+        deps.tools!.attach(toolToken, tooled);
+      }
       const session = await createPreparedSession(deps.adapter, dir, configured, {
         purpose: "art-prompt",
         agent: "stage-designer",
       }, undefined, abort.signal);
       sessionId = session.sessionId;
-      const turn = async (
-        prompt: string,
-        requiredReads: readonly string[] = [],
-      ): Promise<StageConstructionDraft> => {
+      const readStep = (summary: string) => {
+        if (toolToken === null) return;
+        const name = sourceImages.find((image) => summary.includes(image.name));
+        if (name === undefined) return;
+        emit("working", `read ${name.name.startsWith("plate") ? "plate" : "references"}`, undefined,
+          { label: name.name.startsWith("plate") ? "read plate" : "read references", detail: name.name.startsWith("plate") && plate ? plate.label : name.name, calls: 0 });
+      };
+      const converse = async (prompt: string): Promise<{ final: string; reads: Set<string> }> => {
         assertCurrent();
         let final = "";
         const reads = new Set<string>();
@@ -251,10 +341,14 @@ export class StageConstructor {
         const collect = (async () => {
           for await (const event of deps.adapter.streamEvents(streamAbort.signal)) {
             if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-            if ((deps.adapter.usageTokens?.(session.sessionId) ?? 0) > 30_000)
-              abort.abort(new Error("Stage construction reached its 30,000-token budget."));
+            if ((deps.adapter.usageTokens?.(session.sessionId) ?? 0) > tokenLimit)
+              abort.abort(new Error(`Stage construction reached its ${tokenLimit.toLocaleString("en-GB")}-token budget.`));
             abort.signal.throwIfAborted();
-            if (event.type === "tool.activity" && /read/i.test(event.tool)) reads.add(event.summary);
+            if (event.type === "tool.activity" && /read/i.test(event.tool)) {
+              if (!everRead.has(event.summary)) readStep(event.summary);
+              reads.add(event.summary);
+              everRead.add(event.summary);
+            }
             // Refusals have no call id or path. Invalidate earlier attempts conservatively;
             // a later successful retry can supply fresh receipts without aborting the build.
             if (event.type === "tool.refused" && /read/i.test(event.tool)) reads.clear();
@@ -284,6 +378,14 @@ export class StageConstructor {
           abort.signal.removeEventListener("abort", stop);
         }
         assertCurrent();
+        return { final, reads };
+      };
+      const turn = async (
+        prompt: string,
+        requiredReads: readonly string[] = [],
+        answered?: { final: string; reads: Set<string> },
+      ): Promise<StageConstructionDraft> => {
+        const { final, reads } = answered ?? await converse(prompt);
         if (final.length > 180_000) throw new Error("The proposed blockout exceeds the scene budget.");
         const draft = StageConstructionDraftSchema.parse(stageSolveDraftWords(extractJson(final), duration, source.aspect, effectiveFraming(source.scene, source.shot).lens));
         if (requiredReads.some((name) => ![...reads].some((summary) => summary.includes(name))))
@@ -323,10 +425,66 @@ export class StageConstructor {
         if (problems.length) throw new Error(problems.join(" "));
         return draft;
       };
-      emit("working", "Constructing the scene and camera…");
+      const contract = `Contract: world metres, +Y up, +Z forward, angles in degrees; a figure faces +Z at facing 0 and stands 1.8 m unless its height says otherwise. Cover camera time 0 to ${duration}s exactly. Write camera keys in words wherever they can say it — {t, frame:{subject:sheetId, size:extreme wide|wide|medium|medium close-up|close-up|extreme close-up, angle:eye|low|high|top, side:front|behind|left|right|over, over?:sheetId, focalMm?}} with no p or l — and the Stage solves them through the shot's lens (${JSON.stringify(STAGE_FRAMED_HEIGHT)} of the figure for each size). A key written as numbers looks from p toward l; anchor makes p/l offsets from a figure or group, anchorSpace local turns them with it, track keeps the aim on it; easeIn/easeOut apply at the first departure, the last arrival and holds. Named moves the brief knows: ${STAGE_CAMERA_MOVES.map(move => move.label).join(", ")}. Set items: a kit item (${STAGE_KIT_KINDS.join(", ")}) is placed and sized whole by x, z, y, w, h, d and rotation and expands into its parts; a room is w on x, d on z, h high, its open sides without walls, its openings cut at metres along a wall from its centre. Other sets are primitives sized w/h/d about their centre and translated to (x, y+h/2, z), or bounded indexed meshes normalised to about -0.5..0.5; sets in a group use group-local coordinates and objectMotions move the group. Materials: ${STAGE_MATERIALS.join(", ")}; a kit item names them in surfaces by part or wall side. Marks: pose one of ${STAGE_POSES.join(", ")}; hand {side, on, part?} and look name a figure or a set; turns stay under ${STAGE_TURN_LIMIT_DPS}°/s and walks at a walking pace. Limits: 30 cast, 120 sets, 30 moving groups, 120 keys per track, 2048 vertices and 12288 indices per mesh, 24 lights. Use only the supplied sheet identities. Preserve ${request.preserve}.${sourceImages[0]?.name.startsWith("plate") && plate ? ` ${sourceImages[0].name} is the location plate, "${plate.label}": an empty picture of this place and the authority on its layout. Build the walls, openings and large furniture where it shows them, estimate where its camera stood and set plateCamera {p,l,focalMm}${plate.shotId === undefined || plate.shotId === request.shotId ? "; this shot's first camera key matches it" : ""}.` : ""}`;
+      let answered: { final: string; reads: Set<string> } | undefined;
+      if (toolToken !== null) {
+        // Build with Arke as a tool session (issue 1823): small validated edits on a draft this
+        // run owns, renders when the model wants to look, and stage_done to finish.
+        const host = tooled!;
+        emit("working", "Building the blockout…");
+        let prompt = `Block out the selected shot with the stage tools, following your Stage direction brief. Work in small steps: read the source images with your read tool, call stage_get, then build the set, the figures and their marks, the lights and the camera, one thing per call. Look whenever you want with stage_render (${STAGE_RENDER_BUDGET} renders) and compare with the plate; run stage_check and fix what it finds; finish with stage_done and your assessment. The tools hold the draft: do not reply with it as JSON. ${contract} User instruction: ${request.instruction}\nCast colours in the renders, by order: blue, magenta, amber, teal, violet, lime. Source images to read: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nThe draft starts from: ${JSON.stringify(original)}`;
+        // A model that ends its turn without finishing is asked twice to go on, then the build
+        // stops with what it has, for review as unfinished.
+        for (let attempt = 0; attempt < 3 && !host.done; attempt++) {
+          const reply = await converse(prompt);
+          // A model that answers with the whole draft and never touches the tools is taken at its
+          // word: the build goes on as the single-reply build, inspection rounds and all.
+          if (attempt === 0 && host.callCount === 0 && wholeDraft(reply.final, duration, source.aspect, effectiveFraming(source.scene, source.shot).lens)) {
+            answered = reply;
+            break;
+          }
+          prompt = "You have not called stage_done. Keep building with the stage tools: render to look, run stage_check, then call stage_done with your assessment.";
+        }
+      }
+      if (toolToken !== null && answered === undefined) {
+        const host = tooled!;
+        assertCurrent();
+        const finished = host.draft();
+        if ("problem" in finished) throw new Error(`The build ended without a whole blockout: ${finished.problem}`);
+        const draft = finished.draft;
+        if (!host.done) draft.assessment = "Unfinished: the build ended without calling stage_done. Review this blockout before keeping it.";
+        // The record says how much the model looked at, up to what authorship holds (24): eight
+        // renders of up to eight frames can see more, and an over-count would fail the ready event's
+        // own schema and throw the finished build away.
+        inspectedFrames = Math.min(host.framesSeen, MAX_INSPECTED_FRAMES);
+        // The tools refuse protected edits as they come; the finished draft is held to them too.
+        if (original && request.preserve === "blocking" &&
+          fingerprint([draft.cast, draft.sets, draft.staging.performances, draft.staging.objectMotions]) !==
+          fingerprint([original.cast, original.sets, original.performances, original.objectMotions]))
+          throw new Error("The model changed protected blocking. Your existing work is intact.");
+        if (source.shot.staging && original && request.preserve === "camera" &&
+          fingerprint([draft.staging.keys, draft.staging.rig, draft.staging.seed, draft.staging.rigIntensity]) !==
+          fingerprint([original.keys, original.rig, original.seed, original.rigIntensity]))
+          throw new Error("The model changed the protected camera. Your existing work is intact.");
+        latest = draft;
+        assertCurrent();
+        latest.staging.authorship = {
+          model: deps.model,
+          sourceVersion: request.baseVersion,
+          sourceFingerprint,
+          instruction: request.instruction,
+          assumptions: latest.assumptions,
+          assessment: latest.assessment,
+          inspectedFrames,
+        };
+        emit("ready", host.done ? "Blockout ready to review. Keep applies this shot's override." : "Blockout built; the model did not finish it. Review before keeping.", latest);
+        return;
+      }
+      if (answered === undefined) emit("working", "Constructing the scene and camera…");
       latest = await turn(
-        `Block out the selected shot, following your Stage direction brief. Contract: world metres, +Y up, +Z forward, angles in degrees; a figure faces +Z at facing 0 and stands 1.8 m unless its height says otherwise. Cover camera time 0 to ${duration}s exactly. Write camera keys in words wherever they can say it — {t, frame:{subject:sheetId, size:extreme wide|wide|medium|medium close-up|close-up|extreme close-up, angle:eye|low|high|top, side:front|behind|left|right|over, over?:sheetId, focalMm?}} with no p or l — and the Stage solves them through the shot's lens (${JSON.stringify(STAGE_FRAMED_HEIGHT)} of the figure for each size). A key written as numbers looks from p toward l; anchor makes p/l offsets from a figure or group, anchorSpace local turns them with it, track keeps the aim on it; easeIn/easeOut apply at the first departure, the last arrival and holds. Named moves the brief knows: ${STAGE_CAMERA_MOVES.map(move => move.label).join(", ")}. Set items: a kit item (${STAGE_KIT_KINDS.join(", ")}) is placed and sized whole by x, z, y, w, h, d and rotation and expands into its parts; a room is w on x, d on z, h high, its open sides without walls, its openings cut at metres along a wall from its centre. Other sets are primitives sized w/h/d about their centre and translated to (x, y+h/2, z), or bounded indexed meshes normalised to about -0.5..0.5; sets in a group use group-local coordinates and objectMotions move the group. Materials: ${STAGE_MATERIALS.join(", ")}; a kit item names them in surfaces by part or wall side. Marks: pose one of ${STAGE_POSES.join(", ")}; hand {side, on, part?} and look name a figure or a set; turns stay under ${STAGE_TURN_LIMIT_DPS}°/s and walks at a walking pace. Limits: 30 cast, 120 sets, 30 moving groups, 120 keys per track, 2048 vertices and 12288 indices per mesh, 24 lights. Use only the supplied sheet identities. Preserve ${request.preserve}.${sourceImages[0]?.name.startsWith("plate") && plate ? ` ${sourceImages[0].name} is the location plate, "${plate.label}": an empty picture of this place and the authority on its layout. Build the walls, openings and large furniture where it shows them, estimate where its camera stood and return plateCamera {p,l,focalMm}${plate.shotId === undefined || plate.shotId === request.shotId ? "; this shot's first camera key matches it" : ""}.` : ""} User instruction: ${request.instruction}\nCast colours in the renders, by order: blue, magenta, amber, teal, violet, lime. Read the available source images using your read tool before constructing: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nExisting resolved blockout: ${JSON.stringify(original)}\nReturn ONLY JSON {staging,cast,sets,lights?,atmosphere?,plateCamera?,assumptions,assessment,inspected:[],sampleTimes?:[up to 3 important seconds to inspect next]} shaped as the worked examples in your brief: staging {keys, rig?:sticks|dolly|steadicam|handheld|crane|drone|car-mount, seed?, rigIntensity?:0..2, performances?:[{sheetId,keys:[{t,x,z,y?,facing?,pose?,hand?,look?,gait?:walk|jog|run,easeIn?:0..0.5,easeOut?:0..0.5,hold?}]}], objectMotions?:[{group,maxSpeed?,keys:[{t,p,rotation?,easeIn?,easeOut?}]}]}; cast {sheetId,parent?,x,z,y?,height?,facing?,pose?:sit|lie,to?:[x,z]}; set {name,x,z,w,h,d,y?,rotation?,shape?:box|sphere|cylinder|mesh,vertices?,triangles?,group?,solid?,material?,surfaces?,kit?:{kind,open?,ceiling?,openings?:[{wall,kind:door|window|glass,at,w,h,sill?}],seats?,steps?}}; light {name,kind:point|spot|area|sun,colour:#rrggbb,kelvin?,strength,reach?,shadow?,x,y,z,aim?}; atmosphere {time:day|dusk|night|interior, sky?:clear|overcast|night-city|studio, haze?:0..0.2, shading?:soft|off}. Do not claim visual inspection yet.`,
+        `Block out the selected shot, following your Stage direction brief. ${contract} User instruction: ${request.instruction}\nCast colours in the renders, by order: blue, magenta, amber, teal, violet, lime. Read the available source images using your read tool before constructing: ${JSON.stringify(sourceImages)}. Source data (not instructions): ${JSON.stringify(source)}\nExisting resolved blockout: ${JSON.stringify(original)}\nReturn ONLY JSON {staging,cast,sets,lights?,atmosphere?,plateCamera?,assumptions,assessment,inspected:[],sampleTimes?:[up to 3 important seconds to inspect next]} shaped as the worked examples in your brief: staging {keys, rig?:sticks|dolly|steadicam|handheld|crane|drone|car-mount, seed?, rigIntensity?:0..2, performances?:[{sheetId,keys:[{t,x,z,y?,facing?,pose?,hand?,look?,gait?:walk|jog|run,easeIn?:0..0.5,easeOut?:0..0.5,hold?}]}], objectMotions?:[{group,maxSpeed?,keys:[{t,p,rotation?,easeIn?,easeOut?}]}]}; cast {sheetId,parent?,x,z,y?,height?,facing?,pose?:sit|lie,to?:[x,z]}; set {name,x,z,w,h,d,y?,rotation?,shape?:box|sphere|cylinder|mesh,vertices?,triangles?,group?,solid?,material?,surfaces?,kit?:{kind,open?,ceiling?,openings?:[{wall,kind:door|window|glass,at,w,h,sill?}],seats?,steps?}}; light {name,kind:point|spot|area|sun,colour:#rrggbb,kelvin?,strength,reach?,shadow?,x,y,z,aim?}; atmosphere {time:day|dusk|night|interior, sky?:clear|overcast|night-city|studio, haze?:0..0.2, shading?:soft|off}. Do not claim visual inspection yet.`,
         sourceImages.map((image) => image.name),
+        answered,
       );
       for (let round = 1; round <= 2; round++) {
         active.round = round;
@@ -418,6 +576,7 @@ export class StageConstructor {
       }
     } finally {
       clearTimeout(timer);
+      if (toolToken !== null) deps.tools?.detach(toolToken);
       abort.abort();
       abort.signal.removeEventListener("abort", interrupt);
       if (this.active === active) this.active = null;

@@ -365,6 +365,8 @@ export class StageViewport {
   private composer: { composer: EffectComposer; ao: GTAOPass; width: number; height: number } | null = null;
   private objectGroups = new Map<string, Group>();
   private boardRigs: Array<{ object: Object3D; number: number }> = [];
+  /** A room's walls and ceiling, each with the way it faces out, for the overview's cutaway. */
+  private cutaway: Array<{ parts: Object3D[]; normal: Vector3 | null; centre: Vector3 }> = [];
   private cam: CamRefs | null = null;
   private aim: AimRefs | null = null;
   private path: Line | null = null;
@@ -583,7 +585,7 @@ export class StageViewport {
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * this.view.aspect);
     const distance =
       Math.max(size.y / 2 / Math.tan(vertical / 2), size.x / 2 / Math.tan(horizontal / 2), size.z / 2 / Math.tan(horizontal / 2)) * 1.12;
-    const direction = new Vector3(0.62, 0.42, 1).normalize();
+    const direction = new Vector3(0.55, 0.9, 1).normalize();
     this.controls.target.set(centre.x, Math.max(0.85, centre.y * 0.72), centre.z);
     this.view.position.copy(this.controls.target).addScaledVector(direction, Math.max(3.2, distance));
     this.controls.maxDistance = Math.max(22, distance * 3);
@@ -609,6 +611,7 @@ export class StageViewport {
     const data = this.data;
     this.structure = JSON.stringify([data.cast, data.sets, data.keys, data.active, data.fov, data.aspect, data.look, data.lights, data.atmosphere, data.plate, data.board?.number, data.board?.rigs]);
     this.boardRigs = [];
+    this.cutaway = [];
     this.clear(this.castGroup);
     this.clear(this.setGroup);
     this.clear(this.rigGroup);
@@ -647,7 +650,7 @@ export class StageViewport {
       box.receiveShadow = true;
       // Glass, leaves and lampshades are not solid in any look: they neither shadow nor block a sightline.
       box.castShadow = (set.solid ?? false) && (this.lookRig.look === "greybox" || (box.material as MeshStandardMaterial).opacity === undefined || (box.material as MeshStandardMaterial).opacity === 1);
-      box.userData = { solid: set.solid ?? false, label: item.name, labelled: partIndex === 0, up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
+      box.userData = { solid: set.solid ?? false, label: item.name, labelled: partIndex === 0 && item.kit?.kind !== "room", up: (item.kit ? item.h + (item.y ?? 0) - (set.y ?? 0) - set.h / 2 : set.h / 2) + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
       parent.add(box);
       this.setMeshes.push(box);
       // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
@@ -660,6 +663,21 @@ export class StageViewport {
       edges.rotation.copy(box.rotation);
       edges.scale.copy(box.scale);
       parent.add(edges);
+      // A room's walls face out on their side; the ceiling faces up (design turn 229a: the overview
+      // looks into the room, dollhouse-fashion, while every lens sees the walls).
+      if (item.kit?.kind === "room") {
+        const side = /\b(back|front|left|right) wall\b/.exec(set.name)?.[1];
+        const turn = MathUtils.degToRad(item.rotation?.[1] ?? 0);
+        const out = side === "back" ? [0, -1] : side === "front" ? [0, 1] : side === "left" ? [-1, 0] : side === "right" ? [1, 0] : null;
+        const ceiling = /\bceiling\b/.test(set.name);
+        if (out !== null || ceiling) {
+          this.cutaway.push({
+            parts: [box, edges],
+            normal: out === null ? null : new Vector3(out[0]! * Math.cos(turn) + out[1]! * Math.sin(turn), 0, -out[0]! * Math.sin(turn) + out[1]! * Math.cos(turn)),
+            centre: new Vector3(item.x, 0, item.z),
+          });
+        }
+      }
     }
 
     if (this.lookRig.look !== "greybox") {
@@ -1160,7 +1178,13 @@ export class StageViewport {
     for (const entry of this.labels) entry.element.remove();
     this.labels = [];
     for (const walker of this.walkers) {
-      this.labels.push({ element: this.label(walker.userData["name"] as string, false), object: walker, up: 1.95 });
+      const element = this.label(walker.userData["name"] as string, false);
+      const member = this.data.cast.find((candidate) => candidate.sheetId === walker.userData["sheetId"]);
+      if (member !== undefined) {
+        element.style.setProperty("--fy-cast", `#${member.colour.toString(16).padStart(6, "0")}`);
+        element.dataset["cast"] = "true";
+      }
+      this.labels.push({ element, object: walker, up: 1.95 });
     }
     for (const mesh of this.setMeshes) {
       if (mesh.userData["labelled"] === false) continue;
@@ -1385,6 +1409,21 @@ export class StageViewport {
 
   /** The orbit view; Lit with soft shading draws contact shading through a composer sized to the canvas. */
   private renderView(): void {
+    // The walls the orbit camera stands behind, and every ceiling, are cut away for this view only.
+    const hidden: Object3D[] = [];
+    for (const wall of this.cutaway) {
+      const outside = wall.normal === null || this.view.position.clone().setY(0).sub(wall.centre).dot(wall.normal) > 0;
+      if (!outside) continue;
+      for (const part of wall.parts) if (part.visible) { part.visible = false; hidden.push(part); }
+    }
+    try {
+      this.renderOrbit();
+    } finally {
+      for (const part of hidden) part.visible = true;
+    }
+  }
+
+  private renderOrbit(): void {
     if (!this.lookRig.shading) {
       this.renderer.render(this.scene, this.view);
       return;
@@ -1414,10 +1453,14 @@ export class StageViewport {
       const box = this.letterbox(canvasWidth, canvasHeight);
       const x = Math.round((canvasWidth - box.w) / 2);
       const y = Math.round((canvasHeight - box.h) / 2);
-      // The bands outside the letterbox are the page showing through, not the last Look frame:
-      // a scissored render clears only inside the scissor, so the whole canvas is cleared first.
+      // The bands outside the letterbox are black, as 229c draws Camera mode, never the last Look
+      // frame: a scissored render clears only inside the scissor, so the whole canvas is cleared first.
+      const clearColour = this.renderer.getClearColor(new Color());
+      const clearAlpha = this.renderer.getClearAlpha();
       this.renderer.setScissorTest(false);
+      this.renderer.setClearColor(0x0b0b0e, 1);
       this.renderer.clear();
+      this.renderer.setClearColor(clearColour, clearAlpha);
       try {
         this.renderer.setViewport(x / ratio, y / ratio, box.w / ratio, box.h / ratio);
         this.renderer.setScissor(x / ratio, y / ratio, box.w / ratio, box.h / ratio);
@@ -1431,8 +1474,8 @@ export class StageViewport {
     } else {
       this.renderView();
       // A live lens preview, always on screen while blocking. Staging aids stay out of the lens.
-      const pipWidth = Math.max(150 * ratio, Math.min(238 * ratio, canvasWidth * 0.3));
-      const box = this.letterbox(pipWidth, canvasHeight);
+      const pipWidth = Math.max(96 * ratio, Math.min(238 * ratio, canvasWidth * 0.3));
+      const box = this.letterbox(pipWidth, Math.max(120 * ratio, canvasHeight * 0.32));
       const margin = 12 * ratio;
       const x = canvasWidth - box.w - margin;
       const y = margin;

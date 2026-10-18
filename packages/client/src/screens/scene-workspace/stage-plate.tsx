@@ -90,13 +90,15 @@ function PlatePicker({ world, productionId, onPick }: { world: WorldBundle; prod
 }
 
 /** The plate's form (229c): picture and Replace, the shot it matches, its lens and horizon, whether it rides, Match camera. */
-export function PlateForm({ plate, world, productionId, shots, currentShotId, disabled, onChange, onReplace, onMatch, onRemove }: {
+export function PlateForm({ plate, world, productionId, shots, currentShotId, disabled, light, onChange, onReplace, onMatch, onRemove }: {
   plate: ScenePlate;
   world: WorldBundle;
   productionId: string;
   shots: readonly Shot[];
   currentShotId: string;
   disabled: boolean;
+  /** The scene's light as the plate shows it (229c: "night · warm practicals · 5"). */
+  light?: { time: string | undefined; summary: string | undefined };
   onChange: (next: ScenePlate) => void;
   onReplace: (candidate: PlateCandidate) => void;
   onMatch: () => void;
@@ -108,7 +110,7 @@ export function PlateForm({ plate, world, productionId, shots, currentShotId, di
   const matchesHere = plate.shotId === undefined || plate.shotId === currentShotId;
   return (
     <div className="fy-swstage__block" data-testid="stage-plate-form">
-      <Eyebrow title="Plate" meta={plate.label} />
+      <Eyebrow title="Plate" meta={light?.time === undefined ? plate.label : `${plate.label} · ${light.time}`} />
       <div className="fy-swstage__platehead">
         {picture === null ? <span className="fy-swstage__platethumb" data-missing="true" /> : <span className="fy-swstage__platethumb" style={{ backgroundImage: `url("${picture}")` }} />}
         <span>
@@ -173,6 +175,7 @@ export function PlateForm({ plate, world, productionId, shots, currentShotId, di
           </Row>
         </>
       )}
+      {light?.summary === undefined ? null : <Row label="light"><Value muted><span className="fy-swstage__quietmono">{light.summary}</span></Value></Row>}
       <Row label="rides">
         <span className="fy-swstage__chips" role="radiogroup" aria-label="Plate rides">
           {([["Image 1", true], ["Off", false]] as const).map(([label, rides]) => (

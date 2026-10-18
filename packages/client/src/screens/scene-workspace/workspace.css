@@ -376,6 +376,35 @@
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut > em { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); font-style: normal; color: var(--muted-foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__cut-head { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--foreground); pointer-events: none; z-index: 2; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lane-cut { position: absolute; top: 1px; height: 14px; border-left: 1px dashed var(--border); pointer-events: none; }
-:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lane-pose { position: absolute; top: 16px; transform: translateX(-2px); font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); color: var(--muted-foreground); white-space: nowrap; pointer-events: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lane-pose { position: absolute; top: -3px; transform: translateX(6px); font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); color: var(--muted-foreground); white-space: nowrap; pointer-events: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:disabled { cursor: default; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item:disabled:hover { background: transparent; }
+/* Build with Arke's working log (issue 1823, design turn 229f): a popover over the viewport's top
+   left, one line per step with a tick, the running step's dot, and what a render looked at. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__log { position: absolute; left: 12px; top: 12px; z-index: 4; width: min(420px, calc(100% - 24px)); max-height: calc(100% - 24px); box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; overflow: hidden; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__loghead { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 2px; font: var(--weight-semibold) var(--text-2xs)/1.3 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__loghead > span:last-child { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); letter-spacing: 0; text-transform: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 24px; font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:first-child { display: inline-grid; place-items: center; color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep[data-state="run"] > span:first-child { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep[data-state="run"] > span:first-child > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logstep > span:last-child { color: var(--muted-foreground); font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logthumbs { display: flex; gap: 6px; padding: 4px 0 6px 24px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__logthumbs > i { width: auto; height: 78px; border: 1px solid var(--border); border-radius: 4px; background: var(--media-overlay-bg) center / cover; }
+/* Turn 229's side-by-side: the line is one framed row, the full-screen head is stepper, title,
+   scope, then the state on the right, and a figure's label carries its cast colour. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction { margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__scope { font-size: inherit; opacity: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__meta { flex: 0 1 auto; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__gap { flex: 1; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__label[data-cast="true"] { box-shadow: inset 3px 0 0 var(--fy-cast); padding-left: 9px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__motion-track .fy-swstage__key > span { background: currentColor; }
+/* Camera mode (229c): the lens sits on black, its safe frame on the lens, and the plate look says
+   where the horizon and the lens are in chips at the lens's foot. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-mode="camera"] { background: var(--media-overlay-bg); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips { position: absolute; left: 12px; bottom: 12px; z-index: 5; display: flex; gap: 6px; pointer-events: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__lenschips > span { padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); font: var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__linewarning { flex-basis: 100%; margin: 0; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__kitmenu em { margin-left: auto; padding-left: 12px; font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); font-style: normal; color: var(--muted-foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-building="true"] .fy-swstage__modes { left: min(444px, calc(100% - 180px)); }
