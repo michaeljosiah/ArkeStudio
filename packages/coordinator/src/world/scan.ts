@@ -31,6 +31,7 @@ import {
   AudioDramaRecordSchema,
   EpisodeScriptSchema,
   EpisodeTakesSchema,
+  episodeScriptFile,
   type EpisodeScript,
   type EpisodeTakes,
   type Episode,
@@ -961,6 +962,12 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     for (const file of (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort()) {
       const rel = `productions/${id}/scripts/${file}`;
       const script = await tryParse(rel, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
+      // A file is the script of the episode it is named for (codex on PR 1870): a copied or renamed
+      // one would open as another episode and every save would land elsewhere, so it is reported.
+      if (script && file !== episodeScriptFile(script.episode)) {
+        problems.push({ path: toPortable(rel), message: `this file holds episode ${script.episode}'s script; it must be named ${episodeScriptFile(script.episode)}` });
+        continue;
+      }
       if (script) episodeScripts.push({ file, hash: manifest[toPortable(rel)]!, script });
     }
     // Its takes (SPEC-057 R-29), by episode.

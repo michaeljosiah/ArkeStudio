@@ -84,7 +84,7 @@ function withScript(blocks: EpisodeScriptBlock[]): ClientState {
   const drama = { ...structuredClone(base), meta: { ...base.meta, id: "low-water-drama", title: "Low Water", format: "story", medium: "story", kind: "audio-drama" },
     chapters: [], scenes: [], episodes: [], takes: [],
     audioDrama: { version: 1, source: { productionId: "low-water" }, plan: { episodes: 6, minutes: 25, keptFromListener: [] } },
-    episodeScripts: [{ file: "episode-01.json", hash: "sha256:base", script: { version: 2, episode: 1, title: "The tide turns", blocks } }] };
+    episodeScripts: [{ file: "episode-001.json", hash: "sha256:base", script: { version: 2, episode: 1, title: "The tide turns", blocks } }] };
   state.world!.productions = [...state.world!.productions, novel, drama] as never;
   return state;
 }
@@ -129,11 +129,32 @@ describe("the score (230e)", () => {
     assert.ok(m.container.querySelector(`[data-block="${bray.id}"] .fy-ad-score__new`), "a line with no source paragraph is marked new");
     assert.equal(m.container.querySelector(`[data-block="${maren.id}"] .fy-ad-score__new`), null);
     // The drone runs from its row to the scene's end, in the music lane only.
-    assert.ok(m.container.querySelector(`[data-block="${drone.id}"] [data-lane="music"].fy-ad-score__lane--start`));
-    assert.ok(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="music"].fy-ad-score__lane--run`));
-    assert.ok(m.container.querySelector(`[data-block="${bray.id}"] [data-lane="music"].fy-ad-score__lane--end`));
-    assert.equal(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="ambience"].fy-ad-score__lane--run`), null);
+    assert.ok(m.container.querySelector(`[data-block="${drone.id}"] [data-lane="music"] .fy-ad-score__bed--start`));
+    assert.ok(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="music"] .fy-ad-score__bed--run`));
+    assert.ok(m.container.querySelector(`[data-block="${bray.id}"] [data-lane="music"] .fy-ad-score__bed--end`));
+    assert.equal(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="ambience"] .fy-ad-score__bed`), null);
     assert.match(m.container.textContent!, /Saved · script v2/);
+  });
+
+  it("draws two beds that overlap in one lane, each with its own start (codex on PR 1870)", async () => {
+    const rain: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Rain" };
+    const wind: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Wind" };
+    const m = await mount(withScript([heading, rain, maren, wind, bray]));
+    const beds = [...m.container.querySelectorAll(`[data-block="${bray.id}"] [data-lane="ambience"] .fy-ad-score__bed`)].map(bed => bed.getAttribute("data-bed"));
+    assert.deepEqual(beds, [rain.id, wind.id], "both beds run under the last line");
+    assert.ok(m.container.querySelector(`[data-block="${wind.id}"] [data-bed="${wind.id}"].fy-ad-score__bed--start`), "the later bed's start is not hidden");
+  });
+
+  it("an edit not yet saved when the score is left is still saved (codex on PR 1870)", async () => {
+    const m = await mount(withScript(blocks));
+    const words = m.container.querySelector(`[data-block="${bray.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log is wrong." } }));
+    await act(async () => root!.unmount());
+    root = null;
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    assert.ok(save, "left inside the pause, the edit is sent rather than dropped");
+    assert.equal(save.blocks.find(block => block.id === bray.id)!.kind === "dialogue" && (save.blocks.find(block => block.id === bray.id) as { words: string }).words, "The log is wrong.");
+    assert.equal(save.baseHash, "sha256:base");
   });
 
   it("shows the pinned chapter version in Source and marks the selected line's passage", async () => {
