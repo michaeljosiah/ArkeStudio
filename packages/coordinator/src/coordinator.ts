@@ -163,6 +163,7 @@ import {
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
   pictureLookFor,
+  chapterLookDisagreement,
   kitLookLibrary,
   ridingPicks,
   PICTURE_PROMPT_MAX,
@@ -185,6 +186,7 @@ import {
   type IllustrationRow,
   illustrationRowGoes,
   illustrationTotal,
+  disagreementsNotSentAsIs,
   pictureRefusal,
   type AudiobookReader,
   type ManifestModel,
@@ -1727,7 +1729,7 @@ export class Coordinator {
    * lands, the record sent to the windows each time. A picture that fails is held with its reason
    * and the run goes on; Stop cancels the one in hand, keeps what is made and spends nothing more.
    */
-  private async runIllustration(store: WorldStore, run: { productionId: string; chapter: { id: string; file: string; order: number }; proposal: IllustrationProposal; rows: IllustrationRow[]; confirmedMicroUsd: number; control: AbortController; key: string }): Promise<void> {
+  private async runIllustration(store: WorldStore, run: { productionId: string; chapter: { id: string; file: string; order: number }; proposal: IllustrationProposal; rows: IllustrationRow[]; without: ReadonlySet<string>; confirmedMicroUsd: number; control: AbortController; key: string }): Promise<void> {
     const { productionId, chapter, proposal, rows, control, key } = run;
     const ids = { worldId: store.worldId, productionId, chapterId: chapter.id };
     const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: run.confirmedMicroUsd };
@@ -1740,6 +1742,9 @@ export class Coordinator {
     // The rows the provider would not make: only these are held as refused, to be tried again. A row
     // whose words changed or that has a picture now is not one Try again could make (codex on PR 1559).
     const refusedHere = new Set<string>();
+    // Rows held for a look that came to disagree during the proposal, by who: marked on the row the
+    // proposal keeps, so its card holds it with As it is rather than as an ordinary picture.
+    const disagreedHere = new Map<string, string[]>();
     try {
       if (!model) {
         for (const row of rows) progress.failed.push({ block: row.block, reason: "no picture model is on" });
@@ -1764,6 +1769,14 @@ export class Coordinator {
           // The chapter's look as it stands now: a look chosen since the proposal rides (R-119); and a
           // look held on the block for its picture alone rides for that person in its place (R-146).
           const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
+          // A look the Looks sheet has come to flag since the proposal holds the row as the card
+          // would have (issue 1658), unless the author sent it as it is for that person.
+          const disagreeing = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0).map((entry) => entry.key);
+          if (disagreementsNotSentAsIs(row, run.without, disagreeing).length > 0) {
+            disagreedHere.set(row.block, disagreeing);
+            progress.failed.push({ block: row.block, reason: "a look disagrees with the chapter · review looks" });
+            continue;
+          }
           const made = await this.makeBenchPicture(store, {
             title: `Chapter ${chapter.order} · ${row.block === "title" ? "title" : row.title}`,
             // Held to rule 4 again: a look chosen since the proposal rides now, and its image carries the clothes (codex on PR 1559).
@@ -1815,9 +1828,10 @@ export class Coordinator {
       .filter((row) => !progress.made.includes(row.block))
       .map((row) => {
         if (reasons.has(row.block)) return { ...row, refused: (reasons.get(row.block) || "not made").slice(0, 200) };
-        if (!otherwise.has(row.block) || row.refused === undefined) return row;
+        const flagged = disagreedHere.get(row.block);
+        if (!otherwise.has(row.block) || row.refused === undefined) return flagged === undefined ? row : { ...row, disagrees: flagged };
         const { refused: _old, ...rest } = row;
-        return rest;
+        return flagged === undefined ? rest : { ...rest, disagrees: flagged };
       });
     this.makingIllustrations.delete(key);
     if (remaining.length > 0 && !store.closingSignal.aborted) {
@@ -15944,7 +15958,7 @@ export class Coordinator {
         const progress: IllustrationProgress = { proposalId: proposal.proposalId, state: "making", total: rows.length, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: msg.confirmedMicroUsd };
         this.makingIllustrations.set(key, { control, ...ids, progress });
         try {
-          await this.runIllustration(store, { productionId: msg.productionId, chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, proposal, rows, confirmedMicroUsd: msg.confirmedMicroUsd, control, key });
+          await this.runIllustration(store, { productionId: msg.productionId, chapter: { id: chapter.id, file: chapter.file, order: chapter.order }, proposal, rows, without, confirmedMicroUsd: msg.confirmedMicroUsd, control, key });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.makingIllustrations.delete(key);
