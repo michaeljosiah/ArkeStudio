@@ -1632,13 +1632,12 @@ export class Coordinator {
     // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
     const saved = book === null || book === "unreadable" ? undefined : book.narrator;
-    // A catalogue that did not load says nothing of the voice (only a fault can then), and Read
-    // still refuses below on the narrator it could not resolve.
-    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list());
-    if (requireAvailable && saved !== undefined && (unavailable !== null || own === null || own.fallback)) {
-      throw new Error(unavailable !== null
-        ? `The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`
-        : `The book narrator ${saved.label ?? saved.voiceId} is unavailable. Refresh the voice catalogue or choose a replacement narrator before generating audio.`);
+    // A catalogue that did not load says nothing of the voice, but a narrator it cannot resolve
+    // cannot read either: Read refuses one, so Direct and the door hold on it too (codex on PR 1869).
+    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list())
+      ?? (saved !== undefined && (own === null || own.fallback) ? "the voice list didn't load" : null);
+    if (requireAvailable && saved !== undefined && unavailable !== null) {
+      throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
     }
     const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
     return {

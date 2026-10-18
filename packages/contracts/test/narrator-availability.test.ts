@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { bookNarratorUnavailable, readerUnavailableWords } from "../src/narrator-availability.js";
+import { NARRATOR_UNAVAILABLE_MAX, bookNarratorUnavailable, readerUnavailableWords } from "../src/narrator-availability.js";
 
 /**
  * Why the book's own narrator cannot read now (issue 1661): a 402 left a read waiting on
@@ -43,5 +43,12 @@ describe("the book narrator's availability (issue 1661)", () => {
   it("puts a refused payment in the author's words and leaves any other reason as the reader said it", () => {
     assert.equal(readerUnavailableWords("elevenlabs", "elevenlabs: HTTP 402 payment_required"), "ElevenLabs needs payment");
     assert.equal(readerUnavailableWords("elevenlabs", "offline"), "offline");
+  });
+
+  it("cuts a vendor's raw error to the door's limit, so the warning never costs the door (codex on PR 1869)", () => {
+    const raw = `google: HTTP 500 ${"{\"error\":\"internal\"} ".repeat(40)}`;
+    const said = bookNarratorUnavailable(NARRATOR, [row], [{ id: "google", fault: raw }])!;
+    assert.equal(said.length, NARRATOR_UNAVAILABLE_MAX);
+    assert.ok(said.startsWith("google: HTTP 500") && said.endsWith("…"));
   });
 });

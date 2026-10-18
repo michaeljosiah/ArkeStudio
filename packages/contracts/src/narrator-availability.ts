@@ -2,6 +2,9 @@ import { providerFaultCategory } from "./diagnostics.js";
 import { credentialFaulted, type ProviderStatus } from "./provider.js";
 import { legacyVoiceModel, providerName, supportsVoiceUse, type VoiceCandidate } from "./voice.js";
 
+/** The longest reason said for a narrator that cannot read: a vendor's raw error can run to pages. */
+export const NARRATOR_UNAVAILABLE_MAX = 300;
+
 /**
  * Why the book's own narrator cannot read now, in words an author can act on (`Google needs
  * payment`), or null while it can (issue 1661). The book keeps its narrator either way (#1752);
@@ -30,7 +33,12 @@ export function bookNarratorUnavailable(
   return row.unavailableReason === undefined ? null : readerUnavailableWords(narrator.provider, row.unavailableReason);
 }
 
-/** A reader's refusal as an author reads it: a refused payment is `Google needs payment`, anything else as the reader said it. */
+/**
+ * A reader's refusal as an author reads it: a refused payment is `Google needs payment`, anything
+ * else as the reader said it, cut to `NARRATOR_UNAVAILABLE_MAX`. A vendor's raw error past the
+ * door's limit once failed the whole door, not just the warning (codex on PR 1869).
+ */
 export function readerUnavailableWords(provider: string, reason: string): string {
-  return providerFaultCategory(reason) === "billing" ? `${providerName(provider)} needs payment` : reason;
+  if (providerFaultCategory(reason) === "billing") return `${providerName(provider)} needs payment`;
+  return reason.length <= NARRATOR_UNAVAILABLE_MAX ? reason : `${reason.slice(0, NARRATOR_UNAVAILABLE_MAX - 1).trimEnd()}…`;
 }

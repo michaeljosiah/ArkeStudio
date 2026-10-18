@@ -273,6 +273,21 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(q(m, '[data-testid="reading-narrator-unavailable"]')?.textContent, "Google needs payment");
   });
 
+  it("asks the door again when a provider's fault comes or goes, so an idle page learns its narrator was silenced (codex on PR 1869)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = asks();
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "a 402 on another job asks again");
+    await answerDoor(m, door("narrator"));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "the same status again asks nothing");
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(asks(), before + 2, "and once more when it clears");
+  });
+
   it("the narrator's chip opens the book's narrator: the app's, or a voice for this book, and nothing written until the press (SPEC-047 R-46)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));

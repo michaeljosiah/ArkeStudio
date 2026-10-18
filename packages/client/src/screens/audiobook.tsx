@@ -113,6 +113,9 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
     Object.entries(store.audiobookRecords).filter(([key]) => key.startsWith(prefix)).map(([, held]) => held.seq),
     book?.state ?? null,
     note?.seq ?? null,
+    // A fault silences the book's narrator with no catalogue change (issue 1661): the door says so
+    // only once it is asked again (codex on PR 1869).
+    (store.state?.app.providers ?? []).map((provider) => [provider.id, provider.fault, provider.faultKind ?? null]),
   ]);
 }
 

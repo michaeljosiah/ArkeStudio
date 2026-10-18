@@ -1595,6 +1595,23 @@ describe("the director reads the book (design turn 184)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
     assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 4");
   });
+
+  it("a read whose cast voice's lane pauses says what it waits on, though the narrator reads locally (codex on PR 1869)", async () => {
+    // Maren speaks in Low tide on a model the manifest lists, so her block is ElevenLabs' to read.
+    const cast = inkbound("cast");
+    const state = voiced({ ...cast, world: { ...cast.world!, sheets: cast.world!.sheets.map((sheet) => (sheet.id === "maren-kest" && sheet.voice !== undefined ? { ...sheet, voice: { ...sheet.voice, model: "eleven-v3" } } : sheet)) } });
+    const m = await mount(state);
+    await answerOpen(m, { voices: CAST });
+    await act(async () => __applyEventForTest({ type: "voice.catalogue", at: AT, voices: [
+      { provider: "elevenlabs", model: "eleven-v3", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, usedBy: [] },
+      { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: [], local: true, canClone: false, usedBy: [] },
+    ] }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 5, blocks: 5, requests: 3 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "fishaudio", paused: true, pauseKind: "offline", reason: "offline", held: 1 } }));
+    assert.match(q(m, '[data-testid="audiobook-progress"]')?.textContent ?? "", /^reading… request 1 of 3/, "a lane none of the chapter's readers use holds nothing here");
+    await act(async () => __applyEventForTest({ at: AT, type: "queue.status", queue: { provider: "elevenlabs", paused: true, pauseKind: "fault", reason: "elevenlabs: HTTP 402 payment_required", held: 1 } }));
+    assert.equal(q(m, '[data-testid="audiobook-progress"]')?.textContent, "waiting · ElevenLabs needs payment · 0 of 5", "Maren's voice, Low tide, is ElevenLabs'");
+  });
 });
 
 /**

@@ -2188,6 +2188,19 @@ describe("an explicit book narrator never falls back (#1752)", () => {
       assert.equal(door.voices[0]?.unavailable, "ElevenLabs needs payment");
     }));
 
+  it("a narrator no voice list could resolve holds Direct and is said on the door, as Read refuses it (codex on PR 1869)", () =>
+    withHarness({ voiceless: true, direction: async (input) => ({ blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })), summary: "Measured." }) }, async ({ send, events }) => {
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: { provider: LOW_TIDE.provider, model: LOW_TIDE.model, voiceId: LOW_TIDE.voiceId, label: LOW_TIDE.label } });
+      await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap" });
+      const directed = events.find((e): e is Extract<DomainEvent, { type: "direction.finished" }> => e.type === "direction.finished");
+      assert.equal(directed?.outcome, "unavailable");
+      assert.match(directed?.reason ?? "", /voice list didn't load/);
+      const requestId = "01J8F3K2QW9VZX4N7M0RTYB6DB";
+      await send({ kind: "open-audiobook", worldId: WORLD_ID, productionId: LEDGER, requestId });
+      const door = events.filter((e): e is Extract<DomainEvent, { type: "audiobook.door" }> => e.type === "audiobook.door" && e.requestId === requestId).at(-1)?.door;
+      assert.equal(door?.voices[0]?.unavailable, "the voice list didn't load");
+    }));
+
   it("a book narrator that can read has nothing said of it on the door", () =>
     withHarness({ cloud: [LOW_TIDE] }, async ({ send, events }) => {
       await send({ kind: "set-credential", provider: "elevenlabs", key: "k-test" });
