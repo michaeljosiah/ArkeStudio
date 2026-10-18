@@ -185,7 +185,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
 // 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
 // 90: an audio drama — the setup kind and its audio-drama.json plan (SPEC-057, issue 1857).
-export const SUPPORTED_SCHEMA_VERSION = 90;
+// 91: an audio drama's episode scripts (SPEC-057 R-83, issue 1858).
+export const SUPPORTED_SCHEMA_VERSION = 91;
 
 export class WorldOpenError extends Error {
   constructor(

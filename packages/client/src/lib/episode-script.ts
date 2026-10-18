@@ -187,7 +187,14 @@ export function scriptAsText(title: string, episode: number, blocks: readonly Ep
   const lines: string[] = [`EPISODE ${episode}${title ? ` · ${title}` : ""}`, ""];
   let scene = 0;
   let spoken = 0;
+  // Where a bed stops is part of the score (codex on PR 1870): said at the block it stops before.
+  const stops = new Map<string, string[]>();
   for (const block of blocks) {
+    if ((block.kind === "ambience" || block.kind === "music") && block.until) stops.set(block.until, [...(stops.get(block.until) ?? []), `     ${block.kind.toUpperCase()} ENDS: ${block.heard}`]);
+  }
+  for (const block of blocks) {
+    const ends = stops.get(block.id);
+    if (ends) lines.push(...ends, "");
     switch (block.kind) {
       case "heading":
         scene++;
