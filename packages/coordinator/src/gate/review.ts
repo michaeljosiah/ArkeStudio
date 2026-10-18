@@ -89,7 +89,8 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
         : block.kind === "dialogue" ? `${block.speaker.toUpperCase()}${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
         : block.kind === "narration" ? `NARRATOR${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
         : block.kind === "silence" ? `SILENCE ${block.seconds} s` : block.kind === "note" ? `[${block.text}]` : `${block.kind.toUpperCase()}: ${block.heard}`);
-      return { label: `Episode ${script.episode} script`, kind: `episode script · v${script.version}`, fields: new Map([["Script", lines.join("\n")]]) };
+      return { label: `Episode ${script.episode} script`, kind: `episode script · v${script.version}`,
+        fields: new Map([["Title", script.title || "—"], ["Script", lines.join("\n")], ["Script JSON", JSON.stringify(script.blocks, null, 2)]]) };
     } catch { return null; }
   }
   if (/^productions\/[a-z0-9-]+\/scenes\/[^/]+\.json$/.test(path)) {

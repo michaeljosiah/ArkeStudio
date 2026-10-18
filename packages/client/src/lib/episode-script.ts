@@ -259,6 +259,16 @@ export function draftRows(current: readonly EpisodeScriptBlock[], proposed: read
   return rows;
 }
 
+/**
+ * The fields a rewrite changes beyond its words (codex on PR 1874): a channel, a bed's stop, a
+ * source pin — written by Keep, so said beside the line.
+ */
+export function changedFields(was: EpisodeScriptBlock, now: EpisodeScriptBlock): string[] {
+  const keys = new Set([...Object.keys(was), ...Object.keys(now)]);
+  const shown = new Set(["id", "kind", "words", "direction", "speaker", "heard", "place", "time", "text", "seconds", "cut"]);
+  return [...keys].filter((key) => !shown.has(key) && JSON.stringify((was as Record<string, unknown>)[key]) !== JSON.stringify((now as Record<string, unknown>)[key]));
+}
+
 /** A block in one line, as the draft shows it. */
 export function blockLine(block: EpisodeScriptBlock, name: (slug: string) => string): { who: string; text: string } {
   switch (block.kind) {

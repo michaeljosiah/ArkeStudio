@@ -6,11 +6,11 @@ import {
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
 import {
-  acceptProposal, discardProposal, openChapter, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
+  acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
+  blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Users, X } from "../components/icons.js";
@@ -257,7 +257,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         </span>
       </header>
       {drafted && draft && (
-        <DraftBar rows={draft} busy={dirty || saving !== null}
+        <DraftBar rows={draft} busy={dirty || saving !== null || conflict} proposalId={drafted.proposal.id}
+          title={drafted.episodeScripts![scriptPath]!.title !== title ? drafted.episodeScripts![scriptPath]!.title : null}
           onKeep={() => acceptProposal(world.meta.worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}
           onDiscard={() => discardProposal(world.meta.worldId, drafted.proposal.id)} />
       )}
@@ -452,16 +453,25 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   );
 }
 
-/** Arke's draft, waiting (R-9, R-54): what it changes, counted, and Keep or Discard — whole. */
-function DraftBar({ rows, busy, onKeep, onDiscard }: { rows: ReturnType<typeof draftRows>; busy: boolean; onKeep: () => void; onDiscard: () => void }) {
+/**
+ * Arke's draft, waiting (R-9, R-54): what it changes, counted, and Keep or Discard — whole. Keep
+ * waits while the score holds unsaved or conflicting work, and a refused Keep says why (codex on PR 1874).
+ */
+function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
+  rows: ReturnType<typeof draftRows>; busy: boolean; proposalId: string; title: string | null; onKeep: () => boolean; onDiscard: () => void;
+}) {
+  const notice = useGateNotices()[proposalId];
+  const [unsent, setUnsent] = useState(false);
   const count = (state: string) => rows.filter((row) => row.state === state).length;
   const parts = [["added", "added"], ["changed", "changed"], ["removed", "removed"]]
     .map(([state, label]) => [count(state!), label] as const).filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`);
   return (
     <div className="fy-ad-draftbar" role="region" aria-label="Arke's draft">
-      <b>Arke's draft</b><span>{parts.join(" · ") || "no change"}</span><span className="gap" />
+      <b>Arke's draft</b><span>{[...parts, ...(title !== null ? [`title “${title}”`] : [])].join(" · ") || "no change"}</span>
+      {(unsent || notice) && <span className="fy-ad-draftbar__why" role="alert">{unsent ? "The studio is disconnected." : notice!.detail ?? `Not kept: ${notice!.reason}.`}</span>}
+      <span className="gap" />
       <Button size="sm" variant="ghost" onClick={onDiscard}>Discard</Button>
-      <Button size="sm" variant="primary" disabled={busy} onClick={onKeep}>Keep</Button>
+      <Button size="sm" variant="primary" disabled={busy} onClick={() => setUnsent(!onKeep())}>Keep</Button>
     </div>
   );
 }
@@ -476,7 +486,8 @@ function DraftScore({ rows, name, episode }: { rows: ReturnType<typeof draftRows
     <div className="fy-ad-score fy-ad-score--draft" role="list" aria-label={`Episode ${episode} draft`}>
       {rows.map((row) => (
         <div key={`${row.state}:${row.block.id}`} role="listitem" data-block={row.block.id}>
-          {row.state === "changed" ? <>{line(row.was, "removed")}{line(row.block, "added")}</> : line(row.block, row.state)}
+          {row.state === "changed" ? <>{line(row.was, "removed")}{line(row.block, "added")}
+            {changedFields(row.was, row.block).length > 0 && <small className="fy-ad-draft__fields">also changes {changedFields(row.was, row.block).join(", ")}</small>}</> : line(row.block, row.state)}
         </div>
       ))}
     </div>

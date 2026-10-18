@@ -30,7 +30,8 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
     // An audio drama's plan, source and secrets (SPEC-057 R-7): its episodes are not scene records.
     ...(production.audioDrama ? { audioDrama: production.audioDrama } : {}),
     // Its episode scripts, by episode (SPEC-057 R-83): blocks carry the ids an edit names.
-    ...(production.episodeScripts?.length ? { episodeScripts: production.episodeScripts.map((entry) => entry.script) } : {}),
+    // With the hash a whole-script proposal is fenced on (codex on PR 1874).
+    ...(production.episodeScripts?.length ? { episodeScripts: production.episodeScripts.map((entry) => ({ ...entry.script, baseHash: entry.hash })) } : {}),
     episodes: production.episodes.map((e) => ({
       id: e.id,
       order: e.order,

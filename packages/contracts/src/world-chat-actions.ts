@@ -889,7 +889,10 @@ const ProductionEpisodeScriptModelActionSchema = z
     productionId: SlugSchema,
     episode: z.number().int().min(1).max(200),
     title: z.string().trim().max(160).optional(),
-    blocks: z.array(DraftScriptBlockSchema).min(1).max(4_000)
+    baseHash: z.string().min(1).nullable()
+      .describe("The episode script's baseHash exactly as get_production read it; null for an episode with no script yet."),
+    // Empty is a script too (codex on PR 1874), as the score can save one.
+    blocks: z.array(DraftScriptBlockSchema).max(4_000)
       .describe("The whole script after the change, in order. Keep every block you do not change exactly as read, id included. A new block has no id, or a short key of your own (new-1) when a bed's until must name it. Only what is said goes in words; how it is said goes in direction."),
     checkReceiptIds: CompleteReadIdsSchema,
   })

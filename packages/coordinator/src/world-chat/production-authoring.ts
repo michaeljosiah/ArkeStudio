@@ -418,7 +418,10 @@ export async function stageWorldChatProductionAuthoredAction(
     // read it, so the author is never offered a draft that cannot be kept.
     if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama`);
     const { episode } = payload.action;
-    const current = production.episodeScripts?.find((entry) => entry.script.episode === episode)?.script;
+    const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode);
+    // Fenced on the script Arke read (codex on PR 1874): an edit since is never written over.
+    if ((stored?.hash ?? null) !== payload.action.baseHash) throw new Error(`Episode ${episode}'s script changed since it was read. Read get_production again and redraft from it.`);
+    const current = stored?.script;
     const record = EpisodeScriptSchema.parse({
       version: current?.version ?? 1, episode,
       title: payload.action.title ?? current?.title ?? "",

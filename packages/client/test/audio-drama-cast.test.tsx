@@ -8,7 +8,7 @@ import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } f
 import { ProductionCastScreen } from "../src/screens/production-cast.js";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
-import { draftRows } from "../src/lib/episode-script.js";
+import { changedFields, draftRows } from "../src/lib/episode-script.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -195,5 +195,13 @@ describe("Arke's draft in the score (R-9, R-54)", () => {
     const discard = [...container.querySelectorAll("button")].find((button) => button.textContent === "Discard")!;
     await act(async () => props(discard).onClick!({}));
     assert.deepEqual(sent.at(-1), { kind: "proposal-discard", worldId: FIXTURE_WORLD_ID, proposalId: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA" });
+  });
+});
+
+describe("codex round 1 on PR 1874", () => {
+  it("names what a rewrite changes beyond its words", () => {
+    const was = line("bray", "Two.");
+    assert.deepEqual(changedFields(was, { ...was, channel: "radio" } as EpisodeScriptBlock), ["channel"]);
+    assert.deepEqual(changedFields(was, { ...was, words: "Three." } as EpisodeScriptBlock), [], "the words are shown in the line itself");
   });
 });

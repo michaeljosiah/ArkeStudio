@@ -22,7 +22,7 @@ async function drama(blocks: EpisodeScriptBlock[]) {
 describe("Arke's episode script (SPEC-057 R-54)", () => {
   it("is a model action Arke can name, with blocks that need no id", () => {
     const parsed = ModelWorldChatActionSchema.safeParse({
-      kind: "production-episode-script", productionId: "low-water", episode: 1, checkReceiptIds: [`check_${ulid()}`],
+      kind: "production-episode-script", productionId: "low-water", episode: 1, baseHash: null, checkReceiptIds: [`check_${ulid()}`],
       blocks: [{ kind: "heading", place: "The quay" }, { kind: "dialogue", speaker: "maren-kest", words: "Climb." }],
     });
     assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
@@ -32,9 +32,10 @@ describe("Arke's episode script (SPEC-057 R-54)", () => {
     const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
     const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look." };
     const { store, id, gate, intent } = await drama([scene, line]);
+    const baseHash = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.hash;
     const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
       kind: "world-chat-production-episode-script", worldId: store.worldId,
-      action: { kind: "production-episode-script", productionId: id, episode: 1, checkReceiptIds: [], blocks: [
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash, checkReceiptIds: [], blocks: [
         { id: scene.id, kind: "heading", place: "The bell tower" },
         { kind: "ambience", heard: "Wind in the stair.", until: "new-1" },
         { id: line.id, kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look — the stairs." },
@@ -59,12 +60,23 @@ describe("Arke's episode script (SPEC-057 R-54)", () => {
     const { store, id, gate, intent } = await drama([]);
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
       kind: "world-chat-production-episode-script", worldId: store.worldId,
-      action: { kind: "production-episode-script", productionId: "the-ledger-of-nights", episode: 1, checkReceiptIds: [], blocks: [{ kind: "heading", place: "x" }] },
+      action: { kind: "production-episode-script", productionId: "the-ledger-of-nights", episode: 1, baseHash: null, checkReceiptIds: [], blocks: [{ kind: "heading", place: "x" }] },
     }), /not an audio drama/);
     await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
       kind: "world-chat-production-episode-script", worldId: store.worldId,
-      action: { kind: "production-episode-script", productionId: id, episode: 1, checkReceiptIds: [],
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash: null, checkReceiptIds: [],
         blocks: [{ kind: "dialogue", speaker: "maren-kest", words: "Cut off", cut: true }] },
     }));
+  });
+});
+
+describe("codex round 1 on PR 1874", () => {
+  it("refuses a draft written from a script that has changed since it was read", async () => {
+    const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
+    const { store, id, gate, intent } = await drama([scene]);
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash: "sha256:what-arke-read", checkReceiptIds: [], blocks: [] },
+    }), /changed since it was read/);
   });
 });
