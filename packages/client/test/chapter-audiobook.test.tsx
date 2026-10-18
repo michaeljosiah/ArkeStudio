@@ -1940,6 +1940,26 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.deepEqual([sent.blocks, sent.without, sent.confirmedMicroUsd], [["p0.0", "p3.0"], ["p3.0"], 80_000], "named, so the coordinator makes it");
   });
 
+  it("a refused row's one press names every hold it lets go: never a Try again that also sends a disputed look unsaid (issue 1875)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    const reason = "refused by the image safety check";
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [
+      row("p0.0", { refused: reason, disagrees: ["maren-kest"] }),
+      row("p1.0", { at: 90, refused: reason, needs: ["Bray"] }),
+      row("p3.0", { at: 150, refused: reason }),
+    ] } }));
+    const card = (block: string) => q(m, `[data-testid="illustration-row"][data-block="${block}"]`)!;
+    const presses = (block: string) => [...card(block).querySelectorAll('[data-testid="illustration-retry"], [data-testid="illustration-as-is"], [data-testid="illustration-without"]')].map((el) => [el.getAttribute("data-testid"), el.textContent]);
+    assert.deepEqual(presses("p0.0"), [["illustration-retry", "Try again · as it is"]], "one press, and it says the look goes as it is");
+    assert.deepEqual(presses("p1.0"), [["illustration-retry", "Try again · without"]]);
+    assert.deepEqual(presses("p3.0"), [["illustration-retry", "Try again"]]);
+    await act(async () => (card("p0.0").querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
+    assert.equal(card("p0.0").dataset.state, "ready");
+    assert.equal(card("p0.0").querySelector('[data-testid="illustration-disagrees"]')!.textContent, "sent as it is");
+    assert.equal(card("p0.0").querySelector('[data-testid="illustration-retry"]')!.textContent, "Hold");
+  });
+
   it("holds a row refused again after Try again: the consent was for the run that ended", async () => {
     const m = await mount(voiced(inkbound()));
     await answerOpen(m);
