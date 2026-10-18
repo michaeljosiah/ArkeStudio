@@ -28,6 +28,7 @@ import {
   type ChapterFrontmatter,
   EpisodeSchema,
   ProductionNarrativeSchema,
+  AudioDramaRecordSchema,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -180,7 +181,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 87: a camera key written in words (issue 1820, design turn 229a).
 // 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
 // 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
-export const SUPPORTED_SCHEMA_VERSION = 89;
+// 90: an audio drama — the setup kind and its audio-drama.json plan (SPEC-057, issue 1857).
+export const SUPPORTED_SCHEMA_VERSION = 90;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -958,6 +960,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       meta: metaDoc,
       narrative: await exists(join(pdir, "narrative.json"))
         ? await tryParse(`productions/${id}/narrative.json`, raw => ProductionNarrativeSchema.parse(JSON.parse(raw)))
+        : null,
+      audioDrama: await exists(join(pdir, "audio-drama.json"))
+        ? await tryParse(`productions/${id}/audio-drama.json`, raw => AudioDramaRecordSchema.parse(JSON.parse(raw)))
         : null,
       story,
       proseStyle,

@@ -474,6 +474,12 @@ export const ADAPT_FROM_SCHEMA_VERSION = 70;
  * and before a creation that writes one.
  */
 export const PRODUCTION_TARGET_SCHEMA_VERSION = 71;
+/**
+ * An audio drama (SPEC-057, issue 1857): the `audio-drama` kind on the strict setup draft, and
+ * `audio-drama.json` beside its production. A build before it reads the kind as a story with
+ * chapters and the draft as unreadable, so the world is raised before either is written.
+ */
+export const AUDIO_DRAMA_SCHEMA_VERSION = 90;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**

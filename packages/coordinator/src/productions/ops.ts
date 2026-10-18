@@ -45,6 +45,8 @@ import {
   countWords,
   ChapterFrontmatterSchema,
   type ChapterImplies,
+  AudioDramaRecordSchema,
+  DEFAULT_AUDIO_DRAMA_PLAN,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -54,7 +56,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sceneLookReleases } from "../references/kit.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import { CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -195,6 +197,7 @@ export async function createProductionFromPlan(
     });
     const root = `productions/${plan.production.id}`;
     if (content.narrative) add(`${root}/narrative.json`, content.narrative);
+    if (content.audioDrama) add(`${root}/audio-drama.json`, content.audioDrama);
     for (const episode of content.episodes) add(`${root}/episodes/${episode.stem}.json`, episode.record);
     for (const scene of content.scenes) add(`${root}/scenes/${scene.stem}.json`, scene.record);
     // The link lands with the files. A crash before transcript attachment can then reconcile
@@ -252,7 +255,8 @@ export async function createProductionFromPlan(
       source: options.source,
       files,
       requestId: options.requestId,
-      ...(content ? { raiseSchemaVersion: 19 } : plan.production.frameRate !== undefined
+      ...(content?.audioDrama || shape.isAudioDrama ? { raiseSchemaVersion: AUDIO_DRAMA_SCHEMA_VERSION }
+        : content ? { raiseSchemaVersion: 19 } : plan.production.frameRate !== undefined
         ? { raiseSchemaVersion: 5 }
         : shape.isEpisodic || plan.production.medium !== undefined || plan.production.kind !== undefined
           ? { raiseSchemaVersion: 2 }
@@ -331,6 +335,15 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
       baseHash: null,
     },
   ];
+  // An audio drama starts from the default plan (SPEC-057 D-2); setup writes the one it agreed.
+  if (shape.isAudioDrama) {
+    files.push({
+      path: `productions/${slug}/audio-drama.json`,
+      action: "create",
+      content: JSON.stringify(AudioDramaRecordSchema.parse({ version: 1, plan: DEFAULT_AUDIO_DRAMA_PLAN }), null, 2) + "\n",
+      baseHash: null,
+    });
+  }
   // An episodic creation makes its season — and, the first time, its Series — in the same
   // commit (turn 47: "Create Series and open day one" names both things it makes).
   if (shape.isEpisodic) {
@@ -377,7 +390,9 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
-    ...(input.frameRate !== undefined
+    ...(shape.isAudioDrama
+      ? { raiseSchemaVersion: AUDIO_DRAMA_SCHEMA_VERSION }
+      : input.frameRate !== undefined
       ? { raiseSchemaVersion: 5 }
       : carriesNewModel || shape.isEpisodic
         ? { raiseSchemaVersion: 2 }

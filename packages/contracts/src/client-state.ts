@@ -1,5 +1,6 @@
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
+import { AudioDramaRecordSchema } from "./audio-drama.js";
 import { DesignedVoiceSchema } from "./designed-voice.js";
 import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
@@ -167,6 +168,8 @@ export const ProductionBundleSchema = valueSchema(z
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
     narrative: ProductionNarrativeSchema.nullable().optional(),
+    /** audio-drama.json — an audio drama's plan and source (SPEC-057 R-7), or null. */
+    audioDrama: AudioDramaRecordSchema.nullable().optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.

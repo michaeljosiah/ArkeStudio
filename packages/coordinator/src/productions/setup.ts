@@ -2,8 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProductionSetupDraftSchema, ProductionSetupStateSchema, ProductionSetupOriginSchema, PRODUCTION_SETUP_SCHEMA_VERSION,
-  adaptableStories, applyProductionSetupUpdate, ulid,
-  type ConversationId, type ProductionSetupState, type ProductionSetupUpdate, type WorldChatLoaded,
+  AUDIO_DRAMA_KIND, DEFAULT_AUDIO_DRAMA_PLAN, adaptableStories, applyProductionSetupUpdate, ulid,
+  type ConversationId, type ProductionSetupCommand, type ProductionSetupState, type ProductionSetupUpdate, type WorldChatLoaded,
 } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import { createProductionFromPlan } from "./ops.js";
@@ -12,7 +12,10 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { ADAPT_FROM_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+
+/** What a door may say about the production before setup opens (SPEC-057 R-3). */
+export type ProductionSetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
 
@@ -37,12 +40,18 @@ export async function fenceAdaptableSource(world: WorldStore, update: Production
   // A Target is carried by the draft once it is a micro drama: chosen, or seeded by the change of
   // format (SPEC-052 R-6). Raised for either, since the seeding happens inside the update.
   if (update.fields?.target || update.fields?.kind === "microdrama") await world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
+  // The audio-drama kind and its plan are strict draft fields older builds cannot read (SPEC-057).
+  if (update.fields?.kind === AUDIO_DRAMA_KIND || update.fields?.audioDrama) await world.ensureSchemaVersion(AUDIO_DRAMA_SCHEMA_VERSION, "production-setup");
 }
 
-function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
+function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {
+  const kind = seed?.kind ?? "film";
   return { status: "draft", review: null, draft: ProductionSetupDraftSchema.parse({
-    schemaVersion: 1, setupId, worldId, revision: 1, title: "", kind: "film", aspect: "16:9", frameRate: 24,
+    schemaVersion: 1, setupId, worldId, revision: 1, title: seed?.title ?? "", kind, aspect: "16:9", frameRate: 24,
     narrative: {}, arcs: [], references: [], openQuestions: [], episodes: [], scenes: [],
+    ...(seed?.source ? { source: seed.source } : {}),
+    // An audio drama opens on the default plan until Arke has read the story (SPEC-057 D-2).
+    ...(kind === AUDIO_DRAMA_KIND ? { audioDrama: DEFAULT_AUDIO_DRAMA_PLAN } : {}),
   }) };
 }
 
@@ -97,9 +106,17 @@ export class ProductionSetupService {
     return state;
   }
 
-  async start(id: ConversationId): Promise<ProductionSetupState> {
+  async start(id: ConversationId, seed?: ProductionSetupSeed): Promise<ProductionSetupState> {
     return this.serial(id, async () => {
       await this.world.ensureSchemaVersion(PRODUCTION_SETUP_SCHEMA_VERSION, "production-setup");
+      // A seed is checked and fenced exactly as the same fields arriving in an update would be.
+      if (seed?.source || seed?.kind) {
+        const asUpdate: ProductionSetupUpdate = { expectedRevision: 1, fields: {
+          ...(seed.kind ? { kind: seed.kind } : {}), ...(seed.source ? { source: seed.source } : {}),
+        } };
+        assertAdaptableSource(this.world, asUpdate);
+        await fenceAdaptableSource(this.world, asUpdate);
+      }
       return this.world.ownedWrite(async () => {
         const log = this.log(id);
         const meta = await log.readMeta();
@@ -115,7 +132,7 @@ export class ProductionSetupService {
         if (!current.events.length) await log.append({
           type: "conversation.created", title: "New production", entryContext: { kind: "production-setup", setupId: id },
         }, { at: this.world.now() });
-        const state = initialState(this.world.worldId, id);
+        const state = initialState(this.world.worldId, id, seed);
         await log.append({ type: "production-setup.updated", state }, { at: this.world.now() });
         return state;
       });
