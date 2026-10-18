@@ -158,6 +158,15 @@ describe("conversational production setup (SPEC-012 §4)", () => {
       planned, "a plan sent with the new story is that story's");
   });
 
+  it("a secret is revealed in one of the plan's episodes, even when the count is lowered", () => {
+    assert.throws(() => AudioDramaPlanSchema.parse({ episodes: 6, minutes: 25, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 200 }] }),
+      /revealed in episode 200, but the plan has 6/);
+    const planned = { episodes: 6, minutes: 25, keptFromListener: [{ fact: "Ilo is alive", revealEpisode: 5 }] };
+    const drama = { ...draft(), kind: "audio-drama" as const, scenes: [], audioDrama: planned };
+    assert.throws(() => applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { audioDrama: { ...planned, episodes: 4 } } }), /revealed in episode 5/);
+    assert.equal(applyProductionSetupUpdate(drama, { expectedRevision: 1, fields: { audioDrama: { ...planned, episodes: 5 } } }).audioDrama?.episodes, 5);
+  });
+
   it("a pilot names each chapter once", () => {
     assert.throws(() => AudioDramaPlanSchema.parse({ episodes: 6, minutes: 25, pilot: { title: "Gold", chapters: [3, 3] } }), /each chapter once/);
     assert.deepEqual(AudioDramaPlanSchema.parse({ episodes: 6, minutes: 25, pilot: { title: "Gold", chapters: [3, 4] } }).pilot?.chapters, [3, 4]);

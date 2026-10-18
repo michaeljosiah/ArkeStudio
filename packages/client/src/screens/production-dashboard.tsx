@@ -117,6 +117,14 @@ function AudioDramaEpisodesScreen() {
             : `${production.audioDrama.source.productionId} · no longer here`}
         </div>
       )}
+      {/* The pilot is a scene, not an episode: the plan names no episode for it, so it is shown
+          on its own rather than placed somewhere the plan never put it (codex on PR 1866). */}
+      {plan?.pilot && (
+        <div>
+          <div className="fy-listhead">Pilot</div>
+          <p className="fy-ad-home__pilot">{[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}</p>
+        </div>
+      )}
       <div>
         <div className="fy-listhead">Episodes</div>
         <ol className="fy-ad-home__episodes">
@@ -125,7 +133,7 @@ function AudioDramaEpisodesScreen() {
               <span className="fy-ad-home__n">{n}</span>
               <span>
                 <b>Episode {n}</b>
-                <small>{n === 1 && plan?.pilot ? `pilot · ${[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}` : "not written"}</small>
+                <small>not written</small>
               </span>
             </li>
           ))}

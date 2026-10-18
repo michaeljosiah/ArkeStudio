@@ -300,7 +300,8 @@ describe("an audio drama's own pages (design turn 230 revision 3)", () => {
     const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drama`]}><App /></MemoryRouter>).replace(/<!-- -->/g, "");
     __setStateForTest(FIXTURE_STATE);
     assert.match(html, /6 episodes · about 25 minutes each · where the ear needs one/);
-    assert.match(html, /Episode 1.*pilot · The tide turns · chapter 1/s);
+    assert.match(html, /Pilot.*The tide turns · chapter 1.*Episodes/s, "the pilot stands apart: the plan names no episode for it");
+    assert.doesNotMatch(html, /pilot · The tide turns/, "and it is never placed under Episode 1");
     assert.match(html, /Episode 6/);
     assert.match(html, /Kept from the listener.*Ilo is alive.*until ep 5/s);
     assert.match(html, /Adapts.*Low Water/s);

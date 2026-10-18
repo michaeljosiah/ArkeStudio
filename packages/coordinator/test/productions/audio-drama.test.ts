@@ -6,6 +6,8 @@ import { newId, productionShape, ulid, type ConversationId } from "@arke-studio/
 import { ProductionSetupService, assertSourceReadForPlan } from "../../src/productions/setup.js";
 import { createProduction, createProductionFromPlan, planProductionCreation, validateProductionMetadataChanges } from "../../src/productions/ops.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
+import { chapterFence } from "../../src/world-chat/target-reads.js";
+import { setupSourceDigest } from "../../src/productions/setup-plan.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
 import { AUDIO_DRAMA_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -74,7 +76,8 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     assert.ok(chapters.length >= 2, "the fixture story has chapters to read");
     const runId = newId("run");
     const whole = (id: string, extra: object = {}) => ({ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [], at: CLOCK,
-      target: { requirement: "chapters", id: `the-ledger-of-nights:${id}` }, complete: true, ...extra }) as never;
+      target: { requirement: "chapters", id: `the-ledger-of-nights:${id}` }, complete: true,
+      observedRevisionOrDigest: chapterFence(story, id.split(":")[0]!), ...extra }) as never;
     const update = { expectedRevision: 1, fields: { audioDrama: { episodes: 6, minutes: 25, keptFromListener: [] } } };
     const allButLast = chapters.slice(0, -1).map(chapter => whole(chapter.id));
     assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(`${chapters.at(-1)!.id}:beats`)]),
@@ -82,9 +85,21 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
       "a beats read is not a reading of the chapter");
     assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(chapters.at(-1)!.id, { complete: false })]),
       /Still to read/, "nor is a page that is not the last");
+    assert.throws(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(chapters.at(-1)!.id, { observedRevisionOrDigest: "sha256:before-the-edit" })]),
+      /Still to read/, "nor is a read of the chapter as it was before an edit");
     assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), update, draft, [...allButLast, whole(chapters.at(-1)!.id)]));
     assert.doesNotThrow(() => assertSourceReadForPlan(store.getBundle(), { expectedRevision: 1, fields: { title: "Low Water" } }, draft, []),
       "only a plan has to rest on the reading");
+  });
+
+  it("the reviewed digest covers the adapted story's chapters, so an edit between Review and Create is caught", async () => {
+    const store = await open();
+    const bundle = store.getBundle();
+    const story = bundle.productions.find(production => production.meta.id === "the-ledger-of-nights")!;
+    const edited = { ...bundle, productions: bundle.productions.map(production => production !== story ? production
+      : { ...production, chapters: production.chapters.map((chapter, i) => i === 0 ? { ...chapter, hash: "sha256:edited" } : chapter) }) };
+    assert.notEqual(setupSourceDigest(edited, story.meta.id), setupSourceDigest(bundle, story.meta.id));
+    assert.equal(setupSourceDigest(edited), setupSourceDigest(bundle), "a setup that adapts nothing is not held to the story");
   });
 
   it("a prepared create without setup's content still writes the default plan (World Chat's production-create)", async () => {

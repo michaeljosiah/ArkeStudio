@@ -10,8 +10,15 @@ import { sha256 } from "../world/text-files.js";
 import { planProductionCreation } from "./ops.js";
 
 /** Full relevant records, not a windowed search or just version numbers. */
-export function setupSourceDigest(bundle: WorldBundle): string {
+export function setupSourceDigest(bundle: WorldBundle, sourceId?: string): string {
+  // The story a setup adapts, chapter by chapter (codex on PR 1866): an edit or a retirement
+  // between Review and Create is a different source, so the reviewed plan must be reviewed again.
+  // Absent for a setup that adapts nothing, so its digest is what it always was.
+  const source = sourceId === undefined ? undefined : bundle.productions.find(production => production.meta.id === sourceId);
   return sha256(stableJson({
+    ...(sourceId !== undefined ? { source: source ? source.chapters.map(chapter => ({
+      id: chapter.id, order: chapter.order, version: chapter.version ?? null, hash: chapter.hash ?? null, retired: chapter.retired === true,
+    })).sort((a, b) => a.id.localeCompare(b.id)) : null } : {}),
     worldId: bundle.meta.worldId,
     canon: bundle.canon,
     bible: bundle.bible,

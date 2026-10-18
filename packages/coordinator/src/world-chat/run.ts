@@ -3,6 +3,7 @@ import {
   advanceWorldChatInputQueue,
   worldChatInputRouting,
   applyProductionSetupUpdate,
+  productionShape,
   type ProductionSetupDraft,
   type ProductionSetupUpdate,
   type ProductionSetupState,
@@ -30,7 +31,7 @@ import {
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
-import { TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
 import { SceneEditRefused } from "../productions/scene-edits.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
 import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
@@ -1298,6 +1299,13 @@ export class WorldChatRunner {
       }) ?? [];
     } catch (error) {
       return { ok: false, problems: [preparationProblem(error)] };
+    }
+    // An audio drama's create card is written into this turn before it is bound, so the world is
+    // raised first: a build before schema 90 would otherwise approve it as a plain story with no
+    // plan (SPEC-057 R-82, codex on PR 1866).
+    if (actions.some(action => action.payload.kind === "world-chat-production-create" && productionShape(action.payload.plan.production).isAudioDrama)) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "action-unavailable", safeMessage: "This host cannot create an audio drama from chat. Answer without creating one." }] };
+      await this.deps.raiseSchemaBoundary(AUDIO_DRAMA_SCHEMA_VERSION);
     }
     await store.append(
       {

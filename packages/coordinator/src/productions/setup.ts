@@ -7,6 +7,7 @@ import {
   type WorldBundle, type WorldChatCheckReceipt, type WorldChatLoaded,
 } from "@arke-studio/contracts";
 import { chaptersReadWhole } from "../world-chat/source-reads.js";
+import { chapterFence } from "../world-chat/target-reads.js";
 import { WriteQueue } from "../change-log.js";
 import { createProductionFromPlan } from "./ops.js";
 import { planProductionSetup, setupSourceDigest } from "./setup-plan.js";
@@ -28,7 +29,7 @@ export function assertSourceReadForPlan(
   const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
   if (!story) return;
   const chapters = story.chapters.filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
-  const read = chaptersReadWhole(receipts, story.meta.id);
+  const read = chaptersReadWhole(receipts, story.meta.id, chapterId => chapterFence(story, chapterId));
   const unread = chapters.filter(chapter => !read.has(chapter.id));
   if (unread.length === 0) return;
   throw new Error(`Read all of “${story.meta.title}” before proposing the plan: ${chapters.length - unread.length} of ${chapters.length} chapters read whole. Still to read with get_chapter (no section): ${unread.slice(0, 40).map(chapter => chapter.id).join(", ")}${unread.length > 40 ? ", …" : ""}.`);
@@ -203,7 +204,7 @@ export class ProductionSetupService {
       const plan = planProductionSetup(bundle, state.draft, this.world.now());
       return this.append(id, view, {
         draft: state.draft, status: "reviewed",
-        review: { id: ulid(), plan, sourceDigest: setupSourceDigest(bundle) },
+        review: { id: ulid(), plan, sourceDigest: setupSourceDigest(bundle, state.draft.source?.productionId) },
       });
     }, () => null));
   }
@@ -263,7 +264,7 @@ export class ProductionSetupService {
         if (review.plan.initialSeason?.target) await this.world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
         await createProductionFromPlan(this.world, review.plan, {
           source: "production-setup", requestId: review.id,
-          precondition: () => setupSourceDigest(this.world.getBundle()) === review.sourceDigest
+          precondition: () => setupSourceDigest(this.world.getBundle(), state.draft.source?.productionId) === review.sourceDigest
             ? null : "The world changed after review. Review the outline again.",
         });
       } catch (error) {

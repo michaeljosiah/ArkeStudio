@@ -42,7 +42,16 @@ export const AudioDramaPlanSchema = z.object({
   narrator: AudioDramaNarratorSchema.optional(),
   keptFromListener: z.array(KeptFromListenerSchema).max(50).default([]),
   pilot: AudioDramaPilotSchema.optional(),
-}).strict();
+}).strict().superRefine((plan, ctx) => {
+  // A fact withheld until an episode the plan does not have is never revealed (codex on PR 1866),
+  // so lowering the count past a reveal is refused rather than silently dropping the secret.
+  plan.keptFromListener.forEach((kept, index) => {
+    if (kept.revealEpisode > plan.episodes) ctx.addIssue({
+      code: "custom", path: ["keptFromListener", index, "revealEpisode"],
+      message: `“${kept.fact}” is revealed in episode ${kept.revealEpisode}, but the plan has ${plan.episodes}. Reveal it in one of them, or plan more episodes.`,
+    });
+  });
+});
 export type AudioDramaPlan = z.infer<typeof AudioDramaPlanSchema>;
 
 /** Where the plan starts before Arke has read anything, or with nothing to read (D-2). */
