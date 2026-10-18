@@ -15,6 +15,7 @@ import {
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, More, X } from "../components/icons.js";
 import { Button, IconButton, cx } from "../components/ui.js";
+import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { EmptyState, Screen } from "../components/layout.js";
 
 /** Minutes and seconds, as the listening ring reads (3:05). */
@@ -66,6 +67,10 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [selected, setSelected] = useState<string | null>(null);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The spoken lines selected to hear (230g): a click selects one, shift extends the run.
+  const [lines, setLines] = useState<string[]>([]);
+  const [retake, setRetake] = useState(false);
+  const anchor = useRef<string | null>(null);
   const focusNext = useRef<{ id: string; at: number } | null>(null);
 
   // Another window's save, or Arke's accepted proposal, arrives in the bundle: adopted while this
@@ -104,7 +109,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);
-    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); }
+    // A save that lands clears what an earlier one said (codex on PR 1871): Hear prices again.
+    if (result.disposition === "saved" && result.hash) { setBaseHash(result.hash); setVersion(result.version ?? version); setConflict(false); setFailure(null); }
     else { setFailure(result.reason ?? "Not saved."); setDirty(false); setConflict(true); }
   }), [saving, version]);
 
@@ -128,6 +134,19 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const selectedIndex = blocks.findIndex((block) => block.id === selected);
   const selectedScene = selectedIndex >= 0 ? scenes[selectedIndex] : headings[0] ?? null;
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
+  const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
+  const spokenIds = blocks.filter((block) => block.kind === "dialogue" || block.kind === "narration").map((block) => block.id);
+  const pick = (id: string, extend: boolean) => {
+    setRetake(false);
+    if (!spokenIds.includes(id)) { setLines([]); return; }
+    if (extend && anchor.current !== null && spokenIds.includes(anchor.current)) {
+      const [from, to] = [spokenIds.indexOf(anchor.current), spokenIds.indexOf(id)].sort((a, b) => a - b);
+      setLines(spokenIds.slice(from!, to! + 1));
+      return;
+    }
+    anchor.current = id;
+    setLines([id]);
+  };
   const newLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && scenes[i]?.source && !block.paragraphs?.length).length;
 
   const insertAfter = (kind: EpisodeScriptBlock["kind"]) => {
@@ -236,7 +255,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                 className={cx("fy-ad-score__row", `fy-ad-score__row--${block.kind}`, on && "fy-ad-score__row--on",
                   block.kind === "dialogue" && `fy-voice--${tones.get(block.speaker) ?? 1}`,
                   block.kind === "dialogue" && block.overlapsPrevious && "fy-ad-score__row--breaks-in")}
-                onClick={() => setSelected(block.id)}>
+                onClick={(event) => { setSelected(block.id); pick(block.id, event.shiftKey); }}>
                 {lane("ambience")}{lane("music")}
                 {block.kind === "heading" ? (
                   <HeadingRow block={block} n={headings.indexOf(block) + 1} on={on} production={production} world={world}
@@ -298,8 +317,12 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                           onChange={(event) => change(block.id, { text: event.target.value })} />
                       )}
                     </div>
-                    {/* The take (S-3): a spoken line's place for its performance. */}
-                    <span className="fy-ad-score__take" aria-hidden="true">{block.kind === "dialogue" || block.kind === "narration" ? "○" : ""}</span>
+                    {/* The take (230i): what this line's performance is, and what waits on it. */}
+                    <span className="fy-ad-score__take">{(block.kind === "dialogue" || block.kind === "narration") && (
+                      <TakeCell block={block} line={takes?.lines[block.id]} voice={block.kind === "dialogue" ? world.sheets.find((sheet) => sheet.id === block.speaker)?.voice : undefined}
+                        worldId={world.meta.worldId} productionId={production.meta.id} episode={episode}
+                        worldSlug={world.meta.slug} onRetake={() => { setLines([block.id]); setRetake(true); }} />
+                    )}</span>
                   </>
                 )}
                 {on && (
@@ -310,7 +333,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                       edit(blocks.map((candidate, at) => at === i ? { ...candidate, cut: broken || undefined } as EpisodeScriptBlock
                         : at === i + 1 ? { ...candidate, overlapsPrevious: broken || undefined } as EpisodeScriptBlock : candidate));
                     }}
-                    onInsert={insertAfter} onRemove={() => remove(block.id)} />
+                    onInsert={insertAfter} onRemove={() => remove(block.id)}
+                    {...(takes?.lines[block.id]?.kept ? { onRetake: () => { setLines([block.id]); setRetake(true); } } : {})} />
                 )}
               </div>
             );
@@ -321,6 +345,12 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             </div>
           )}
         </div>
+        {lines.length > 0 && (
+          <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
+            scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
+            takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
+            onHeard={() => setRetake(false)} />
+        )}
         {sourceOpen && (
           <SourceColumn world={world} story={selectedScene?.source ? world.productions.find((p) => p.meta.id === selectedScene.source!.story) ?? null : source}
             heading={selectedScene ?? null} block={selectedIndex >= 0 ? blocks[selectedIndex]! : null} onClose={() => setSourceOpen(false)} />
@@ -398,10 +428,10 @@ function HeadingRow({ block, n, on, production, world, source, onChange, onSourc
 }
 
 /** The selected row's own controls: channel, a line broken off, its source paragraphs, insert, delete. */
-function RowTools({ block, index, blocks, scene, onChange, onBreak, onInsert, onRemove }: {
+function RowTools({ block, index, blocks, scene, onChange, onBreak, onInsert, onRemove, onRetake }: {
   block: EpisodeScriptBlock; index: number; blocks: EpisodeScriptBlock[]; scene: ScriptHeading | null;
   onChange: (patch: Partial<EpisodeScriptBlock>) => void; onBreak: (broken: boolean) => void;
-  onInsert: (kind: EpisodeScriptBlock["kind"]) => void; onRemove: () => void;
+  onInsert: (kind: EpisodeScriptBlock["kind"]) => void; onRemove: () => void; onRetake?: () => void;
 }) {
   const next = blocks[index + 1];
   return (
@@ -431,6 +461,7 @@ function RowTools({ block, index, blocks, scene, onChange, onBreak, onInsert, on
           onBlur={(event) => { const paragraphs = parseParagraphs(event.target.value); onChange({ paragraphs: paragraphs.length ? paragraphs : undefined } as Partial<EpisodeScriptBlock>); }} />
       )}
       <span className="gap" />
+      {onRetake && <Button variant="ghost" size="sm" onClick={onRetake}>Retake</Button>}
       <select aria-label="Insert below" value="" onChange={(event) => { if (event.target.value) onInsert(event.target.value as EpisodeScriptBlock["kind"]); }}>
         <option value="">Insert below…</option>
         {INSERTS.map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}

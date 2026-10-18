@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { SlugSchema, UlidSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { AudiobookReaderSchema } from "./audiobook.js";
+import { textDigest } from "./subtitles.js";
 
 /**
  * The audio drama (SPEC-057, design turn 230): a Story production of its own kind, adapted for the
@@ -199,6 +201,92 @@ export const EpisodeScriptSchema = z.object({
   for (const message of episodeScriptProblems(script.blocks)) ctx.addIssue({ code: "custom", path: ["blocks"], message });
 });
 export type EpisodeScript = z.infer<typeof EpisodeScriptSchema>;
+
+// ---------------------------------------------------------------------------
+// Takes (SPEC-057 R-25..R-37, design turn 230g–i): a spoken line's performances. One kept take
+// per line, and at most one waiting for the author — a replacement, or a take that was misread.
+// `productions/<id>/drama-takes/episode-<NN>.json`; the audio is a production artifact.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a take answers to (R-31): who says it, the words, the direction and the channel. A take
+ * made under any other is out of date; a take made for the same is still the line's.
+ */
+export function dramaLineHash(block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>): string {
+  return textDigest(JSON.stringify([
+    block.kind === "dialogue" ? block.speaker : "narrator",
+    block.words.replace(/\s+/g, " ").trim(),
+    block.direction?.trim() ?? "",
+    block.kind === "dialogue" ? block.channel ?? "" : "",
+  ]));
+}
+
+export const DramaTakeSchema = z.object({
+  artifactId: ArtifactIdSchema,
+  /** The audio, relative to the world folder (`artifacts/<file>`). */
+  file: z.string().min(1).max(400),
+  textHash: z.string().min(1),
+  voice: AudiobookReaderSchema,
+  /** Spoken in the narrator's voice because the speaker had none (R-28): labelled everywhere. */
+  standIn: z.boolean().optional(),
+  /** What the take was heard to say, when it was not the line (R-30). */
+  misread: z.string().max(2_000).optional(),
+  estimatedMicroUsd: z.number().int().min(0),
+  madeAt: IsoDateTimeSchema,
+}).strict();
+export type DramaTake = z.infer<typeof DramaTakeSchema>;
+
+export const EpisodeTakesSchema = z.object({
+  version: z.literal(1),
+  episode: z.number().int().min(1).max(200),
+  /** By block id: the kept take, and one waiting for the author's decision. */
+  lines: z.record(UlidSchema, z.object({ kept: DramaTakeSchema.optional(), waiting: DramaTakeSchema.optional() }).strict()),
+}).strict();
+export type EpisodeTakes = z.infer<typeof EpisodeTakesSchema>;
+
+/** A line's take, as the score shows it (230i). */
+export type DramaTakeState = "none" | "kept" | "stand-in" | "out of date" | "new or kept?" | "misread";
+export function dramaTakeState(
+  block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>,
+  line: EpisodeTakes["lines"][string] | undefined,
+  /** The role's voice now, where it is known: a take in another voice is out of date (R-60). */
+  voice?: { provider: string; voiceId: string; model?: string | undefined },
+): DramaTakeState {
+  if (line?.waiting) return line.waiting.misread !== undefined ? "misread" : "new or kept?";
+  if (!line?.kept) return "none";
+  if (line.kept.textHash !== dramaLineHash(block)) return "out of date";
+  // A voice of its own now outdates a stand-in too (codex on PR 1871): Hear would not reuse it.
+  if (voice && (line.kept.standIn || line.kept.voice.provider !== voice.provider || line.kept.voice.voiceId !== voice.voiceId ||
+    (voice.model !== undefined && line.kept.voice.model !== voice.model))) return "out of date";
+  return line.kept.standIn ? "stand-in" : "kept";
+}
+
+/** What the author decides for a speaker with no voice (R-28): nothing is substituted unasked. */
+export const MissingVoiceChoiceSchema = z.enum(["narrator", "leave-out"]);
+export type MissingVoiceChoice = z.infer<typeof MissingVoiceChoiceSchema>;
+
+/** One request as it is sent (R-27's What's sent): the words, the voice, how direction went. */
+export const DramaRequestSchema = z.object({
+  block: UlidSchema,
+  speaker: z.string().min(1).max(200),
+  voice: z.string().min(1).max(200),
+  model: z.string().min(1).max(200),
+  text: z.string().max(10_000),
+  direction: z.object({ sent: z.enum(["tag", "instruction", "not sent"]), text: z.string().max(400).optional(), reason: z.string().max(400).optional() }).strict().optional(),
+  standIn: z.boolean().optional(),
+  estimatedMicroUsd: z.number().int().min(0),
+  /** Already performed for these words in this voice: played, not sent again. */
+  cached: z.boolean(),
+}).strict();
+export type DramaRequest = z.infer<typeof DramaRequestSchema>;
+
+/** The default most a single Hear may spend without the dialog (R-26): $0.50. */
+export const HEAR_ONE_PRESS_LIMIT_MICRO_USD = 500_000;
+
+/** Where episode `n`'s takes are recorded: named as its script is. */
+export function episodeTakesFile(episode: number): string {
+  return episodeScriptFile(episode);
+}
 
 /** Where episode `n`'s script lives: three digits keep every allowed episode in order (codex on PR 1870). */
 export function episodeScriptFile(episode: number): string {

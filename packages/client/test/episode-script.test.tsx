@@ -200,6 +200,67 @@ describe("the score (230e)", () => {
   });
 });
 
+describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
+  const a = line("maren", "The log said two hours.");
+  const b = line("bray", "The log's wrong.");
+  const wait = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const click = (el: Element, shiftKey = false) => act(async () => { const event = new dom.Event("click", { bubbles: true }); Object.assign(event, { shiftKey }); el.dispatchEvent(event); });
+  const hearSent = (sent: ClientMessage[]) => sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines");
+  const request = (block: string, extra: object = {}) => ({ block, speaker: "Maren", voice: "Low tide", model: "Multilingual v2", text: "x", estimatedMicroUsd: 1840, cached: false, ...extra });
+
+  it("prices the selection on the button and makes it in one press, against the quoted token", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await click(m.container.querySelector(`[data-block="${b.id}"]`)!, true);
+    await wait(350);
+    const asked = hearSent(m.sent).at(-1)!;
+    assert.deepEqual([asked.blocks, asked.quoteOnly], [[a.id, b.id], true], "shift extends the run; the first ask only prices it");
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 3680, requests: [request(a.id), request(b.id)] }, missing: [] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines · "))!;
+    assert.ok(hear, "the price is on the button");
+    assert.equal(hear.querySelector(".fy-ad-hear__dot"), null, "nothing waits on the author");
+    await click(hear);
+    const made = hearSent(m.sent).at(-1)!;
+    assert.deepEqual([made.quoteToken, made.quoteOnly, made.scriptHash], ["tok", undefined, "sha256:base"], "fenced on the saved script");
+  });
+
+  it("prices nothing while the line is unsaved, then the saved words (codex on PR 1871)", async () => {
+    const m = await mount(withScript([a]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log said three hours." } }));
+    const before = hearSent(m.sent).length;
+    await wait(350);
+    assert.equal(hearSent(m.sent).length, before, "an unsaved line is not priced");
+    await wait(400);
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:saved" }));
+    await wait(350);
+    assert.equal(hearSent(m.sent).at(-1)!.scriptHash, "sha256:saved");
+  });
+
+  it("an uncast speaker always opens the decision; nothing substitutes on its own", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${b.id}"]`)!);
+    await wait(350);
+    const asked = hearSent(m.sent).at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 0, requests: [] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /Hear 1 line/.test(button.textContent ?? ""))!;
+    assert.ok(hear.querySelector(".fy-ad-hear__dot"), "the amber dot says a decision waits");
+    const before = hearSent(m.sent).length;
+    await click(hear);
+    assert.equal(hearSent(m.sent).length, before, "pressed, it asks rather than makes");
+    assert.match(dom.document.body.textContent!, /Bray has no voice/);
+    const standIn = [...dom.document.body.querySelectorAll("button")].find(button => button.textContent === "Narrator stands in")!;
+    await click(standIn);
+    await wait(350);
+    assert.deepEqual(hearSent(m.sent).at(-1)!.decisions, { bray: "narrator" }, "the choice is the author's, sent with the next quote");
+  });
+});
+
 describe("codex round 2 on PR 1870", () => {
   it("keeps parked drafts apart by world, and parks a draft it cannot send yet", () => {
     __setBridgeForTest(null);

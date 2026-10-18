@@ -1,4 +1,5 @@
 import { ChapterReviewSchema } from "./chapter-review.js";
+import { DramaRequestSchema } from "./audio-drama.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
 import { AudiobookActivitySchema } from "./audiobook-activity.js";
 import { valueSchema } from "./value-schema.js";
@@ -401,6 +402,25 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       disposition: z.enum(["saved", "refused"]),
       version: z.number().int().min(1).optional(),
       hash: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * `hear-drama-lines` answered (SPEC-057 R-25..R-28): a quote with its token and what each request
+   * sends; the speakers who have no voice; or the lines made — their takes arrive with the world.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("drama.heard"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1),
+      disposition: z.enum(["quoted", "made", "refused"]),
+      quote: z.object({ token: z.string().min(1), estimatedMicroUsd: z.number().int().min(0), requests: z.array(DramaRequestSchema) }).strict().optional(),
+      missing: z.array(z.object({ speaker: SlugSchema, name: z.string(), blocks: z.array(UlidSchema) }).strict()).optional(),
+      made: z.array(UlidSchema).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
