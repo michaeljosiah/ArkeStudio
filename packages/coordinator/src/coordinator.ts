@@ -16140,7 +16140,7 @@ export class Coordinator {
       case "stop-audio-studio-preview": this.audioStudioPreviews.cancel(msg.worldId, msg.requestId); return;
       case "preview-audio-studio": {
         const store = this.opts.provider.openStore?.();
-        const chapter = store?.worldId === msg.worldId ? store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile) : undefined;
+        const chapter = this.studioSubject(store, msg.worldId, msg.productionId, msg.chapterFile);
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable" };
         if (!store || !chapter) { this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: "This chapter is no longer open" }); return; }
         try {
@@ -16154,7 +16154,7 @@ export class Coordinator {
       case "edit-audio-studio":
       case "read-audio-studio-source": {
         const store = this.opts.provider.openStore?.();
-        const chapter = store?.worldId === msg.worldId ? store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile) : undefined;
+        const chapter = this.studioSubject(store, msg.worldId, msg.productionId, msg.chapterFile);
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable" };
         if (!store || !chapter) { this.emit({ at: this.nowIso(), type: "audio-studio.state", ...ids, studio: null, source: null, refused: "This chapter is no longer open" }); return; }
         try {
@@ -16166,7 +16166,8 @@ export class Coordinator {
             if (msg.kind === "edit-audio-studio" || msg.kind === "decide-audio-studio-proposal") {
               const record = msg.kind === "edit-audio-studio" ? await editAudioStudio(store, msg.productionId, chapter.id, msg.base, msg.edit, options)
                 : await decideAudioStudioProposal(store, msg.productionId, chapter.id, msg.id, msg.version, msg.decision, options);
-              this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
+              // An episode keeps no audiobook record: the studio's own state is its answer.
+              if (record) this.emit({ at: this.nowIso(), type: "audiobook.record", ...ids, record });
               this.refreshIfStillOpen(store);
             }
             const studio = await audioStudioSnapshot(store, msg.productionId, chapter.id, options);
@@ -21643,6 +21644,20 @@ export class Coordinator {
    * open another world while it is up. Identity, not the id: switching worlds closes the old
    * store, and writing through a closed one is the thing to stop.
    */
+  /**
+   * What a studio frame names: a chapter by its file or id, or an audio drama's episode by its
+   * script's name, `episode-NNN` (SPEC-057 R-67) — one arrangement each, on the same studio.
+   */
+  private studioSubject(store: WorldStore | null | undefined, worldId: string, productionId: string, chapterFile: string): { id: string } | undefined {
+    if (!store || store.worldId !== worldId) return undefined;
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (production && productionShape(production.meta).isAudioDrama && /^episode-\d{3}$/.test(chapterFile)) {
+      return production.episodeScripts?.some((entry) => entry.file.replace(/\.json$/, "") === chapterFile) ? { id: chapterFile } : undefined;
+    }
+    const chapter = production?.chapters.find((candidate) => candidate.file === chapterFile || candidate.id === chapterFile);
+    return chapter ? { id: chapter.id } : undefined;
+  }
+
   private stillOpen(store: WorldStore): boolean {
     return this.opts.provider.openStore?.() === store;
   }

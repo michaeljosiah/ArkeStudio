@@ -55,7 +55,7 @@ describe("Audio Studio durable authority", () => {
     await store.reload();
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
     assert.ok(opened.state.clips.some(clip => clip.source?.artifactId === artifact.id));
-    const saved = await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
+    const saved = (await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack))!;
     assert.ok(saved.arrangement?.current.clips.some(clip => clip.source?.artifactId === artifact.id));
     const legacy = JSON.parse(saved.arrangement!.legacy);
     // Restore the pre-migration record, then replace bytes precisely at the write boundary.
@@ -73,7 +73,7 @@ describe("Audio Studio durable authority", () => {
       let opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
       if (migrated) { await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack); opened = await openAudioStudio(store, PRODUCTION, CHAPTER); }
       const proposal = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, `noop-${migrated}`, { base: opened.base, summary: "Keep master level", commands: [{ kind: "set-master", master: opened.state.master }] });
-      const applied = await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, proposal.id, 1, "apply");
+      const applied = (await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, proposal.id, 1, "apply"))!;
       assert.deepEqual(applied.arrangement ?? null, opened.saved);
       assert.equal(applied.audioStudioProposals?.at(-1)?.status, "applied");
       assert.equal(applied.audioStudioProposals?.at(-1)?.resultRevision, opened.saved?.revision ?? 0);
@@ -96,11 +96,11 @@ describe("Audio Studio durable authority", () => {
     const revised = await stageAudioStudioProposal(store, PRODUCTION, CHAPTER, "suggestion-4", { ...input, base: kept.base, summary: "Effects lane", family: { id: fresh.id, version: 1 } });
     assert.equal(revised.versions.length, 2);
     await assert.rejects(decideAudioStudioProposal(store, PRODUCTION, CHAPTER, fresh.id, 1, "apply"), /changed/);
-    const applied = await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, fresh.id, 2, "apply");
+    const applied = (await decideAudioStudioProposal(store, PRODUCTION, CHAPTER, fresh.id, 2, "apply"))!;
     assert.equal(applied.arrangement?.undo.length, 1); assert.equal(applied.arrangement?.current.tracks.at(-1)?.id, "fx");
     assert.equal(applied.audioStudioProposals?.at(-1)?.status, "applied");
     const current = await openAudioStudio(store, PRODUCTION, CHAPTER);
-    const undone = await editAudioStudio(store, PRODUCTION, CHAPTER, current.base, { kind: "undo" });
+    const undone = (await editAudioStudio(store, PRODUCTION, CHAPTER, current.base, { kind: "undo" }))!;
     assert.deepEqual(undone.arrangement?.current, opened.state);
     assert.equal(undone.audioStudioProposals?.at(-1)?.status, "applied", "Undo does not reopen a decided proposal");
   }));
@@ -142,19 +142,19 @@ describe("Audio Studio durable authority", () => {
     const opened = await openAudioStudio(store, PRODUCTION, CHAPTER);
     assert.equal(opened.saved, null);
     assert.deepEqual(await readAudiobook(store, PRODUCTION, CHAPTER), before);
-    const saved = await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack);
+    const saved = (await editAudioStudio(store, PRODUCTION, CHAPTER, opened.base, addTrack))!;
     assert.equal(store.getBundle().meta.schemaVersion, AUDIO_STUDIO_SCHEMA_VERSION);
     assert.equal(saved.arrangement?.current.tracks.at(-1)?.id, "fx");
     assert.equal(saved.arrangement?.undo.length, 1);
     assert.ok(ChapterAudiobookSchema.safeParse(JSON.parse(saved.arrangement!.legacy)).success);
     const reopened = await openAudioStudio(store, PRODUCTION, CHAPTER);
     assert.deepEqual(reopened.saved, saved.arrangement);
-    const undone = await editAudioStudio(store, PRODUCTION, CHAPTER, reopened.base, { kind: "undo" });
+    const undone = (await editAudioStudio(store, PRODUCTION, CHAPTER, reopened.base, { kind: "undo" }))!;
     assert.deepEqual(undone.arrangement?.current, opened.state);
     assert.equal(undone.arrangement?.revision, 3);
     assert.equal(undone.arrangement?.legacy, saved.arrangement?.legacy);
     const again = await openAudioStudio(store, PRODUCTION, CHAPTER);
-    const redone = await editAudioStudio(store, PRODUCTION, CHAPTER, again.base, { kind: "redo" });
+    const redone = (await editAudioStudio(store, PRODUCTION, CHAPTER, again.base, { kind: "redo" }))!;
     assert.deepEqual(redone.arrangement?.current, saved.arrangement?.current);
   }));
   it("serializes two reviews so a stale edit cannot erase the winner", () => fixture(async store => {

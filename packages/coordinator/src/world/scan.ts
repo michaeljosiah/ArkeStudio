@@ -193,7 +193,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 93: a generated sound artifact (SPEC-057 R-48, issue 1860).
 // 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
 // 95: an audio drama's adaptation — chapter verdicts and kept reasons (SPEC-057 R-61, issue 1862).
-export const SUPPORTED_SCHEMA_VERSION = 95;
+// 96: an audio drama episode's Audio Studio arrangement — drama-mix (SPEC-057 R-67, issue 1863).
+export const SUPPORTED_SCHEMA_VERSION = 96;
 
 export class WorldOpenError extends Error {
   constructor(

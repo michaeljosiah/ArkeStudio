@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
 import {
-  acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
+  acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
@@ -21,6 +21,8 @@ import { ReviewColumn } from "../components/audio-drama-review.js";
 import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
+import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
+import type { TimingRowLike } from "./chapter-timing.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -43,11 +45,14 @@ const INSERTS: Array<[EpisodeScriptBlock["kind"], string]> = [
 export function EpisodeScriptScreen() {
   const { worldId, prodId, episode: episodeParam } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const [search] = useSearchParams();
   const episode = Number(episodeParam);
   if (!world || !production) return <Screen id="episode-script"><EmptyState title="Opening the script…" /></Screen>;
   if (!Number.isInteger(episode) || episode < 1 || episode > 200) return <Screen id="episode-script"><EmptyState title="This episode address is invalid." /></Screen>;
   if (!productionShape(production.meta).isAudioDrama) return <Screen id="episode-script"><EmptyState title="Scripts are an audio drama's." /></Screen>;
   // Keyed by the world too (codex on PR 1870): two worlds can each hold this slug and episode.
+  // The episode in Audio Studio (SPEC-057 R-67): the chapter's studio, one arrangement an episode.
+  if (search.get("view") === "audio-studio") return <EpisodeAudioStudio key={`${world.meta.worldId}/${production.meta.id}:${episode}:studio`} world={world} production={production} episode={episode} />;
   return <EpisodeScript key={`${world.meta.worldId}/${production.meta.id}:${episode}`} world={world} production={production} episode={episode} />;
 }
 
@@ -216,6 +221,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         <nav className="fy-ad-ep__views" aria-label="Episode views">
           <button type="button" onClick={() => navigate(base)}>Episodes</button>
           <button type="button" aria-current="page">Script</button>
+          <button type="button" disabled={!stored} onClick={() => navigate(`${base}/script/${episode}?view=audio-studio`)}>Audio Studio</button>
         </nav>
         <label className="fy-ad-ep__title">
           <span>Episode {episode}</span>
@@ -492,6 +498,40 @@ function DraftScore({ rows, name, episode }: { rows: ReturnType<typeof draftRows
         </div>
       ))}
     </div>
+  );
+}
+
+/** No chapter clock: an episode's timing is its arrangement, and the studio draws from that. */
+const NO_TIMING = { seconds: 0, bars: [], beds: [], sounds: [], overlaps: [], speech: [], lost: { sounds: [], reactions: [], beds: [] }, estimated: false };
+
+/**
+ * An episode in Audio Studio (design turn 230o, SPEC-057 R-67): the chapter's workspace, named by
+ * the episode's script, with the script's spoken lines as its rows.
+ */
+function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle; production: ProductionBundle; episode: number }) {
+  const navigate = useNavigate();
+  const { connection } = useStore();
+  const base = `/w/${world.meta.worldId}/p/${production.meta.id}`;
+  const stem = episodeScriptFile(episode).replace(/\.json$/, "");
+  const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode) ?? null;
+  const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
+  const [passage, setPassage] = useState<string | null>(null);
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const rows: TimingRowLike[] = (stored?.script.blocks ?? []).flatMap((block) => {
+    if (block.kind !== "dialogue" && block.kind !== "narration") return [];
+    const kept = takes?.lines[block.id]?.kept;
+    const who = block.kind === "dialogue" ? name(block.speaker) : "Narrator";
+    return [{ block: { key: block.id, text: block.words, speaker: who, ...(block.kind === "dialogue" ? { sheet: block.speaker } : {}) }, mark: "",
+      speakerKey: block.kind === "dialogue" ? block.speaker : null, speaker: { label: who, voiceId: kept?.voice.voiceId ?? "" },
+      artifact: kept ? world.artifacts.find((artifact) => artifact.id === kept.artifactId) ?? null : null }];
+  });
+  if (!stored) return <Screen id="episode-script"><EmptyState title="This episode has no script yet." /></Screen>;
+  return (
+    <AudioStudioWorkspace worldId={world.meta.worldId} productionId={production.meta.id} chapterId={stem} chapterFile={stem} slug={world.meta.slug}
+      book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
+      connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
+      passage={passage} onPassage={setPassage} conversation={null} propose={null}
+      onBack={() => navigate(`${base}/script/${episode}`)} onExport={() => {}} exportDisabled />
   );
 }
 

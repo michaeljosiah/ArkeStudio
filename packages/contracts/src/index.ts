@@ -212,3 +212,4 @@ export * from "./story-publication.js";
 export * from "./audio-arrangement-schema.js";
 export * from "./audio-arrangement.js";
 export * from "./audio-arrangement-migration.js";
+export * from "./audio-drama-studio.js";

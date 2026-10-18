@@ -213,3 +213,12 @@ describe("codex round 2 on PR 1874", () => {
     assert.ok(rows.some((row) => row.state === "moved"), "Keep writes the new order, so the draft says so");
   });
 });
+
+describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
+  it("opens the chapter's studio named by the episode's script", async () => {
+    const { container, sent } = await mount(drama([line("bray", "Climb.")]), "script/1?view=audio-studio");
+    const read = sent.find((message) => message.kind === "read-audio-studio") as { chapterFile: string } | undefined;
+    assert.equal(read?.chapterFile, "episode-001", "one arrangement an episode, on the same studio");
+    assert.equal(container.querySelector("textarea[data-words]"), null, "the score is not drawn under it");
+  });
+});
