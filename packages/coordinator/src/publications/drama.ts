@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import {
   DramaEditionSchema, dramaCredits, dramaRoleName, dramaRoleVoice, episodeReadiness, episodeScriptFile, episodeScriptText, listenerTranscript, productionShape,
-  type DramaDelivery, type DramaEdition,
+  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
-import { openAudioStudio } from "../productions/audio-studio.js";
+import { audioStudioSourceProblems, openAudioStudio } from "../productions/audio-studio.js";
 import { renderAudioStudioMix } from "../productions/audio-studio-mix.js";
 
 /**
@@ -18,7 +19,11 @@ import { renderAudioStudioMix } from "../productions/audio-studio-mix.js";
  * Nothing in the world can change a published edition afterwards.
  */
 export class DramaEditionService {
+  // Quitting stops a publication before the coordinator waits on it (codex on PR 1880).
+  private readonly stopping = new AbortController();
   constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner } = {}) {}
+
+  stop(): void { this.stopping.abort(); }
 
   /** The episodes asked for, refused by name where one is not ready (R-72). */
   async publish(store: WorldStore, productionId: string, input: { name: string; delivery: DramaDelivery; episodes: readonly number[] }): Promise<DramaEdition> {
@@ -51,20 +56,33 @@ export class DramaEditionService {
     const dir = join(this.root, id);
     await mkdir(dir, { recursive: true });
     // A world closing stops the render and the copies with it (codex on PR 1880).
-    const signal = store.closingSignal;
+    const signal = AbortSignal.any([store.closingSignal, this.stopping.signal]);
     try {
       const files: DramaEdition["files"] = [];
       const episodes: DramaEdition["episodes"] = [];
       const keep = async (file: string, content: string | Uint8Array) => { await writeFile(join(dir, file), content); files.push(await describe(dir, file)); };
-      const omitted = new Set<string>();
+      // What the listener hears, read from each rendered plan (codex on PR 1880): a line or a cue the
+      // mix leaves out, muted or removed, is not in the transcript, and every sound heard is credited.
+      const heard = new Set<string>();
+      const heardSounds = new Set<string>();
       for (const { episode, entry } of chosen) {
         signal.throwIfAborted();
         const stem = episodeScriptFile(episode).replace(/\.json$/, "");
         const opened = await openAudioStudio(store, productionId, stem, this.options.ffmpeg ? { ffmpeg: this.options.ffmpeg } : {});
-        // The final render refuses any unresolved issue: a published episode is complete.
-        const mix = await renderAudioStudioMix(store.dir, opened.state, opened.script, { final: true, signal, ...(this.options.ffmpeg ? { ffmpeg: this.options.ffmpeg } : {}) });
-        // A line left out of the mix on purpose is left out of what the listener reads (codex on PR 1880).
-        for (const passage of opened.state.passages) if (mix.plan.omitted.includes(passage.id)) omitted.add(passage.key);
+        // The final render refuses any unresolved issue: a published episode is complete. Its sources
+        // are checked as Audio Studio checks them, rights included (codex on PR 1880).
+        const unavailable = await audioStudioSourceProblems(store, productionId, opened.state, true);
+        const mix = await renderAudioStudioMix(store.dir, opened.state, opened.script, { final: true, signal, unavailable, ...(this.options.ffmpeg ? { ffmpeg: this.options.ffmpeg } : {}) });
+        const passageKey = new Map(opened.state.passages.map((passage) => [passage.id, passage.key]));
+        for (const { clip, muted } of mix.plan.clips) {
+          if (muted) continue;
+          if (clip.role === "speech" && clip.passageId !== undefined && !mix.plan.omitted.includes(clip.passageId)) heard.add(passageKey.get(clip.passageId) ?? "");
+          else if (clip.role !== "speech") {
+            heard.add(clip.id.replace(/^(sound|bed):/, ""));
+            const artifact = bundle.artifacts.find((candidate) => candidate.id === clip.source?.artifactId || `artifacts/${candidate.file}` === clip.source?.file);
+            if (artifact) heardSounds.add(artifact.id);
+          }
+        }
         signal.throwIfAborted();
         const audio = `${stem}.wav`;
         await copyFile(join(store.dir, mix.file), join(dir, audio));
@@ -75,7 +93,8 @@ export class DramaEditionService {
       const last = chosen.at(-1)!.episode;
       const cast = production.audioDrama?.cast;
       if (await inputs() !== frozen) throw new Error("The production changed while publishing. Publish again.");
-      await keep("transcript.txt", listenerTranscript(chosen.map(({ episode, entry }) => ({ episode, title: entry.script.title, blocks: entry.script.blocks.filter((block) => !omitted.has(block.id)) })), name, cast));
+      const listened = (block: EpisodeScriptBlock) => block.kind !== "dialogue" && block.kind !== "narration" && block.kind !== "sound" && block.kind !== "ambience" && block.kind !== "music" || heard.has(block.id);
+      await keep("transcript.txt", listenerTranscript(chosen.map(({ episode, entry }) => ({ episode, title: entry.script.title, blocks: entry.script.blocks.filter(listened) })), name, cast));
       // Who spoke, in what voice: a hidden role keeps its public label to the edition's last episode (R-59).
       const roles = new Map<string, { role: string; voice: string; recorded?: boolean }>();
       const sounds = new Map<string, { name: string; made: string }>();
@@ -89,15 +108,16 @@ export class DramaEditionService {
             const recorded = artifact?.generation?.source === "audiobook" && artifact.generation.recording !== undefined;
             roles.set(key, { role: key === "@narrator" ? "Narrator" : dramaRoleName(name(key), cast?.[key], last),
               voice: `${kept.voice.label ?? kept.voice.voiceId}${recorded ? "" : ` · ${kept.voice.provider}`}`, ...(recorded ? { recorded: true } : {}) });
-          } else if ((block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact && !sounds.has(block.soundArtifact)) {
-            // Every placed sound is credited (codex on PR 1880): generated by its engine, else recorded or uploaded.
-            const artifact = bundle.artifacts.find((candidate) => candidate.id === block.soundArtifact);
-            if (!artifact) continue;
-            sounds.set(block.soundArtifact, artifact.generation?.source === "sound"
-              ? { name: artifact.generation.name, made: `generated with ${artifact.generation.model}` }
-              : { name: artifact.file.split("/").pop() ?? artifact.file, made: "recorded or uploaded" });
           }
         }
+      }
+      // Every sound heard is credited (codex on PR 1880), a cue's or one imported onto the timeline:
+      // generated by its engine, else recorded or uploaded.
+      for (const artifactId of heardSounds) {
+        const artifact = bundle.artifacts.find((candidate) => candidate.id === artifactId)!;
+        sounds.set(artifactId, artifact.generation?.source === "sound"
+          ? { name: artifact.generation.name, made: `generated with ${artifact.generation.model}` }
+          : { name: artifact.file.split("/").pop() ?? artifact.file, made: "recorded or uploaded" });
       }
       await keep("credits.txt", dramaCredits({ title: production.meta.title, roles: [...roles.values()], sounds: [...sounds.values()] }));
       const story = production.audioDrama?.source ? bundle.productions.find((candidate) => candidate.meta.id === production.audioDrama!.source!.productionId) : undefined;
@@ -140,7 +160,9 @@ export class DramaEditionService {
   }
 }
 
+/** Hashed as a stream (codex on PR 1880): an hour of stereo WAV is never one buffer. */
 async function describe(dir: string, name: string): Promise<{ name: string; bytes: number; sha256: string }> {
-  const bytes = await readFile(join(dir, name));
-  return { name, bytes: (await stat(join(dir, name))).size, sha256: createHash("sha256").update(bytes).digest("hex") };
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(join(dir, name))) hash.update(chunk as Buffer);
+  return { name, bytes: (await stat(join(dir, name))).size, sha256: hash.digest("hex") };
 }
