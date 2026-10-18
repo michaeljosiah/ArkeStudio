@@ -25,6 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
+import { saveEpisodeScript } from "./productions/audio-drama.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
 import { ConversationAuthoringService } from "./application/conversation-authoring.js";
 import { conversationRunDependencies } from "./application/conversation-runs.js";
@@ -10478,6 +10479,27 @@ export class Coordinator {
           this.chapterSaves.add(saving);
           void saving.catch(() => {}).finally(() => this.chapterSaves.delete(saving));
           const saved = await saving;
+          answer({ disposition: "saved", ...saved });
+        } catch (err) {
+          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "save-episode-script": {
+        // An audio drama's episode script (SPEC-057 R-83): saved whole, fenced on the file the
+        // score read, answered by name either way so the editor knows its new base.
+        const store = this.opts.provider.openStore?.();
+        const answer = (result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string }) =>
+          this.emit({ at: new Date().toISOString(), type: "episode-script.save-result", requestId: msg.requestId,
+            worldId: msg.worldId, productionId: msg.productionId, episode: msg.episode, ...result });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "refused", reason: "that world is not open" });
+          return;
+        }
+        try {
+          const saved = await saveEpisodeScript(store, msg.productionId,
+            { episode: msg.episode, title: msg.title, blocks: msg.blocks, baseHash: msg.baseHash }, { requestId: msg.requestId });
           answer({ disposition: "saved", ...saved });
         } catch (err) {
           answer({ disposition: "refused", reason: describeCoordinatorError(err) });

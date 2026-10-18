@@ -1590,6 +1590,7 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
           track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
@@ -1689,6 +1690,7 @@ export class ProposalManager {
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
+          track === "episode-script" ||
           track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
@@ -1988,6 +1990,7 @@ function readVersion(path: string, raw: string): number | null {
       kind.track === "routing" ||
       kind.track === "season" ||
       kind.track === "episode" ||
+      kind.track === "episode-script" ||
       kind.track === "series"
     ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);

@@ -29,6 +29,8 @@ import {
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
+  EpisodeScriptSchema,
+  type EpisodeScript,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -952,7 +954,15 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     if (await exists(join(pdir, "setup-origin.json"))) {
       await tryParse(`productions/${id}/setup-origin.json`, raw => ProductionSetupOriginSchema.parse(JSON.parse(raw)));
     }
+    // An audio drama's episode scripts (SPEC-057 R-83), whole, with the hash a save is fenced on.
+    const episodeScripts: Array<{ file: string; hash: string; script: EpisodeScript }> = [];
+    for (const file of (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort()) {
+      const rel = `productions/${id}/scripts/${file}`;
+      const script = await tryParse(rel, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
+      if (script) episodeScripts.push({ file, hash: manifest[toPortable(rel)]!, script });
+    }
     productions.push({
+      ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },

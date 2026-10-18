@@ -52,6 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
+import { EpisodeScriptBlockSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
@@ -2296,6 +2297,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("retire-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * An audio drama's episode script, saved whole by the score (SPEC-057 R-83). Fenced like a
+   * chapter save: `baseHash` is the file the editor read, null for an episode with no script yet,
+   * and a save against a moved base is refused rather than merged. A direct save keeps the version.
+   */
+  z
+    .object({
+      kind: z.literal("save-episode-script"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      title: z.string().trim().max(160),
+      blocks: z.array(EpisodeScriptBlockSchema).max(4_000),
+      baseHash: z.string().min(1).nullable(),
+    })
+    .strict(),
   z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts

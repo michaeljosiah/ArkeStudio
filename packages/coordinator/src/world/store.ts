@@ -523,7 +523,7 @@ export class WorldStore {
     // (commit.ts keeps one per version on the chapter track), so "Earlier versions" can put one
     // back exactly as the bible does. A direct save preserves the version and refreshes the
     // current snapshot, which is why only accepted drafts appear in that list.
-    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "prose-style", "season", "episode", "art-direction", "chapter"]);
+    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "prose-style", "season", "episode", "episode-script", "art-direction", "chapter"]);
     const historyPath = restorable.has(kind.track) ? historyPathForVersion(portablePath, version) : null;
     if (historyPath === null) {
       throw new CommitPlanError(
@@ -1162,6 +1162,7 @@ function historyDirectory(portablePath: string): string | null {
     return `.history/productions/${kind.production}/${kind.track}`;
   }
   if (kind.track === "episode") return `.history/productions/${kind.production}/episodes/${kind.file}`;
+  if (kind.track === "episode-script") return `.history/productions/${kind.production}/scripts/${kind.file}`;
   if (kind.track === "series") return `.history/series/${kind.id}`;
   if (kind.track === "art-direction") return ".history/art-direction";
   if (kind.track === "bible") return ".history/bible";

@@ -1,0 +1,194 @@
+import { ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
+
+/**
+ * The episode score's pure parts (SPEC-057 R-11..R-24, design turn 230d–f): which scene a block is
+ * in, where beds run, which voice colour a speaker wears, and the edits that keep block ids.
+ */
+
+/** Each block's scene: the nearest heading above it, or null before the first heading. */
+export function scenesOf(blocks: readonly EpisodeScriptBlock[]): Array<ScriptHeading | null> {
+  let scene: ScriptHeading | null = null;
+  return blocks.map((block) => {
+    if (block.kind === "heading") scene = block;
+    return scene;
+  });
+}
+
+export type BedLane = "ambience" | "music";
+/** Where a bed is drawn on one row: its start (the cue's own row), a row it runs under, or its last. */
+export type BedMark = { lane: BedLane; bed: string; at: "start" | "run" | "end"; stops: boolean };
+
+/**
+ * Where every bed runs, row by row (R-15): from its cue down to the block named by `until` (which
+ * it stops before) or to the end of its scene. `stops` says the bed is cut by `until`, drawn as a
+ * foot; a bed that runs out with its scene has none. Beds may not cross a heading on their own —
+ * crossing one is what `until` below the heading is for.
+ */
+export function bedMarks(blocks: readonly EpisodeScriptBlock[]): Array<BedMark[]> {
+  const marks: Array<BedMark[]> = blocks.map(() => []);
+  blocks.forEach((block, i) => {
+    if (block.kind !== "ambience" && block.kind !== "music") return;
+    const stopAt = block.until !== undefined ? blocks.findIndex((candidate) => candidate.id === block.until) : -1;
+    let last = i;
+    if (stopAt > i) last = stopAt - 1;
+    else {
+      while (last + 1 < blocks.length && blocks[last + 1]!.kind !== "heading") last++;
+    }
+    for (let row = i; row <= last; row++) {
+      marks[row]!.push({ lane: block.kind, bed: block.id, at: row === i ? "start" : row === last ? "end" : "run", stops: stopAt > i });
+    }
+  });
+  return marks;
+}
+
+/** A speaker's voice colour, 1–6, in the order they first speak (the audiobook's tones). */
+export function speakerTones(blocks: readonly EpisodeScriptBlock[]): Map<string, number> {
+  const tones = new Map<string, number>();
+  for (const block of blocks) {
+    if (block.kind === "dialogue" && !tones.has(block.speaker)) tones.set(block.speaker, (tones.size % 6) + 1);
+  }
+  return tones;
+}
+
+/**
+ * Split a line at the caret (R-24): the first part keeps the block's id, so a take or a note on it
+ * stays put; the rest becomes a new block of the same kind and speaker, with a new id. A line that
+ * was broken off passes that on to the part that now ends it.
+ */
+export function splitBlock(blocks: readonly EpisodeScriptBlock[], id: string, at: number): EpisodeScriptBlock[] {
+  const index = blocks.findIndex((block) => block.id === id);
+  const block = blocks[index];
+  if (!block || (block.kind !== "dialogue" && block.kind !== "narration")) return [...blocks];
+  const head = block.words.slice(0, at).trimEnd();
+  const tail = block.words.slice(at).trimStart();
+  const first = { ...block, words: head } as EpisodeScriptBlock;
+  const second = { ...block, id: ulid(), words: tail } as EpisodeScriptBlock;
+  if (first.kind === "dialogue") { delete first.cut; }
+  if (second.kind === "dialogue") { delete second.overlapsPrevious; delete second.direction; }
+  if (second.kind === "narration") delete second.direction;
+  delete (second as { paragraphs?: number[] }).paragraphs;
+  return [...blocks.slice(0, index), first, second, ...blocks.slice(index + 1)];
+}
+
+/**
+ * Join a line into the one above it (R-24) when both are the same kind and, for dialogue, the same
+ * speaker. The upper block keeps its id; the lower one's id is gone, as its words now belong above.
+ */
+export function joinBlock(blocks: readonly EpisodeScriptBlock[], id: string): EpisodeScriptBlock[] | null {
+  const index = blocks.findIndex((block) => block.id === id);
+  const lower = blocks[index];
+  const upper = blocks[index - 1];
+  if (!lower || !upper) return null;
+  if (upper.kind === "dialogue" && lower.kind === "dialogue" && upper.speaker === lower.speaker) {
+    const merged = { ...upper, words: [upper.words, lower.words].filter(Boolean).join(" ") };
+    if (lower.cut) merged.cut = true; else delete merged.cut;
+    return [...blocks.slice(0, index - 1), merged, ...blocks.slice(index + 1)];
+  }
+  if (upper.kind === "narration" && lower.kind === "narration") {
+    return [...blocks.slice(0, index - 1), { ...upper, words: [upper.words, lower.words].filter(Boolean).join(" ") }, ...blocks.slice(index + 1)];
+  }
+  return null;
+}
+
+/** A new block of a kind, ready to edit: every block is born with its id (R-24). */
+export function newBlock(kind: EpisodeScriptBlock["kind"], speaker?: string): EpisodeScriptBlock {
+  const id = ulid();
+  switch (kind) {
+    case "heading": return { id, kind, place: "New scene" };
+    case "dialogue": return { id, kind, speaker: speaker ?? "narrator", words: "" };
+    case "narration": return { id, kind, words: "" };
+    case "silence": return { id, kind, seconds: 1 };
+    case "note": return { id, kind, text: "Note" };
+    default: return { id, kind, heard: kind === "music" ? "Music" : kind === "ambience" ? "Ambience" : "A sound" };
+  }
+}
+
+/**
+ * Keep the relations whole after an edit (R-18): a line marked broken off with no line breaking in
+ * below it is no longer broken off, and a line breaking in with no line above it no longer does.
+ */
+export function mendRelations(blocks: readonly EpisodeScriptBlock[]): EpisodeScriptBlock[] {
+  return blocks.map((block, i) => {
+    if (block.kind !== "dialogue") return block;
+    const next = blocks[i + 1];
+    const previous = blocks[i - 1];
+    let mended = block;
+    if (block.cut && !(next?.kind === "dialogue" && next.overlapsPrevious)) { mended = { ...mended }; delete mended.cut; }
+    if (block.overlapsPrevious && !(previous?.kind === "dialogue" && previous.cut)) { mended = { ...mended }; delete mended.overlapsPrevious; }
+    return mended;
+  }).map((block, i, all) => {
+    if ((block.kind === "ambience" || block.kind === "music") && block.until !== undefined) {
+      const at = all.findIndex((candidate) => candidate.id === block.until);
+      if (at <= i) { const mended = { ...block }; delete mended.until; return mended; }
+    }
+    return block;
+  });
+}
+
+/** A chapter's paragraphs, numbered from 1 as Source shows them: blank lines separate them. */
+export function chapterParagraphs(body: string): string[] {
+  return body.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+}
+
+/** "14–17" or "14, 16" from the numbers a block cites. */
+export function paragraphLabel(paragraphs: readonly number[] | undefined): string {
+  if (!paragraphs?.length) return "";
+  const sorted = [...paragraphs].sort((a, b) => a - b);
+  const contiguous = sorted.every((n, i) => i === 0 || n === sorted[i - 1]! + 1);
+  return `¶${contiguous && sorted.length > 1 ? `${sorted[0]}–${sorted.at(-1)}` : sorted.join(", ")}`;
+}
+
+/** "14-17, 20" typed into a field, as the paragraph numbers it names; nonsense yields none. */
+export function parseParagraphs(text: string): number[] {
+  const out = new Set<number>();
+  for (const part of text.split(/[,\s]+/).filter(Boolean)) {
+    const range = /^(\d+)[-–](\d+)$/.exec(part);
+    if (range) {
+      const [from, to] = [Number(range[1]), Number(range[2])];
+      for (let n = Math.min(from, to); n <= Math.max(from, to) && out.size < 200; n++) out.add(n);
+    } else if (/^\d+$/.test(part) && Number(part) > 0) out.add(Number(part));
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+const HEARD_AS_LABEL = { narrated: "Narrated", "in-the-room": "In the room", recording: "A recording" } as const;
+export function heardAsLabel(value: ScriptHeading["heardAs"]): string {
+  return value ? HEARD_AS_LABEL[value] : "";
+}
+
+/**
+ * The script as a numbered radio script (R-11 export): scenes as headings, spoken lines numbered,
+ * direction in parentheses, cues in capitals. What is read aloud and what is sound stay apart.
+ */
+export function scriptAsText(title: string, episode: number, blocks: readonly EpisodeScriptBlock[], name: (slug: string) => string): string {
+  const lines: string[] = [`EPISODE ${episode}${title ? ` · ${title}` : ""}`, ""];
+  let scene = 0;
+  let spoken = 0;
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "heading":
+        scene++;
+        lines.push("", `${scene}. ${block.place.toUpperCase()}${block.time ? ` — ${block.time}` : ""}${block.heardAs ? ` [${heardAsLabel(block.heardAs)}]` : ""}`, "");
+        break;
+      case "dialogue":
+        spoken++;
+        lines.push(`${String(spoken).padStart(3)}  ${name(block.speaker).toUpperCase()}${block.channel ? ` (${block.channel})` : ""}${block.direction ? ` (${block.direction})` : ""}`);
+        lines.push(`     ${block.words}${block.cut ? " —" : ""}`, "");
+        break;
+      case "narration":
+        spoken++;
+        lines.push(`${String(spoken).padStart(3)}  NARRATOR${block.direction ? ` (${block.direction})` : ""}`, `     ${block.words}`, "");
+        break;
+      case "sound": case "ambience": case "music":
+        lines.push(`     ${block.kind.toUpperCase()}: ${block.heard}`, "");
+        break;
+      case "silence":
+        lines.push(`     SILENCE ${block.seconds} s${block.note ? ` · ${block.note}` : ""}`, "");
+        break;
+      case "note":
+        lines.push(`     [${block.text}]`, "");
+        break;
+    }
+  }
+  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
+}

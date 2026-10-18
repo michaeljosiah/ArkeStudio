@@ -21,6 +21,7 @@ import {
   type ClientState,
   type ConversationActionCard,
   type DomainEvent,
+  type EpisodeScriptBlock,
   type Delivery,
   type Frame,
   type HarnessEngine,
@@ -1062,6 +1063,14 @@ export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult
   return () => chapterOpenListeners.delete(listener);
 }
 
+/** What became of one episode script save (SPEC-057 R-83): the new base, or a refusal by name. */
+export type EpisodeScriptSaveResult = Extract<DomainEvent, { type: "episode-script.save-result" }>;
+const episodeScriptSaveListeners = new Set<(result: EpisodeScriptSaveResult) => void>();
+export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScriptSaveResult) => void): () => void {
+  episodeScriptSaveListeners.add(listener);
+  return () => episodeScriptSaveListeners.delete(listener);
+}
+
 /** What became of one chapter save (turn 126): the new base, or a refusal by name. */
 export type ChapterSaveResult = Extract<DomainEvent, { type: "chapter.save-result" }>;
 const chapterSaveListeners = new Set<(result: ChapterSaveResult) => void>();
@@ -1752,6 +1761,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "chapter.save-result") {
       for (const listener of chapterSaveListeners) listener(event);
+    }
+    if (event.type === "episode-script.save-result") {
+      for (const listener of episodeScriptSaveListeners) listener(event);
     }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
@@ -5005,6 +5017,22 @@ export function saveChapter(
     return null;
   }
   return requestId;
+}
+
+/**
+ * Save an audio drama's episode script whole (SPEC-057 R-83). `baseHash` is the file the score
+ * read, null for an episode with no script yet; the answer, by requestId, carries the next base.
+ */
+export function saveEpisodeScript(
+  worldId: string,
+  productionId: string,
+  episode: number,
+  title: string,
+  blocks: EpisodeScriptBlock[],
+  baseHash: string | null,
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "save-episode-script", requestId, worldId, productionId, episode, title, blocks, baseHash }) ? requestId : null;
 }
 
 /**

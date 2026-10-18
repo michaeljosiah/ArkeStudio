@@ -224,6 +224,7 @@ type Classified =
   | { track: "season"; production: string }
   | { track: "narrative"; production: string }
   | { track: "episode"; production: string; file: string }
+  | { track: "episode-script"; production: string; file: string }
   | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
   | { track: "art-direction" }
@@ -252,6 +253,9 @@ export function classify(path: string): Classified {
   if (m) return { track: "season", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/episodes\/([^/]+)\.json$/.exec(path);
   if (m) return { track: "episode", production: m[1]!, file: m[2]! };
+  // An audio drama's episode script (SPEC-057 R-83): versioned and snapshotted like an episode.
+  m = /^productions\/([a-z0-9-]+)\/scripts\/([^/]+)\.json$/.exec(path);
+  if (m) return { track: "episode-script", production: m[1]!, file: m[2]! };
   m = /^series\/([a-z0-9-]+)\.json$/.exec(path);
   if (m) return { track: "series", id: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/production\.json$/.exec(path);
@@ -600,6 +604,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "season" ||
       track === "narrative" ||
       track === "episode" ||
+      track === "episode-script" ||
       track === "series"
     ) {
       const before = JsonFile.parse(live).value;
@@ -774,6 +779,7 @@ export class Committer {
         kind.track === "season" ||
         kind.track === "narrative" ||
         kind.track === "episode" ||
+        kind.track === "episode-script" ||
         kind.track === "series"
       ) {
         // Season, episode, and series ride the same JSON version/history machinery the story
@@ -786,7 +792,9 @@ export class Committer {
                   ? `scenes/${kind.file}`
                   : kind.track === "episode"
                     ? `episodes/${kind.file}`
-                    : kind.track
+                    : kind.track === "episode-script"
+                      ? `scripts/${kind.file}`
+                      : kind.track
               }`;
         const baseDoc = base !== null ? JsonFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
