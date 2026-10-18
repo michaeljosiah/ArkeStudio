@@ -222,3 +222,51 @@ export function scriptAsText(title: string, episode: number, blocks: readonly Ep
   }
   return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
 }
+
+/** One row of Arke's draft against the script (SPEC-057 R-54): kept, added, changed or removed. */
+export type DraftRow =
+  | { state: "same" | "added" | "removed"; block: EpisodeScriptBlock }
+  | { state: "changed"; block: EpisodeScriptBlock; was: EpisodeScriptBlock };
+
+/**
+ * Arke's draft as tracked edits, by block id: what it adds is shown where it goes, what it removes
+ * where it was, and a block it rewrites as the old struck beside the new.
+ */
+export function draftRows(current: readonly EpisodeScriptBlock[], proposed: readonly EpisodeScriptBlock[]): DraftRow[] {
+  const kept = new Set(proposed.map((block) => block.id));
+  const before = new Map(current.map((block) => [block.id, block]));
+  const rows: DraftRow[] = [];
+  let at = 0;
+  const flushRemoved = (until: string | null) => {
+    while (at < current.length && current[at]!.id !== until) {
+      if (!kept.has(current[at]!.id)) rows.push({ state: "removed", block: current[at]! });
+      at++;
+    }
+  };
+  for (const block of proposed) {
+    const was = before.get(block.id);
+    if (was) {
+      flushRemoved(block.id);
+      at++;
+      rows.push(JSON.stringify(was) === JSON.stringify(block) ? { state: "same", block } : { state: "changed", block, was });
+    } else {
+      // Struck lines read before the new ones that take their place.
+      while (at < current.length && !kept.has(current[at]!.id)) rows.push({ state: "removed", block: current[at++]! });
+      rows.push({ state: "added", block });
+    }
+  }
+  flushRemoved(null);
+  return rows;
+}
+
+/** A block in one line, as the draft shows it. */
+export function blockLine(block: EpisodeScriptBlock, name: (slug: string) => string): { who: string; text: string } {
+  switch (block.kind) {
+    case "heading": return { who: "Scene", text: `${block.place}${block.time ? ` — ${block.time}` : ""}` };
+    case "dialogue": return { who: name(block.speaker), text: `${block.direction ? `(${block.direction}) ` : ""}${block.words}${block.cut ? " —" : ""}` };
+    case "narration": return { who: "Narrator", text: `${block.direction ? `(${block.direction}) ` : ""}${block.words}` };
+    case "sound": case "ambience": case "music": return { who: block.kind[0]!.toUpperCase() + block.kind.slice(1), text: block.heard };
+    case "silence": return { who: "Silence", text: `${block.seconds} s${block.note ? ` · ${block.note}` : ""}` };
+    case "note": return { who: "Note", text: block.text };
+  }
+}

@@ -247,6 +247,8 @@ export const StagedProposalSchema = z
     artDirection: ArtDirectionRecordSchema.optional(),
     /** Complete staged scene candidates, keyed by their world-relative target path (SPEC-029 R-37). */
     scenes: z.record(z.string().min(1), SceneRecordSchema).optional(),
+    /** Arke's whole episode script, by target path, for the score's tracked draft (SPEC-057 R-54). */
+    episodeScripts: z.record(z.string().min(1), EpisodeScriptSchema).optional(),
     /**
      * What this proposal would change, field by field (#70 §11.5).
      *

@@ -4,12 +4,15 @@ import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
   EpisodeSchema,
+  EpisodeScriptSchema,
   ProseStyleSchema,
   SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
   StoryOverviewSchema,
   countWords,
+  episodeScriptFile,
+  settleDraftBlocks,
   paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
@@ -19,6 +22,7 @@ import {
   type Proposal,
   type WorldChatProductionChapterAction,
   type WorldChatProductionEpisodeAction,
+  type WorldChatProductionEpisodeScriptAction,
   type WorldChatProductionOverviewAction,
   type WorldChatProductionProseStyleAction,
   type WorldChatProductionSceneAction,
@@ -36,6 +40,7 @@ export type WorldChatProductionAuthoredAction =
   | WorldChatProductionSeriesAction
   | WorldChatProductionOverviewAction
   | WorldChatProductionProseStyleAction
+  | WorldChatProductionEpisodeScriptAction
   | WorldChatProductionSeasonAction
   | WorldChatProductionEpisodeAction
   | WorldChatProductionChapterAction
@@ -403,6 +408,28 @@ export async function stageWorldChatProductionAuthoredAction(
       ...context,
       targets: [{
         path: `productions/${production.meta.id}/prose-style.json`,
+        content: `${JSON.stringify(record, null, 2)}\n`,
+      }],
+    }, precondition);
+  }
+
+  if (payload.kind === "world-chat-production-episode-script") {
+    // An audio drama's episode, written whole (SPEC-057 R-9, R-54): parsed as the scanner will
+    // read it, so the author is never offered a draft that cannot be kept.
+    if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama`);
+    const { episode } = payload.action;
+    const current = production.episodeScripts?.find((entry) => entry.script.episode === episode)?.script;
+    const record = EpisodeScriptSchema.parse({
+      version: current?.version ?? 1, episode,
+      title: payload.action.title ?? current?.title ?? "",
+      blocks: settleDraftBlocks(payload.action.blocks, current?.blocks ?? []),
+    });
+    return gate.stage({
+      kind: "episode-script",
+      summary: `Episode ${episode} script: ${production.meta.title}`,
+      ...context,
+      targets: [{
+        path: `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`,
         content: `${JSON.stringify(record, null, 2)}\n`,
       }],
     }, precondition);

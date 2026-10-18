@@ -8,6 +8,7 @@ import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } f
 import { ProductionCastScreen } from "../src/screens/production-cast.js";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
+import { draftRows } from "../src/lib/episode-script.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -139,5 +140,34 @@ describe("Review in the score (230j)", () => {
     assert.equal(decided.kind, "decide-drama-note");
     assert.equal(decided.decision, "intentional");
     assert.match(decided.key, /^clarity:/);
+  });
+});
+
+describe("Arke's draft in the score (R-9, R-54)", () => {
+  it("reads a draft against the script by block id: added, changed, removed, kept", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const rows = draftRows([a, b, c], [a, { ...b, words: "Two, climb." } as EpisodeScriptBlock, line("bray", "Four.")]);
+    assert.deepEqual(rows.map((row) => row.state), ["same", "changed", "removed", "added"]);
+  });
+
+  it("shows Arke's draft as tracked edits, with Keep and Discard whole", async () => {
+    const a = line("maren-kest", "The log said two hours."), b = line("bray", "The log's wrong.");
+    const state = drama([a, b]);
+    const proposed = { version: 3, episode: 1, title: "The tide turns", blocks: [a, { ...b, words: "The log's wrong. Climb." }, line("bray", "Now.")] };
+    state.world!.proposals = [{ proposal: { id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", kind: "episode-script", summary: "Episode 1 script", targets: [], draftRevision: 2 },
+      ripple: null, episodeScripts: { "productions/low-water-drama/scripts/episode-001.json": proposed } }] as never;
+    const { container, sent } = await mount(state, "script/1");
+    assert.match(container.querySelector('[aria-label="Arke\'s draft"]')!.textContent!, /1 added · 1 changed/);
+    const added = [...container.querySelectorAll('[data-draft="added"]')].map((row) => row.textContent);
+    const removed = [...container.querySelectorAll('[data-draft="removed"]')].map((row) => row.textContent);
+    assert.deepEqual(removed, ["BrayThe log's wrong."], "the rewritten line's old words are struck");
+    assert.deepEqual(added, ["BrayThe log's wrong. Climb.", "BrayNow."]);
+    assert.equal(container.querySelector("textarea[data-words]"), null, "the draft is read, not edited, until decided");
+    const keep = [...container.querySelectorAll("button")].find((button) => button.textContent === "Keep")!;
+    await act(async () => props(keep).onClick!({}));
+    assert.deepEqual(sent.at(-1), { kind: "proposal-accept", worldId: FIXTURE_WORLD_ID, proposalId: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", expectedDraftRevision: 2 });
+    const discard = [...container.querySelectorAll("button")].find((button) => button.textContent === "Discard")!;
+    await act(async () => props(discard).onClick!({}));
+    assert.deepEqual(sent.at(-1), { kind: "proposal-discard", worldId: FIXTURE_WORLD_ID, proposalId: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA" });
   });
 });

@@ -19,6 +19,8 @@ export const ProposalKindSchema = z.enum([
   "chapter-draft",
   "story-overview",
   "prose-style",
+  /** An audio drama episode's script, rewritten by Arke (SPEC-057 R-9, R-54). */
+  "episode-script",
   "scene-draft",
   "scene-edit",
   /** SPEC-023 R-17: the narrative-domain JSON entities, each staged whole through the gate. */

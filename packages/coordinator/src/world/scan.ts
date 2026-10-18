@@ -1112,11 +1112,26 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       }
     }
 
+    // Arke's episode script, whole, so the score can show it as a tracked draft (SPEC-057 R-54).
+    const proposedScripts: Record<string, EpisodeScript> = {};
+    if (proposal.kind === "episode-script") {
+      for (const target of proposal.targets) {
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        let json: unknown = null;
+        try { json = JSON.parse(raw); } catch { /* reported below as unreadable */ }
+        const parsed = EpisodeScriptSchema.safeParse(json);
+        if (parsed.success) proposedScripts[target.path] = parsed.data;
+        else problems.push({ path: `.proposals/${pid}/${target.path}`, message: parsed.error.issues[0]?.message ?? "unreadable script" });
+      }
+    }
+
     proposals.push({
       proposal,
       ripple,
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
+      ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),
       ...(review.targets.length > 0 ? { review } : {}),
     });
   }

@@ -1,4 +1,4 @@
-import { SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
+import { EpisodeScriptSchema, SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -81,6 +81,17 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
    * steers drafting. Every schema field is projected; a malformed file returns null and the
    * accept gate refuses it separately.
    */
+  // An audio drama's episode script (SPEC-057 R-54): read as the radio script it is, one line a block.
+  if (/^productions\/[a-z0-9-]+\/scripts\/episode-\d+\.json$/.test(path)) {
+    try {
+      const script = EpisodeScriptSchema.parse(JSON.parse(content));
+      const lines = script.blocks.map((block) => block.kind === "heading" ? `SCENE · ${block.place}${block.time ? ` — ${block.time}` : ""}`
+        : block.kind === "dialogue" ? `${block.speaker.toUpperCase()}${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
+        : block.kind === "narration" ? `NARRATOR${block.direction ? ` (${block.direction})` : ""}: ${block.words}`
+        : block.kind === "silence" ? `SILENCE ${block.seconds} s` : block.kind === "note" ? `[${block.text}]` : `${block.kind.toUpperCase()}: ${block.heard}`);
+      return { label: `Episode ${script.episode} script`, kind: `episode script · v${script.version}`, fields: new Map([["Script", lines.join("\n")]]) };
+    } catch { return null; }
+  }
   if (/^productions\/[a-z0-9-]+\/scenes\/[^/]+\.json$/.test(path)) {
     try {
       const scene = SceneRecordSchema.parse(JSON.parse(content));
