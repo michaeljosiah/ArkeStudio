@@ -63,6 +63,16 @@ describe("productionShape resolves the legacy discriminator", () => {
       episodic: false,
       label: "Visual novel",
     },
+    {
+      // SPEC-057 R-82: a story told for the ear. It has episodes as scripts, so neither chapters
+      // nor a video season, and it is not episodic in the season sense.
+      meta: { format: "story", medium: "story", kind: "audio-drama" },
+      medium: "story",
+      kind: "audio-drama",
+      capability: "video",
+      episodic: false,
+      label: "Audio drama",
+    },
   ];
 
   for (const row of table) {
@@ -73,7 +83,8 @@ describe("productionShape resolves the legacy discriminator", () => {
       assert.equal(shape.dispatchCapability, row.capability);
       assert.equal(shape.isEpisodic, row.episodic);
       assert.equal(shape.displayLabel, row.label);
-      assert.equal(shape.hasChapters, row.medium === "story");
+      assert.equal(shape.isAudioDrama, row.kind === "audio-drama");
+      assert.equal(shape.hasChapters, row.medium === "story" && row.kind !== "audio-drama");
       assert.equal(shape.hasScenes, row.medium !== "story");
       assert.equal(shape.isBranching, row.kind === "interactive" || row.kind === "visual-novel");
       assert.equal(shape.playsAsBeats, row.kind === "visual-novel");
@@ -102,6 +113,17 @@ describe("productionShape resolves the legacy discriminator", () => {
     assert.equal(shape.kindLabel, "docuseries");
     assert.equal(shape.isEpisodic, false, "behaviour falls back to the medium default");
     assert.equal(shape.dispatchCapability, "video");
+  });
+
+  it("the audio-drama kind belongs to the story medium only (SPEC-057 R-82)", () => {
+    const onVideo = productionShape({ format: "video", medium: "video", kind: "audio-drama" });
+    assert.equal(onVideo.isAudioDrama, false, "a video is never an audio drama");
+    assert.equal(onVideo.hasScenes, true);
+    const drama = productionShape({ format: "story", medium: "story", kind: "audio-drama" });
+    assert.equal(drama.isAudioDrama, true);
+    assert.equal(drama.hasChapters, false, "its episodes are scripts, not chapters");
+    assert.equal(drama.hasScenes, false, "and not video scene records");
+    assert.equal(drama.isEpisodic, false, "no season, Series or cut");
   });
 
   it("the visual-novel kind on a story is no visual novel (codex round 17)", () => {

@@ -1,6 +1,7 @@
 import {
   EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
+  AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN,
   migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
 } from "@arke-studio/contracts";
@@ -9,8 +10,15 @@ import { sha256 } from "../world/text-files.js";
 import { planProductionCreation } from "./ops.js";
 
 /** Full relevant records, not a windowed search or just version numbers. */
-export function setupSourceDigest(bundle: WorldBundle): string {
+export function setupSourceDigest(bundle: WorldBundle, sourceId?: string): string {
+  // The story a setup adapts, chapter by chapter (codex on PR 1866): an edit or a retirement
+  // between Review and Create is a different source, so the reviewed plan must be reviewed again.
+  // Absent for a setup that adapts nothing, so its digest is what it always was.
+  const source = sourceId === undefined ? undefined : bundle.productions.find(production => production.meta.id === sourceId);
   return sha256(stableJson({
+    ...(sourceId !== undefined ? { source: source ? source.chapters.map(chapter => ({
+      id: chapter.id, order: chapter.order, version: chapter.version ?? null, hash: chapter.hash ?? null, retired: chapter.retired === true,
+    })).sort((a, b) => a.id.localeCompare(b.id)) : null } : {}),
     worldId: bundle.meta.worldId,
     canon: bundle.canon,
     bible: bundle.bible,
@@ -25,6 +33,27 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
   if (draft.worldId !== bundle.meta.worldId) throw new Error("This setup belongs to another world.");
   const problems = productionSetupProblems(draft, bundle.sheets, bundle.productions);
   if (problems.length) throw new Error(problems.join("\n"));
+  // An audio drama is a Story production (SPEC-057 R-82): no aspect, frame rate, season or scenes.
+  // What setup agreed — the plan and the story it adapts — is written as audio-drama.json.
+  if (draft.kind === AUDIO_DRAMA_KIND) {
+    const base = planProductionCreation(bundle, {
+      title: draft.title, medium: "story", productionKind: AUDIO_DRAMA_KIND,
+      ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
+    }, at);
+    if (draft.models && Object.keys(draft.models).length > 0) {
+      base.production = ProductionSchema.parse({ ...base.production, models: draft.models });
+    }
+    return ProductionCreationPlanSchema.parse({
+      ...base,
+      initialContent: {
+        worldId: draft.worldId, setupId: draft.setupId, revision: draft.revision,
+        narrative: null, episodes: [], scenes: [],
+        audioDrama: AudioDramaRecordSchema.parse({
+          version: 1, plan: draft.audioDrama ?? DEFAULT_AUDIO_DRAMA_PLAN, ...(draft.source ? { source: draft.source } : {}),
+        }),
+      },
+    });
+  }
   if (!normalizeAspect(draft.aspect)) throw new Error("Choose a valid aspect, such as 16:9 or 9:16.");
   const base = planProductionCreation(bundle, {
     title: draft.title, medium: "video", ...(draft.kind !== "other" ? { productionKind: draft.kind } : {}),

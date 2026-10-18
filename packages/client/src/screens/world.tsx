@@ -10,6 +10,8 @@ import {
   artifactPosterPath,
   CHARACTER_ROLE_MAX,
   MICRODRAMA_DEFAULTS,
+  AUDIO_DRAMA_KIND,
+  adaptableStories,
   newId,
   deriveCut,
   designatedCompilation,
@@ -40,7 +42,7 @@ import {
   sortScenes,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
-import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Callout, Card, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { Archive, ArrowRight, ChevronRight, Copy, Lock, Message, More, Pencil, Plus, Search, Sparkle, Speaker, Upload, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
@@ -4570,7 +4572,7 @@ export function ProductionsScreen() {
                     <Badge tone="outline">{productionShape(p.meta).displayLabel}</Badge>
                     {active && <span className="fy-dot fy-dot--warn" />}
                     <span style={{ marginLeft: "auto" }} className="fy-mono">
-                      {story ? `${drafted} of ${chapters.length} chapters` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
+                      {story ? `${drafted} of ${chapters.length} chapters` : p.audioDrama ? `${p.audioDrama.plan.episodes} episodes` : shots.length > 0 ? `${covered} of ${shots.length} shots` : `${p.takes.length} takes`}
                     </span>
                   </div>
                   <div className="fy-prodcard__name">{p.meta.title}</div>
@@ -4612,14 +4614,15 @@ export function ProductionsScreen() {
  * intentions now and branching is one a person arrives holding.
  *
  * Audio is deliberately not a card: turn 99 claimed it as a medium and nothing has ever shipped
- * behind it, so the audiobook rides under `WRITE` until there is something to open.
+ * behind it, so the audiobook rides under `WRITE` — and so does the audio drama, a kind of story
+ * rather than a fourth door (design turn 230 revision 2, SPEC-057 R-1): the work is writing first.
  */
 export const DOOR_CHOICES = [
   {
     id: "write",
     eyebrow: "WRITE",
     label: "Tell a story",
-    body: "Novel, novella, episodic fiction or audiobook",
+    body: "Novel, novella, episodic fiction, audio drama or audiobook",
     affordance: "Begin with words",
     medium: "story",
   },
@@ -4691,21 +4694,32 @@ export const INTERACTIVE_KIND_CHOICES = [
   },
 ] as const;
 
-type KindChoice = { id: string; label: string; body: string; aspect: string };
+/**
+ * What `WRITE` asks (design turn 230b, SPEC-057 R-1): which kind of story. A novel is the story
+ * medium's plain default, and Other is nothing assumed, so neither writes a kind down; an audio
+ * drama is a story told in episodes for the ear, and does. None of them has a frame to deliver in.
+ */
+export const STORY_KIND_CHOICES = [
+  { id: "book", label: "Novel", body: "Chapters, to read." },
+  { id: AUDIO_DRAMA_KIND, label: "Audio drama", body: "Episodes, for the ear." },
+  { id: "other", label: "Other", body: "Nothing assumed." },
+] as const;
+
+type KindChoice = { id: string; label: string; body: string; aspect?: string };
 
 /**
  * The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2).
  * `interactive` is still one of them and still reads back the same way — it just arrives from
  * the door now rather than from the kind row (turn 113a).
  */
-const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel"]);
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive", "visual-novel", AUDIO_DRAMA_KIND]);
 
 /*
  * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
  * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
  * one. A kind added without a plate falls back to that same empty box rather than breaking.
  */
-export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel"]);
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive", "visual-novel", "book", AUDIO_DRAMA_KIND]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4730,24 +4744,25 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
  * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
  * holds the name, so a card with nothing else to ask shows the name alone rather than sending
  * the person through a dialog the other cards do not get. `choose` has had kinds of its own since
- * turn 174 — an interactive movie or a visual novel — and `write` is empty until a story does.
+ * turn 174 — an interactive movie or a visual novel — and `write` since turn 230: a novel, an
+ * audio drama or neither.
  */
 export const KINDS_BY_DOOR: Record<DoorId, readonly KindChoice[]> = {
-  write: [],
+  write: STORY_KIND_CHOICES,
   watch: VIDEO_KIND_CHOICES,
   choose: INTERACTIVE_KIND_CHOICES,
 };
 
 /** The kind each door's row starts on, and so what an untouched step two creates. */
 const DEFAULT_KIND_BY_DOOR: Record<DoorId, string> = {
-  write: "",
+  write: "book",
   watch: "film",
   choose: "interactive",
 };
 
 /** The question step two asks above a door's kind row. */
 const KIND_QUESTION: Record<DoorId, string> = {
-  write: "",
+  write: "What kind of story?",
   watch: "What kind of video?",
   choose: "What kind of interactive?",
 };
@@ -4760,13 +4775,22 @@ export function NewProductionScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
+  // A story's ⋯ → Adapt… arrives holding that story (SPEC-057 R-3): step two, an audio drama,
+  // with Adapt from already set. The door's question has been answered by where it came from.
+  const adapting = (useLocation().state as { adapt?: { productionId?: unknown } } | null)?.adapt?.productionId;
+  const adaptFrom = typeof adapting === "string" ? adapting : null;
   // Null until a card is pressed: the door is step one, and which card was pressed is the whole
   // of what step one produces. There is no default — a preselected card would answer the
   // question the screen is asking.
-  const [door, setDoor] = useState<DoorId | null>(null);
+  const [door, setDoor] = useState<DoorId | null>(adaptFrom ? "write" : null);
   // The kind the row has selected, for whichever door was pressed; seeded from the door.
-  const [videoKind, setVideoKind] = useState<string>("film");
+  const [videoKind, setVideoKind] = useState<string>(adaptFrom ? AUDIO_DRAMA_KIND : "film");
   const [title, setTitle] = useState("");
+  // Whether the name is still the one this step filled in. It follows the chosen story until the
+  // author types, so choosing A and then B never leaves B's drama named after A (codex on PR 1866).
+  const [titleFollows, setTitleFollows] = useState(true);
+  // The story an audio drama adapts (design turn 230b): empty is an original drama.
+  const [source, setSource] = useState(adaptFrom ?? "");
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
@@ -4797,6 +4821,28 @@ export function NewProductionScreen() {
   const kinds = door === null ? [] : KINDS_BY_DOOR[door];
   const isMicrodrama = door === "watch" && videoKind === "microdrama";
   const lengthRange = parseEpisodeLength(episodeLength);
+  const isAudioDrama = door === "write" && videoKind === AUDIO_DRAMA_KIND;
+  const stories = adaptableStories(world?.productions ?? []);
+  const story = isAudioDrama && source ? stories.find((s) => s.id === source) ?? null : null;
+  // A name the author has not typed follows the story it adapts, so a drama of Low Water starts
+  // as Low Water, and an original drama starts unnamed; anything typed is never replaced.
+  useEffect(() => {
+    if (titleFollows) setTitle(story?.title ?? "");
+    // Only a newly chosen story names it: the flag is read, not watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [story?.id]);
+
+  /*
+   * An audio drama that adapts a story is planned with Arke (SPEC-057 R-3): setup reads the story
+   * first, so its number of episodes is never a guess made here. The seed carries the answers
+   * this step already has; setup checks the source exactly as if it had been chosen there.
+   */
+  const planWithArke = () => {
+    if (!worldId || !story) return;
+    navigate(`/w/${worldId}/productions/setup/${newId("cv")}`, {
+      state: { seed: { kind: AUDIO_DRAMA_KIND, source: { productionId: story.id }, ...(title.trim() ? { title: title.trim() } : {}) } },
+    });
+  };
 
   const create = () => {
     if (!worldId || pendingRequest || !chosen) return;
@@ -4810,7 +4856,7 @@ export function NewProductionScreen() {
          * or a visual novel since turn 174 — and a card's own kind stands in where it has no row,
          * which is how `CHOOSE` wrote `interactive` from turn 113a until then.
          */
-        ...(kinds.length > 0 && chosen.medium === "video" && STORED_KINDS.has(videoKind)
+        ...(kinds.length > 0 && STORED_KINDS.has(videoKind)
           ? { productionKind: videoKind }
           : "productionKind" in chosen
             ? { productionKind: chosen.productionKind }
@@ -4852,7 +4898,7 @@ export function NewProductionScreen() {
       <div className="fy-dialogwrap fy-production-step" data-screen="new-production">
         <ProductionDialogBackdrop world={world} />
         <div
-          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds")}
+          className={cx("fy-dialog fy-production-step__panel", kinds.length > 0 && "fy-production-step__panel--kinds", kinds.length === 3 && "fy-production-step__panel--three")}
         >
           <div className="fy-production-step__head">
             {kinds.length > 0 ? (
@@ -4873,7 +4919,7 @@ export function NewProductionScreen() {
             </div>
           )}
           {kinds.length > 0 && (
-          <div className="fy-production-kinds">
+          <div className={cx("fy-production-kinds", kinds.length === 3 && "fy-production-kinds--three")}>
             {kinds.map((k) => (
               <button
                 key={k.id}
@@ -4881,7 +4927,7 @@ export function NewProductionScreen() {
                 className={cx("fy-radio", videoKind === k.id && "fy-radio--on")}
                 onClick={() => {
                   setVideoKind(k.id);
-                  setAspect(k.aspect);
+                  if (k.aspect) setAspect(k.aspect);
                 }}
               >
                 <div aria-hidden="true" className="fy-production-kind__plate">
@@ -4926,8 +4972,28 @@ export function NewProductionScreen() {
             aria-label="Name"
             placeholder="Name it · working titles are fine"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              // Emptied, the field is the step's to fill again.
+              setTitleFollows(e.target.value === "");
+            }}
           />
+          {/* Adapt from (design turn 230b, SPEC-057 R-2): an audio drama's one other question.
+              A novel or Other has none, and a video asks it in setup. */}
+          {isAudioDrama && (stories.length > 0 || source !== "") && (
+            <label className="fy-production-step__adapt">
+              <span className="fy-production-step__label">Adapt from</span>
+              <Select label="Adapt from" value={source} onChange={(e) => setSource(e.target.value)}>
+                <option value="">Nothing · an original drama</option>
+                {stories.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title} · {s.kind} · {s.chapters} chapter{s.chapters === 1 ? "" : "s"} · {s.words.toLocaleString("en-GB")} words
+                  </option>
+                ))}
+                {source !== "" && !story && <option value={source}>{source} · no longer here</option>}
+              </Select>
+            </label>
+          )}
           {/*
             Everything the kind can answer, under one label that says what it is (turn 99). What
             is not here is ENDING: it sat in this row as though how a season ends were a setting,
@@ -4994,22 +5060,32 @@ export function NewProductionScreen() {
             )}
             <span style={{ flex: 1 }} />
             {/* Back to the door, and nothing was created on the way here. */}
-            <Button variant="ghost" onClick={() => setDoor(null)}>
+            <Button variant="ghost" onClick={() => { setDoor(null); setSource(""); }}>
               Back
             </Button>
+            {story ? (
+              // Nothing is created here: setup reads the story, asks one question and proposes
+              // the plan, and its Create is the one that writes (SPEC-057 R-3..R-9).
+              <Button variant="primary" onClick={planWithArke}>
+                Plan with Arke
+              </Button>
+            ) : (
             <Button
               variant="primary"
-              disabled={title.trim().length === 0 || pendingRequest !== null}
+              disabled={title.trim().length === 0 || pendingRequest !== null || (isAudioDrama && source !== "")}
               onClick={create}
             >
               {pendingRequest
                 ? "Creating…"
                 : isMicrodrama
                   ? "Create Series and Season 1"
-                  : chosen.medium === "story"
-                    ? "Create and open day one"
-                    : "Create and open it"}
+                  : isAudioDrama
+                    ? "Create"
+                    : chosen.medium === "story"
+                      ? "Create and open day one"
+                      : "Create and open it"}
             </Button>
+            )}
           </Footer>
         </div>
       </div>

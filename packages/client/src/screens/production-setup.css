@@ -28,6 +28,24 @@
 .fy-production-target__row > label:first-child { color: var(--muted-foreground); }
 .fy-production-target__end { text-align: right; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
 .fy-production-target__check { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+/* An audio drama's plan (design turn 230c): the Target card's frame, read as label and value. */
+.fy-ad-plan { border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 14px; margin: 0 0 20px; display: grid; gap: 10px; }
+.fy-ad-plan header { display: flex; align-items: baseline; gap: 8px; }
+.fy-ad-plan header h3 { margin: 12px 0 0; font-size: 14px; font-weight: 600; }
+.fy-ad-plan header small { color: var(--muted-foreground); font-size: 12px; }
+.fy-ad-plan__kv { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: 13px; }
+.fy-ad-plan__kv dt { color: var(--muted-foreground); }
+.fy-ad-plan__kv dd { margin: 0; overflow-wrap: anywhere; }
+.fy-ad-plan__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fy-ad-plan__fields label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
+.fy-ad-plan__fields label:last-child { grid-column: 1 / -1; }
+.fy-ad-plan__kept { display: grid; gap: 7px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 13px; }
+.fy-ad-plan__kept > span { font-size: 12px; color: var(--muted-foreground); }
+.fy-ad-plan__secret { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fy-ad-plan__secret > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fy-ad-plan__secret small, .fy-ad-plan__until { color: var(--muted-foreground); font-size: 12px; white-space: nowrap; }
+.fy-ad-plan__until { display: flex; align-items: center; gap: 6px; }
+.fy-ad-plan__until input { width: 56px; padding: 4px 6px; }
 .fy-production-setup__review, .fy-production-setup__problems { border: 1px solid var(--line); border-radius: 8px; padding: 0 16px 12px; margin-top: 24px; }
 .fy-production-setup__actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
 .fy-production-setup__tabs { display: none; }

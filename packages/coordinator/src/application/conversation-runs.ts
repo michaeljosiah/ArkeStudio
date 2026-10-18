@@ -1,5 +1,5 @@
 import { productionSetupBrief } from "../productions/setup-brief.js";
-import { assertAdaptableSource, fenceAdaptableSource } from "../productions/setup.js";
+import { assertAdaptableSource, assertSourceReadForPlan, fenceAdaptableSource } from "../productions/setup.js";
 import { validateProductionPlan } from "../world-chat/production-readiness.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
@@ -280,9 +280,10 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         return outcome;
       }, budgetChars,
     ),
-    checkSetupUpdate: async (update) => {
+    checkSetupUpdate: async (update, { draft, receipts }) => {
       assertAdaptableSource(store, update);
       await fenceAdaptableSource(store, update);
+      assertSourceReadForPlan(store.getBundle(), update, draft, receipts);
     },
     setupBrief: ({ leaseToken, draft, budgetChars }) => productionSetupBrief(
       store.getBundle(), draft, async (tool, args) => {

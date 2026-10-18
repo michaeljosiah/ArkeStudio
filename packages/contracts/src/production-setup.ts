@@ -7,6 +7,7 @@ import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
+import { AUDIO_DRAMA_KIND, AudioDramaPlanSchema, DEFAULT_AUDIO_DRAMA_PLAN } from "./audio-drama.js";
 
 export const PRODUCTION_SETUP_BOUNDS = {
   episodes: 50, scenes: 300, arcs: 50, blocks: 200, references: 100, questions: 100,
@@ -16,7 +17,8 @@ const Key = SlugSchema.max(80);
 const Title = z.string().trim().min(1).max(PRODUCTION_SETUP_BOUNDS.title);
 const Prose = z.string().max(PRODUCTION_SETUP_BOUNDS.prose);
 const Keys = z.array(Key).max(PRODUCTION_SETUP_BOUNDS.scenes);
-export const SetupKindSchema = z.enum(["microdrama", "film", "music-video", "other"]);
+// An audio drama (SPEC-057) is the one Story kind setup makes; the rest are Video kinds.
+export const SetupKindSchema = z.enum(["microdrama", "film", "music-video", AUDIO_DRAMA_KIND, "other"]);
 export const SetupEpisodeSchema = z.object({
   key: Key,
   title: Title,
@@ -35,12 +37,13 @@ const SetupArcSchema = z.object({
   setup: Key.optional(), turn: Key.optional(), payoff: Key.optional(),
 }).strict();
 /**
- * The story a micro drama or a film is adapted from (design turn 205, SPEC-052 R-1..R-2): a Story
- * production in the same world with a chapter. Only its id is kept; what it holds is read each turn.
+ * The story a micro drama, a film or an audio drama is adapted from (design turn 205, SPEC-052
+ * R-1..R-2, SPEC-057 R-2): a Story production in the same world with a chapter. Only its id is
+ * kept; what it holds is read each turn.
  */
 export const SetupSourceSchema = z.object({ productionId: SlugSchema }).strict();
-/** The formats Adapt from is offered for (SPEC-052 R-1). */
-export const ADAPTATION_KINDS: ReadonlyArray<z.infer<typeof SetupKindSchema>> = ["microdrama", "film"];
+/** The formats Adapt from is offered for (SPEC-052 R-1, amended by SPEC-057 R-2). */
+export const ADAPTATION_KINDS: ReadonlyArray<z.infer<typeof SetupKindSchema>> = ["microdrama", "film", AUDIO_DRAMA_KIND];
 
 export interface AdaptableStory { id: string; title: string; kind: string; chapters: number; words: number }
 /**
@@ -50,7 +53,8 @@ export interface AdaptableStory { id: string; title: string; kind: string; chapt
 export function adaptableStories(productions: ReadonlyArray<{ meta: Production; chapters: readonly ChapterSummary[] }>): AdaptableStory[] {
   return productions.flatMap((production) => {
     const shape = productionShape(production.meta);
-    if (shape.medium !== "story") return [];
+    // An audio drama is a story with no chapters; it is adapted from, never adapted.
+    if (shape.medium !== "story" || shape.isAudioDrama) return [];
     const chapters = production.chapters.filter((chapter) => chapter.retired !== true);
     if (chapters.length === 0) return [];
     return [{
@@ -81,6 +85,8 @@ const SetupFieldsSchema = z.object({
   source: SetupSourceSchema.optional(),
   /** Where a micro drama will be watched (design turn 205, SPEC-052 R-6); its numbers are `defaults`. */
   target: ProductionTargetSchema.optional(),
+  /** An audio drama's one plan (SPEC-057 R-7): episodes, narrator, what is kept, the pilot. */
+  audioDrama: AudioDramaPlanSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -111,6 +117,7 @@ export const ProductionSetupUpdateSchema = z.object({
     defaults: SetupFieldsSchema.shape.defaults.nullable(),
     source: SetupSourceSchema.nullable().optional(),
     target: ProductionTargetSchema.nullable().optional(),
+    audioDrama: AudioDramaPlanSchema.nullable().optional(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   scenes: z.array(SetupSceneSchema.partial().extend({
@@ -148,6 +155,14 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
   const seeding = draft.kind !== "microdrama" && update.fields?.kind === "microdrama";
   const seeded = seeding && !draft.target && update.fields?.target === undefined ? presetTarget("global-app") : null;
   const defaults = seeding ? { ...MICRODRAMA_DEFAULTS, ...seeded?.defaults, ...draft.defaults } : draft.defaults;
+  // Becoming an audio drama starts from the default plan (SPEC-057 D-2) until Arke proposes one.
+  // So does changing the story it adapts: a pilot and secrets read from one story are not a plan
+  // for another, and must be proposed again from the new one (codex on PR 1866).
+  const sourceChanged = update.fields?.source !== undefined
+    && (update.fields.source?.productionId ?? null) !== (draft.source?.productionId ?? null);
+  const replanned = sourceChanged && (update.fields?.kind ?? draft.kind) === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined;
+  const audioPlan = update.fields?.audioDrama === null ? undefined : update.fields?.audioDrama
+    ?? replanned ?? draft.audioDrama ?? (update.fields?.kind === AUDIO_DRAMA_KIND ? DEFAULT_AUDIO_DRAMA_PLAN : undefined);
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
@@ -157,6 +172,7 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     narrative: { ...draft.narrative, ...update.fields?.narrative },
     source: update.fields?.source === null ? undefined : update.fields?.source ?? draft.source,
     target: update.fields?.target === null ? undefined : update.fields?.target ?? seeded?.target ?? draft.target,
+    audioDrama: audioPlan,
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults
@@ -186,14 +202,32 @@ export function productionSetupProblems(
   const problems: string[] = [];
   if (!draft.title.trim()) problems.push("Give the production a working title.");
   if (draft.source) {
-    if (!ADAPTATION_KINDS.includes(draft.kind)) problems.push("Adapt from is for a micro drama or a film. Clear it, or choose one.");
+    if (!ADAPTATION_KINDS.includes(draft.kind)) problems.push("Adapt from is for a micro drama, a film or an audio drama. Clear it, or choose one.");
     else if (productions && !adaptableStories(productions).some((story) => story.id === draft.source!.productionId)) {
       problems.push("The story this adapts is no longer in this world. Choose another under Adapt from, or clear it.");
     }
   }
+  // An audio drama plans its episodes in its own plan, as scripts (SPEC-057 R-7): it holds no
+  // video scenes, season episodes, arcs or Series in the draft.
+  const audioDrama = draft.kind === AUDIO_DRAMA_KIND;
+  if (audioDrama && (draft.scenes.length || draft.episodes.length || draft.arcs.length || draft.series)) {
+    problems.push("An audio drama plans its episodes in its own plan. Remove the scenes, episodes, arcs and Series.");
+  }
+  // The pilot cites chapters by their number in the story it adapts (SPEC-057 R-7). A number the
+  // story does not have is a misread or a stale plan, and would be shown as the pilot's source.
+  const pilot = audioDrama ? draft.audioDrama?.pilot : undefined;
+  if (pilot && pilot.chapters.length > 0) {
+    if (!draft.source) problems.push("An original drama's pilot names no chapters. Remove them, or choose a story under Adapt from.");
+    else {
+      const story = productions?.find((candidate) => candidate.meta.id === draft.source!.productionId);
+      const orders = new Set(story?.chapters.filter((chapter) => chapter.retired !== true).map((chapter) => chapter.order));
+      const missing = story ? pilot.chapters.filter((chapter) => !orders.has(chapter)) : [];
+      if (missing.length > 0) problems.push(`The pilot names chapter ${missing.join(", ")}, which the story does not have. Choose the pilot again.`);
+    }
+  }
   const episodic = draft.kind === "microdrama";
-  if (!episodic && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
-  if (!episodic && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");
+  if (!episodic && !audioDrama && (draft.episodes.length || draft.arcs.length)) problems.push("This format owns scenes directly. Remove the episodes and season arcs, or choose Micro drama.");
+  if (!episodic && !audioDrama && draft.series) problems.push("This format does not belong to a Series. Clear the Series or choose Micro drama.");
   if (episodic && draft.narrative.arcNotes) problems.push("Move the film arc notes into season direction or named season arcs.");
   const sceneKeys = new Set(draft.scenes.map(scene => scene.key));
   const episodeKeys = new Set(draft.episodes.map(episode => episode.key));
@@ -256,7 +290,13 @@ export const ProductionSetupCommandSchema = z.object({
   setupId: ConversationIdSchema,
   requestId: UlidSchema,
   action: z.discriminatedUnion("operation", [
-    z.object({ operation: z.literal("start") }).strict(),
+    // A door can open setup already knowing what it makes (SPEC-057 R-3): the kind, the story it
+    // adapts and a working title. Ignored when the setup already exists.
+    z.object({ operation: z.literal("start"), seed: z.object({
+      kind: SetupKindSchema.optional(),
+      source: SetupSourceSchema.optional(),
+      title: z.string().trim().max(PRODUCTION_SETUP_BOUNDS.title).optional(),
+    }).strict().optional() }).strict(),
     z.object({ operation: z.literal("update"), update: ProductionSetupUpdateSchema }).strict(),
     z.object({ operation: z.literal("review"), expectedRevision: z.number().int().min(1) }).strict(),
     z.object({ operation: z.literal("create"), expectedRevision: z.number().int().min(1), reviewId: UlidSchema }).strict(),

@@ -3,6 +3,7 @@ import { ConversationIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { EpisodeSchema, ProductionSchema, SeasonSchema, SeriesSchema } from "./world.js";
 import { SceneRecordSchema, validateSceneFlow } from "./scene-flow.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
+import { AudioDramaRecordSchema } from "./audio-drama.js";
 
 /** Delivery defaults shared by direct creation and conversational setup. Story endings remain authored. */
 export const MICRODRAMA_DEFAULTS = {
@@ -34,6 +35,8 @@ export const ProductionCreationPlanSchema = z.object({
     narrative: ProductionNarrativeSchema.nullable(),
     episodes: z.array(z.object({ stem: SlugSchema, record: EpisodeSchema }).strict()).max(50),
     scenes: z.array(z.object({ stem: SlugSchema, record: SceneRecordSchema }).strict()).max(300),
+    /** An audio drama's plan and source, written as `audio-drama.json` (SPEC-057 R-7). */
+    audioDrama: AudioDramaRecordSchema.optional(),
   }).strict().optional(),
 }).strict();
 export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
@@ -46,6 +49,9 @@ export function validateInitialContent(plan: ProductionCreationPlan): void {
     throw new Error("A film cannot contain season episodes.");
   }
   if (plan.initialSeason && content.narrative) throw new Error("A season cannot contain a film narrative.");
+  if (content.audioDrama && (plan.initialSeason || content.narrative || content.episodes.length || content.scenes.length)) {
+    throw new Error("An audio drama holds only its plan at creation.");
+  }
   for (const entries of [content.episodes, content.scenes]) {
     if (new Set(entries.map(entry => entry.stem)).size !== entries.length ||
         new Set(entries.map(entry => entry.record.id)).size !== entries.length) throw new Error("The creation plan repeats an id or filename.");

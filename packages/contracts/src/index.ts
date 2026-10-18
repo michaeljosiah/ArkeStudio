@@ -3,6 +3,7 @@ export * from "./remote-access.js";
 export { ReferenceMediaBindingsSchema, referenceInputProblem, type ReferenceMediaBindings } from "./media-reference.js";
 export * from "./world.js";
 export * from "./production-shape.js";
+export * from "./audio-drama.js";
 export * from "./scene-findings.js";
 export * from "./season-findings.js";
 export * from "./bible.js";

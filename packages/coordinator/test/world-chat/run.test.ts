@@ -1291,3 +1291,39 @@ it("renders a recovered earlier action's completed receipt in the next model pro
   assert.match(prompts[0]!, /"status":"completed"/);
   assert.doesNotMatch(prompts[0]!, /C:\/private/);
 });
+
+describe("an audio drama's create card is fenced before it is durable (SPEC-057 R-82, codex on PR 1866)", () => {
+  it("raises the world to schema 90 before the turn that prepares it is written", async () => {
+    const worldPath = await tempDir("arke-run-drama-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append({ type: "conversation.created", title: "make one", entryContext: { kind: "world" } }, { at: AT });
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const raised: Array<{ version: number; turnWritten: boolean }> = [];
+    const checkId = newId("check");
+    const answer = JSON.stringify({ reply: "Here is the card.", candidateOperations: [], groupOperations: [],
+      actions: [{ kind: "production-create", production: { title: "Low Water", medium: "story", productionKind: "audio-drama" }, checkReceiptIds: [checkId] }] });
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([answer]),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: (runId) => [{ id: checkId, runId, tool: "target-read", status: "complete", consulted: [], at: AT,
+        target: { requirement: "production-metadata", id: bundle.meta.worldId }, observedRevisionOrDigest: "fence", complete: true }] as never,
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({ messages, bundle, attachments: [], attachmentText: new Map() }),
+      prepareActions: () => [{ payload: { kind: "world-chat-production-create",
+        plan: { production: { id: "low-water", title: "Low Water", format: "story", medium: "story", kind: "audio-drama" } } }, intent: {} }] as never,
+      bindActions: async () => {},
+      raiseSchemaBoundary: async (version) => {
+        raised.push({ version, turnWritten: (await store.read()).events.some(({ event }) => event.type === "turn.completed") });
+        // Stop here: what is asserted is that the fence came first, not what the stub intent writes.
+        throw new Error("fenced");
+      },
+      now: NOW,
+    });
+    await runner.send(store, conversationId, "Make an audio drama of Low Water").catch(() => {});
+    assert.deepEqual(raised.find(entry => entry.version === 90), { version: 90, turnWritten: false },
+      JSON.stringify((await store.read()).events.map(({ event }) => event.type === "run.finished" ? event.run : event.type)));
+  });
+});

@@ -10,14 +10,15 @@ import {
   takeCostCopy,
   type ModelChoices,
 } from "@arke-studio/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Composer } from "../components/composer.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait } from "../components/portrait.js";
 import { Button } from "../components/ui.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { ChevronRight } from "../components/icons.js";
+import { ChevronRight, Lock, More } from "../components/icons.js";
+import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
@@ -54,7 +55,102 @@ export function ProductionHomeScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
   if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
+  if (production && productionShape(production.meta).isAudioDrama) return <AudioDramaEpisodesScreen />;
   return <ProductionDashboardScreen />;
+}
+
+/**
+ * The story's ⋯ (SPEC-057 R-4). Adapt… opens Tell a story's step two holding this book, as an
+ * audio drama: the one adaptation made from step two. A film or a micro drama adapts the book from
+ * its own setup, which offers the same story under Adapt from.
+ */
+function StoryMore({ onAdapt }: { onAdapt: () => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: Event) => { if (box.current !== null && !box.current.contains(event.target as Node)) setOpen(false); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", key); };
+  }, [open]);
+  return (
+    <span ref={box} className="fy-story-more">
+      <button type="button" className="fy-story-more__btn" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <More size={16} />
+      </button>
+      {open && (
+        <div className="fy-story-more__menu" role="menu" aria-label="More">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onAdapt(); }}>Adapt…</button>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/**
+ * An audio drama's home (design turn 230p, SPEC-057 R-7): its episodes as the plan sets them out,
+ * the pilot among them, and what the listener is not told yet. Scripts, takes and listening join
+ * this page as they are built; until then it is the plan, read back.
+ */
+function AudioDramaEpisodesScreen() {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  if (!world || !production) return <Screen id="production-dashboard"><EmptyState title="Opening production…" /></Screen>;
+  const plan = production.audioDrama?.plan ?? null;
+  const source = production.audioDrama?.source ? world.productions.find(p => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
+  const episodes = plan ? Array.from({ length: plan.episodes }, (_, i) => i + 1) : [];
+  return (
+    <div className="fy-prodmain fy-ad-home" data-screen="production-dashboard">
+      <div className="fy-h1row">
+        <h1 className="fy-h1">{production.meta.title}</h1>
+        <span className="fy-h1row__meta">
+          {plan ? `${plan.episodes} episode${plan.episodes === 1 ? "" : "s"} · about ${plan.minutes} minutes each${plan.narrator ? ` · ${NARRATOR_LABEL[plan.narrator].toLowerCase()}` : ""}` : "no plan"}
+        </span>
+      </div>
+      {production.audioDrama?.source && (
+        <div className="fy-h1row__meta">
+          Adapts{" "}
+          {source ? <button type="button" className="fy-linkbtn" onClick={() => navigate(`/w/${worldId}/p/${source.meta.id}`)}>{source.meta.title}</button>
+            : `${production.audioDrama.source.productionId} · no longer here`}
+        </div>
+      )}
+      {/* The pilot is a scene, not an episode: the plan names no episode for it, so it is shown
+          on its own rather than placed somewhere the plan never put it (codex on PR 1866). */}
+      {plan?.pilot && (
+        <div>
+          <div className="fy-listhead">Pilot</div>
+          <p className="fy-ad-home__pilot">{[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}</p>
+        </div>
+      )}
+      <div>
+        <div className="fy-listhead">Episodes</div>
+        <ol className="fy-ad-home__episodes">
+          {episodes.map(n => (
+            <li key={n}>
+              <span className="fy-ad-home__n">{n}</span>
+              <span>
+                <b>Episode {n}</b>
+                <small>not written</small>
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      {plan && plan.keptFromListener.length > 0 && (
+        <div>
+          <div className="fy-listhead">Kept from the listener</div>
+          <ul className="fy-ad-home__kept">
+            {plan.keptFromListener.map((kept, i) => (
+              <li key={`${i}:${kept.fact}`}><Lock size={13} /><span>{kept.fact}</span><small>until ep {kept.revealEpisode}</small></li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ProductionDashboardScreen() {
@@ -107,6 +203,10 @@ export function ProductionDashboardScreen() {
                   inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
+          {/* Adapt… (SPEC-057 R-4): a book with chapters is something to make a drama from. */}
+          {chapters.length > 0 && (
+            <StoryMore onAdapt={() => navigate(`/w/${worldId}/productions/new`, { state: { adapt: { productionId: production.meta.id } } })} />
+          )}
         </div>
         <div className="fy-h1row__meta">
           {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}

@@ -3,6 +3,7 @@ import {
   advanceWorldChatInputQueue,
   worldChatInputRouting,
   applyProductionSetupUpdate,
+  productionShape,
   type ProductionSetupDraft,
   type ProductionSetupUpdate,
   type ProductionSetupState,
@@ -30,7 +31,7 @@ import {
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
-import { TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
 import { SceneEditRefused } from "../productions/scene-edits.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
 import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
@@ -86,7 +87,12 @@ export interface RunDeps {
    * Checks a setup turn's update against the world before it is applied, and raises the world past
    * the builds that cannot read it (design turn 205): Adapt from named by Arke, as by the rail.
    */
-  checkSetupUpdate?: (update: ProductionSetupUpdate) => Promise<void>;
+  /**
+   * Checks a setup turn's update against the world. `draft` is the draft it would make, and
+   * `receipts` every read the conversation has made, this run's included, so a plan can be held
+   * to what was actually read (SPEC-057 R-5).
+   */
+  checkSetupUpdate?: (update: ProductionSetupUpdate, context: { draft: ProductionSetupDraft; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -1110,8 +1116,11 @@ export class WorldChatRunner {
         return { ok: false, problems: [{ code: "setup-stale", safeMessage: "Production so far changed while this reply was being written. Read the latest draft and try again." }] };
       }
       try {
-        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate);
         const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
+        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate, {
+          draft,
+          receipts: [...events.flatMap(({ event }) => event.type === "turn.completed" ? event.receipts : []), ...this.deps.receiptsFor(runId)],
+        });
         productionSetup = { draft, status: "draft", review: null };
       } catch (error) {
         return { ok: false, problems: [{ code: "setup-update", safeMessage: error instanceof Error ? error.message.slice(0, 500) : "The outline update could not be read." }] };
@@ -1290,6 +1299,13 @@ export class WorldChatRunner {
       }) ?? [];
     } catch (error) {
       return { ok: false, problems: [preparationProblem(error)] };
+    }
+    // An audio drama's create card is written into this turn before it is bound, so the world is
+    // raised first: a build before schema 90 would otherwise approve it as a plain story with no
+    // plan (SPEC-057 R-82, codex on PR 1866).
+    if (actions.some(action => action.payload.kind === "world-chat-production-create" && productionShape(action.payload.plan.production).isAudioDrama)) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "action-unavailable", safeMessage: "This host cannot create an audio drama from chat. Answer without creating one." }] };
+      await this.deps.raiseSchemaBoundary(AUDIO_DRAMA_SCHEMA_VERSION);
     }
     await store.append(
       {

@@ -1,4 +1,5 @@
 import type { ProductionFormat, ProductionMedium } from "./world.js";
+import { AUDIO_DRAMA_KIND } from "./audio-drama.js";
 
 /**
  * The one place classification becomes behaviour (SPEC-023 R-4). Every surface that used to
@@ -11,6 +12,12 @@ export interface ProductionShape {
   kind: string;
   /** Whether episodes exist for this production (SPEC-023 R-11). */
   isEpisodic: boolean;
+  /**
+   * A story told for the ear (SPEC-057 R-82): episodes that are scripts, not chapters and not a
+   * video season. Kept apart from `isEpisodic`, which means a season of scenes, shots and a cut;
+   * an audio drama has neither chapters nor scene records.
+   */
+  isAudioDrama: boolean;
   hasChapters: boolean;
   hasScenes: boolean;
   /** Branching belongs to the interactive kinds (turn 100; was a medium of its own, turn 84). */
@@ -79,6 +86,7 @@ const KIND_LABEL: Record<string, string> = {
   // because the question above it already said video.
   interactive: "Interactive video",
   "visual-novel": "Visual novel",
+  [AUDIO_DRAMA_KIND]: "Audio drama",
 };
 
 export function resolveMedium(meta: { format: ProductionFormat; medium?: ProductionMedium }): ProductionMedium {
@@ -112,11 +120,14 @@ export function productionShape(meta: {
   // A visual novel is a video production's kind (turn 174): the same word on a story, which
   // has chapters and no scenes, is no visual novel, and must not route, play or dispatch as one.
   const visualNovel = medium === "video" && kind === VISUAL_NOVEL_KIND;
+  // The same word on a video is no audio drama: it is a kind of the story medium only.
+  const audioDrama = medium === "story" && kind === AUDIO_DRAMA_KIND;
   return {
     medium,
     kind,
     isEpisodic,
-    hasChapters: medium === "story",
+    isAudioDrama: audioDrama,
+    hasChapters: medium === "story" && !audioDrama,
     hasScenes: medium !== "story",
     isBranching: kind === VISUAL_NOVEL_KIND ? visualNovel : BRANCHING_KINDS.has(kind),
     playsAsBeats: visualNovel,
