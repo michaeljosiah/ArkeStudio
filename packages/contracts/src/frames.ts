@@ -2333,6 +2333,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       episode: z.number().int().min(1).max(200),
       block: UlidSchema,
       keep: z.enum(["new", "kept"]),
+      /** The waiting take the author heard: a different one waiting now is not decided. */
+      waiting: ArtifactIdSchema,
     })
     .strict(),
   z

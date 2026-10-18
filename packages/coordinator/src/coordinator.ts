@@ -10516,7 +10516,7 @@ export class Coordinator {
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
-            succeededJobs: (match) => (this.jobQueue?.listJobs() ?? []).filter((job) => job.status === "succeeded" && match(job)),
+            jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
             ...(transcribe !== undefined ? { transcribe } : {}),
           });
           // The world first, then the answer (codex on PR 1871): the press plays the takes it made.
@@ -10533,7 +10533,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         // A decision on a take that no longer waits changes nothing; the refreshed world shows it.
         // Anything else is said (codex on PR 1871), never swallowed.
-        try { await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep); }
+        try { await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep, msg.waiting); }
         catch (err) {
           if (!(err instanceof Error && err.message === "no take is waiting on that line")) {
             this.emit({ at: new Date().toISOString(), type: "command.failed", command: "decide-drama-take", requestId: null, reason: describeCoordinatorError(err) });
