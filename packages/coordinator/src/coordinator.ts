@@ -25,7 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
-import { decideDramaNote, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
+import { decideDramaNote, keepAllAdaptedText, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
 import { ProseAuthoringService } from "./application/prose-authoring.js";
@@ -4987,6 +4987,7 @@ export class Coordinator {
         try { await recoverProductionSetups(store); }
         finally { await this.refreshConversations(store); }
       });
+      await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
     // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn

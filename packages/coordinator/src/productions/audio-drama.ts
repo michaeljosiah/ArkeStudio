@@ -128,6 +128,16 @@ export async function keepAdaptedText(store: WorldStore, productionId: string, b
   }
 }
 
+/**
+ * Every saved script's adapted text, kept on open (codex on PR 1878): a script saved before
+ * snapshots existed would otherwise lose its evidence to the first edit made in place.
+ */
+export async function keepAllAdaptedText(store: WorldStore): Promise<void> {
+  for (const production of store.getBundle().productions) {
+    for (const entry of production.episodeScripts ?? []) await keepAdaptedText(store, production.meta.id, entry.script.blocks).catch(() => {});
+  }
+}
+
 /** A scene's adapted text, by the hash it was pinned at. */
 export async function readDramaSource(store: WorldStore, productionId: string, hash: string): Promise<string> {
   const body = await readFile(toExtendedLength(join(store.dir, fromPortable(dramaSourceSnapshotPath(productionId, hash)))), "utf8").catch(() => null);

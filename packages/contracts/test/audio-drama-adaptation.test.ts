@@ -34,6 +34,15 @@ describe("changed paragraphs", () => {
   });
 });
 
+describe("codex round 3 on PR 1878", () => {
+  it("aligns a long chapter without a table the size of both", () => {
+    const adapted = Array.from({ length: 6000 }, (_, i) => `Paragraph ${i}.`);
+    const now = adapted.map((text, i) => i === 3000 ? "Rewritten." : text);
+    assert.deepEqual(changedParagraphs(adapted, now), [3001]);
+    assert.equal(remapParagraphs(adapted, [...now.slice(1), now[0]!]).get(1), 6000, "beyond the table, a moved paragraph is still found by its words");
+  });
+});
+
 describe("codex round 1 on PR 1878", () => {
   it("renumbers paragraphs that moved, and lets a changed one go", () => {
     const v14 = ["A.", "B.", "C."];

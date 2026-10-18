@@ -704,22 +704,32 @@ export function changedParagraphs(adapted: readonly string[], now: readonly stri
  */
 function alignParagraphs(adapted: readonly string[], now: readonly string[]): Map<number, number> {
   const a = adapted.map(sameText), b = now.map(sameText);
-  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
-  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
-    lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
-  }
   const placed = new Map<number, number>(), used = new Set<number>();
-  for (let i = 0, j = 0; i < a.length && j < b.length;) {
-    if (a[i] === b[j]) { placed.set(i + 1, j + 1); used.add(j); i++; j++; }
-    else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) i++;
-    else j++;
+  const keep = (i: number, j: number) => { placed.set(i + 1, j + 1); used.add(j); };
+  // The unchanged head and tail first (codex on PR 1878): an edit is usually local, and the table
+  // below grows with the product of what is left. Both always belong to a longest run.
+  let head = 0, tail = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) { keep(head, head); head++; }
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) { keep(a.length - 1 - tail, b.length - 1 - tail); tail++; }
+  const m = a.length - head - tail, n = b.length - head - tail, width = n + 1;
+  // Past a few million cells the order is let go, and the words alone place each paragraph.
+  if (m > 0 && n > 0 && (m + 1) * width <= 4_000_000) {
+    const lcs = new Uint16Array((m + 1) * width);
+    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) {
+      lcs[i * width + j] = a[head + i] === b[head + j] ? lcs[(i + 1) * width + j + 1]! + 1 : Math.max(lcs[(i + 1) * width + j]!, lcs[i * width + j + 1]!);
+    }
+    for (let i = 0, j = 0; i < m && j < n;) {
+      if (a[head + i] === b[head + j]) { keep(head + i, head + j); i++; j++; }
+      else if (lcs[(i + 1) * width + j]! >= lcs[i * width + j + 1]!) i++;
+      else j++;
+    }
   }
   a.forEach((text, i) => {
     if (placed.has(i + 1)) return;
     const j = b.findIndex((candidate, at) => !used.has(at) && candidate === text);
-    if (j >= 0) { placed.set(i + 1, j + 1); used.add(j); }
+    if (j >= 0) keep(i, j);
   });
-  return placed;
+  return new Map([...placed].sort(([x], [y]) => x - y));
 }
 
 /** The blocks of a scene that rest on changed paragraphs: its lines' own, else the scene's pin. */
