@@ -1788,6 +1788,22 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(plain.querySelector('[data-testid="illustration-without"]'), null);
   });
 
+  it("a row handed back with a look it never showed disagreeing is held again, its Without spent (codex on PR 1868)", async () => {
+    const m = await mount(voiced(inkbound()));
+    await answerOpen(m);
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"] }), row("p3.0", { at: 150 })] } }));
+    await act(async () => (all(m, '[data-testid="illustration-row"]')[0]!.querySelector('[data-testid="illustration-without"]') as HTMLButtonElement).click());
+    await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
+    assert.deepEqual(sentOf(m, "accept-illustration")[0]!.without, ["p0.0"]);
+    // The run finds Maren's look disputed now, holds the row, and hands it back marked.
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.progress", ...ids, progress: { proposalId: "ill-1", state: "done", total: 2, made: ["p3.0"], failed: [{ block: "p0.0", reason: "a look disagrees with the chapter · review looks" }], spentMicroUsd: 40_000, confirmedMicroUsd: 80_000 } }));
+    await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { needs: ["Bray"], disagrees: ["maren-kest"] })] } }));
+    const card = all(m, '[data-testid="illustration-row"]')[0]!;
+    assert.equal(card.dataset.state, "held", "not `sent as it is` on a Without given for the missing reference alone");
+    assert.equal(card.querySelector('[data-testid="illustration-disagrees"]')!.textContent, "look disagrees with the chapter");
+    assert.equal(card.querySelector('[data-testid="illustration-without"]')!.textContent, "Without · as it is");
+  });
+
   it("counts the pictures as they are made in the dock's one line and Stop keeps what is made", async () => {
     const m = await proposedMount();
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());

@@ -403,6 +403,17 @@ export function illustrationRowGoes(row: Pick<IllustrationRow, "block" | "needs"
   return without.has(row.block) || ((row.needs?.length ?? 0) === 0 && (row.disagrees?.length ?? 0) === 0 && row.refused === undefined);
 }
 
+/**
+ * Whose look a run may not make a row in (issue 1658): the people whose look disagrees with the
+ * chapter now, less those the row showed disagreeing when the author sent it as it is. Without
+ * for a missing reference, or Try again, consents to no look; As it is consents to the people it
+ * named, and to no one whose look came to disagree after (codex on PR 1868).
+ */
+export function disagreementsNotSentAsIs(row: Pick<IllustrationRow, "block" | "disagrees">, without: ReadonlySet<string>, live: readonly string[]): string[] {
+  const shown = new Set(without.has(row.block) ? (row.disagrees ?? []) : []);
+  return live.filter((key) => !shown.has(key));
+}
+
 /** Where a made-one-at-a-time run stands (191d), and what each picture came to. */
 export const IllustrationProgressSchema = z
   .object({

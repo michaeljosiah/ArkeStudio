@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { IllustrationProposalSchema, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
+import { IllustrationProposalSchema, disagreementsNotSentAsIs, illustrationRowGoes, illustrationTotal, paceLabel, pacePhrase, pictureBench, pictureCap, pictureDetailSkins, sheetSkin, pictureStarts, priceLabel, referenceBriefLine, thinPictures } from "../src/audiobook-illustrate.js";
 import { sheetReferencePicture } from "../src/world-image-references.js";
 
 /**
@@ -83,6 +83,15 @@ describe("what the card says (191b)", () => {
   });
 
   // Issue 1658: Illustrate made 17 pictures in looks the chapter's Looks sheet flagged.
+  it("lets a run make a row in a disputed look only for the people the author sent as it is (codex on PR 1868)", () => {
+    const row = { block: "b", disagrees: ["ife"] };
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(["b"]), ["ife"]), [], "As it is, for the look it named");
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(["b"]), ["ife", "ade"]), ["ade"], "not for one that came to disagree after");
+    assert.deepEqual(disagreementsNotSentAsIs(row, new Set(), ["ife"]), ["ife"], "not sent as it is at all");
+    assert.deepEqual(disagreementsNotSentAsIs({ block: "b" }, new Set(["b"]), ["ife"]), ["ife"], "a Without for a missing reference, or Try again, names no look");
+    assert.deepEqual(disagreementsNotSentAsIs({ block: "b" }, new Set(), []), []);
+  });
+
   it("holds a row whose chapter look disagrees with the chapter until the author sends it as it is", () => {
     const rows = [
       { block: "a", estimatedMicroUsd: 40_000 },
