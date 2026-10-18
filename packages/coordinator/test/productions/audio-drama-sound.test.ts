@@ -8,6 +8,8 @@ import { createProduction } from "../../src/productions/ops.js";
 import { generateDramaSound, type DramaSoundDeps, type DramaSoundInput } from "../../src/productions/audio-drama-sound.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
+import { SOUND_ARTIFACT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -51,7 +53,7 @@ describe("a sound for an audio drama's cue (SPEC-057 R-39..R-42)", () => {
     if (made.disposition !== "made") return;
     assert.equal(sent.length, 1);
     assert.equal(sent[0]!.capability, "sound-effect");
-    assert.deepEqual(sent[0]!.params, { text: bell.prompt, durationSeconds: 4 }, "what is sent is the edited prompt, not the script's words");
+    assert.deepEqual(sent[0]!.params, { text: bell.prompt, durationSec: 4 }, "what is sent is the edited prompt, not the script's words");
     const artifact = store.getBundle().artifacts.find((a) => a.id === made.artifactIds[0])!;
     assert.equal(artifact.production, id, "a production artifact");
     assert.equal(artifact.generation?.source === "sound" && artifact.generation.heard, bell.heard, "the script's words are kept as they were");
@@ -67,7 +69,7 @@ describe("a sound for an audio drama's cue (SPEC-057 R-39..R-42)", () => {
     const made = await generateDramaSound(store, id, { ...rain, quoteToken: quoted.quote.token }, deps);
     assert.ok(made.disposition === "made" && made.artifactIds.length === 2);
     if (made.disposition !== "made") return;
-    assert.deepEqual(sent.map((input) => input.params), [{ text: rain.prompt, durationSeconds: 30, loop: true }, { text: rain.prompt, durationSeconds: 23, loop: true }]);
+    assert.deepEqual(sent.map((input) => input.params), [{ text: rain.prompt, durationSec: 30, loop: true }, { text: rain.prompt, durationSec: 23, loop: true }]);
     const second = store.getBundle().artifacts.find((a) => a.id === made.artifactIds[1])!;
     assert.equal(second.generation?.source === "sound" && second.generation.pair, made.artifactIds[0]);
   });
@@ -78,7 +80,30 @@ describe("a sound for an audio drama's cue (SPEC-057 R-39..R-42)", () => {
     const quoted = await generateDramaSound(store, id, { ...cello, quoteOnly: true }, deps);
     assert.ok(quoted.disposition === "quoted" && quoted.quote.estimatedMicroUsd === 112_500, "45 s at $0.15 a minute");
     await generateDramaSound(store, id, { ...cello, quoteToken: quoted.disposition === "quoted" ? quoted.quote.token : "" }, deps);
-    assert.deepEqual([sent[0]!.capability, sent[0]!.model, sent[0]!.params], ["music", "music_v1", { prompt: cello.prompt, durationSeconds: 45 }]);
+    assert.deepEqual([sent[0]!.capability, sent[0]!.model, sent[0]!.params], ["music", "music_v1", { prompt: cello.prompt, durationSec: 45 }]);
     await assert.rejects(generateDramaSound(store, id, { ...bell, durationSec: 31, quoteOnly: true }, deps), /0\.5 to 30 seconds/);
+  });
+});
+
+describe("codex round 1 on PR 1872", () => {
+  it("refuses What's sent past the model's limit before anything is priced or sent", async () => {
+    const { store, id, sent, deps } = await drama();
+    await assert.rejects(generateDramaSound(store, id, { ...bell, prompt: "x".repeat(451), quoteOnly: true }, deps), /takes 450/);
+    assert.equal(sent.length, 0);
+  });
+
+  it("keeps the first ambience loop, said, when the second is not made; the world is fenced for sounds", async () => {
+    const { store, id, sent, deps } = await drama();
+    const ambience: DramaSoundInput = { cue: "ambience", heard: "Harbour at night.", prompt: "Harbour at night. Close and dry.", durationSec: null, name: "Harbour" };
+    const quoted = await generateDramaSound(store, id, { ...ambience, quoteOnly: true }, deps);
+    assert.ok(quoted.disposition === "quoted");
+    if (quoted.disposition !== "quoted") return;
+    const failing: DramaSoundDeps = { ...deps, waitForJob: async (jobId) => sent.length === 1 ? deps.waitForJob(jobId) : ({ id: jobId, status: "failed" } as unknown as Job) };
+    const made = await generateDramaSound(store, id, { ...ambience, quoteToken: quoted.quote.token }, failing);
+    assert.equal(made.disposition, "made");
+    if (made.disposition !== "made") return;
+    assert.equal(made.artifactIds.length, 1, "the paid first loop is placed, not orphaned");
+    assert.match(made.reason ?? "", /second loop was not made/);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= SOUND_ARTIFACT_SCHEMA_VERSION);
   });
 });

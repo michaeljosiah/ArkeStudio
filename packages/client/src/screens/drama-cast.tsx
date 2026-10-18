@@ -185,7 +185,9 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
 /** The request for this role's first line, as Hear would send it (R-60): priced, never made here. */
 function RoleSent({ world, production, role }: { world: WorldBundle; production: ProductionBundle; role: DramaCastRole }) {
   const first = dramaBlocks(production).find(({ block }) => role.key === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === role.key);
-  const quote = useHearQuote(world.meta.worldId, production.meta.id, first?.episode ?? 1, first ? [first.block.id] : [], {}, JSON.stringify(role.role ?? null));
+  // Priced from the saved script, as Hear is: the request shown is the one a press would send.
+  const saved = production.episodeScripts?.find((entry) => entry.script.episode === first?.episode)?.hash ?? null;
+  const quote = useHearQuote(world.meta.worldId, production.meta.id, first?.episode ?? 1, first ? [first.block.id] : [], {}, JSON.stringify(role.role ?? null), false, saved);
   if (!first) return <p className="fy-ad-cast__sent">No line yet.</p>;
   if (!quote) return <p className="fy-ad-cast__sent">Pricing…</p>;
   if (quote.disposition === "refused") return <p className="fy-ad-cast__sent">{quote.reason}</p>;

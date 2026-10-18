@@ -222,7 +222,23 @@ describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
     assert.equal(hear.querySelector(".fy-ad-hear__dot"), null, "nothing waits on the author");
     await click(hear);
     const made = hearSent(m.sent).at(-1)!;
-    assert.deepEqual([made.quoteToken, made.quoteOnly], ["tok", undefined]);
+    assert.deepEqual([made.quoteToken, made.quoteOnly, made.scriptHash], ["tok", undefined, "sha256:base"], "fenced on the saved script");
+  });
+
+  it("prices nothing while the line is unsaved, then the saved words (codex on PR 1871)", async () => {
+    const m = await mount(withScript([a]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log said three hours." } }));
+    const before = hearSent(m.sent).length;
+    await wait(350);
+    assert.equal(hearSent(m.sent).length, before, "an unsaved line is not priced");
+    await wait(400);
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:saved" }));
+    await wait(350);
+    assert.equal(hearSent(m.sent).at(-1)!.scriptHash, "sha256:saved");
   });
 
   it("an uncast speaker always opens the decision; nothing substitutes on its own", async () => {
@@ -275,5 +291,39 @@ describe("codex round 2 on PR 1870", () => {
     takeParked(FIXTURE_WORLD_ID, "low-water-drama", 1);
     const moved = await mount(withScript([pinned("sha256:then")]));
     assert.match(moved.container.textContent!, /Chapter 3 · changed v14/, "the version alone would not have said it");
+  });
+});
+
+describe("codex round 3 on PR 1870", () => {
+  it("exports where a bed stops", () => {
+    const stop = line("maren", "Two. Climb.");
+    const text = scriptAsText("", 1, [{ id: ulid(), kind: "music", heard: "Low drone", until: stop.id }, line("bray", "One."), stop], slug => slug);
+    assert.match(text, /MUSIC: Low drone[\s\S]*BRAY[\s\S]*MUSIC ENDS: Low drone[\s\S]*MAREN/);
+  });
+
+  it("keeps the author's text after a refused save, and Keep mine saves it over the newer script", async () => {
+    const first = line("maren", "Bray. Bray, look.");
+    const state = withScript([first]);
+    const m = await mount(state);
+    const words = m.container.querySelector(`[data-block="${first.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "Mine." } }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "refused", reason: "The script changed." }));
+    // The newer script arrives in the bundle: it does not replace what the author wrote.
+    const newer = structuredClone(state);
+    const drama = newer.world!.productions.find(p => p.meta.id === "low-water-drama")!;
+    drama.episodeScripts = [{ file: "episode-001.json", hash: "sha256:theirs", script: { version: 3, episode: 1, title: "", blocks: [line("bray", "Theirs.")] } }];
+    await act(async () => __setStateForTest(newer, { connection: "open" }));
+    assert.equal((m.container.querySelector(`[data-block="${first.id}"] .fy-ad-score__line textarea`) as HTMLTextAreaElement | null)?.value, "Mine.");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    assert.equal(m.sent.filter(message => message.kind === "save-episode-script").length, 1, "not sent again on its own");
+    const keep = [...m.container.querySelectorAll("button")].find(button => button.textContent === "Keep mine")!;
+    await act(async () => props(keep).onClick!({}));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const again = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal(again.baseHash, "sha256:theirs");
+    assert.equal(again.blocks[0]!.kind === "dialogue" && again.blocks[0]!.words, "Mine.");
   });
 });

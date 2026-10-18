@@ -32,6 +32,7 @@ import {
   EpisodeScriptSchema,
   EpisodeTakesSchema,
   episodeScriptFile,
+  episodeTakesFile,
   type EpisodeScript,
   type EpisodeTakes,
   type Episode,
@@ -187,7 +188,11 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
 // 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
 // 90: an audio drama — the setup kind and its audio-drama.json plan (SPEC-057, issue 1857).
-export const SUPPORTED_SCHEMA_VERSION = 90;
+// 91: an audio drama's episode scripts (SPEC-057 R-83, issue 1858).
+// 92: an audio drama's takes — drama-takes and the episode on a take's sidecar (SPEC-057 R-29, issue 1859).
+// 93: a generated sound artifact (SPEC-057 R-48, issue 1860).
+// 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
+export const SUPPORTED_SCHEMA_VERSION = 94;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -973,7 +978,13 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // Its takes (SPEC-057 R-29), by episode.
     const episodeTakes: EpisodeTakes[] = [];
     for (const file of (await listDir(join(pdir, "drama-takes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const takes = await tryParse(`productions/${id}/drama-takes/${file}`, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
+      const rel = `productions/${id}/drama-takes/${file}`;
+      const takes = await tryParse(rel, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
+      // Named for its episode, as a script is (codex on PR 1871): a stale copy never shadows the file.
+      if (takes && file !== episodeTakesFile(takes.episode)) {
+        problems.push({ path: toPortable(rel), message: `this file holds episode ${takes.episode}'s takes; it must be named ${episodeTakesFile(takes.episode)}` });
+        continue;
+      }
       if (takes) episodeTakes.push(takes);
     }
     productions.push({

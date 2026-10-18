@@ -6,6 +6,8 @@ import { ulid, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { createProduction } from "../../src/productions/ops.js";
 import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
+import { EPISODE_SCRIPT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -40,6 +42,7 @@ describe("saving an episode script (SPEC-057 R-83)", () => {
     assert.equal(bundled.episodeScripts?.[0]?.hash, second.hash, "the scan carries the base the next save is fenced on");
     assert.equal(bundled.episodeScripts?.[0]?.script.blocks.length, 3);
     assert.equal((productionRecord(store.getBundle(), id) as { episodeScripts?: unknown[] }).episodeScripts?.length, 1, "Arke reads what the score shows");
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= EPISODE_SCRIPT_SCHEMA_VERSION, "a build that cannot read scripts refuses the world");
   });
 
   it("refuses a save against a moved base, a broken relation, or a production that is not a drama", async () => {

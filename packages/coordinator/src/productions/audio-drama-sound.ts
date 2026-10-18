@@ -42,12 +42,15 @@ type Request = { model: ManifestModel; durationSec: number | null; loop: boolean
 export type DramaSoundResult =
   | { disposition: "quoted"; quote: { token: string; estimatedMicroUsd: number;
       requests: Array<{ engine: string; prompt: string; durationSec?: number; loop?: boolean; estimatedMicroUsd: number }> } }
-  | { disposition: "made"; artifactIds: string[] };
+  | { disposition: "made"; artifactIds: string[]; reason?: string };
 
 function plan(input: DramaSoundInput, models: readonly ManifestModel[]): Request[] {
   const find = (id: string) => {
     const model = models.find((candidate) => candidate.provider === "elevenlabs" && candidate.id === id);
     if (!model) throw new Error(`${id} is not available on this host`);
+    // The row's own limit on what is sent (codex on PR 1872): refused here, never sent to fail there.
+    const most = model.limits.maxPromptChars;
+    if (most !== undefined && input.prompt.length > most) throw new Error(`What's sent is ${input.prompt.length} characters; ${model.displayName} takes ${most}.`);
     return model;
   };
   if (input.cue === "music") {
@@ -88,13 +91,18 @@ export async function generateDramaSound(store: WorldStore, productionId: string
       provider: "elevenlabs",
       model: request.model.id,
       params: music
-        ? { prompt: input.prompt, ...(request.durationSec !== null ? { durationSeconds: request.durationSec } : {}) }
-        : { text: input.prompt, ...(request.durationSec !== null ? { durationSeconds: request.durationSec } : {}), ...(request.loop ? { loop: true } : {}) },
+        ? { prompt: input.prompt, ...(request.durationSec !== null ? { durationSec: request.durationSec } : {}) }
+        : { text: input.prompt, ...(request.durationSec !== null ? { durationSec: request.durationSec } : {}), ...(request.loop ? { loop: true } : {}) },
       estimatedMicroUsd: request.estimatedMicroUsd,
       landing: { dir: `.staging/drama-sound/${productionId}`, name: `${Date.now()}-${index}.mp3` },
     });
     const job = await deps.waitForJob(jobId);
-    if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) throw new Error(job.status === "cancelled" ? "stopped" : "the sound job failed · open Activity for details");
+    if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) {
+      const why = job.status === "cancelled" ? "stopped" : "the sound job failed · open Activity for details";
+      // A loop already made is paid for and kept (codex on PR 1872): placed, and the rest said.
+      if (artifactIds.length > 0) return { disposition: "made", artifactIds, reason: `The second loop was not made (${why}). The first is kept.` };
+      throw new Error(why);
+    }
     const landed = join(store.dir, fromPortable(job.landedFiles[0]));
     const artifact = await fileGeneratedArtifact(store, {
       sourcePath: landed,

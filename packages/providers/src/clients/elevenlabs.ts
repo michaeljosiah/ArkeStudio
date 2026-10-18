@@ -188,7 +188,8 @@ export class ElevenLabsClient implements ProviderClient {
   private async sound(key: string, request: SubmitRequest): Promise<SubmitResult> {
     const text = String(request.params["text"] ?? "").trim();
     if (!text) throw new ProviderRequestRejectedError("elevenlabs: a sound needs words");
-    const duration = request.params["durationSeconds"];
+    // `durationSec` is the shared length every music and sound path prices by (codex on PR 1872).
+    const duration = request.params["durationSec"] ?? request.params["durationSeconds"];
     if (duration !== undefined && duration !== null && (typeof duration !== "number" || duration < 0.5 || duration > 30)) {
       throw new ProviderRequestRejectedError("elevenlabs: a sound effect is 0.5 to 30 seconds");
     }
@@ -211,18 +212,23 @@ export class ElevenLabsClient implements ProviderClient {
       artifacts: [{ name: "sound.mp3", contentType: "audio/mpeg", data }] };
   }
 
-  /** Music from a prompt (SPEC-057 R-40): Eleven Music, instrumental, up to the row's five minutes. */
+  /**
+   * Music from a prompt (SPEC-057 R-40): Eleven Music, up to the row's five minutes. Instrumental
+   * unless the Bench sends lyrics, which ride in the prompt and let the voice sing (codex on PR 1872).
+   */
   private async music(key: string, request: SubmitRequest): Promise<SubmitResult> {
-    const prompt = String(request.params["prompt"] ?? request.params["text"] ?? "").trim();
-    if (!prompt) throw new ProviderRequestRejectedError("elevenlabs: music needs a prompt");
-    const seconds = request.params["durationSeconds"];
+    const style = String(request.params["prompt"] ?? request.params["text"] ?? "").trim();
+    const lyrics = typeof request.params["lyrics"] === "string" ? request.params["lyrics"].trim() : "";
+    if (!style && !lyrics) throw new ProviderRequestRejectedError("elevenlabs: music needs a prompt");
+    const prompt = lyrics ? `${style}${style ? "\n\n" : ""}Lyrics:\n${lyrics}` : style;
+    const seconds = request.params["durationSec"] ?? request.params["durationSeconds"];
     if (seconds !== undefined && seconds !== null && (typeof seconds !== "number" || seconds < 3 || seconds > 300)) {
       throw new ProviderRequestRejectedError("elevenlabs: music is 3 seconds to 5 minutes here");
     }
     const res = await this.fetchImpl(`${this.baseUrl}/v1/music?output_format=mp3_44100_128`, {
       method: "POST",
       headers: this.headers(key),
-      body: JSON.stringify({ prompt, model_id: request.model, force_instrumental: true, ...(typeof seconds === "number" ? { music_length_ms: Math.round(seconds * 1000) } : {}) }),
+      body: JSON.stringify({ prompt, model_id: request.model, force_instrumental: lyrics === "", ...(typeof seconds === "number" ? { music_length_ms: Math.round(seconds * 1000) } : {}) }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status >= 400) throw await refusal(res, res.status === 401 || res.status === 403 ? "the credential" : "music generation");
