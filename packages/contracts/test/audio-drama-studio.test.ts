@@ -59,6 +59,19 @@ describe("codex round 1 on PR 1879", () => {
     assert.equal(at(a.id)!.at, 1.3 * RATE);
   });
 
+  it("cuts music at the block it stops before, and keeps an ambience under a scene with no line performed", () => {
+    const a = line("Climb."), b = line("Now.");
+    const theme: EpisodeScriptBlock = { id: ulid(), kind: "music", heard: "The theme.", soundArtifact: ulid(), until: b.id };
+    const long = arrange([theme, a, b], { [a.id]: 1, [b.id]: 1, [(theme as { soundArtifact: string }).soundArtifact]: 5 });
+    assert.equal(long.resolved.issues.length, 0, JSON.stringify(long.resolved.issues));
+    assert.deepEqual([long.at(theme.id)!.at, long.at(theme.id)!.samples], [0, RATE], "five seconds of theme, cut where Now. begins");
+    const wind: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Wind.", soundArtifact: ulid() };
+    const bell: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: ulid() };
+    const silent = arrange([wind, bell, { id: ulid(), kind: "silence", seconds: 1 }, line("Unperformed.")],
+      { [(wind as { soundArtifact: string }).soundArtifact]: 0.5, [(bell as { soundArtifact: string }).soundArtifact]: 0.5 });
+    assert.deepEqual([silent.at(wind.id)!.at, silent.at(wind.id)!.samples], [0, 1.5 * RATE], "looped through the bell and the silence");
+  });
+
   it("leaves out a take in a voice the role no longer has", () => {
     const a = line("Climb.");
     const { at } = arrange([a], { [a.id]: 1 }, () => ({ ...VOICE, voiceId: "recast" }));

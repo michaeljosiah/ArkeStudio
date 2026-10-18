@@ -127,22 +127,33 @@ export function deriveEpisodeArrangement(
     if (block.kind !== "ambience" && block.kind !== "music") return;
     const source = sourceOf(block.soundArtifact);
     if (!source) return;
+    const ambience = block.kind === "ambience";
+    // Either bed ends at the block it stops before, or its scene's end (codex on PR 1879).
+    const sceneEnd = blocks.findIndex((candidate, at) => at > index && candidate.kind === "heading");
+    const stop = block.until ? blocks.findIndex((candidate) => candidate.id === block.until) : -1;
+    const end = stop > index ? stop : sceneEnd > index ? sceneEnd : blocks.length;
+    const length = times[end]! - times[index]!;
+    if (ambience && length <= 0) return;
     const cue = cues[index]!;
-    const from = boundary(cue);
-    const lane = block.kind === "ambience" ? track("ambience", "Ambience") : track("music", "Music");
+    const at = "at" in cue ? cue.at : 0;
+    // Both boundaries are a line's, or neither is: before any line is performed, every cue is a time.
+    const from = boundary(cue), to = boundary(cues[end]!);
+    const lane = ambience ? track("ambience", "Ambience") : track("music", "Music");
     const clip = newAudioClip(`bed:${block.id}`, lane.id, source, source.samples);
     clip.label = block.heard.slice(0, 200); clip.role = "music"; clip.duckDb = 6;
-    clip.gainDb = block.kind === "ambience" ? -12 : -10;
-    if (block.kind === "music") {
-      clip.placement = from ? { kind: "passage", anchor: from } : { kind: "fixed", at: "at" in cue ? cue.at : 0 };
+    clip.gainDb = ambience ? -12 : -10;
+    clip.loop = ambience;
+    if (ambience || (length > 0 && source.samples > length)) {
+      // Held to its range: an ambience looped through it, music cut at its end.
+      if (from && to) clip.placement = { kind: "range", from, to };
+      else {
+        // No line to anchor to yet, a sound-only scene included (codex on PR 1879): its times hold it.
+        clip.placement = { kind: "fixed", at };
+        if (ambience) clip.loopDuration = length;
+        else clip.sourceOut = length;
+      }
     } else {
-      const sceneEnd = blocks.findIndex((candidate, at) => at > index && candidate.kind === "heading");
-      const stop = block.until ? blocks.findIndex((candidate) => candidate.id === block.until) : -1;
-      const end = stop > index ? stop : sceneEnd > index ? sceneEnd : blocks.length;
-      const to = boundary(cues[end]!);
-      if (!from || !to || times[end]! <= times[index]!) return;
-      clip.loop = true;
-      clip.placement = { kind: "range", from, to };
+      clip.placement = from ? { kind: "passage", anchor: from } : { kind: "fixed", at };
     }
     state.clips.push(clip);
   });
