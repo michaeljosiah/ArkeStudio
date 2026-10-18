@@ -10518,7 +10518,7 @@ export class Coordinator {
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
             actualCost: async (jobId) => (this.ledger ? ((await this.ledger.readAll()).find((entry) => entry.jobId === jobId)?.actualMicroUsd ?? null) : null),
-            succeededJobs: (match) => (this.jobQueue?.listJobs() ?? []).filter((job) => job.status === "succeeded" && match(job)),
+            jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
             ...(transcribe !== undefined ? { transcribe } : {}),
           });
           // The world first, then the answer (codex on PR 1871): the press plays the takes it made.
@@ -10551,12 +10551,15 @@ export class Coordinator {
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            jobs: (match) => (this.jobQueue?.listJobs() ?? []).filter(match),
           });
-          if (result.disposition === "made") await this.refreshWorldSnapshot(msg.worldId);
+          // Only while this world is still the open one (codex on PR 1872): a sound finishing after
+          // the author moved on never reopens the world they left.
+          if (result.disposition === "made" && this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ at: new Date().toISOString(), type: "drama.sound", ...ids, ...result });
         } catch (err) {
           refuse(describeCoordinatorError(err));
-          await this.refreshWorldSnapshot(msg.worldId);
+          if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
         }
         return;
       }
@@ -10566,9 +10569,12 @@ export class Coordinator {
         // audio-drama.json; the refreshed world shows what landed.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        // A write that fails is said (codex on PR 1873): the author's edit did not land.
         await (msg.kind === "set-drama-role"
           ? setDramaRole(store, msg.productionId, msg.role, msg.value)
-          : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch(() => {});
+          : decideDramaNote(store, msg.productionId, msg.key, msg.decision)).catch((err: unknown) => {
+          this.emit({ at: new Date().toISOString(), type: "command.failed", command: msg.kind, requestId: null, reason: describeCoordinatorError(err) });
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -10577,7 +10583,7 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         // A decision on a take that no longer waits changes nothing; the refreshed world shows it.
         // Anything else is said (codex on PR 1871), never swallowed.
-        try { await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep); }
+        try { await decideDramaTake(store, msg.productionId, msg.episode, msg.block, msg.keep, msg.waiting); }
         catch (err) {
           if (!(err instanceof Error && err.message === "no take is waiting on that line")) {
             this.emit({ at: new Date().toISOString(), type: "command.failed", command: "decide-drama-take", requestId: null, reason: describeCoordinatorError(err) });

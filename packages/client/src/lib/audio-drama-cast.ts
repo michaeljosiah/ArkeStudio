@@ -40,7 +40,9 @@ export function dramaBlocks(production: ProductionBundle): Array<{ episode: numb
 /** The names a narration may quote, as the coordinator matches them for a request. */
 export function quotableNames(world: WorldBundle, production: ProductionBundle): Record<string, string> {
   const names: Record<string, string> = {};
-  for (const sheet of world.sheets) if (sheet.type === "character" && !sheet.retired) names[sheet.id] = sheet.name;
+  // A retired character the scripts still give lines is still quoted, as the coordinator matches.
+  const scripted = new Set(dramaBlocks(production).flatMap(({ block }) => block.kind === "dialogue" ? [block.speaker] : []));
+  for (const sheet of world.sheets) if (sheet.type === "character" && (!sheet.retired || scripted.has(sheet.id))) names[sheet.id] = sheet.name;
   for (const key of Object.keys(production.audioDrama?.cast ?? {})) if (key !== DRAMA_NARRATOR) names[key] ??= key;
   return names;
 }
@@ -93,14 +95,17 @@ export function roleVoice(production: ProductionBundle, sheets: readonly Sheet[]
 }
 
 /** The kept takes a new voice would put out of date (R-60), listed before it is confirmed. */
-export function takesOutOfDate(production: ProductionBundle, key: string, voice: { provider: string; voiceId: string }): Array<{ episode: number; block: string; words: string }> {
+export function takesOutOfDate(production: ProductionBundle, key: string, voice: { provider: string; voiceId: string; model?: string | undefined }): Array<{ episode: number; block: string; words: string }> {
   const out: Array<{ episode: number; block: string; words: string }> = [];
   for (const { episode, block } of dramaBlocks(production)) {
     const speaks = key === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === key;
     if (!speaks || !("words" in block)) continue;
     const kept = production.episodeTakes?.find((entry) => entry.episode === episode)?.lines[block.id]?.kept;
     if (!kept || kept.standIn) continue;
-    if (kept.voice.provider !== voice.provider || kept.voice.voiceId !== voice.voiceId) out.push({ episode, block: block.id, words: block.words });
+    // The model too (codex on PR 1873): Hear would not reuse a take read by another model.
+    if (kept.voice.provider !== voice.provider || kept.voice.voiceId !== voice.voiceId || (voice.model !== undefined && voice.model !== "" && kept.voice.model !== voice.model)) {
+      out.push({ episode, block: block.id, words: block.words });
+    }
   }
   return out;
 }

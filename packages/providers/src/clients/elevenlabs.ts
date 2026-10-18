@@ -221,6 +221,9 @@ export class ElevenLabsClient implements ProviderClient {
     const lyrics = typeof request.params["lyrics"] === "string" ? request.params["lyrics"].trim() : "";
     if (!style && !lyrics) throw new ProviderRequestRejectedError("elevenlabs: music needs a prompt");
     const prompt = lyrics ? `${style}${style ? "\n\n" : ""}Lyrics:\n${lyrics}` : style;
+    // The style and lyrics together are what Eleven Music limits (codex on PR 1872): refused here,
+    // before anything is sent, rather than by ElevenLabs after.
+    if (prompt.length > 2_000) throw new ProviderRequestRejectedError(`elevenlabs: Eleven Music takes 2,000 characters of style and lyrics together; this is ${prompt.length}`);
     const seconds = request.params["durationSec"] ?? request.params["durationSeconds"];
     if (seconds !== undefined && seconds !== null && (typeof seconds !== "number" || seconds < 3 || seconds > 300)) {
       throw new ProviderRequestRejectedError("elevenlabs: music is 3 seconds to 5 minutes here");

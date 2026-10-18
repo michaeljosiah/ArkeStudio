@@ -31,8 +31,8 @@ export interface DramaHearDeps {
   transcribe?: (bytes: Uint8Array, contentType: string) => Promise<string>;
   /** The settled charge for a job, where the ledger has one. */
   actualCost?: (jobId: string) => Promise<number | null>;
-  /** The queue's succeeded jobs that match: a paid line landed before its take was recorded. */
-  succeededJobs?: (match: (job: Job) => boolean) => Job[];
+  /** The queue's jobs that match, in any state: a line still being made, or paid and not yet recorded. */
+  jobs?: (match: (job: Job) => boolean) => Job[];
 }
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
@@ -41,7 +41,20 @@ type Planned = { block: Spoken; voice: AudiobookReader; model: ManifestModel; te
 
 export type DramaHearResult =
   | { disposition: "quoted"; quote: { token: string; estimatedMicroUsd: number; requests: DramaRequest[] }; missing: Array<{ speaker: string; name: string; blocks: string[] }> }
-  | { disposition: "made"; made: string[] };
+  | { disposition: "made"; made: string[]; reason?: string };
+
+/** The most a narrator's combined note may be: within What's sent's own bound. */
+const NARRATOR_NOTE_MAX = 1_500;
+
+/** Lines being made in this process, by world, production, episode and block. */
+const making = new Set<string>();
+
+/** A job made for exactly this line: the same world, provider, model, voice, words and instructions. */
+function lineJob(entry: Planned, productionId: string, deps: DramaHearDeps): (job: Job) => boolean {
+  return (job) => job.target.kind === "voice-preview" && job.worldId === deps.worldId && job.productionId === productionId &&
+    job.provider === entry.model.provider && job.model === entry.model.id && job.params["block"] === entry.block.id &&
+    job.params["text"] === entry.text && job.params["voiceId"] === entry.voice.voiceId && (job.params["instructions"] ?? undefined) === entry.instructions;
+}
 
 function readerModel(models: readonly ManifestModel[], voice: { provider: string; model?: string | undefined; voiceId: string }): ManifestModel | null {
   const id = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId);
@@ -73,7 +86,9 @@ export async function hearDramaLines(
   const cast = production.audioDrama?.cast ?? {};
   const narrator = cast[DRAMA_NARRATOR]?.voice ?? deps.narrator;
   const roleNames: Record<string, string> = {};
-  for (const sheet of bundle.sheets) if (sheet.type === "character" && !sheet.retired) roleNames[sheet.id] = sheet.name;
+  // A retired character the scripts still give lines keeps its narrator's version (codex on PR 1873).
+  const scripted = new Set((production.episodeScripts ?? []).flatMap((entry) => entry.script.blocks.flatMap((block) => block.kind === "dialogue" ? [block.speaker] : [])));
+  for (const sheet of bundle.sheets) if (sheet.type === "character" && (!sheet.retired || scripted.has(sheet.id))) roleNames[sheet.id] = sheet.name;
   for (const key of Object.keys(cast)) if (key !== DRAMA_NARRATOR) roleNames[key] ??= key;
   const missing = new Map<string, { speaker: string; name: string; blocks: string[] }>();
   const planned: Planned[] = [];
@@ -87,7 +102,11 @@ export async function hearDramaLines(
         const version = cast[key]?.narration ?? bundle.sheets.find((sheet) => sheet.id === key)?.narration?.trim();
         return version ? [`When quoting ${roleNames[key]}: ${version}`] : [];
       });
-      note = [cast[DRAMA_NARRATOR]?.sound, ...quoted].filter(Boolean).join("\n") || undefined;
+      // Bounded to what a request carries (codex on PR 1873): the narrator's own note first, then
+      // each quoted role's version while it fits.
+      let combined = cast[DRAMA_NARRATOR]?.sound ?? "";
+      for (const part of quoted) if (`${combined}\n${part}`.length <= NARRATOR_NOTE_MAX) combined = combined ? `${combined}\n${part}` : part;
+      note = combined || undefined;
     }
     if (block.kind === "dialogue") {
       const sheet = bundle.sheets.find((candidate) => candidate.id === block.speaker);
@@ -155,13 +174,30 @@ export async function hearDramaLines(
   if (input.quoteOnly || missing.size > 0 || (priced && input.quoteToken !== token)) {
     return { disposition: "quoted", quote: { token, estimatedMicroUsd, requests: planned.map((entry) => entry.request) }, missing: [...missing.values()] };
   }
+  // One making per line (codex on PR 1871): a second press, another window or a job still running
+  // from before a restart is refused rather than paid for twice.
+  const toMake = planned.filter((entry) => !entry.request.cached);
+  const keys = toMake.map((entry) => `${deps.worldId}/${productionId}/${input.episode}/${entry.block.id}`);
+  const busy = toMake.find((entry, i) => making.has(keys[i]!) ||
+    (deps.jobs?.(lineJob(entry, productionId, deps)) ?? []).some((job) => !["succeeded", "failed", "cancelled"].includes(job.status)));
+  if (busy) throw new Error(`${busy.request.speaker}'s line is already being made.`);
+  for (const key of keys) making.add(key);
   const made: string[] = [];
-  for (const entry of planned) {
-    if (entry.request.cached) continue;
-    const take = (input.retake ? null : await recoverLine(store, productionId, input.episode, script.version, entry, deps))
-      ?? await performLine(store, productionId, input.episode, script.version, entry, deps);
-    await recordTake(store, productionId, input.episode, entry.block.id, take, input.retake === true);
-    made.push(entry.block.id);
+  try {
+    for (const entry of toMake) {
+      try {
+        const take = (input.retake ? null : await recoverLine(store, productionId, input.episode, script.version, entry, deps))
+          ?? await performLine(store, productionId, input.episode, script.version, entry, deps);
+        await recordTake(store, productionId, input.episode, entry.block.id, take, input.retake === true);
+        made.push(entry.block.id);
+      } catch (err) {
+        // Lines already made are kept and said (codex on PR 1871): paid for, and played.
+        if (made.length === 0) throw err;
+        return { disposition: "made", made, reason: `${made.length} of ${toMake.length} made; ${entry.request.speaker}'s line was not: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+  } finally {
+    for (const key of keys) making.delete(key);
   }
   return { disposition: "made", made };
 }
@@ -172,9 +208,8 @@ export async function hearDramaLines(
  * artifact is taken up, or its landed file filed now, rather than sending the line again.
  */
 async function recoverLine(store: WorldStore, productionId: string, episode: number, scriptVersion: number, entry: Planned, deps: DramaHearDeps): Promise<DramaTake | null> {
-  const jobs = deps.succeededJobs?.((job) => job.target.kind === "voice-preview" && job.productionId === productionId &&
-    job.params["block"] === entry.block.id && job.params["text"] === entry.text && job.params["voiceId"] === entry.voice.voiceId &&
-    job.model === entry.model.id && (job.params["instructions"] ?? undefined) === entry.instructions) ?? [];
+  // Matched by world and provider too (codex on PR 1871): a copied world's job is never this one's.
+  const jobs = (deps.jobs?.(lineJob(entry, productionId, deps)) ?? []).filter((job) => job.status === "succeeded");
   if (jobs.length === 0) return null;
   const bundle = store.getBundle();
   const taken = new Set((bundle.productions.find((p) => p.meta.id === productionId)?.episodeTakes ?? [])
@@ -286,10 +321,12 @@ async function recordTake(store: WorldStore, productionId: string, episode: numb
 }
 
 /** The author's answer to a waiting take (R-30): the new one is kept, or the kept one stays. */
-export async function decideDramaTake(store: WorldStore, productionId: string, episode: number, block: string, keep: "new" | "kept"): Promise<void> {
+export async function decideDramaTake(store: WorldStore, productionId: string, episode: number, block: string, keep: "new" | "kept", waiting?: string): Promise<void> {
   await writeTakes(store, productionId, episode, (takes) => {
     const line = takes.lines[block];
     if (!line?.waiting) throw new Error("no take is waiting on that line");
+    // Bound to the take the author heard (codex on PR 1871): a newer one waiting is not decided unheard.
+    if (waiting !== undefined && line.waiting.artifactId !== waiting) throw new Error("no take is waiting on that line");
     const next = keep === "new" ? { kept: line.waiting } : line.kept ? { kept: line.kept } : {};
     return { ...takes, lines: { ...takes.lines, [block]: next } };
   });

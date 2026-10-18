@@ -5095,8 +5095,8 @@ export function decideDramaNote(worldId: string, productionId: string, key: stri
 }
 
 /** Keep the take that waits, or the one kept before it (SPEC-057 R-30). */
-export function decideDramaTake(worldId: string, productionId: string, episode: number, block: string, keep: "new" | "kept"): void {
-  send({ kind: "decide-drama-take", worldId, productionId, episode, block, keep });
+export function decideDramaTake(worldId: string, productionId: string, episode: number, block: string, keep: "new" | "kept", waiting: string): void {
+  send({ kind: "decide-drama-take", worldId, productionId, episode, block, keep, waiting: waiting as never });
 }
 
 /**

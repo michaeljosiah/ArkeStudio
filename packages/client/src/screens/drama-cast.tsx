@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import {
   DRAMA_NARRATOR, DramaRoleSchema,
@@ -94,14 +94,19 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
   const [problem, setProblem] = useState<string | null>(null);
   const [label, setLabel] = useState(role.role?.publicLabel ?? "");
   const [reveal, setReveal] = useState(role.role?.revealEpisode ? String(role.role.revealEpisode) : "");
+  // The role as last sent (codex on PR 1873): two edits before the world answers build on each
+  // other, never both on the same stale role.
+  const latest = useRef(role.role);
+  useEffect(() => { latest.current = role.role; }, [JSON.stringify(role.role ?? null)]);
   const save = (patch: Partial<DramaRole>) => {
-    const next = nextRole(role.role, patch);
+    const next = nextRole(latest.current, patch);
     if (next !== null) {
       const checked = DramaRoleSchema.safeParse(next);
       if (!checked.success) { setProblem(checked.error.issues[0]?.message ?? "Not saved."); return; }
     }
     setProblem(null);
-    if (!setDramaRole(world.meta.worldId, production.meta.id, role.key, next)) setProblem("The studio is disconnected.");
+    if (!setDramaRole(world.meta.worldId, production.meta.id, role.key, next)) { setProblem("The studio is disconnected."); return; }
+    latest.current = next ?? undefined;
   };
   // Both or neither (R-59): a label waits for its episode, and clearing both shows the name again.
   const saveHidden = (nextLabel: string, nextReveal: string) => {

@@ -276,12 +276,14 @@ export function dramaTakeState(
   block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>,
   line: EpisodeTakes["lines"][string] | undefined,
   /** The role's voice now, where it is known: a take in another voice is out of date (R-60). */
-  voice?: { provider: string; voiceId: string },
+  voice?: { provider: string; voiceId: string; model?: string | undefined },
 ): DramaTakeState {
   if (line?.waiting) return line.waiting.misread !== undefined ? "misread" : "new or kept?";
   if (!line?.kept) return "none";
   if (line.kept.textHash !== dramaLineHash(block)) return "out of date";
-  if (voice && !line.kept.standIn && (line.kept.voice.provider !== voice.provider || line.kept.voice.voiceId !== voice.voiceId)) return "out of date";
+  // A voice of its own now outdates a stand-in too (codex on PR 1871): Hear would not reuse it.
+  if (voice && (line.kept.standIn || line.kept.voice.provider !== voice.provider || line.kept.voice.voiceId !== voice.voiceId ||
+    (voice.model !== undefined && line.kept.voice.model !== voice.model))) return "out of date";
   return line.kept.standIn ? "stand-in" : "kept";
 }
 
@@ -356,15 +358,25 @@ export function sheetSound(sheet: { sections?: ReadonlyArray<{ heading: string; 
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-/** A name as it is said: in full, and by its first word. */
-function nameForms(name: string): string[] {
+const firstOf = (name: string) => name.trim().toLowerCase().split(/\s+/)[0] ?? "";
+/**
+ * A name as it is said: in full, and by its first word — only where no other role shares that
+ * first word (codex on PR 1873), so a narration naming Maren Kest never names Maren Vale.
+ */
+function nameForms(name: string, shared: ReadonlySet<string>): string[] {
   const full = name.trim().toLowerCase();
-  const first = full.split(/\s+/)[0] ?? "";
-  return [...new Set([full, first].filter((form) => form.length >= 3))];
+  const first = firstOf(name);
+  return [...new Set([full, shared.has(first) ? "" : first].filter((form) => form.length >= 3))];
 }
-function names(words: string, name: string): boolean {
+/** First words more than one role answers to. */
+function sharedFirsts(all: Iterable<string>): Set<string> {
+  const seen = new Set<string>(), shared = new Set<string>();
+  for (const name of all) { const first = firstOf(name); if (seen.has(first)) shared.add(first); seen.add(first); }
+  return shared;
+}
+function names(words: string, name: string, shared: ReadonlySet<string> = new Set()): boolean {
   const text = words.toLowerCase();
-  return nameForms(name).some((form) => new RegExp(`(^|[^\\p{L}])${escapeRegExp(form)}($|[^\\p{L}])`, "u").test(text));
+  return nameForms(name, shared).some((form) => new RegExp(`(^|[^\\p{L}])${escapeRegExp(form)}($|[^\\p{L}])`, "u").test(text));
 }
 
 /**
@@ -374,7 +386,8 @@ function names(words: string, name: string): boolean {
  */
 export function narrationQuotes(words: string, roles: Readonly<Record<string, string>>): string[] {
   if (!/["“”]/.test(words)) return [];
-  return Object.entries(roles).filter(([, name]) => names(words, name)).map(([key]) => key);
+  const shared = sharedFirsts(Object.values(roles));
+  return Object.entries(roles).filter(([, name]) => names(words, name, shared)).map(([key]) => key);
 }
 
 // ---------------------------------------------------------------------------
@@ -428,16 +441,21 @@ const termsOf = (text: string) => (text.toLowerCase().match(/\p{L}+/gu) ?? []).f
 /** Every significant word of the fact, in the line, allowing a word's ending to differ. */
 function tells(words: string, fact: string): boolean {
   const facts = termsOf(fact);
-  if (facts.length < 2) return false;
+  if (facts.length === 0) return false;
   const line = termsOf(words);
+  // A one-word secret is matched whole (codex on PR 1873): "pregnant", never any word near it.
+  if (facts.length === 1) return line.includes(facts[0]!);
   return facts.every((term) => line.some((word) => word.startsWith(term.slice(0, Math.max(4, term.length - 2))) || term.startsWith(word) && word.length >= 4));
 }
 
-/** A short, stable key for a note's decision. */
-function noteKey(check: string, blocks: readonly string[], says: string): string {
+/**
+ * A short, stable key for a note's decision, over what it says and every line it rests on (codex
+ * on PR 1873): rewrite a line and the note opens again, decided afresh.
+ */
+function noteKey(check: string, blocks: readonly string[], says: string, evidence: string): string {
   let hash = 5381;
-  for (const char of says) hash = ((hash << 5) + hash + char.charCodeAt(0)) >>> 0;
-  return `${check}:${blocks.slice(0, 3).join("+")}:${hash.toString(36)}`;
+  for (const char of `${says}\n${evidence}`) hash = ((hash << 5) + hash + char.charCodeAt(0)) >>> 0;
+  return `${check}:${blocks.slice(0, 3).join("+")}${blocks.length > 3 ? `+${blocks.length - 3}` : ""}:${hash.toString(36)}`;
 }
 
 export interface DramaReviewInput {
@@ -508,7 +526,8 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   // Clarity by ear: where we are, and who is speaking.
   const clarity = raw.length;
   for (const scene of scenes) {
-    if (!scene.heading) continue;
+    // Lines before any heading are a scene too (codex on PR 1873): the listener is placed or not.
+    if (!scene.heading && scene.blocks.length === 0) continue;
     const opener = scene.blocks.find((block) => block.kind !== "note" && block.kind !== "silence");
     if (opener?.kind === "dialogue") add("clarity", [opener.id], "The scene opens on a line. Nothing yet tells the listener where we are.");
     const offMic = new Map<string, string[]>();
@@ -560,9 +579,10 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
     for (const block of leaks) add("mystery", [block.id], `This may tell the listener “${kept.fact}” before episode ${kept.revealEpisode}.`);
     if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${kept.fact.replace(/\.$/, "")}.` });
   }
+  const shared = sharedFirsts(Object.values(input.names));
   for (const [speaker, role] of hidden) {
     const name = nameOf(speaker);
-    const leaks = blocks.filter((block) => spoken(block) && names(block.words, name));
+    const leaks = blocks.filter((block) => spoken(block) && names(block.words, name, shared));
     for (const block of leaks) add("mystery", [block.id], `${name} is named here, before episode ${role.revealEpisode}.`);
     if (leaks.length === 0) checked.push({ check: "mystery", says: `${role.publicLabel} is not named before episode ${role.revealEpisode}.` });
   }
@@ -575,6 +595,7 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   const notes = raw
     .map((note, order) => ({ note, order }))
     .sort((a, b) => at(a.note) - at(b.note) || a.order - b.order)
-    .map(({ note }) => ({ ...note, key: noteKey(note.check, note.blocks, note.says), evidence }));
+    .map(({ note }) => ({ ...note, evidence,
+      key: noteKey(note.check, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
   return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
 }
