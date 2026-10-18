@@ -25,6 +25,7 @@ import { SamplingClock, UpscaleClock, jobSampling, localTakeFreeze, withLocalSam
 import { adapterMediaVisible } from "./local-ai/adapter-media.js";
 import { HEARMEMAN_ADAPTERS, H3_ADAPTER_BUNDLES, COMFYUI_RECIPES, recipeWithAdapters, comfyUiRecipeById, comfyUiRecipeIdentity, comfyUiRouteRecipe } from "@arke-studio/providers";
 import { ConversationActionService, ConversationTakeReviewRefusal } from "./application/conversation-actions.js";
+import { DramaEditionService } from "./publications/drama.js";
 import { decideDramaNote, readDramaSource, saveEpisodeScript, setDramaRole, setDramaVerdict } from "./productions/audio-drama.js";
 import { decideDramaTake, hearDramaLines } from "./productions/audio-drama-hear.js";
 import { generateDramaSound } from "./productions/audio-drama-sound.js";
@@ -3366,7 +3367,9 @@ export class Coordinator {
   private plannedManifest: { base: ModelManifest; plans: ProviderPlans; manifest: ModelManifest } | null = null;
 
   private readonly storyPublications: StoryPublicationService;
+  private readonly dramaEditions: DramaEditionService;
   constructor(private readonly opts: CoordinatorOptions) {
+    this.dramaEditions = new DramaEditionService(opts.appRoot ? join(opts.appRoot, "drama-editions") : opts.changeLogPath + ".drama-editions", opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {});
     this.storyPublications = new StoryPublicationService(opts.appRoot ? join(opts.appRoot, "story-publications") : opts.changeLogPath + ".story-publications", { ...(opts.ffmpeg ? { ffmpeg: opts.ffmpeg } : {}), ...(opts.mediaProbe ? { probe: opts.mediaProbe } : {}) });
     this.effectAnalysis = new EditorEffectAnalysisService(opts.effectAudioAnalysisHost, (analysis, scope) => this.emit({
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
@@ -3890,6 +3893,8 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.wav|episode-\d{3}-script\.txt|transcript\.txt|credits\.txt)$/.exec(urlPath);
+        if (drama) return this.dramaEditions.serve(drama[1]!, drama[2]!);
         const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
         const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
@@ -10659,6 +10664,26 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "publish-drama-edition":
+      case "list-drama-editions": {
+        // An audio drama's editions (SPEC-057 R-71..R-76): copies in app storage, frozen.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, refused: "that world is not open" });
+          return;
+        }
+        if (msg.kind === "list-drama-editions") {
+          this.emit({ at: new Date().toISOString(), type: "drama.editions", requestId: msg.requestId, editions: await this.dramaEditions.list(msg.worldId, msg.productionId) });
+          return;
+        }
+        try {
+          const edition = await this.dramaEditions.publish(store, msg.productionId, { name: msg.name, delivery: msg.delivery, episodes: msg.episodes });
+          this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, edition });
+        } catch (err) {
+          this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, refused: describeCoordinatorError(err) });
+        }
+        return;
+      }
       case "read-drama-source": {
         const store = this.opts.provider.openStore?.();
         const answer = (result: { body: string } | { reason: string }) =>
@@ -16264,6 +16289,19 @@ export class Coordinator {
         // only what is made, and mixed by the one renderer into the world's cache.
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        // An audio drama's episode renders through its studio arrangement (SPEC-057 R-67).
+        const episodeStudio = /^episode-\d{3}$/.test(msg.chapterFile) ? this.studioSubject(store, msg.worldId, msg.productionId, msg.chapterFile) : undefined;
+        if (episodeStudio) {
+          const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: episodeStudio.id };
+          try {
+            const opened = await openAudioStudio(store, msg.productionId, episodeStudio.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
+            const rendered = await this.audioStudioPreviews.render(store, { productionId: msg.productionId, chapterFile: episodeStudio.id, requestId: msg.requestId, base: opened.base }, this.opts.ffmpeg);
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
+          } catch (err) {
+            this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(err) });
+          }
+          return;
+        }
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
         const ids = { requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };

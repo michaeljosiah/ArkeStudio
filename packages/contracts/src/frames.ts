@@ -52,6 +52,7 @@ import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
 import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
+import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
@@ -2358,6 +2359,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       value: DramaRoleSchema.nullable(),
     })
     .strict(),
+  /** An audio drama's edition (SPEC-057 R-71..R-76): the ready episodes, published and frozen. */
+  z
+    .object({
+      kind: z.literal("publish-drama-edition"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      name: z.string().trim().min(1).max(120),
+      delivery: DramaDeliverySchema,
+      episodes: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+    })
+    .strict(),
+  z.object({ kind: z.literal("list-drama-editions"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema }).strict(),
   /** The exact chapter text a scene was adapted from, by the hash it was pinned at (SPEC-057 R-65). */
   z
     .object({

@@ -7,6 +7,7 @@ import {
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
+  renderAudiobookMix, subscribeAudiobookMix,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
@@ -517,6 +518,17 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
   const [passage, setPassage] = useState<string | null>(null);
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  // Export renders the episode's arrangement and hands its file over (R-67).
+  const [exporting, setExporting] = useState<string | null>(null);
+  useEffect(() => subscribeAudiobookMix((answer) => {
+    if (answer.requestId !== exporting) return;
+    setExporting(null);
+    if (!answer.mix) return;
+    const link = document.createElement("a");
+    link.href = mediaUrl(world.meta.slug, answer.mix.file);
+    link.download = `${production.meta.id}-${stem}.wav`;
+    link.click();
+  }), [exporting]);
   const rows: TimingRowLike[] = (stored?.script.blocks ?? []).flatMap((block) => {
     if (block.kind !== "dialogue" && block.kind !== "narration") return [];
     const kept = takes?.lines[block.id]?.kept;
@@ -531,7 +543,8 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
       connection={connection} stamp={`${stored.hash}:${JSON.stringify(takes ?? null).length}`} rows={rows} timing={NO_TIMING}
       passage={passage} onPassage={setPassage} conversation={null} propose={null}
-      onBack={() => navigate(`${base}/script/${episode}`)} onExport={() => {}} exportDisabled />
+      onBack={() => navigate(`${base}/script/${episode}`)} onExport={() => setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem))}
+      exportDisabled={connection !== "open" || exporting !== null} />
   );
 }
 

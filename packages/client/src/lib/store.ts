@@ -1089,6 +1089,22 @@ export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScri
   return () => episodeScriptSaveListeners.delete(listener);
 }
 
+type DramaEditionAnswer = { requestId: string; editions: Extract<DomainEvent, { type: "drama.editions" }>["editions"]; refused?: string };
+const dramaEditionListeners = new Set<(answer: DramaEditionAnswer) => void>();
+/** An edition published or refused, or the production's editions listed (SPEC-057 R-71). */
+export function subscribeDramaEditions(listener: (answer: DramaEditionAnswer) => void): () => void {
+  dramaEditionListeners.add(listener);
+  return () => dramaEditionListeners.delete(listener);
+}
+export function publishDramaEdition(worldId: string, productionId: string, input: { name: string; delivery: "podcast" | "archive"; episodes: number[] }): string | null {
+  const requestId = ulid();
+  return send({ kind: "publish-drama-edition", requestId, worldId, productionId, ...input }) ? requestId : null;
+}
+export function listDramaEditions(worldId: string, productionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "list-drama-editions", requestId, worldId, productionId }) ? requestId : null;
+}
+
 const dramaSourceListeners = new Set<(result: Extract<DomainEvent, { type: "drama.source" }>) => void>();
 /** The exact text a scene was adapted from, by its pinned hash (SPEC-057 R-65). Rejects with why. */
 export function readDramaSource(worldId: string, productionId: string, hash: string): Promise<string> {
@@ -1801,6 +1817,11 @@ function handleFrame(json: string): void {
     }
     if (event.type === "drama.source") {
       for (const listener of dramaSourceListeners) listener(event);
+    }
+    if (event.type === "drama.edition" || event.type === "drama.editions") {
+      for (const listener of dramaEditionListeners) listener(event.type === "drama.edition"
+        ? { requestId: event.requestId, editions: event.edition ? [event.edition] : [], ...(event.refused ? { refused: event.refused } : {}) }
+        : { requestId: event.requestId, editions: event.editions });
     }
     if (event.type === "drama.heard") {
       for (const listener of dramaHeardListeners) listener(event);

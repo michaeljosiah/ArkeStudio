@@ -59,6 +59,11 @@ export function genesisMediaUrl(genesisId: string, relPath: string): string {
   return authorize(`${httpBase()}/genesis-media/${encodeURIComponent(genesisId)}/${clean.split("/").map(encodeURIComponent).join("/")}`);
 }
 
+/** A published audio drama edition's file (SPEC-057 R-71): its audio, transcript, credits or script. */
+export function dramaEditionMediaUrl(id: string, file: string): string {
+  return authorize(`${httpBase()}/drama-edition-media/${encodeURIComponent(id)}/${encodeURIComponent(file)}`);
+}
+
 export function storyEditionMediaUrl(id: string, file: string): string {
   return authorize(`${httpBase()}/story-edition-media/${encodeURIComponent(id)}/${encodeURIComponent(file)}`);
 }

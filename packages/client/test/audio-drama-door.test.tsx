@@ -302,7 +302,7 @@ describe("an audio drama's own pages (design turn 230 revision 3)", () => {
     assert.match(html, /6 episodes · about 25 minutes each · where the ear needs one/);
     assert.match(html, /Pilot.*The tide turns · chapter 1.*Episodes/s, "the pilot stands apart: the plan names no episode for it");
     assert.doesNotMatch(html, /pilot · The tide turns/, "and it is never placed under Episode 1");
-    assert.match(html, /Episode 6/);
+    assert.match(html, /Episodes 1–6 · not planned/, "the episodes not yet planned are one row");
     assert.match(html, /Kept from the listener.*Ilo is alive.*until ep 5/s);
     assert.match(html, /Adapts.*Low Water/s);
     assert.doesNotMatch(html, /Day one\.|Find the spine together/, "not a book's dashboard");

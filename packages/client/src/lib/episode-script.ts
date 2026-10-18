@@ -174,54 +174,8 @@ export function parseParagraphs(text: string): number[] {
   return [...out].sort((a, b) => a - b);
 }
 
-const HEARD_AS_LABEL = { narrated: "Narrated", "in-the-room": "In the room", recording: "A recording" } as const;
-export function heardAsLabel(value: ScriptHeading["heardAs"]): string {
-  return value ? HEARD_AS_LABEL[value] : "";
-}
-
-/**
- * The script as a numbered radio script (R-11 export): scenes as headings, spoken lines numbered,
- * direction in parentheses, cues in capitals. What is read aloud and what is sound stay apart.
- */
-export function scriptAsText(title: string, episode: number, blocks: readonly EpisodeScriptBlock[], name: (slug: string) => string): string {
-  const lines: string[] = [`EPISODE ${episode}${title ? ` · ${title}` : ""}`, ""];
-  let scene = 0;
-  let spoken = 0;
-  // Where a bed stops is part of the score (codex on PR 1870): said at the block it stops before.
-  const stops = new Map<string, string[]>();
-  for (const block of blocks) {
-    if ((block.kind === "ambience" || block.kind === "music") && block.until) stops.set(block.until, [...(stops.get(block.until) ?? []), `     ${block.kind.toUpperCase()} ENDS: ${block.heard}`]);
-  }
-  for (const block of blocks) {
-    const ends = stops.get(block.id);
-    if (ends) lines.push(...ends, "");
-    switch (block.kind) {
-      case "heading":
-        scene++;
-        lines.push("", `${scene}. ${block.place.toUpperCase()}${block.time ? ` — ${block.time}` : ""}${block.heardAs ? ` [${heardAsLabel(block.heardAs)}]` : ""}`, "");
-        break;
-      case "dialogue":
-        spoken++;
-        lines.push(`${String(spoken).padStart(3)}  ${name(block.speaker).toUpperCase()}${block.channel ? ` (${block.channel})` : ""}${block.direction ? ` (${block.direction})` : ""}`);
-        lines.push(`     ${block.words}${block.cut ? " —" : ""}`, "");
-        break;
-      case "narration":
-        spoken++;
-        lines.push(`${String(spoken).padStart(3)}  NARRATOR${block.direction ? ` (${block.direction})` : ""}`, `     ${block.words}`, "");
-        break;
-      case "sound": case "ambience": case "music":
-        lines.push(`     ${block.kind.toUpperCase()}: ${block.heard}`, "");
-        break;
-      case "silence":
-        lines.push(`     SILENCE ${block.seconds} s${block.note ? ` · ${block.note}` : ""}`, "");
-        break;
-      case "note":
-        lines.push(`     [${block.text}]`, "");
-        break;
-    }
-  }
-  return `${lines.join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
-}
+// The radio script lives in contracts now (S-7b), so a published edition carries the same text.
+export { heardAsLabel, episodeScriptText as scriptAsText } from "@arke-studio/contracts";
 
 /** One row of Arke's draft against the script (SPEC-057 R-54): kept, added, changed or removed. */
 export type DraftRow =

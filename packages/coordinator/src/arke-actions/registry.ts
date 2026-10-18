@@ -439,6 +439,8 @@ const CLIENT_COMMAND_METADATA = {
   "hear-drama-lines": humanOnly("Hearing lines spends at the author's press, against the quote they saw."),
   "decide-drama-take": humanOnly(HUMAN_DECISION),
   "set-drama-role": humanOnly("A role's voice and notes are the author's casting."),
+  "publish-drama-edition": humanOnly("Publishing an edition is the author's release."),
+  "list-drama-editions": humanOnly("A screen's read of its editions."),
   "read-drama-source": humanOnly("A screen's read of the text a scene was adapted from."),
   "set-drama-verdict": humanOnly("What becomes of a chapter is the author's call; Arke proposes scripts."),
   "decide-drama-note": humanOnly(HUMAN_DECISION),
