@@ -374,7 +374,9 @@ export function ProductionLayout() {
   // of the screen under a back press, and the page's own bar takes over once it scrolls away.
   const audiobookDeep = phone && /\/story\/audiobook\/?$/.test(location.pathname) && production !== undefined && production !== null;
   // An audio drama's episode script is its own phone page too (230r): its head goes back to Episodes.
-  const dramaDeep = phone && /\/script\/\d+\/?$/.test(location.pathname) && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama;
+  // Only a real episode (codex on PR 1881): a refused address keeps the shell's way back.
+  const dramaEpisode = Number(/\/script\/(\d+)\/?$/.exec(location.pathname)?.[1] ?? 0);
+  const dramaDeep = phone && dramaEpisode >= 1 && dramaEpisode <= 200 && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama;
   const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute && !audioStudioRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design

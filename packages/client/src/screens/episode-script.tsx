@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
@@ -169,22 +169,49 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
       setLines(spokenIds.slice(from!, to! + 1));
       return;
     }
+    // No shift on a phone (codex on PR 1881): a tap adds a line to the selection or takes it away.
+    if (phone) {
+      anchor.current = id;
+      setLines(lines.includes(id) ? lines.filter((line) => line !== id) : spokenIds.filter((line) => line === id || lines.includes(line)));
+      return;
+    }
     anchor.current = id;
     setLines([id]);
   };
   // A required cue with no sound is amber, and counted here (R-38).
   const missingSounds = blocks.filter((block) => (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.required && !block.soundArtifact).length;
   const newLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && scenes[i]?.source && !block.paragraphs?.length).length;
+  // A retake belongs to the line it was asked for (codex on PR 1881): never carried to a scene.
   const goScene = (id: string) => {
-    setSelected(null); setLines([]); setSceneInView(id);
+    setSelected(null); setLines([]); setRetake(false); setSceneInView(id);
     document.querySelector(`[data-block="${id}"]`)?.scrollIntoView({ block: "start" });
   };
+  // Scrolled into another scene, the head and Hear follow it (codex on PR 1881).
+  const followScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (!phone || headings.length === 0) return;
+    const top = event.currentTarget.getBoundingClientRect().top + 8;
+    let current = headings[0]!.id;
+    for (const heading of headings) {
+      const row = event.currentTarget.querySelector(`[data-block="${heading.id}"]`);
+      if (!row || row.getBoundingClientRect().top > top) break;
+      current = heading.id;
+    }
+    if (current === selectedScene?.id) return;
+    setSelected(null); setSceneInView(current);
+    if (lines.length === 0) setRetake(false);
+  };
+  const sceneEnd = (() => {
+    const at = selectedScene ? blocks.indexOf(selectedScene) : -1;
+    const next = at < 0 ? -1 : blocks.findIndex((block, i) => i > at && block.kind === "heading");
+    return at < 0 ? blocks.length : next < 0 ? blocks.length : next;
+  })();
   // On a phone, Hear is the selection, or with none the scene in view (230r).
   const sceneLines = blocks.filter((block, i) => (block.kind === "dialogue" || block.kind === "narration") && (headings.length === 0 || scenes[i]?.id === selectedScene?.id)).map((block) => block.id);
   const hearLines = lines.length > 0 ? lines : sceneLines;
 
   const insertAfter = (kind: EpisodeScriptBlock["kind"]) => {
-    const at = selectedIndex >= 0 ? selectedIndex + 1 : blocks.length;
+    // With nothing selected, at the end of the scene in view (codex on PR 1881), not the episode's.
+    const at = selectedIndex >= 0 ? selectedIndex + 1 : sceneEnd;
     const previousSpeaker = blocks.slice(0, at).reverse().find((block) => block.kind === "dialogue");
     const block = newBlock(kind, previousSpeaker?.kind === "dialogue" ? previousSpeaker.speaker : cast[0]?.id);
     edit([...blocks.slice(0, at), block, ...blocks.slice(at)]);
@@ -255,7 +282,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             <IconButton label="Episodes" onClick={() => navigate(base)}><ChevronLeft size={18} /></IconButton>
             <div className="fy-ad-ep__ptitle">
               <b>{selectedScene?.place || title || `Episode ${episode}`}</b>
-              <small>Episode {episode}{sceneNumber > 0 ? ` · scene ${sceneNumber}` : ""} · ≈ {clock(estimate)}</small>
+              <small>Episode {episode}{sceneNumber > 0 ? ` · scene ${sceneNumber}` : ""} · ≈ {clock(sceneNumber > 0 ? estimateScriptSeconds(blocks.filter((_, i) => scenes[i]?.id === selectedScene?.id)) : estimate)}</small>
             </div>
             <IconButton label="Source" aria-pressed={side === "source"} onClick={() => toggle("source")}><BookOpen size={18} /></IconButton>
             {more}
@@ -316,7 +343,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
       )}
       <div className={cx("fy-ad-ep__body", side !== null && "fy-ad-ep__body--source")}>
         {draft ? <DraftScore rows={draft} name={name} episode={episode} /> : (
-        <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`}>
+        <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`} onScroll={followScroll}>
           {blocks.length === 0 && (
             <div className="fy-ad-score__empty">
               <p>No script yet.</p>
@@ -495,19 +522,20 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         {missingSounds > 0 && <span className="fy-ad-ep__warn">{missingSounds} required sound{missingSounds === 1 ? "" : "s"} missing</span>}
         {newLines > 0 && <span>{newLines} new line{newLines === 1 ? "" : "s"}</span>}
       </footer>
-      {phone && !draft && (
-        // The tool bar (230r): Hear, Ask Arke, Cast and the keyboard, each a 44 px target.
+      {phone && (
+        // The tool bar (230r): Hear, Ask Arke, Cast and the keyboard, each a 44 px target. Beside
+        // Arke's draft it stays (codex on PR 1881); only Hear waits, as it does on a desktop.
         <HeldBar className="fy-ad-ep__tools">
-          {hearLines.length > 0 ? (
+          {hearLines.length > 0 && !draft ? (
             <HearBar compact worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={hearLines} script={blocks}
               scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
-              takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
+              takes={takes} worldSlug={world.meta.slug} name={name} retake={retake && lines.length > 0} onClear={() => { setLines([]); setRetake(false); }}
               onHeard={() => setRetake(false)} />
           ) : <Button variant="primary" disabled>Hear</Button>}
           <button type="button" className="fy-ad-ep__tool" disabled={!chatSurface} onClick={() => chatSurface && chat!.open(chatSurface)}>Ask Arke</button>
           <span className="gap" />
           <IconButton label="Cast" aria-pressed={side === "cast"} onClick={() => toggle("cast")}><Users size={18} /></IconButton>
-          <IconButton label="Type" onClick={() => {
+          <IconButton label="Type" disabled={draft !== null} onClick={() => {
             const target = selectedIndex >= 0 ? blocks[selectedIndex] : undefined;
             if (target && (target.kind === "dialogue" || target.kind === "narration")) document.querySelector<HTMLTextAreaElement>(`[data-words="${target.id}"]`)?.focus();
             else insertAfter("dialogue");

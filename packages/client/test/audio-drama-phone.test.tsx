@@ -117,6 +117,20 @@ describe("the script on a phone (230r–v)", () => {
     assert.ok([...cast.querySelectorAll("button")].some((candidate) => candidate.textContent === "Change voice…"), "the voice is chosen here, not on another page");
   });
 
+  it("selects lines by tap, and Type adds a line to the scene in view (codex on PR 1881)", async () => {
+    const { a, b, c, blocks } = scenes();
+    const container = await mount(drama(blocks), "script/1");
+    const tap = async (id: string) => act(async () => props(container.querySelector(`[data-block="${id}"]`)!).onClick!({ shiftKey: false }));
+    await tap(b.id); await tap(c.id);
+    assert.equal(dom.document.body.querySelector(".fy-ad-ep__tools .ui-btn")!.textContent, "Hear 2 lines", "a second tap adds a line");
+    await tap(b.id);
+    assert.equal(dom.document.body.querySelector(".fy-ad-ep__tools .ui-btn")!.textContent, "Hear 1 line", "a tap on a chosen line takes it away");
+    await press("1");
+    await press("Type");
+    const order = [...container.querySelectorAll("[data-block]")].map((row) => row.getAttribute("data-block"));
+    assert.equal(order.indexOf(a.id) + 1, order.findIndex((id) => ![a.id, b.id, c.id].includes(id!) && container.querySelector(`[data-block="${id}"] textarea`)), "the new line is in scene 1, after its last line");
+  });
+
   it("keeps every phone target at 44 px and draws the beds as one edge line", () => {
     const css = readFileSync(new URL("../src/screens/audio-drama.css", import.meta.url), "utf8");
     const phone = css.slice(css.indexOf("@media (max-width: 599px) {", css.indexOf("/* A phone (230r")));

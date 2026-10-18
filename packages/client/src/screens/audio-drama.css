@@ -398,6 +398,9 @@ button.fy-ad-chip { cursor: pointer; }
   .fy-ad-heardlg__foot > * { flex: 1; min-height: 44px; }
   .fy-ad-sheet .fy-ad-source { border: 0; padding: 0 2px 16px; overflow: visible; }
   .fy-ad-castcol__role h3 button { min-height: 44px; }
+  /* A role opened in the sheet is touched too (codex on PR 1881). */
+  .fy-ad-castcol__role .fy-ad-cast__detail :is(button, input, textarea) { min-height: 44px; }
+  .fy-ad-castcol__role .fy-ad-cast__detail .fy-linkbtn { display: inline-flex; align-items: center; }
   /* Add a sound's search takes the row, as the generation sheets' does. */
   .fy-ad-sound .fy-refpicker__searchwrap { width: 100%; min-width: 0; height: 44px; }
   .fy-ad-sound .fy-refpicker__search { min-width: 0; }
