@@ -565,6 +565,7 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
+import { journalRecord } from "./journal-record.js";
 import { readNdjson } from "./ndjson.js";
 import {
   AuthoringService,
@@ -4323,7 +4324,7 @@ export class Coordinator {
       parsed.type !== "diagnostics.ready"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
-      void this.changeLog.append({ kind: "event", event: parsed });
+      void this.changeLog.append({ kind: "event", event: journalRecord(parsed) });
     }
     this.transport.broadcast(parsed);
     if (parsed.type === "proposal.resolved") {
