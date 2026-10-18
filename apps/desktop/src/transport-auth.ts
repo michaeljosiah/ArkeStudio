@@ -23,7 +23,7 @@ export function authenticatedMediaHeaders(
     if (key.toLowerCase() === "authorization" && headers[key] === `Bearer ${session.token}`) delete headers[key];
   }
   const url = new URL(request.url);
-  if (url.origin === `http://127.0.0.1:${session.port}` && /^\/(?:media|genesis-media|story-edition-media|story-preview-media)\//.test(url.pathname)) {
+  if (url.origin === `http://127.0.0.1:${session.port}` && /^\/(?:media|genesis-media|story-edition-media|story-preview-media|drama-edition-media)\//.test(url.pathname)) {
     headers.Authorization = `Bearer ${session.token}`;
   }
   return headers;

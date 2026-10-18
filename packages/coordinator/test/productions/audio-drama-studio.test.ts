@@ -145,3 +145,29 @@ describe("codex round 1 on PR 1880", () => {
     assert.equal((await editions.list(store.worldId, id)).length, 1, "the damaged receipt is skipped");
   });
 });
+
+describe("codex round 2 on PR 1880", () => {
+  it("writes only the sounds the mix plays, and credits one imported onto the timeline", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    let cue = "";
+    const { store, id } = await episode((bell) => {
+      const sound: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell };
+      cue = sound.id;
+      return [{ id: ulid(), kind: "heading", place: "The quay" }, sound, a];
+    });
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const removed = await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "No bell", commands: [{ kind: "remove-clip", id: `sound:${cue}` }] } as never);
+    assert.equal(removed, null);
+    await writeFile(join(store.dir, ".staging/sound/gull.wav"), second(0.7)); // not the bell's bytes, which would file as the bell
+    const failures = await importAudioStudioMedia(store, [join(store.dir, ".staging/sound/gull.wav")],
+      { productionId: id, chapterFile: "episode-001", base: (await openAudioStudio(store, id, "episode-001")).base, destination: { trackId: null, at: 0 } }, { abandoned: () => false });
+    assert.deepEqual(failures, []);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    const edition = await editions.publish(store, id, { name: "Gulls", delivery: "archive", episodes: [1] });
+    const transcript = await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8");
+    assert.doesNotMatch(transcript, /The bell/, "a cue taken out of the mix is not in the transcript");
+    const credits = await readFile((await editions.serve(edition.id, "credits.txt"))!.path, "utf8");
+    assert.match(credits, /gull\.wav — recorded or uploaded/);
+    assert.doesNotMatch(credits, /Bell/, "a sound not heard is not credited");
+  });
+});

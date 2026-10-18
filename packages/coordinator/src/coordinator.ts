@@ -21916,6 +21916,7 @@ export class Coordinator {
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
       this.storyPublications.stop();
+      this.dramaEditions.stop();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
