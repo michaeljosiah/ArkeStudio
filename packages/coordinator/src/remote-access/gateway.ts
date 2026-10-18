@@ -18,7 +18,7 @@ const frameLimit = 100 * 1024 * 1024;
 // Keep the record exhaustive for every command with these host-path fields.
 type HostFileCommand = Extract<ClientMessage, { sourcePath?: string } | { sourcePaths?: (string | null)[] }>;
 const hostFileCommands: Record<HostFileCommand["kind"], true> = {
-  "world-chat-attach": true, "stage-playblast": true, "conversation-action-stage-playblast-complete": true,
+  "world-chat-attach": true, "stage-playblast": true, "stage-animatic": true, "conversation-action-stage-playblast-complete": true,
   "upload-artifacts": true, "file-artifact": true, "genesis-attach": true, "import-folder": true,
 };
 const cookies = (req: IncomingMessage, name: string) =>

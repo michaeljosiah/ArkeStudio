@@ -396,6 +396,13 @@ export function carriesStageConstruction(raw: string): boolean {
 
 /** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
 export const STAGE_PLATE_SCHEMA_VERSION = 84;
+/** A board animatic pinned on the scene's strict boards needs schema 89 (issue 1824). */
+export const STAGE_ANIMATIC_SCHEMA_VERSION = 89;
+export function carriesStageAnimatic(raw: string): boolean {
+  try { return (parseSceneRecord(raw).boards?.animatics?.length ?? 0) > 0; }
+  catch { return false; }
+}
+
 /** A mark with a named pose beyond stand/sit/lie, a hand or a look needs schema 88 (issue 1821). */
 export const STAGE_POSE_SCHEMA_VERSION = 88;
 export function carriesStagePose(raw: string): boolean {

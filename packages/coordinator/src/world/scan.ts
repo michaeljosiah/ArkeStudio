@@ -179,7 +179,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // look a playblast pin was drawn in (issue 1825, design turn 229a).
 // 87: a camera key written in words (issue 1820, design turn 229a).
 // 88: named poses, hand contacts and looks on performance marks (issue 1821, design turn 229d).
-export const SUPPORTED_SCHEMA_VERSION = 88;
+// 89: a board's cut animatic pinned on the scene's boards (issue 1824, design turn 229g).
+export const SUPPORTED_SCHEMA_VERSION = 89;
 
 export class WorldOpenError extends Error {
   constructor(

@@ -25,7 +25,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "account-cancel-sign-in": "host", "account-sign-out": "host", "account-open": "host",
   "import-location-view-candidate": "host", "import-prop-state-candidate": "host", "import-main-photo-candidate": "host",
   "import-main-photo": "host", "import-character-sheet": "host", "import-shot-frame": "host",
-  "stage-playblast": "host", "conversation-action-stage-playblast-complete": "host", "upload-artifacts": "host",
+  "stage-playblast": "host", "stage-animatic": "host", "conversation-action-stage-playblast-complete": "host", "upload-artifacts": "host",
   "file-artifact": "host", "attach-files": "host", "genesis-attach": "host",
   "genesis-attach-files": "host", "import-folder": "host", "stage-audiobook-take": "host",
   "stage-audiobook-lines": "host", "open-exports-folder": "host", "pick-manuscript": "host",
