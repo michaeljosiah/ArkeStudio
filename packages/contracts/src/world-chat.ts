@@ -2546,6 +2546,19 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-episode-script": {
+    kind: "production-episode-script",
+    productionId: "low-water-drama",
+    episode: 1,
+    baseHash: "sha256:3f2a…",
+    blocks: [
+      { id: "01ARZ3NDEKTSV4RRFFQ69G5FB0", kind: "heading", place: "The bell tower", time: "Night" },
+      { kind: "ambience", heard: "Wind in the stairwell.", until: "new-1" },
+      { id: "01ARZ3NDEKTSV4RRFFQ69G5FB1", kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look.", direction: "breathless" },
+      { id: "new-1", kind: "dialogue", speaker: "bray", words: "I see them." },
+    ],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-prose-style": {
     kind: "production-prose-style",
     productionId: "saltlight",
@@ -2849,6 +2862,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
+  "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first, name the script's baseHash, and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
   "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",

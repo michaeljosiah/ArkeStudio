@@ -6,6 +6,7 @@ import {
 import { ChevronLeft, ChevronRight, X } from "./icons.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { decideDramaNote } from "../lib/store.js";
+import { useGlobalChat } from "./global-chat-context.js";
 
 const CHECK: Record<DramaReviewCheck, string> = {
   fidelity: "Fidelity", clarity: "Clarity", pacing: "Pacing", emotion: "Emotion", mystery: "Mystery", intelligibility: "Intelligibility",
@@ -64,6 +65,15 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
     setCurrent(note.key);
     if (note.blocks[0]) onPick(note.blocks[0]);
   };
+  // Fix asks Arke (R-54): the note and its line are put to Arke in the chat beside the page, and
+  // Arke's change arrives here as a draft to keep or discard — never written straight in.
+  const chat = useGlobalChat();
+  const surface = chat?.forPage() ?? null;
+  const fix = (note: (typeof open)[number], n: number) => {
+    if (!chat || !surface) return;
+    chat.setValue(surface.key, "draft", `Fix review note ${n} on episode ${episode}'s script (${CHECK[note.check]} · ${note.evidence}): ${note.says}${note.quote ? ` The line: “${note.quote}”` : ""} Propose the change with production-episode-script.`);
+    chat.open(surface);
+  };
   const decide = (key: string, decision: "intentional" | "dismissed") => {
     decideDramaNote(world.meta.worldId, production.meta.id, key, decision);
     setCurrent(null);
@@ -88,6 +98,7 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
               {on && note.quote && <q>{note.quote.length > 140 ? `${note.quote.slice(0, 140)}…` : note.quote}</q>}
               {on && (
                 <span className="fy-ad-review__acts" onClick={(event) => event.stopPropagation()}>
+                  {surface && <Button size="sm" variant="primary" onClick={() => fix(note, index + 1)}>Fix</Button>}
                   <Button size="sm" variant="secondary" onClick={() => decide(note.key, "intentional")}>Intentional</Button>
                   <Button size="sm" variant="ghost" onClick={() => decide(note.key, "dismissed")}>Dismiss</Button>
                 </span>

@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { ModelWorldChatActionSchema, newId, ulid, type ConversationId, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { ProposalManager } from "../../src/gate/proposals.js";
+import { createProduction } from "../../src/productions/ops.js";
+import { saveEpisodeScript } from "../../src/productions/audio-drama.js";
+import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { WorldStore } from "../../src/world/store.js";
+import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
+
+/** Arke's episode script (SPEC-057 R-9, R-54): staged whole as a proposal, kept or discarded by the author. */
+const CLOCK = "2026-10-18T12:00:00.000Z";
+async function drama(blocks: EpisodeScriptBlock[]) {
+  const store = await WorldStore.open(await makeTempWorld(), { clock: () => CLOCK });
+  closeOnCleanup(() => store.close());
+  const id = await createProduction(store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+  if (blocks.length > 0) await saveEpisodeScript(store, id, { episode: 1, title: "The tide turns", blocks, baseHash: null });
+  return { store, id, gate: new ProposalManager(store), intent: { actionId: newId("act"), conversationId: newId("cv") as ConversationId } };
+}
+
+describe("Arke's episode script (SPEC-057 R-54)", () => {
+  it("is a model action Arke can name, with blocks that need no id", () => {
+    const parsed = ModelWorldChatActionSchema.safeParse({
+      kind: "production-episode-script", productionId: "low-water", episode: 1, baseHash: null, checkReceiptIds: [`check_${ulid()}`],
+      blocks: [{ kind: "heading", place: "The quay" }, { kind: "dialogue", speaker: "maren-kest", words: "Climb." }],
+    });
+    assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
+  });
+
+  it("stages the whole script as a proposal, keeping unchanged ids, and writes nothing until it is kept", async () => {
+    const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look." };
+    const { store, id, gate, intent } = await drama([scene, line]);
+    const baseHash = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.hash;
+    const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash, checkReceiptIds: [], blocks: [
+        { id: scene.id, kind: "heading", place: "The bell tower" },
+        { kind: "ambience", heard: "Wind in the stair.", until: "new-1" },
+        { id: line.id, kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look — the stairs." },
+        { id: "new-1", kind: "dialogue", speaker: "bray", words: "I see them." },
+      ] },
+    });
+    assert.equal(proposal.kind, "episode-script");
+    const before = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.script;
+    assert.equal(before.blocks.length, 2, "the script is untouched while the draft waits");
+    const staged = store.getBundle().proposals.find((entry) => entry.proposal.id === proposal.id)!;
+    const drafted = Object.values(staged.episodeScripts ?? {})[0]!;
+    assert.deepEqual(drafted.blocks.map((block) => block.id).slice(0, 1), [scene.id]);
+    assert.equal(drafted.blocks[2]!.id, line.id, "a rewritten line keeps its id");
+    const bed = drafted.blocks[1]!;
+    assert.ok(bed.kind === "ambience" && bed.until === drafted.blocks[3]!.id, "the bed's until follows Arke's key to the new block's ULID");
+    assert.equal((await gate.accept(proposal.id)).status, "accepted");
+    const after = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.script;
+    assert.equal(after.blocks.length, 4);
+  });
+
+  it("refuses a script for a production that is not an audio drama, and one whose relations are broken", async () => {
+    const { store, id, gate, intent } = await drama([]);
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: "the-ledger-of-nights", episode: 1, baseHash: null, checkReceiptIds: [], blocks: [{ kind: "heading", place: "x" }] },
+    }), /not an audio drama/);
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash: null, checkReceiptIds: [],
+        blocks: [{ kind: "dialogue", speaker: "maren-kest", words: "Cut off", cut: true }] },
+    }));
+  });
+});
+
+describe("codex round 1 on PR 1874", () => {
+  it("refuses a draft written from a script that has changed since it was read", async () => {
+    const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
+    const { store, id, gate, intent } = await drama([scene]);
+    await assert.rejects(stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash: "sha256:what-arke-read", checkReceiptIds: [], blocks: [] },
+    }), /changed since it was read/);
+  });
+});
+
+describe("codex round 2 on PR 1874", () => {
+  it("stages one draft of a script at a time, and none placing a sound the production cannot use", async () => {
+    const scene: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The quay" };
+    const { store, id, gate, intent } = await drama([scene]);
+    const baseHash = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!.hash;
+    const stage = (blocks: unknown[]) => stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash, checkReceiptIds: [], blocks: blocks as never },
+    });
+    await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay" }, { kind: "sound", heard: "A bell.", soundArtifact: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV" }]), /cannot use/);
+    await stage([{ id: scene.id, kind: "heading", place: "The quay, at night" }]);
+    await assert.rejects(stage([{ id: scene.id, kind: "heading", place: "The quay, at dawn" }]), /is waiting/);
+  });
+});

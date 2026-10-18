@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import {
-  estimateScriptSeconds, pickableSheets, productionShape,
+  episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
 import {
-  openChapter, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
+  acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
+  blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Users, X } from "../components/icons.js";
@@ -20,6 +20,7 @@ import { AddSoundDialog } from "../components/audio-drama-sound.js";
 import { ReviewColumn } from "../components/audio-drama-review.js";
 import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -189,6 +190,15 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
     }
   };
 
+  // Arke's draft of this script (SPEC-057 R-9, R-54): shown as tracked edits until kept or discarded.
+  const scriptPath = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
+  const drafted = world.proposals.find((staged) => staged.proposal.kind === "episode-script" && staged.episodeScripts?.[scriptPath] !== undefined);
+  const draft = drafted ? draftRows(blocks, drafted.episodeScripts![scriptPath]!.blocks) : null;
+
+  // Arke drafts in the chat beside the page; its script arrives here as a draft (R-9).
+  const chat = useGlobalChat();
+  const chatSurface = chat?.forPage() ?? null;
+
   const download = () => {
     const text = scriptAsText(title, episode, blocks, name);
     const link = document.createElement("a");
@@ -246,12 +256,28 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           )}
         </span>
       </header>
+      {drafted && draft && (
+        <DraftBar rows={draft} busy={dirty || saving !== null || conflict} proposalId={drafted.proposal.id}
+          title={drafted.episodeScripts![scriptPath]!.title !== title ? drafted.episodeScripts![scriptPath]!.title : null}
+          onKeep={() => acceptProposal(world.meta.worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}
+          onDiscard={() => discardProposal(world.meta.worldId, drafted.proposal.id)} />
+      )}
       <div className={cx("fy-ad-ep__body", side !== null && "fy-ad-ep__body--source")}>
+        {draft ? <DraftScore rows={draft} name={name} episode={episode} /> : (
         <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`}>
           {blocks.length === 0 && (
             <div className="fy-ad-score__empty">
               <p>No script yet.</p>
-              <Button variant="primary" onClick={() => insertAfter("heading")}>Start the script</Button>
+              {chatSurface && (
+                <Button variant="primary" onClick={() => {
+                  const pilot = plan?.pilot;
+                  chat!.setValue(chatSurface.key, "draft", pilot && episode === 1
+                    ? `Draft the pilot scene, “${pilot.title}”${pilot.chapters.length ? ` from chapter ${pilot.chapters.join(", ")}` : ""}, into episode 1's script with production-episode-script.`
+                    : `Draft episode ${episode}'s script with production-episode-script.`);
+                  chat!.open(chatSurface);
+                }}>{plan?.pilot && episode === 1 ? "Draft the pilot with Arke" : "Draft with Arke"}</Button>
+              )}
+              <Button variant={chatSurface ? "secondary" : "primary"} onClick={() => insertAfter("heading")}>Start the script</Button>
             </div>
           )}
           {blocks.map((block, i) => {
@@ -380,7 +406,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             </div>
           )}
         </div>
-        {lines.length > 0 && (
+        )}
+        {/* Never beside a draft (codex on PR 1874): Hear would make the saved words while the draft's show. */}
+        {lines.length > 0 && !draft && (
           <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
             scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
@@ -422,6 +450,47 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             onPlace={(artifactId) => change(cue.id, { soundArtifact: artifactId } as Partial<EpisodeScriptBlock>)} />
         ) : null;
       })()}
+    </div>
+  );
+}
+
+/**
+ * Arke's draft, waiting (R-9, R-54): what it changes, counted, and Keep or Discard — whole. Keep
+ * waits while the score holds unsaved or conflicting work, and a refused Keep says why (codex on PR 1874).
+ */
+function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
+  rows: ReturnType<typeof draftRows>; busy: boolean; proposalId: string; title: string | null; onKeep: () => boolean; onDiscard: () => void;
+}) {
+  const notice = useGateNotices()[proposalId];
+  const [unsent, setUnsent] = useState(false);
+  const count = (state: string) => rows.filter((row) => row.state === state).length;
+  const parts = [["added", "added"], ["changed", "changed"], ["moved", "moved"], ["removed", "removed"]]
+    .map(([state, label]) => [count(state!), label] as const).filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`);
+  return (
+    <div className="fy-ad-draftbar" role="region" aria-label="Arke's draft">
+      <b>Arke's draft</b><span>{[...parts, ...(title !== null ? [`title “${title}”`] : [])].join(" · ") || "no change"}</span>
+      {(unsent || notice) && <span className="fy-ad-draftbar__why" role="alert">{unsent ? "The studio is disconnected." : notice!.detail ?? `Not kept: ${notice!.reason}.`}</span>}
+      <span className="gap" />
+      <Button size="sm" variant="ghost" onClick={onDiscard}>Discard</Button>
+      <Button size="sm" variant="primary" disabled={busy} onClick={() => setUnsent(!onKeep())}>Keep</Button>
+    </div>
+  );
+}
+
+/** The draft read in place: added in grey, removed struck, a rewrite as the old struck over the new. */
+function DraftScore({ rows, name, episode }: { rows: ReturnType<typeof draftRows>; name: (slug: string) => string; episode: number }) {
+  const line = (block: EpisodeScriptBlock, how: string) => {
+    const { who, text } = blockLine(block, name);
+    return <div className={cx("fy-ad-draft__row", `fy-ad-draft__row--${how}`)} data-draft={how}><span className="fy-ad-draft__who">{who}</span><span className="fy-ad-draft__text">{text}</span></div>;
+  };
+  return (
+    <div className="fy-ad-score fy-ad-score--draft" role="list" aria-label={`Episode ${episode} draft`}>
+      {rows.map((row) => (
+        <div key={`${row.state}:${row.block.id}`} role="listitem" data-block={row.block.id}>
+          {row.state === "changed" ? <>{line(row.was, "removed")}{line(row.block, "added")}
+            {changedFields(row.was, row.block).length > 0 && <small className="fy-ad-draft__fields">also changes {changedFields(row.was, row.block).join(", ")}</small>}</> : line(row.block, row.state)}
+        </div>
+      ))}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AudioStudioProposalInputSchema } from "./audio-arrangement-schema.js";
+import { DraftScriptBlockSchema } from "./audio-drama.js";
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
@@ -877,6 +878,26 @@ const ProductionProseStyleModelActionSchema = z
   })
   .strict();
 
+/**
+ * An audio drama episode's script, written whole (SPEC-057 R-9, R-54): the pilot's first draft, a
+ * review note's Fix, or any change the author asks for. Staged as a proposal the author keeps or
+ * discards in the score; the script is untouched until then.
+ */
+const ProductionEpisodeScriptModelActionSchema = z
+  .object({
+    kind: z.literal("production-episode-script"),
+    productionId: SlugSchema,
+    episode: z.number().int().min(1).max(200),
+    title: z.string().trim().max(160).optional(),
+    baseHash: z.string().min(1).nullable()
+      .describe("The episode script's baseHash exactly as get_production read it; null for an episode with no script yet."),
+    // Empty is a script too (codex on PR 1874), as the score can save one.
+    blocks: z.array(DraftScriptBlockSchema).max(4_000)
+      .describe("The whole script after the change, in order. Keep every block you do not change exactly as read, id included. A new block has no id, or a short key of your own (new-1) when a bed's until must name it. Only what is said goes in words; how it is said goes in direction."),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
 // Visual facts are the person's reviewed assertions (SPEC-051 R-46). Keep the shared scene
 // vocabulary intact for the shot panel, but never offer these fields to a conversation.
 type SceneCommandOption = (typeof SceneCommandSchema.options)[number];
@@ -1363,6 +1384,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionSceneRestoreModelActionSchema.extend(ActionSequencingShape),
   ProductionStyleModelActionSchema.extend(ActionSequencingShape),
   ProductionProseStyleModelActionSchema.extend(ActionSequencingShape),
+  ProductionEpisodeScriptModelActionSchema.extend(ActionSequencingShape),
   ProductionSceneCommandModelActionSchema.extend(ActionSequencingShape),
   ProductionBoardCompileModelActionSchema.extend(ActionSequencingShape),
   ProductionBoardExportModelActionSchema.extend(ActionSequencingShape),
@@ -1478,6 +1500,7 @@ export const WorldChatProductionModelActionSchema = preparedAction("world-chat-p
 export const WorldChatProductionSeriesActionSchema = preparedAction("world-chat-production-series", ProductionSeriesModelActionSchema);
 export const WorldChatProductionOverviewActionSchema = preparedAction("world-chat-production-overview", ProductionOverviewModelActionSchema);
 export const WorldChatProductionProseStyleActionSchema = preparedAction("world-chat-production-prose-style", ProductionProseStyleModelActionSchema);
+export const WorldChatProductionEpisodeScriptActionSchema = preparedAction("world-chat-production-episode-script", ProductionEpisodeScriptModelActionSchema);
 export const WorldChatProductionSeasonActionSchema = preparedAction("world-chat-production-season", ProductionSeasonModelActionSchema);
 export const WorldChatProductionEpisodeActionSchema = preparedAction("world-chat-production-episode", ProductionEpisodeModelActionSchema);
 export const WorldChatProductionChapterActionSchema = preparedAction("world-chat-production-chapter", ProductionChapterModelActionSchema);
@@ -1580,6 +1603,7 @@ export type WorldChatProductionModelAction = z.infer<typeof WorldChatProductionM
 export type WorldChatProductionSeriesAction = z.infer<typeof WorldChatProductionSeriesActionSchema>;
 export type WorldChatProductionOverviewAction = z.infer<typeof WorldChatProductionOverviewActionSchema>;
 export type WorldChatProductionProseStyleAction = z.infer<typeof WorldChatProductionProseStyleActionSchema>;
+export type WorldChatProductionEpisodeScriptAction = z.infer<typeof WorldChatProductionEpisodeScriptActionSchema>;
 export type WorldChatProductionSeasonAction = z.infer<typeof WorldChatProductionSeasonActionSchema>;
 export type WorldChatProductionEpisodeAction = z.infer<typeof WorldChatProductionEpisodeActionSchema>;
 export type WorldChatProductionChapterAction = z.infer<typeof WorldChatProductionChapterActionSchema>;
@@ -1724,6 +1748,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionSeriesActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
+  WorldChatProductionEpisodeScriptActionSchema,
   WorldChatProductionSeasonActionSchema,
   WorldChatProductionEpisodeActionSchema,
   WorldChatProductionChapterActionSchema,

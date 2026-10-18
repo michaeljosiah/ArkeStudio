@@ -4,12 +4,16 @@ import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
   EpisodeSchema,
+  EpisodeScriptSchema,
   ProseStyleSchema,
   SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
   StoryOverviewSchema,
   countWords,
+  episodeScriptFile,
+  settleDraftBlocks,
+  unusableSound,
   paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
@@ -19,6 +23,7 @@ import {
   type Proposal,
   type WorldChatProductionChapterAction,
   type WorldChatProductionEpisodeAction,
+  type WorldChatProductionEpisodeScriptAction,
   type WorldChatProductionOverviewAction,
   type WorldChatProductionProseStyleAction,
   type WorldChatProductionSceneAction,
@@ -36,6 +41,7 @@ export type WorldChatProductionAuthoredAction =
   | WorldChatProductionSeriesAction
   | WorldChatProductionOverviewAction
   | WorldChatProductionProseStyleAction
+  | WorldChatProductionEpisodeScriptAction
   | WorldChatProductionSeasonAction
   | WorldChatProductionEpisodeAction
   | WorldChatProductionChapterAction
@@ -405,6 +411,45 @@ export async function stageWorldChatProductionAuthoredAction(
         path: `productions/${production.meta.id}/prose-style.json`,
         content: `${JSON.stringify(record, null, 2)}\n`,
       }],
+    }, precondition);
+  }
+
+  if (payload.kind === "world-chat-production-episode-script") {
+    // An audio drama's episode, written whole (SPEC-057 R-9, R-54): parsed as the scanner will
+    // read it, so the author is never offered a draft that cannot be kept.
+    if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama`);
+    const { episode } = payload.action;
+    const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode);
+    // Fenced on the script Arke read (codex on PR 1874): an edit since is never written over.
+    if ((stored?.hash ?? null) !== payload.action.baseHash) throw new Error(`Episode ${episode}'s script changed since it was read. Read get_production again and redraft from it.`);
+    const current = stored?.script;
+    const record = EpisodeScriptSchema.parse({
+      version: current?.version ?? 1, episode,
+      title: payload.action.title ?? current?.title ?? "",
+      blocks: settleDraftBlocks(payload.action.blocks, current?.blocks ?? []),
+    });
+    // Only sounds this production can play (codex on PR 1874), as a save is held to.
+    const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
+    if (sound) throw new Error(sound);
+    // A scene's source must be a chapter there is (codex on PR 1874): a pin the score cannot open is refused.
+    for (const block of record.blocks) {
+      if (block.kind !== "heading" || !block.source) continue;
+      const { story, chapter } = block.source;
+      if (!store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.some((candidate) => candidate.id === chapter)) {
+        throw new Error(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
+      }
+    }
+    // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
+    // and keeping either would make the other stale.
+    const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
+    if (store.getBundle().proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path))) {
+      throw new Error(`A draft of episode ${episode}'s script is waiting. Keep or discard it in the score first.`);
+    }
+    return gate.stage({
+      kind: "episode-script",
+      summary: `Episode ${episode} script: ${production.meta.title}`,
+      ...context,
+      targets: [{ path, content: `${JSON.stringify(record, null, 2)}\n` }],
     }, precondition);
   }
 

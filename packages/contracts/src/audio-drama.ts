@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema, ulid } from "./ids.js";
 import { AudiobookReaderSchema } from "./audiobook.js";
 import { PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { textDigest } from "./subtitles.js";
@@ -196,6 +196,44 @@ export const EpisodeScriptBlockSchema = z.discriminatedUnion("kind", [
   ScriptHeadingSchema, ScriptDialogueSchema, ScriptNarrationSchema, ScriptCueSchema, ScriptSilenceSchema, ScriptNoteSchema,
 ]);
 export type EpisodeScriptBlock = z.infer<typeof EpisodeScriptBlockSchema>;
+
+/**
+ * A block as Arke writes it (SPEC-057 R-9, R-54): an unchanged block keeps its id; a new one has
+ * none, or a short key of Arke's own (`new-1`) so a bed's `until` can name it. Staging gives each
+ * new block a ULID; nothing Arke writes reaches the script until the author keeps it.
+ */
+const DraftId = z.string().trim().min(1).max(40);
+export const DraftScriptBlockSchema = z.discriminatedUnion("kind", [
+  ScriptHeadingSchema.extend({ id: DraftId.optional() }),
+  ScriptDialogueSchema.extend({ id: DraftId.optional() }),
+  ScriptNarrationSchema.extend({ id: DraftId.optional() }),
+  ScriptCueSchema.extend({ id: DraftId.optional(), until: DraftId.optional() }),
+  ScriptSilenceSchema.extend({ id: DraftId.optional() }),
+  ScriptNoteSchema.extend({ id: DraftId.optional() }),
+]);
+export type DraftScriptBlock = z.infer<typeof DraftScriptBlockSchema>;
+
+/**
+ * Arke's blocks as the script's: an id the current script holds is kept, once; any other id, or
+ * none, becomes a new ULID; and a bed's `until` follows the block it named.
+ */
+export function settleDraftBlocks(draft: readonly DraftScriptBlock[], current: readonly EpisodeScriptBlock[]): EpisodeScriptBlock[] {
+  // A key used twice could bind a bed's `until` to either block (codex on PR 1874): refused.
+  const keys = draft.flatMap((block) => block.id === undefined ? [] : [block.id]);
+  const twice = keys.find((key, i) => keys.indexOf(key) !== i);
+  if (twice !== undefined) throw new Error(`The draft names block ${twice} twice. Give each block its own id or key.`);
+  const known = new Set(current.map((block) => block.id));
+  const used = new Set<string>();
+  const renamed = new Map<string, string>();
+  const settled = draft.map((block) => {
+    const keep = block.id !== undefined && known.has(block.id) && !used.has(block.id);
+    const id = keep ? block.id! : ulid();
+    if (block.id !== undefined) { if (!renamed.has(block.id)) renamed.set(block.id, id); used.add(block.id); }
+    return { ...block, id };
+  });
+  return settled.map((block) => "until" in block && block.until !== undefined
+    ? { ...block, until: renamed.get(block.until) ?? block.until } : block) as EpisodeScriptBlock[];
+}
 export type ScriptHeading = z.infer<typeof ScriptHeadingSchema>;
 export type ScriptDialogue = z.infer<typeof ScriptDialogueSchema>;
 export type ScriptCue = z.infer<typeof ScriptCueSchema>;
@@ -619,4 +657,23 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
       // Scoped to the episode (codex on PR 1873): two episodes' like notes are decided apart.
       key: noteKey(`e${episode}:${note.check}`, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
   return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
+}
+
+/**
+ * A placed sound a production cannot play (SPEC-057 R-43): not audio, retired, gone, or another
+ * production's. Checked wherever a script lands — a save, an Arke draft staged, a draft kept.
+ */
+export function unusableSound(
+  blocks: readonly EpisodeScriptBlock[],
+  artifacts: ReadonlyArray<{ id: string; kind: string; retiredAt?: unknown; production?: string | undefined }>,
+  productionId: string,
+): string | null {
+  for (const block of blocks) {
+    if ((block.kind !== "sound" && block.kind !== "ambience" && block.kind !== "music") || !block.soundArtifact) continue;
+    const artifact = artifacts.find((candidate) => candidate.id === block.soundArtifact);
+    if (!artifact || artifact.kind !== "audio" || artifact.retiredAt !== undefined || (artifact.production !== undefined && artifact.production !== productionId)) {
+      return `“${block.heard}” is placed with a sound this production cannot use. Choose its sound again.`;
+    }
+  }
+  return null;
 }
