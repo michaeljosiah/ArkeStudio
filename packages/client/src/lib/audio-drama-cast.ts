@@ -101,7 +101,9 @@ export function takesOutOfDate(production: ProductionBundle, key: string, voice:
     const speaks = key === DRAMA_NARRATOR ? block.kind === "narration" : block.kind === "dialogue" && block.speaker === key;
     if (!speaks || !("words" in block)) continue;
     const kept = production.episodeTakes?.find((entry) => entry.episode === episode)?.lines[block.id]?.kept;
-    if (!kept || kept.standIn) continue;
+    if (!kept) continue;
+    // A stand-in goes out of date once the role has a voice of its own (codex on PR 1873).
+    if (kept.standIn) { out.push({ episode, block: block.id, words: block.words }); continue; }
     // The model too (codex on PR 1873): Hear would not reuse a take read by another model.
     if (kept.voice.provider !== voice.provider || kept.voice.voiceId !== voice.voiceId || (voice.model !== undefined && voice.model !== "" && kept.voice.model !== voice.model)) {
       out.push({ episode, block: block.id, words: block.words });

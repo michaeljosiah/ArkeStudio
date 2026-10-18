@@ -33,6 +33,9 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
       const voice = cast[block.speaker]?.voice ?? sheet?.voice;
       if (voice) voices[block.speaker] = `${voice.provider}/${voice.voiceId}`;
     }
+    // The narrator's voice is told apart from the characters' too (codex on PR 1873).
+    const narrator = cast[DRAMA_NARRATOR]?.voice;
+    if (narrator) voices[DRAMA_NARRATOR] = `${narrator.provider}/${narrator.voiceId}`;
     for (const key of Object.keys(cast)) {
       if (key === DRAMA_NARRATOR || names[key] !== undefined) continue;
       names[key] = world.sheets.find((sheet) => sheet.id === key)?.name ?? key;

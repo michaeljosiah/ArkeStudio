@@ -2,7 +2,7 @@ import { access, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote,
-  productionShape, quoteSpeech, sheetSound, voiceFormatForModel, voiceSourceFor,
+  productionShape, quoteSpeech, sheetSound, textDigest, voiceFormatForModel, voiceSourceFor,
   type AudiobookReader, type ClonedVoice, type DramaRequest, type DramaTake, type EpisodeScriptBlock, type EpisodeTakes, type Job, type ManifestModel,
   type MissingVoiceChoice, type SpeechQuote,
 } from "@arke-studio/contracts";
@@ -13,6 +13,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
 import { compareAudioTranscript } from "../audio/transcript-comparison.js";
+import { oneAtATime } from "./audio-drama.js";
 
 /**
  * Hear an audio drama's lines (SPEC-057 R-25..R-31, design turn 230g–i): each spoken line in its
@@ -136,9 +137,6 @@ export async function hearDramaLines(
     const source = voiceSourceFor(bundle.clonedVoices ?? [], model.provider, model.id, voice.voiceId);
     if (source.kind === "missing-clone") throw new Error(`${speakerName}'s cloned voice has lost its recording. Choose another voice.`);
     const kept = takes?.lines[block.id]?.kept;
-    // A stand-in is the line's only while it still stands in (codex on PR 1871).
-    const cached = !input.retake && kept !== undefined && kept.textHash === dramaLineHash(block) && !!kept.standIn === standIn &&
-      kept.voice.provider === voice.provider && kept.voice.model === voice.model && kept.voice.voiceId === voice.voiceId;
     // Direction is how, never what (R-13): a tag ahead of the words where the reader writes tags,
     // an instruction beside them where it takes one, and otherwise not sent — said so, by name.
     let text = block.words;
@@ -159,6 +157,13 @@ export async function hearDramaLines(
         noteSent = { sent: "instruction", text: note };
       } else noteSent = { sent: "not sent", text: note, reason: "This reader takes no instruction." };
     }
+    // A take is the line's only for the instruction it was read with (codex on PR 1873): a changed
+    // How they sound or narrator's version is sent again. A take from before any note was read with
+    // the direction alone. A stand-in is the line's only while it still stands in (codex on PR 1871).
+    const keptWith = kept?.instructionsHash ?? textDigest(direction?.sent === "instruction" ? direction.text ?? "" : "");
+    const cached = !input.retake && kept !== undefined && kept.textHash === dramaLineHash(block) && !!kept.standIn === standIn &&
+      kept.voice.provider === voice.provider && kept.voice.model === voice.model && kept.voice.voiceId === voice.voiceId &&
+      keptWith === textDigest(instructions ?? "");
     const quote = cached ? null : quoteSpeech(model, text, { ...(instructions !== undefined ? { instructions } : {}), at: store.now() });
     planned.push({
       block, voice, model, text, ...(instructions !== undefined ? { instructions } : {}), quote, standIn,
@@ -226,7 +231,7 @@ async function recoverLine(store: WorldStore, productionId: string, episode: num
       const bytes = await readFile(toExtendedLength(join(store.dir, "artifacts", filed.file))).then((data) => new Uint8Array(data), () => null);
       const misread = bytes ? await heardOtherWords(bytes, voiceFormatForModel(entry.model), entry, deps) : undefined;
       return {
-        artifactId: filed.id, file: `artifacts/${filed.file}`, textHash: dramaLineHash(entry.block), voice: entry.voice,
+        artifactId: filed.id, file: `artifacts/${filed.file}`, textHash: dramaLineHash(entry.block), instructionsHash: textDigest(entry.instructions ?? ""), voice: entry.voice,
         ...(entry.standIn ? { standIn: true } : {}), ...(misread !== undefined ? { misread } : {}),
         estimatedMicroUsd: entry.quote?.expectedMicroUsd ?? 0, madeAt: store.now(),
       };
@@ -286,7 +291,7 @@ async function fileTake(store: WorldStore, productionId: string, episode: number
   });
   await unlink(toExtendedLength(landed)).catch(() => {});
   return {
-    artifactId: artifact.id, file: `artifacts/${artifact.file}`, textHash, voice: entry.voice,
+    artifactId: artifact.id, file: `artifacts/${artifact.file}`, textHash, instructionsHash: textDigest(entry.instructions ?? ""), voice: entry.voice,
     ...(entry.standIn ? { standIn: true } : {}), ...(misread !== undefined ? { misread } : {}),
     estimatedMicroUsd: entry.quote?.expectedMicroUsd ?? 0, madeAt: store.now(),
   };
@@ -320,6 +325,9 @@ export function placeTake(line: EpisodeTakes["lines"][string] | undefined, take:
 
 async function writeTakes(store: WorldStore, productionId: string, episode: number, change: (takes: EpisodeTakes) => EpisodeTakes): Promise<void> {
   const path = `productions/${productionId}/drama-takes/${episodeTakesFile(episode)}`;
+  return oneAtATime(`${store.dir}/${path}`, () => writeTakesNow(store, path, episode, change));
+}
+async function writeTakesNow(store: WorldStore, path: string, episode: number, change: (takes: EpisodeTakes) => EpisodeTakes): Promise<void> {
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   const current = live === null ? { version: 1 as const, episode, lines: {} } : EpisodeTakesSchema.parse(JSON.parse(live));
   const next = EpisodeTakesSchema.parse(change(current));

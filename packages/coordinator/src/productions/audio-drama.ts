@@ -8,9 +8,24 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
 
+/**
+ * One read-change-write at a time per file (codex on PR 1873): two edits arriving together would
+ * both read the same bytes, and the later one's fenced write would be refused.
+ */
+const writing = new Map<string, Promise<unknown>>();
+export async function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const before = writing.get(key) ?? Promise.resolve();
+  const turn = before.catch(() => {}).then(work);
+  writing.set(key, turn);
+  try { return await turn; } finally { if (writing.get(key) === turn) writing.delete(key); }
+}
+
 /** `audio-drama.json`, changed in one write fenced on the file it was read from (SPEC-057 R-85). */
 async function writeDramaRecord(store: WorldStore, productionId: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
   const path = `productions/${productionId}/audio-drama.json`;
+  return oneAtATime(`${store.dir}/${path}`, () => writeDramaRecordNow(store, path, change));
+}
+async function writeDramaRecordNow(store: WorldStore, path: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (live === null) throw new Error("that production is not an audio drama");
   const next = AudioDramaRecordSchema.parse(change(AudioDramaRecordSchema.parse(JSON.parse(live))));

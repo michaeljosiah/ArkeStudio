@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { decideDramaNote, saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
@@ -125,7 +125,7 @@ describe("the cast in each request (SPEC-057 R-55..R-58, R-85)", () => {
     const plain: EpisodeScriptBlock = { id: ulid(), kind: "narration", words: "The water took the stairs." };
     const { store, id, deps } = await drama([spoken, quoting, plain]);
     await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even.", narration: "A little of her slowness." });
-    await setDramaRole(store, id, "narrator", { voice: BREEZE, sound: "Close, unhurried." });
+    await setDramaRole(store, id, DRAMA_NARRATOR, { voice: BREEZE, sound: "Close, unhurried." });
     const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [spoken.id, quoting.id, plain.id], quoteOnly: true }, deps());
     assert.ok(quoted.disposition === "quoted");
     if (quoted.disposition !== "quoted") return;
@@ -271,5 +271,34 @@ describe("codex round 3 on PR 1871", () => {
   it("refuses to hear a production that is not an audio drama", async () => {
     const { store, deps } = await drama([maren("Climb.")]);
     await assert.rejects(hearDramaLines(store, "the-ledger-of-nights", { episode: 1, blocks: [ulid()] }, deps()), /not an audio drama/);
+  });
+});
+
+describe("codex round 2 on PR 1873", () => {
+  const BREEZE = { provider: "breezeblue", model: "breeze-tts-2", voiceId: "breeze-a", label: "Breeze A" };
+
+  it("sends a take again when How they sound changes, never replaying it as performed", async () => {
+    const a = maren("Climb.");
+    const { store, id, deps } = await drama([a]);
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Low and even." });
+    const first = await hearDramaLines(store, id, { episode: 1, blocks: [a.id] }, deps());
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteToken: first.disposition === "quoted" ? first.quote.token : "" }, deps());
+    const same = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(same.disposition === "quoted" && same.quote.requests[0]!.cached, "the same note is played, not sent");
+    await setDramaRole(store, id, "maren-kest", { voice: BREEZE, sound: "Quick, bright." });
+    const changed = await hearDramaLines(store, id, { episode: 1, blocks: [a.id], quoteOnly: true }, deps());
+    assert.ok(changed.disposition === "quoted" && !changed.quote.requests[0]!.cached, "a new note is a new performance");
+  });
+
+  it("lands a cast edit and a review decision made together", async () => {
+    const { store, id } = await drama([maren("Climb.")]);
+    await Promise.all([
+      setDramaRole(store, id, "maren-kest", { sound: "Quick, bright." }),
+      decideDramaNote(store, id, "e1:pacing:x:1", "dismissed"),
+      setDramaRole(store, id, DRAMA_NARRATOR, { sound: "Close." }),
+    ]);
+    const record = store.getBundle().productions.find((p) => p.meta.id === id)!.audioDrama!;
+    assert.deepEqual(Object.keys(record.cast ?? {}).sort(), [DRAMA_NARRATOR, "maren-kest"].sort());
+    assert.deepEqual(record.review, { "e1:pacing:x:1": "dismissed" });
   });
 });

@@ -154,3 +154,19 @@ describe("codex round 1 on PR 1873", () => {
     assert.deepEqual(review.notes.filter((note) => note.check === "clarity").map((note) => note.blocks), [[opener.id]]);
   });
 });
+
+describe("codex round 2 on PR 1873", () => {
+  it("keeps a reveal inside the planned episodes, and a role key no sheet id can take", () => {
+    const record = (cast: object) => AudioDramaRecordSchema.safeParse({ version: 1, plan: { episodes: 6, minutes: 25 }, cast });
+    assert.ok(!record({ ilo: { publicLabel: "The Singer", revealEpisode: 20 } }).success);
+    assert.ok(record({ "@narrator": { sound: "Close." } }).success);
+    assert.ok(!record({ "@bray": { sound: "Close." } }).success);
+  });
+
+  it("matches a short full name, and tells a character in the narrator's voice apart", () => {
+    assert.deepEqual(narrationQuotes("“Go,” said Li.", { li: "Li" }), ["li"]);
+    const review = reviewDramaScript({ episode: 1, version: 1, names, voices: { maren: "el/v1", "@narrator": "el/v1" },
+      blocks: [heading("Quay"), narration("The tide turned."), line("maren", "Climb.")] });
+    assert.ok(review.notes.some((note) => note.says === "The narrator and Maren Kest speak in the same voice here."));
+  });
+});

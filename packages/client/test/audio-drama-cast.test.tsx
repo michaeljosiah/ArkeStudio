@@ -80,7 +80,7 @@ describe("the drama's Cast (230k)", () => {
     const headers = [...container.querySelectorAll('[role="columnheader"]')].map((cell) => cell.textContent);
     assert.deepEqual(headers, ["Role", "Voice", "How they sound", "Lines"]);
     assert.match(container.textContent!, /This production · 4 roles · 2 without a voice/);
-    assert.match(rowText(container, "narrator"), /Narrator.*optional role.*App narrator/);
+    assert.match(rowText(container, "@narrator"), /Narrator.*optional role.*App narrator/);
     assert.match(rowText(container, "maren-kest"), /Maren Kest.*from character.*1$/);
     assert.match(rowText(container, "bray"), /BrayNo voice.*Warm, steady\. Counts when frightened\.When the narrator quotes them: A slower warmth\.2$/);
     assert.doesNotMatch(rowText(container, "maren-kest"), /When the narrator quotes/, "Maren is never quoted by the narrator");
@@ -138,7 +138,7 @@ describe("Review in the score (230j)", () => {
     const decided = sent.at(-1) as { kind: string; key: string; decision: string };
     assert.equal(decided.kind, "decide-drama-note");
     assert.equal(decided.decision, "intentional");
-    assert.match(decided.key, /^clarity:/);
+    assert.match(decided.key, /^e1:clarity:/, "scoped to its episode");
   });
 });
 
