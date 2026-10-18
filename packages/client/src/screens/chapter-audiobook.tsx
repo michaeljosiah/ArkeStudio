@@ -1,6 +1,6 @@
 import { chapterNarrator } from "../lib/audiobook-narrator.js";
 export { chapterNarrator } from "../lib/audiobook-narrator.js";
-import { soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type SpeechTurn, type BlockTurns } from "@arke-studio/contracts";
+import { bookNarratorUnavailable, readerUnavailableWords, soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type SpeechTurn, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import {
@@ -410,6 +410,13 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   const narrator = useMemo<AudiobookReader>(
     () => chapterNarrator({ ...(bookNarrator !== undefined ? { bookNarrator } : {}), stored: state?.app.narrator ?? null, worldId, catalogue, names: world ?? {} }),
     [state?.app.narrator, catalogue, bookNarrator, worldId, world],
+  );
+  // Why the book's own narrator cannot read now, judged as the coordinator judges it (issue 1661),
+  // so Direct and Read are held here where the run would refuse them, and the chapter says why: a
+  // 402 once left a read on `request 1 of 9` with the reason only in app.jsonl.
+  const narratorUnavailable = useMemo(
+    () => bookNarratorUnavailable(bookNarrator, catalogue, state?.app.providers ?? []),
+    [bookNarrator, catalogue, state?.app.providers],
   );
   const notes = input.notes;
   const readingNotes = input.readingNotes;
@@ -1040,10 +1047,18 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       return whole(<Button variant="primary" disabled data-testid="read-audiobook">Review read · {speechPricePrefix(models, run.price.voices.map((voice) => voice.provider))}{formatMicroUsd(run.price.estimatedMicroUsd)}</Button>);
     }
     if (reading_) {
+      // A lane paused under the read holds its requests where they are (issue 1661): said here,
+      // where the read is watched, rather than only on the Activity panel. The lanes are this
+      // run's readers, the cast's as well as the narrator's: the blocks a block's read asked for,
+      // made or not, else those the chapter's read makes (codex on PR 1869).
+      const asked = only.current;
+      const readers = new Set(rows.filter((row) => (asked !== null ? asked.includes(row.block.key) : row.state !== "made" && row.state !== "awaiting")).map((row) => row.speaker.provider));
+      const lane = state?.app.queues.find((queue) => queue.paused && readers.has(queue.provider));
+      const waiting = lane === undefined ? null : readerUnavailableWords(lane.provider, lane.reason ?? "paused");
       return whole(
         <span className="fy-ab__control fy-ab__read-progress">
           <span className="fy-mono" data-testid="audiobook-progress">
-            {activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
+            {waiting !== null ? `waiting · ${waiting} · ${run.made} of ${run.toMake}` : activity ? <><b>{audiobookActivityStage(activity).replace("Aligning locally", "Aligning")}</b><span className="fy-ab__read-saved">{activity.made} of {activity.toMake} blocks saved</span></> : run.requests !== undefined ? `reading… request ${Math.max(1, run.request ?? 1)} of ${run.requests} · ${run.made} of ${run.toMake}` : `reading… ${run.made} of ${run.toMake}`}
           </span>
           <Button variant="ghost" disabled={activity?.phase === "stopping"} onClick={() => stopAudiobook(worldId, prodId, chapter.file)}>
             {activity?.phase === "stopping" ? "Stopping…" : "Stop"}
@@ -1090,9 +1105,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             key: "direct",
             ...(input.seamsInMenu === true ? { section: "Direct and illustrate" } : {}),
             label: directedBlocks > 0 ? "Direct again" : "Direct this chapter",
-            state: proposal !== null ? "proposed" : directedBlocks > 0 ? "directed" : "",
+            state: narratorUnavailable !== null ? "narrator unavailable" : proposal !== null ? "proposed" : directedBlocks > 0 ? "directed" : "",
             // A held proposal answers the press until it is accepted or discarded (turn 184b).
-            disabled: !directable || locked || connection !== "open" || beatGrouping,
+            disabled: !directable || locked || connection !== "open" || beatGrouping || narratorUnavailable !== null,
             press: directPress,
             testId: "direct-audiobook",
           },
@@ -1125,7 +1140,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     // says `Read · price` (194, rule 1): the tails are their own boxes so the centre's container
     // query can drop them and keep the toolbar on one line.
     const read = counts.toMake.length > 0 ? (
-      <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open" || beatGrouping} onClick={begin} data-testid="read-audiobook">
+      <button type="button" className={`fy-ab__pill${input.listenLeads === true ? "" : " fy-ab__pill--pri"}`} disabled={locked || connection !== "open" || beatGrouping || narratorUnavailable !== null} onClick={begin} data-testid="read-audiobook">
         <span>Read<span className="fy-ab__presstail"> the chapter</span></span>
         {SPOKEN_GAP}
         {(() => {
@@ -1190,9 +1205,11 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       ? "record unreadable · Read the chapter replaces it"
       : run?.state === "refused" || run?.state === "failed" || run?.state === "unavailable"
         ? freePlanNote(run.reason) ?? `could not read · ${run.reason ?? "the run failed"}`
-        : run?.state === "stopped"
-          ? "stopped · the takes made stand"
-          : null;
+        : narratorUnavailable !== null
+          ? `${narrator.label ?? "narrator"} unavailable · ${narratorUnavailable}`
+          : run?.state === "stopped"
+            ? "stopped · the takes made stand"
+            : null;
 
   // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
   // request, Google's free day where it is known, the estimate.

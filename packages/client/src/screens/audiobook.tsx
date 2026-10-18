@@ -113,6 +113,9 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
     Object.entries(store.audiobookRecords).filter(([key]) => key.startsWith(prefix)).map(([, held]) => held.seq),
     book?.state ?? null,
     note?.seq ?? null,
+    // A fault silences the book's narrator with no catalogue change (issue 1661): the door says so
+    // only once it is asked again (codex on PR 1869).
+    (store.state?.app.providers ?? []).map((provider) => [provider.id, provider.fault, provider.faultKind ?? null]),
   ]);
 }
 
@@ -358,6 +361,9 @@ export function AudiobookScreen() {
   const priceWord = speechPricePrefix(app?.manifest?.models, (price?.voices ?? []).map((voice) => voice.provider));
   const cost = price === null || price.estimatedMicroUsd === 0 ? null : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`;
   const narratorName = door?.voices[0]?.name ?? null;
+  // The book's own narrator cannot read now (issue 1661): the door once said `Performed · George`
+  // over a narrator a 402 had silenced. Read the book is held on it, and says why.
+  const narratorUnavailable = door?.voices[0]?.unavailable ?? null;
   const warning = readingWarning(door);
   const made = bookHasTakes(production);
   const left = price !== null && price.chapters > 0;
@@ -450,25 +456,25 @@ export function AudiobookScreen() {
       <button
         type="button"
         className={cx("fy-abshow__btn", !made && "fy-abshow__btn--pri", phone && made && "fy-abshow__btn--grow")}
-        disabled={connection !== "open" || book?.state === "priced"}
+        disabled={connection !== "open" || book?.state === "priced" || narratorUnavailable !== null}
         onClick={begin}
         data-testid="read-book"
       >
         {!made && <PlaySolid size={16} />}
         Read the book
         {phone ? (cost !== null ? <em> · {cost}</em> : null) : <em> · {price.chapters} chapter{price.chapters === 1 ? "" : "s"}{cost !== null ? ` · ${cost}` : ""}</em>}
-        {!phone && warning !== null && <span className="fy-abshow__w"> · {warning}</span>}
+        {narratorUnavailable !== null ? <span className="fy-abshow__w"> · {narratorUnavailable}</span> : !phone && warning !== null && <span className="fy-abshow__w"> · {warning}</span>}
       </button>
     );
   })();
   const menuItems = [
     ...(chapters.length > 0 ? [{ label: "Audio Studio", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(placeRow?.chapterId ?? chapters[0]!.id)}?view=audio-studio`), testId: "menu-audio-studio" }] : []),
     { label: "Reading", data: [READINGS.find(([value]) => value === reading)![1]], warn: warning, onPress: () => setSheet(true), testId: "menu-reading" },
-    ...(narratorName !== null ? [{ label: "Narrator", data: [narratorName], warn: null, onPress: () => setNarrating(true), testId: "menu-narrator" }] : []),
+    ...(narratorName !== null ? [{ label: "Narrator", data: [narratorName], warn: narratorUnavailable, onPress: () => setNarrating(true), testId: "menu-narrator" }] : []),
     // A world with no art: its cover is made where the world's look is (190).
     ...(!hasArt ? [{ label: "Make a cover", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/art-direction`), testId: "menu-cover" }] : []),
   ];
-  const more = <MoreMenu open={menu} onOpen={setMenu} dot={phone && warning !== null} items={menuItems} />;
+  const more = <MoreMenu open={menu} onOpen={setMenu} dot={phone && (warning !== null || narratorUnavailable !== null)} items={menuItems} />;
   // The presses in one wrapping row, never clipped (rule 2): desktop leads with the primary, then
   // Export, then Read the book; a phone puts the primary full width under the thumb.
   const presses = phone ? [primary, readSlot, exportPress, more] : [primary, exportPress, readSlot, more];
@@ -860,6 +866,7 @@ function ReadingSheet({ worldId, productionId, production, door, reading, runnin
               <span className="fy-abshow__v">
                 {narrator.name}
                 {narrator.voice !== undefined && <small>{[...(narrator.book === true ? ["this book"] : []), readerPlace(narrator.voice.provider, narrator.voice.local)].join(" · ")}</small>}
+                {narrator.unavailable !== undefined && <small className="fy-abshow__w" data-testid="reading-narrator-unavailable">{narrator.unavailable}</small>}
               </span>
               <span className="fy-abshow__mono">{blocks(narrator.blocks)}</span>
               <span className="fy-abshow__c"><ChevronRight size={16} stroke={1.9} /></span>

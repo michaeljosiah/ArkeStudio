@@ -191,6 +191,7 @@ import {
   CADENCE_NOTE_MAX,
   DEFAULT_AUDIOBOOK_BOOK,
   narratorFor,
+  bookNarratorUnavailable,
   narratorAppliesTo,
   firstReadNotice,
   type NarratorChoice,
@@ -1621,22 +1622,30 @@ export class Coordinator {
     return (wav, signal) => timeWords(wav, (bytes, contentType) => voice.transcribe(bytes, contentType), signal);
   }
 
-  /** A book keeps its chosen narrator even when unavailable; only an explicit reset inherits the app's. */
-  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding }> {
+  /**
+   * A book keeps its chosen narrator even when unavailable; only an explicit reset inherits the
+   * app's. `unavailable` says why the book's own narrator cannot read now, in the author's words
+   * (issue 1661): Read refuses with it before pricing, Direct holds on it, and the door shows it.
+   */
+  private async audiobookNarrator(store: WorldStore, voice: VoiceService | null, productionId?: string, requireAvailable = false): Promise<{ narrator: AudiobookReader; catalogue: VoiceCandidate[]; designedBinding?: DesignedBinding; unavailable?: string }> {
     const { chosen, narrationCatalogue, catalogue, designedBinding } = await this.appNarrator(store, voice);
     const book = productionId === undefined ? null : await readAudiobookBook(store, productionId).catch(() => null);
     // A book's own narrator is written into the world, so it resolves against the world's
     // voices only — never the app narrator's copy of another world's (SPEC-049 R-12).
     const own = book === null || book === "unreadable" || book.narrator === undefined ? null : narratorFor(book.narrator, narrationCatalogue.filter((candidate) => candidate.narratorCopy !== true));
     const saved = book === null || book === "unreadable" ? undefined : book.narrator;
-    if (requireAvailable && saved !== undefined && (own === null || own.fallback)) {
-      throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable. Refresh the voice catalogue or choose a replacement narrator before generating audio.`);
+    // One rule with the window's: a narrator the catalogue cannot resolve, an empty one included,
+    // cannot read, so Read refuses it and Direct and the door hold on it (codex on PR 1869).
+    const unavailable = bookNarratorUnavailable(saved, catalogue, this.providerService.list());
+    if (requireAvailable && saved !== undefined && unavailable !== null) {
+      throw new Error(`The book narrator ${saved.label ?? saved.voiceId} is unavailable · ${unavailable}. Choose another narrator for the book, or read once it is back.`);
     }
     const narrator = own !== null && !own.fallback ? own : saved ?? chosen;
     return {
       narrator: { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, ...(narrator.label !== undefined ? { label: narrator.label } : {}) },
       catalogue,
       ...(designedBinding !== undefined && narrator.voiceId === designedBinding.target ? { designedBinding } : {}),
+      ...(unavailable !== null ? { unavailable } : {}),
     };
   }
 
@@ -1852,7 +1861,7 @@ export class Coordinator {
     return imageModelFor(settings, this.opts.manifest, undefined, store.getBundle().meta.models);
   }
 
-  private async directionRoom(store: WorldStore, productionId: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding }> {
+  private async directionRoom(store: WorldStore, productionId: string): Promise<{ narrator: AudiobookReader; models: readonly ManifestModel[]; catalogue: VoiceCandidate[]; narratorDescription?: string; designedBinding?: DesignedBinding; unavailable?: string }> {
     const room = await this.audiobookNarrator(store, this.voiceService, productionId);
     const narratorDescription = await this.narratorDescription(store, room.narrator);
     return { ...room, models: this.opts.manifest?.models ?? [], ...(narratorDescription !== undefined ? { narratorDescription } : {}) };
@@ -14938,6 +14947,12 @@ export class Coordinator {
             return;
           }
           const room = await this.directionRoom(store, msg.productionId);
+          // Directing for a narrator who cannot read writes direction for a voice that will not
+          // read it; held, as Read is, until the narrator is back or another is chosen (issue 1661).
+          if (room.unavailable !== undefined) {
+            finished("unavailable", none, { reason: `the book narrator is unavailable · ${room.unavailable}` });
+            return;
+          }
           const result = await directChapter(store, msg.productionId, chapter.id, deriver, room, control.signal, {
             ...(castWith !== null ? { castWith } : {}),
             ...(msg.chapterNote === true ? { chapterNote: true } : {}),
