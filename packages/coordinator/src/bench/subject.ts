@@ -238,10 +238,6 @@ async function voiceTokens(
   return references;
 }
 
-/**
- * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
- * is. Only current output may ride; compatible routes carry the video alongside the beats.
- */
 /** The scene's location plate as a Bench tile, Image 1; null when there is none, it is set not to ride, or its file is gone. */
 function plateToken(scene: SceneRecord, world: WorldBundle): BenchReferenceToken | null {
   const plate = scene.blocking?.plate;
@@ -263,6 +259,10 @@ function plateToken(scene: SceneRecord, world: WorldBundle): BenchReferenceToken
   };
 }
 
+/**
+ * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
+ * is. Only current output may ride; compatible routes carry the video alongside the beats.
+ */
 function playblastToken(
   staging: ShotStaging,
   scene: SceneRecord,
@@ -305,30 +305,6 @@ function animaticToken(scene: SceneRecord, world: WorldBundle, members: readonly
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
-  };
-}
-
-function stageOpeningFrameToken(
-  staging: ShotStaging,
-  scene: SceneRecord,
-  world: WorldBundle,
-  shown: { durationSec: number; aspect: string; lens: string | undefined },
-  index: number,
-): BenchReferenceToken | null {
-  const pinned = staging.playblast;
-  if (pinned?.openingFrameArtifactId === undefined) return null;
-  const moved = stagePlayblastIsStale(scene, staging, shown);
-  if (moved) return null;
-  const artifact = world.artifacts.find((candidate) => candidate.id === pinned.openingFrameArtifactId);
-  if (artifact === undefined || artifact.kind !== "image") return null;
-  return {
-    token: benchTokenFor("image", index),
-    kind: "image",
-    source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
-    label: `Staging · opening frame v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolvedShotStaging(scene, staging).cast, staging.rig)}`,
-    ride: "when-supported",
-    subjectRole: "board-frame",
   };
 }
 
@@ -518,28 +494,22 @@ export async function prepareBenchSubject(
       lens: effectiveFraming(scene, shot).lens,
     };
     const fingerprintCurrent = !staging?.playblast?.sourceFingerprint || staging.playblast.sourceFingerprint === stageSourceFingerprint(scene,shot,aspect);
-    const openingFrame = staging === undefined || !fingerprintCurrent
+    // The clip is where the move matters. The playblast rides as Video where the route carries
+    // video, and the blockout reaches every route as the brief's words. No Stage still rides as an
+    // image (turn 231, rule 10): the opening frame and the playblast's reference frames are grey
+    // mannequins, and as image references they stood beside, or in place of, the real place and
+    // people. The images are the plate and the cast's pictures, numbered as 229h draws them.
+    const playblast = staging === undefined || !fingerprintCurrent
       ? null
-      : stageOpeningFrameToken(staging, scene, world, shown, references.length + 1);
+      : playblastToken(staging, scene, world, shown);
     const selection = production.selections[shot.id];
     const frameArtifactId = selection?.startFrameArtifactId;
     const frameArtifact = frameArtifactId === undefined || frameArtifactId === null
       ? undefined
       : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
-    if (openingFrame !== null) {
-      references.push(openingFrame);
-      for (const frame of staging?.playblast?.referenceFrames ?? []) {
-        const artifact = world.artifacts.find(candidate => candidate.id === frame.artifactId);
-        if (artifact?.kind !== "image") continue;
-        references.push({
-          token: benchTokenFor("image", references.length + 1), kind: "image",
-          source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
-          label: `Staging · ${frame.kind === "last" ? "last frame" : frame.kind === "key" ? "camera key" : "overview"} · ${frame.at.toFixed(2)}s`,
-          detail: frame.kind === "overview" ? "top-down camera path and cast marks" : `camera composition at ${frame.at.toFixed(2)}s`,
-          ride: "when-supported", subjectRole: frame.kind === "last" ? "board-frame" : "reference",
-        });
-      }
-    } else if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
+    // A current blockout stands for the shot's composition, so the storyboard frame stays out of
+    // that handoff, as it did while the opening frame stood for it.
+    if (playblast === null && hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
       references.push({
         token: benchTokenFor("image", references.length + 1),
         kind: "image",
@@ -550,11 +520,6 @@ export async function prepareBenchSubject(
         subjectRole: "board-frame",
       });
     }
-    // The clip is where the move matters: its exact opening view can ride every image-capable
-    // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
-    const playblast = staging === undefined || !fingerprintCurrent
-      ? null
-      : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);

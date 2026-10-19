@@ -858,7 +858,67 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(off.prefill.references.find((reference) => reference.kind === "image")?.token, "Image 1");
   });
 
-  it("opens a staged shot in video mode with its opening frame riding and its move written as beats", async () => {
+  it("sends the plate and the cast's pictures as images and the playblast as video, never a Stage still (turn 231, issue 1897)", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.description = "@maren-kest grips the rail. @bray-half-hitch comes up the stair behind her.";
+    // The fixture's Bray has a picture but no kit; give him Maren's, so both of the cast have a primary.
+    const bray = world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!;
+    const kit = structuredClone(world.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!);
+    world.referenceKits.push({ ...kit, sheetId: "bray-half-hitch", ...(kit.mainPhoto ? { mainPhoto: { ...kit.mainPhoto, sheetVersion: bray.version } } : {}) });
+    const image = (id: string, file: string) => world.artifacts.push({ id: id as never, kind: "image", file, hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" }, links: ["sh_12"], production: "saltlight", created: CLOCK() });
+    image("ar_01J8G0000000000000000000B1", "lobby-plate.png");
+    world.artifacts.push({ id: "ar_01J8G0000000000000000000B2" as never, kind: "video", file: "playblast.mp4", hash: "sha256:0123456789abcdef", origin: { by: "user" }, links: ["sh_12"], production: "saltlight", mediaInfo: { durationSec: 4, hasAudio: false }, created: CLOCK() });
+    // Every still the Stage files beside its playblast: the opening, the last frame, a key and the overview.
+    const stills = ["ar_01J8G0000000000000000000B3", "ar_01J8G0000000000000000000B4", "ar_01J8G0000000000000000000B5", "ar_01J8G0000000000000000000B6"];
+    stills.forEach((id, index) => image(id, `stage-still-${index}.png`));
+    scene.blocking = {
+      version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }, { sheetId: "bray-half-hitch", x: 1.5, z: -2 }], sets: [],
+      plate: { source: { source: "artifact", artifactId: "ar_01J8G0000000000000000000B1", hash: "sha256:aaaabbbbccccdddd" }, label: "Lobby", shotId: "sh_12" },
+    };
+    shot.staging = {
+      version: 2,
+      keys: [{ t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0] }, { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0] }],
+      playblast: {
+        evaluatorVersion: 2, artifactId: "ar_01J8G0000000000000000000B2", openingFrameArtifactId: stills[0] as never, version: 2, blocking: { owner: "scene", version: 1 },
+        referenceFrames: [
+          { kind: "last", at: 4, artifactId: stills[1] as never },
+          { kind: "key", at: 2, artifactId: stills[2] as never },
+          { kind: "overview", at: 0, artifactId: stills[3] as never },
+        ],
+      },
+    };
+    const video = await prepareBenchSubject(world, {
+      productionId: "saltlight", sceneId: "sc_04", subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video", settings: null, manifest: MANIFEST, sources: sourceReader,
+    });
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    const { references } = video.prefill;
+    assert.deepEqual(references.filter((reference) => reference.kind === "image").map((reference) => [reference.token, reference.label]), [
+      ["Image 1", "Lobby · plate"],
+      ["Image 2", `${world.sheets.find((sheet) => sheet.id === "maren-kest")!.name} · v${world.sheets.find((sheet) => sheet.id === "maren-kest")!.version}`],
+      ["Image 3", `${world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!.name} · v${world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!.version}`],
+    ], "Image 1 is the plate, Images 2 and 3 the cast, as 229h numbers them");
+    const playblast = references.find((reference) => reference.kind === "video");
+    assert.equal(playblast?.token, "Video 1");
+    assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000B2", hash: "sha256:0123456789abcdef" });
+    for (const still of stills) {
+      assert.equal(references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === still), false, `no greybox still rides (${still})`);
+    }
+    assert.equal(references.some((reference) => reference.subjectRole === "board-frame"), false, "nothing stands in as the opening frame");
+    assert.match(video.prefill.composer.brief, /^References: @Image 1 the lobby · @Image 2 Maren Kest · @Image 3 Bray Half-Hitch\.$/m);
+    // Where the route carries the video, the citations number it after the pictures and follow it.
+    const session = { subject: video.prefill.subject, subjectTokens: references.map((reference) => reference.token), tokenRegistry: references } as unknown as Parameters<typeof subjectRoutedBrief>[0];
+    const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const withVideo = subjectRoutedBrief(session, [...video.prefill.composer.activeTokens, playblast!.token], video.prefill.composer, nameOf);
+    assert.match(withVideo, /^References: @Image 1 the lobby · @Image 2 Maren Kest · @Image 3 Bray Half-Hitch · @Video 1 the blockout\.$/m);
+  });
+
+  it("opens a staged shot in video mode with the cast as its images and its move written as beats", async () => {
     const { store } = await openWorld();
     const world = store.getBundle();
     const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
@@ -936,12 +996,12 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(playblast?.durationSec, 4);
     assert.equal(playblast?.ride, "when-supported");
     assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A1", hash: "sha256:0123456789abcdef" });
-    const openingFrame = video.prefill.references.find((reference) => reference.label === "Staging · opening frame v2");
-    assert.equal(openingFrame?.kind, "image");
-    assert.equal(openingFrame?.subjectRole, "board-frame");
-    assert.deepEqual(openingFrame?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A2", hash: "sha256:fedcba9876543210" });
-    assert.ok(video.prefill.composer.activeTokens.includes(openingFrame!.token), "the Stage frame rides on an image-reference route");
-    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the Stage opening replaces the storyboard frame for this handoff");
+    // The Stage's opening still is a grey mannequin and does not ride (turn 231, issue 1897); a
+    // current blockout still stands for the composition, so the storyboard frame stays out too.
+    assert.equal(video.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
+    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A2"), false, "no Stage still rides as an image");
+    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the blockout replaces the storyboard frame for this handoff");
+    assert.deepEqual(video.prefill.references.filter((reference) => reference.kind === "image").map((reference) => reference.sheetId), ["maren-kest"]);
     // The blockout is written for the video model (issue 1817): the references it can see, then
     // the camera in a camera operator's words — a figure that holds still faces the lens, so a
     // camera out along +Z is in front of her — then the action, with no coordinates anywhere.

@@ -287,14 +287,13 @@ it("delivers a fresh filed Stage clip through bench admission into the provider 
     // The video rides on H3, so the brief cites it and closes by saying how to follow it (issue 1817).
     assert.match(prepared.prefill.composer.brief, /^References: .*@Video 1 the blockout\.$/m);
     assert.equal(prepared.prefill.composer.brief.split("\n").at(-1), "Follow @Video 1 precisely for camera position, movement, timing and blocking.");
-    const images = prepared.prefill.references.filter(reference => reference.kind === "image");
-    assert.equal(images.length, 4);
-    assert.ok(images.every(reference => reference.ride === "when-supported"));
-    assert.deepEqual(images.map(reference => reference.subjectRole), ["board-frame", "board-frame", "reference", "reference"]);
-    const stills: ManifestModel = { ...manifest.models[0]!, accepts: { referenceImages: 4, referenceVideos: 0, startFrame: false, endFrame: false }, modes: { generate: { locked: [] } } };
-    assert.deepEqual(subjectReferenceRouting(prepared.prefill.references, prepared.prefill.subject, stills), { activeTokens: images.map(image => image.token), keyframeTokens: [] });
-    const pair: ManifestModel = { ...stills, modes: { "first-and-last-frame": { route: "test/image-to-video", locked: ["aspect"] } } };
-    assert.deepEqual(subjectReferenceRouting(prepared.prefill.references, prepared.prefill.subject, pair), { activeTokens: [], keyframeTokens: images.slice(0, 2).map(image => image.token) });
+    // The opening, last, key and overview stills are filed with the clip, but none rides as an
+    // image (turn 231, issue 1897): they are grey mannequins, and the images a take gets are the
+    // plate and the cast's pictures (none readable in this fixture). The clip is the blockout.
+    assert.equal(prepared.prefill.references.some(reference => reference.kind === "image"), false);
+    assert.equal(prepared.prefill.references.some(reference => reference.subjectRole === "board-frame"), false);
+    const stills: ManifestModel = { ...manifest.models[0]!, accepts: { referenceImages: 4, referenceVideos: 0, startFrame: false, endFrame: false }, modes: { "first-and-last-frame": { route: "test/image-to-video", locked: ["aspect"] } } };
+    assert.deepEqual(subjectReferenceRouting(prepared.prefill.references, prepared.prefill.subject, stills), { activeTokens: [], keyframeTokens: [] }, "a route without video gets the words, not a greybox keyframe");
     const session={schemaVersion:1,id:newId("sess"),...prepared.prefill,tokenRegistry:prepared.prefill.references,subjectTokens:prepared.prefill.references.map(r=>r.token),nextToken:{image:2,video:2,audio:1},nextTake:1,takes:[],createdAt:CLOCK,updatedAt:CLOCK} as BenchSession;
     assert.ok(session.tokenRegistry.some(r=>r.kind==="video"&&session.composer.activeTokens.includes(r.token)));
     const plan=planBenchDispatch(session,bundle(),manifest,{worldId:WORLD_ID,requestId:"stage-transport",at:CLOCK});
@@ -302,7 +301,7 @@ it("delivers a fresh filed Stage clip through bench admission into the provider 
     const input=plan.inputs[0]!;
     const {videoReferences:videoPaths,references:imagePaths,...params}=input.params;
     const videoReferences=await readContainedVideoReferences(worldDir,videoPaths as string[]);
-    const imageReferences=await readContainedImageReferences(worldDir,imagePaths as string[]);
+    const imageReferences=await readContainedImageReferences(worldDir,(imagePaths ?? []) as string[]);
     let sent:Record<string,unknown>={};
     await new FalClient(async(_url,init)=>{sent=JSON.parse(String(init?.body));return new Response(JSON.stringify({request_id:"stage-test"}),{status:200});}).submit("test-key",{model:input.model,capability:"video",params,imageReferences,videoReferences});
     assert.deepEqual(sent["reference_video_urls"],[`data:video/mp4;base64,${(await readFile(sourcePath)).toString("base64")}`]);
