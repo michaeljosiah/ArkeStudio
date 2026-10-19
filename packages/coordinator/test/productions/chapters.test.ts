@@ -92,7 +92,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
       "the shipped `number` shape reads as order, and the summary carries the stem",
     );
     assert.equal(before[0]?.status, "drafted", "authored status survives");
-    assert.equal(before[0]?.words, 3120, "authored word count survives");
+    assert.equal(before[0]?.words, 291, "summary measures saved prose rather than the declared 3,120");
 
     // The regression this issue exists for: writing `order` into a shipped chapter must not
     // make it fail the read schema and disappear from the bundle.
@@ -119,6 +119,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
     assert.equal(data["number"], 1, "the legacy field is left where it was, not rewritten");
     assert.equal(data["order"], 2, "the authority field is written beside it");
     assert.equal(data["version"], 4, "reorder cuts no version");
+    assert.equal(data["words"], 3120, "reading and reordering do not rewrite legacy metadata");
   });
 
   it("ties and invalid orders fall back to filename order, deterministically", async () => {
