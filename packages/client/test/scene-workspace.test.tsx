@@ -254,6 +254,29 @@ describe("scene detail owns the workspace", () => {
     assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /^v3 · 2 keys/);
   });
 
+  it("Quick layout over a shot's own marks keeps them, and writes no first shared block over them (codex on PR 1903)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.blocking = undefined;
+    const own = { cast: [{ sheetId: "maren-kest", x: 3.25, z: -1.5 }], sets: [{ name: "kept rail", x: 0, z: -2, w: 4, h: 1, d: 0.2 }] };
+    orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = {
+      version: 2, ...structuredClone(own), keys: [{ t: 0, p: [5, 2.4, 6], l: [2, 1.1, -1] }, { t: 4, p: [4, 2.4, 5], l: [2, 1.1, -1] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await openStage(mounted);
+    await click([...q(mounted, ".fy-swstage__construction")!.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement);
+    assert.ok(stageItem(mounted, "kept rail"), "the shot's own set stands in the draft");
+    await click(all(mounted, '[data-testid="stage-draft"] button').find((button) => button.textContent === "Keep")!);
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.blocking, undefined, "no generated block over the shot's marks");
+    assert.deepEqual([command.staging?.cast, command.staging?.sets], [own.cast, own.sets], "the shot keeps its own marks");
+  });
+
   it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
     await openStage(mounted);
