@@ -1425,7 +1425,7 @@ export function ChapterWorkspace({
   };
 
   // Loaded outlines are planning text. A changed manuscript replacement counts while being
-  // typed, matching the status transition its normal save will make (#1960).
+  // typed, matching the status transition its normal save will make (issue 1960).
   const manuscriptStatus = chapter.status === "outlined" && text.trim() !== "" && text.trim() !== live.trim() ? "drafted" : chapter.status;
   const words = record === null ? (chapter.words ?? 0) : chapterManuscriptWords(text, manuscriptStatus);
   // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
