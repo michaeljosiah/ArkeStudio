@@ -1357,6 +1357,31 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
     }
   };
 
+  it("excludes outline notes from book pricing and generation while keeping the planned row", () =>
+    withHarness({ before: async worldDir => {
+      await twoChapters(worldDir);
+      const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+      const raw = await readFile(file, "utf8");
+      await writeFile(file, raw.replace(/^status:.*$/m, "status: outlined"));
+      const manuscript = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      await writeFile(manuscript, (await readFile(manuscript, "utf8")).replace(/^status:.*$/m, "status: planned"));
+    } }, async ({ worldDir, events, send, spoken, bundle }) => {
+      const file = join(worldDir, "productions", LEDGER, "chapters", "02-the-same-ink.md");
+      const outline = await readFile(file, "utf8");
+      const door = await openDoor(send, events);
+      assert.equal(door.price.chapters, 1);
+      assert.deepEqual(door.rows.map(row => [row.chapterId, row.planned]), [["neap", false], ["the-same-ink", true]]);
+      assert.ok(door.rows[0]!.total > 0, "planned status with saved prose remains eligible");
+      assert.equal(door.rows[1]!.total, 0);
+      assert.equal(bundle().productions.find(p => p.meta.id === LEDGER)!.chapters.find(c => c.id === "the-same-ink")!.words, 0);
+      await readBook(send);
+      assert.equal(events.find((event): event is BookFinished => event.type === "audiobook.book-finished")?.chaptersRead, 1);
+      assert.deepEqual(events.filter((event): event is Extract<DomainEvent, { type: "audiobook.started" }> => event.type === "audiobook.started").map(event => event.chapterId), ["neap"]);
+      assert.ok(spoken.length > 0, "the manuscript chapter still reads");
+      assert.equal(existsSync(recordPath(worldDir, "02-the-same-ink")), false, "no outline narration is generated");
+      assert.equal(await readFile(file, "utf8"), outline, "planning text is preserved");
+    }));
+
   it("the door says what every chapter stands at, who reads, and what a press would spend, and the book reads every chapter in order", () =>
     withHarness({ durations: () => 3, before: twoChapters }, async ({ worldDir, events, spoken, send, refreshes }) => {
       const before = await openDoor(send, events);
