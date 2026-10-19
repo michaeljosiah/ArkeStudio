@@ -13,6 +13,7 @@ import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
   countWords,
+  chapterManuscriptWords,
   paragraphSpans,
   passageOf,
   passageDiff,
@@ -1423,11 +1424,13 @@ export function ChapterWorkspace({
     },
   };
 
-  // The words of the text on screen once it is here; the summary's count only while it is not.
-  const words = record === null ? (chapter.words ?? 0) : countWords(text);
+  // Loaded outlines are planning text. A changed manuscript replacement counts while being
+  // typed, matching the status transition its normal save will make (#1960).
+  const manuscriptStatus = chapter.status === "outlined" && text.trim() !== "" && text.trim() !== live.trim() ? "drafted" : chapter.status;
+  const words = record === null ? (chapter.words ?? 0) : chapterManuscriptWords(text, manuscriptStatus);
   // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
   // status stays "planned" until the author sets one, which read as a chapter not yet written.
-  const shownStatus = chapter.status === "planned" && words > 0 ? "drafted" : chapter.status;
+  const shownStatus = manuscriptStatus === "planned" && words > 0 ? "drafted" : manuscriptStatus;
   const activeChapters = production.chapters.filter((c) => !c.retired);
   const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength, activeChapters.length);

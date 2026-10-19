@@ -393,6 +393,40 @@ describe("chapter autosave recovery (#954)", () => {
 });
 
 describe("the chapter, opened (turn 126)", () => {
+  it("keeps loaded outline notes out of manuscript progress while counting a replacement draft", async () => {
+    const state = structuredClone(inkbound());
+    const chapter = state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!;
+    chapter.status = "outlined";
+    chapter.words = 0;
+    const m = await mount(state);
+    await answerOpen(m);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/);
+    await toView(m, "Chapter");
+    assert.match(text(m), /0 of 3,000 words/);
+    assert.equal(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"), false);
+    await toView(m, "Manuscript");
+    await typeProse(m, ` ${BODY} \n`);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/, "whitespace-only changes remain outline notes");
+    await typeProse(m, "The bell stopped. <br>");
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^4\/ 3,000$/, "a real unsaved replacement counts before autosave");
+    await toView(m, "Chapter");
+    assert.match(text(m), /4 of 3,000 words/);
+    assert.ok(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"));
+    await typeProse(m, BODY);
+    assert.match(text(m), /0 of 3,000 words/, "reverting to the loaded outline clears manuscript readiness");
+  });
+
+  it("counts planned and drafted prose after loading", async () => {
+    for (const status of ["planned", "drafted"] as const) {
+      const state = structuredClone(inkbound());
+      state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.status = status;
+      const m = await mount(state);
+      await answerOpen(m);
+      assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/);
+      await leave(m);
+    }
+  });
+
   it("asks for the body on open, never reads it off the summary, and then shows it", async () => {
     const m = await mount(inkbound());
     const ask = m.sent.find((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
