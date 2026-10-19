@@ -19,6 +19,8 @@ export function AudioStudioWorkspace(props: {
   onBack: () => void; onExport: () => void; exportDisabled: boolean;
   /** Why the last export was refused, said where the studio says its problems. */
   exportProblem?: string | null;
+  /** An episode's studio (issue 1883): Back to its script, and an episode's mix. */
+  backLabel?: string; unit?: "Chapter" | "Episode";
 }) {
   const studio = useAudioStudio(props), player = useAudioStudioPlayer(props), { snapshot } = studio;
   const waveform = useAudioStudioWaveforms(studio.source);
@@ -98,10 +100,11 @@ export function AudioStudioWorkspace(props: {
     playhead={audioSeconds(position)} onPlayhead={seconds => { player.stop(); setAt(audioSamples(seconds)); }}
     audioClock={{ seconds: audioSeconds(plan?.samples ?? 0), passages: plan?.passages.map(entry => ({ key: entry.key, at: audioSeconds(entry.at), seconds: audioSeconds(entry.samples), made: entry.samples > 0 })) ?? [] }}
     playing={player.playing} pending={player.pending} reviewing={review !== null} canPlay={!!plan?.samples && !busy}
+    {...(props.backLabel ? { backLabel: props.backLabel } : {})} unit={props.unit ?? "Chapter"}
     onPlay={play} onStop={player.stop} onBack={props.onBack} onExport={props.onExport} exportDisabled={props.exportDisabled || disabled || !!plan?.issues.length}
     problem={props.exportProblem ?? studio.problem ?? player.problem ?? (snapshot ? player.issues.join(" · ") || null : "Opening Audio Studio…")}
     library={snapshot ? <AudioStudioLibrary snapshot={snapshot} selected={selected} disabled={disabled} replacing={replacing} onAdd={add} onImport={() => importMedia()} onCancelReplace={() => setReplacing(false)} onEdit={edit} /> : <p className="fy-audio-studio__propose">{studio.problem === null ? "Loading Library…" : "Library unavailable"}</p>}
-    showInspector inspector={shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}
+    showInspector inspector={shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} unit={props.unit ?? "Chapter"} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}
     proposal={reviewCard} propose={<>{props.propose}{snapshot?.proposals?.filter(entry => entry.status === "pending").map(entry => {
       const version = entry.versions.at(-1)!;
       return <section key={entry.id} className="fy-audio-studio__propose"><b>{version.summary}</b><p>Version {version.number} · {version.base === snapshot.base ? "Ready to compare" : "Arrangement changed; ask Arke to revise"}</p>

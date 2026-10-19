@@ -14,6 +14,7 @@ import type { TimingRowLike } from "./chapter-timing.js";
 export function ChapterAudioStudio({ book, title, rows, timing, selected, onSelect, playhead, onPlayhead,
   timeline, inspector, conversation, proposal, propose, reviewing, playing, pending, canPlay,
   onPlay, onStop, onBack, onExport, exportDisabled, problem, library: suppliedLibrary, audioClock, showInspector = false,
+  backLabel = "Audiobook", unit = "Chapter",
 }: {
   book: string; title: string; rows: readonly TimingRowLike[]; timing: ChapterTiming;
   selected: string | null; onSelect: (key: string) => void; playhead: number; onPlayhead: (seconds: number) => void;
@@ -23,6 +24,10 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
   exportDisabled: boolean; problem: string | null;
   library?: ReactNode; showInspector?: boolean;
   audioClock?: { seconds: number; passages: readonly { key: string; at: number; seconds: number; made: boolean }[] };
+  /** Where Back goes, by name: an episode's studio goes back to its script, not to an audiobook (issue 1883). */
+  backLabel?: string;
+  /** What is arranged, as the studio names it. */
+  unit?: "Chapter" | "Episode";
 }) {
   const { phone, compact } = useCutLayout();
   const [panel, setPanel] = useState<"inspector" | "arke">("inspector");
@@ -57,9 +62,9 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
       <EditorSheetSlot sheet={compact} open={libraryOpen} title="Library" onClose={() => setLibraryOpen(false)}>{library}</EditorSheetSlot>
     </aside>
     <main className="fy-cutmain">
-      {phone && <header className="fy-cut-back"><button type="button" aria-label="Back to Audiobook" onClick={onBack}><ChevronLeft size={20} /></button><div><span>{book}</span><b>Audio Studio · {title}</b></div><Button onClick={onExport} disabled={exportDisabled || reviewing}><Download size={16} />Export</Button></header>}
+      {phone && <header className="fy-cut-back"><button type="button" aria-label={`Back to ${backLabel}`} onClick={onBack}><ChevronLeft size={20} /></button><div><span>{book}</span><b>Audio Studio · {title}</b></div><Button onClick={onExport} disabled={exportDisabled || reviewing}><Download size={16} />Export</Button></header>}
       <header className="fy-cuthead">
-        <Button size="sm" variant="ghost" onClick={onBack}><ChevronLeft size={12} />Audiobook</Button>
+        <Button size="sm" variant="ghost" onClick={onBack}><ChevronLeft size={12} />{backLabel}</Button>
         <div className="fy-cuthead__title"><h1>Audio Studio</h1><span className="fy-cuthead__meta">{title} · {formatTimingSeconds(clock.seconds)}</span></div>
         <span className="fy-h1row__push" />
         <Button size="sm" disabled={!canPlay || pending || reviewing} onClick={() => onPlay(0)}><Play size={12} />Listen from top</Button>
@@ -68,10 +73,10 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
       {proposal}
       {problem && <p role="status" className="fy-cuttimeline-error">{problem}</p>}
       <div className="fy-cutpreview-wrap">
-        <section className="fy-audio-script" aria-label="Chapter script">
+        <section className="fy-audio-script" aria-label={`${unit} script`}>
           <header><b>Script</b><span>{title}</span><Button size="sm" variant="ghost" aria-pressed={follow} onClick={() => setFollow(value => !value)}>Follow playhead</Button></header>
           <div className="fy-audio-script__passages" ref={script}>
-            {rows.map(row => <button type="button" key={row.block.key} data-passage={row.block.key} aria-pressed={selected === row.block.key} data-sounding={sounding === row.block.key || undefined} onClick={() => { select(row.block.key); if (!playing && !pending) onPlayhead(clock.passages.find(bar => bar.key === row.block.key)?.at ?? 0); }}><span>{row.mark}</span><span>{row.block.text}{!clock.passages.find(bar => bar.key === row.block.key)?.made && <small>Not read</small>}</span></button>)}
+            {rows.map(row => <button type="button" key={row.block.key} data-passage={row.block.key} aria-pressed={selected === row.block.key} data-sounding={sounding === row.block.key || undefined} onClick={() => { select(row.block.key); if (!playing && !pending) onPlayhead(clock.passages.find(bar => bar.key === row.block.key)?.at ?? 0); }}><span>{row.mark}</span><span>{row.block.text}{!clock.passages.find(bar => bar.key === row.block.key)?.made && <small>{unit === "Episode" ? "Not performed" : "Not read"}</small>}</span></button>)}
             {!rows.length && <p>No script passages yet.</p>}
           </div>
           {!compact && <footer>{play}<span className="fy-mono">{formatTimingSeconds(playhead)} / {formatTimingSeconds(clock.seconds)}</span></footer>}

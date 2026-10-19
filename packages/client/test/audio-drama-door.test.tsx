@@ -254,12 +254,42 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     assert.match(card.textContent!, /PilotThe tide turns · chapter 3/);
     assert.match(card.textContent!, /Kept from the listener.*Ilo is alive.*until ep 5/);
     assert.doesNotMatch(m.container.textContent!, /Step 1|step list/i);
+    assert.equal(m.container.querySelector("[data-testid='models-card']"), null, "no picture or film models for the ear (issue 1883)");
+    assert.doesNotMatch(m.container.textContent!, /No media generation starts here/, "and no caption under the composer");
     await click(m.container, "Change");
     await fire(card.querySelector<HTMLInputElement>("input[type=number]")!, "onBlur", "8");
     const update = m.setup().at(-1)!;
     assert.equal(update.action.operation, "update");
     assert.deepEqual(update.action.operation === "update" && update.action.update, { expectedRevision: 4, fields: { audioDrama: { ...plan, episodes: 8 } } },
       "the plan is replaced whole, so nothing else in it is lost");
+  });
+
+  it("under Arke's plan, Start the pilot reviews and creates, and Change the plan opens the card (230c, issue 1883)", async () => {
+    const plan = { episodes: 4, minutes: 20, narrator: "narrated", keptFromListener: [], pilot: { title: "The tide turns", chapters: [1] } };
+    const said = [{ id: "msg_01J8F3K2QW9VZX4N7M0RTYB6HD", turnId: "turn_01J8F3K2QW9VZX4N7M0RTYB6HE", role: "studio", text: "Here is the plan.", receipts: [], refusals: [], createdAt: AT }];
+    const m = await mount(inSetup(dramaSetup(4, plan), said), `/w/${FIXTURE_WORLD_ID}/productions/setup/${SETUP}`);
+    await act(async () => {
+      __setStateForTest(inSetup(dramaSetup(4, plan), said), { connection: "open" });
+      __applyEventForTest({ type: "production-setup.result", at: AT, worldId: FIXTURE_WORLD_ID, setupId: m.setup()[0]!.setupId, requestId: m.setup()[0]!.requestId, state: dramaSetup(4, plan) });
+    });
+    const choices = m.container.querySelector("[aria-label='The plan'][role='group']")!;
+    assert.ok(choices, "the two ways on stand under the reply");
+    await click(choices as HTMLElement, "Change the plan");
+    assert.ok(m.container.querySelector(".fy-ad-plan input[type=number]"), "the plan card opens to edit");
+    await click(choices as HTMLElement, "Start the pilot");
+    const review = m.setup().at(-1)!;
+    assert.deepEqual(review.action, { operation: "review", expectedRevision: 4 });
+    const REVIEW = "01J8F3K2QW9VZX4N7M0RTYB6HF";
+    const reviewed = ProductionSetupStateSchema.parse({ ...dramaSetup(4, plan), status: "reviewed", review: {
+      id: REVIEW, sourceDigest: `sha256:${"a".repeat(64)}`,
+      plan: {
+        production: { id: "low-water-2", title: "Low Water", format: "story", medium: "story", kind: "audio-drama", status: "in-progress", created: AT, updated: AT, failureModes: [] },
+        initialSeason: null, series: { operation: "none" },
+        initialContent: { worldId: FIXTURE_WORLD_ID, setupId: SETUP, revision: 4, narrative: { version: 1 }, scenes: [], episodes: [], audioDrama: { version: 1, source: { productionId: "low-water" }, plan } },
+      } } });
+    await answer(review, reviewed);
+    const create = m.setup().at(-1)!;
+    assert.deepEqual(create.action, { operation: "create", expectedRevision: 4, reviewId: REVIEW }, "and creates once the review is in");
   });
 
   it("leaving the kind drops the plan and restores a frame", async () => {
@@ -303,10 +333,32 @@ describe("an audio drama's own pages (design turn 230 revision 3)", () => {
     assert.match(html, /Pilot.*The tide turns · chapter 1.*Episodes/s, "the pilot stands apart: the plan names no episode for it");
     assert.doesNotMatch(html, /pilot · The tide turns/, "and it is never placed under Episode 1");
     assert.match(html, /Episodes 1–6 · not planned/, "the episodes not yet planned are one row");
+    assert.match(html, /<p>Audio drama · from Low Water<\/p>/, "the hero says the count once, in the plan line (issue 1883)");
     assert.match(html, /Kept from the listener.*Ilo is alive.*until ep 5/s);
     assert.match(html, /Adapts.*Low Water/s);
     assert.doesNotMatch(html, /Day one\.|Find the spine together/, "not a book's dashboard");
     assert.doesNotMatch(html, />Chapters</, "no chapters on its rail");
     assert.doesNotMatch(html, />Generate<|>Cut</, "and nothing of a video's");
+  });
+});
+
+describe("issue 1883: a new drama's way to its pilot (R-9)", () => {
+  it("Start the pilot, the pilot and the not-planned row each open episode 1's script", async () => {
+    for (const label of ["Start the pilot", "The tide turns · chapter 1", "Episodes 1–6 · not planned"]) {
+      const container = dom.document.createElement("div") as unknown as HTMLElement;
+      dom.document.body.append(container);
+      root = createRoot(container);
+      await act(async () => {
+        __setStateForTest(withStories(), { connection: "open" });
+        root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drama`]}><App /></MemoryRouter>);
+      });
+      const found = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+      assert.ok(found, `${label} is offered`);
+      await act(async () => found.dispatchEvent(new dom.Event("click", { bubbles: true })));
+      assert.match(container.textContent!, /No script yet/, `${label} opens episode 1`);
+      await act(async () => root?.unmount());
+      root = null;
+      container.remove();
+    }
   });
 });

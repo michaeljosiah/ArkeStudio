@@ -31,6 +31,12 @@ export const SpendSettingsSchema = z
     thresholdMicroUsd: z.number().int().min(0),
     /** The rolling window the threshold is evaluated over, across all worlds (R-19). */
     periodDays: z.number().int().min(1).max(365),
+    /**
+     * The most one press of an audio drama's Hear makes without asking first (SPEC-057 §1.4,
+     * issue 1882): above it the decision opens with the price. 0 asks every time. Absent, it is
+     * `HEAR_ONE_PRESS_LIMIT_MICRO_USD`, $0.50.
+     */
+    onePressMicroUsd: z.number().int().min(0).max(100_000_000).optional(),
   })
   .strict();
 export type SpendSettings = z.infer<typeof SpendSettingsSchema>;

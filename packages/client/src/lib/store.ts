@@ -1089,7 +1089,7 @@ export function subscribeEpisodeScriptSaveResults(listener: (result: EpisodeScri
   return () => episodeScriptSaveListeners.delete(listener);
 }
 
-type DramaEditionAnswer = { requestId: string; editions: Extract<DomainEvent, { type: "drama.editions" }>["editions"]; refused?: string };
+type DramaEditionAnswer = { requestId: string; editions: Extract<DomainEvent, { type: "drama.editions" }>["editions"]; mixes?: Extract<DomainEvent, { type: "drama.editions" }>["mixes"]; refused?: string };
 const dramaEditionListeners = new Set<(answer: DramaEditionAnswer) => void>();
 /** An edition published or refused, or the production's editions listed (SPEC-057 R-71). */
 export function subscribeDramaEditions(listener: (answer: DramaEditionAnswer) => void): () => void {
@@ -1821,7 +1821,7 @@ function handleFrame(json: string): void {
     if (event.type === "drama.edition" || event.type === "drama.editions") {
       for (const listener of dramaEditionListeners) listener(event.type === "drama.edition"
         ? { requestId: event.requestId, editions: event.edition ? [event.edition] : [], ...(event.refused ? { refused: event.refused } : {}) }
-        : { requestId: event.requestId, editions: event.editions });
+        : { requestId: event.requestId, editions: event.editions, ...(event.mixes ? { mixes: event.mixes } : {}) });
     }
     if (event.type === "drama.heard") {
       for (const listener of dramaHeardListeners) listener(event);
@@ -4012,8 +4012,8 @@ export function setModelEnabled(modelId: string, enabled: boolean): void {
   send({ kind: "set-model-enabled", modelId, enabled });
 }
 
-export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number): void {
-  send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays });
+export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number, onePressMicroUsd?: number): void {
+  send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays, ...(onePressMicroUsd !== undefined ? { onePressMicroUsd } : {}) });
 }
 
 export function detectRuntimes(): void {

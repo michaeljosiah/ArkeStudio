@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   HEAR_ONE_PRESS_LIMIT_MICRO_USD, dramaTakeState, formatMicroUsd,
   type DramaRequest, type EpisodeScriptBlock, type EpisodeTakes, type MissingVoiceChoice,
 } from "@arke-studio/contracts";
-import { decideDramaTake, hearDramaLines, subscribeDramaHeard, type DramaHeard } from "../lib/store.js";
+import { decideDramaTake, hearDramaLines, subscribeDramaHeard, useStore, type DramaHeard } from "../lib/store.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EditorDialog } from "./editor-dialog.js";
@@ -42,7 +42,7 @@ export function useHearQuote(worldId: string, productionId: string, episode: num
   return quote?.key === key ? quote.result : null;
 }
 
-export function HearBar({ worldId, productionId, episode, lines, script, scriptHash, takes, worldSlug, name, onClear, onHeard, retake = false, compact = false }: {
+export function HearBar({ worldId, productionId, episode, lines, script, scriptHash, takes, worldSlug, name, onClear, onHeard, retake = false, compact = false, actions, onChooseVoice }: {
   worldId: string; productionId: string; episode: number; lines: readonly string[]; script: readonly EpisodeScriptBlock[];
   /** The saved script's hash; null while the score holds unsaved edits (codex on PR 1871). */
   scriptHash: string | null;
@@ -51,6 +51,10 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
   retake?: boolean;
   /** The press alone, for a phone's tool bar (230r): the bar around it is the page's. */
   compact?: boolean;
+  /** What else the selection can do, before Done (R-28): Ask Arke, Source, Cast. */
+  actions?: ReactNode;
+  /** A speaker's voice chosen without leaving the episode (issue 1883); a link to the world's voice page otherwise. */
+  onChooseVoice?: (speaker: string) => void;
 }) {
   const [decisions, setDecisions] = useState<Record<string, MissingVoiceChoice>>({});
   const [open, setOpen] = useState(false);
@@ -69,7 +73,9 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
   const quoted = quote?.disposition === "quoted" ? quote : null;
   const missing = quoted?.missing ?? [];
   const price = quoted?.quote?.estimatedMicroUsd ?? 0;
-  const waits = missing.length > 0 || price > HEAR_ONE_PRESS_LIMIT_MICRO_USD;
+  // The one-press limit is the author's setting (SPEC-057 §1.4, issue 1882), $0.50 until changed.
+  const onePress = useStore().state?.app.spend?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD;
+  const waits = missing.length > 0 || price > onePress;
   const spoken = script.filter((block): block is Spoken => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"));
   // A line the author left out is not played either (codex on PR 1871): only what the quote sends or plays.
   const included = quoted?.quote ? new Set(quoted.quote.requests.map((request) => request.block)) : null;
@@ -124,7 +130,9 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
     setPressed(requestId);
   };
 
-  const count = spoken.length;
+  // The lines the press would hear: those sent or played, and those waiting on a voice, so the
+  // dialog's title counts what the button did (issue 1883). A line left out is not counted.
+  const count = quoted?.quote ? quoted.quote.requests.length + missing.reduce((sum, entry) => sum + entry.blocks.length, 0) : spoken.length;
   const said = failure ?? (quote?.disposition === "refused" ? quote.reason : null);
   const press = (
     <Button variant="primary" size={compact ? undefined : "sm"} disabled={!quoted || pressed !== null} onClick={() => waits ? setOpen(true) : hear()}>
@@ -133,9 +141,10 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
     </Button>
   );
   const dialog = (
-    <HearDialog open={open} onClose={() => setOpen(false)} quote={quoted} decisions={decisions} worldId={worldId}
+    <HearDialog open={open} onClose={() => setOpen(false)} quote={quoted} decisions={decisions} worldId={worldId} count={count}
       onDecide={(speaker, choice) => setDecisions((current) => ({ ...current, [speaker]: choice }))}
-      onHear={hear} busy={pressed !== null} />
+      onHear={hear} busy={pressed !== null}
+      {...(onChooseVoice ? { onChooseVoice: (speaker: string) => { setOpen(false); onChooseVoice(speaker); } } : {})} />
   );
   if (compact) return <>{said && <span className="fy-ad-hear__fail fy-ad-hear__fail--above" role="alert">{said}</span>}{press}{dialog}</>;
   return (
@@ -144,8 +153,10 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
       <span className="gap" />
       {/* A refused price is said with its reason, not left as a dead button (codex on PR 1871). */}
       {said && <span className="fy-ad-hear__fail" role="alert">{said}</span>}
-      <Button variant="ghost" size="sm" onClick={onClear}>Done</Button>
+      {/* Hear first, then what else the selection can do (230g). */}
       {press}
+      {actions}
+      <Button variant="ghost" size="sm" onClick={onClear}>Done</Button>
       {dialog}
     </div>
   );
@@ -155,9 +166,9 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
  * The decision that waits (230h), and nothing else: a speaker with no voice — choose one, let the
  * narrator stand in, or leave the line out — and the price. What's sent is one tap inside.
  */
-function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear, busy }: {
-  open: boolean; onClose: () => void; quote: Quote | null; decisions: Record<string, MissingVoiceChoice>; worldId: string;
-  onDecide: (speaker: string, choice: MissingVoiceChoice) => void; onHear: () => void; busy: boolean;
+function HearDialog({ open, onClose, quote, decisions, worldId, count, onDecide, onHear, busy, onChooseVoice }: {
+  open: boolean; onClose: () => void; quote: Quote | null; decisions: Record<string, MissingVoiceChoice>; worldId: string; count: number;
+  onDecide: (speaker: string, choice: MissingVoiceChoice) => void; onHear: () => void; busy: boolean; onChooseVoice?: (speaker: string) => void;
 }) {
   const [sent, setSent] = useState(false);
   // On a phone the dialog is a sheet (230s): it holds the focus, and the page behind is inert.
@@ -165,14 +176,16 @@ function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear
   const missing = quote?.missing ?? [];
   const requests = quote?.quote?.requests ?? [];
   const price = quote?.quote?.estimatedMicroUsd ?? 0;
-  const title = `Hear ${requests.length} line${requests.length === 1 ? "" : "s"}`, subtitle = price > 0 ? formatMicroUsd(price) : "already performed";
+  const title = `Hear ${count} line${count === 1 ? "" : "s"}`, subtitle = price > 0 ? formatMicroUsd(price) : missing.length > 0 ? "a voice is missing" : "already performed";
   const body = (
       <div className="fy-ad-heardlg">
         {missing.map((entry) => (
           <section key={entry.speaker} className="fy-ad-heardlg__missing" aria-label={`${entry.name} has no voice`}>
             <h3>{entry.name} has no voice · {entry.blocks.length} line{entry.blocks.length === 1 ? "" : "s"}</h3>
             <div className="fy-ad-heardlg__choices">
-              <Link className="ui-btn ui-btn--secondary ui-btn--sm" to={`/w/${worldId}/cast/${entry.speaker}/voice`}>Choose a voice</Link>
+              {onChooseVoice
+                ? <Button size="sm" variant="secondary" onClick={() => onChooseVoice(entry.speaker)}>Choose a voice</Button>
+                : <Link className="ui-btn ui-btn--secondary ui-btn--sm" to={`/w/${worldId}/cast/${entry.speaker}/voice`}>Choose a voice</Link>}
               <Button size="sm" variant={decisions[entry.speaker] === "narrator" ? "primary" : "secondary"} onClick={() => onDecide(entry.speaker, "narrator")}>Narrator stands in</Button>
               <Button size="sm" variant={decisions[entry.speaker] === "leave-out" ? "primary" : "secondary"} onClick={() => onDecide(entry.speaker, "leave-out")}>Leave the line out</Button>
             </div>
@@ -247,7 +260,8 @@ export function TakeCell({ block, line, voice, worldId, productionId, episode, w
       <small>{state === "misread" ? `heard “${line!.waiting!.misread}”` : "new or kept?"}</small>
       <span className="fy-ad-take__acts">
         {state === "misread" && <button type="button" onClick={onRetake}>Retake</button>}
-        <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "new", line!.waiting!.artifactId)}>Keep new</button>
+        {/* A first take has nothing to be new against (issue 1883): it is kept, or discarded. */}
+        <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "new", line!.waiting!.artifactId)}>{line?.kept ? "Keep new" : "Keep"}</button>
         {line?.kept && <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "kept", line.waiting!.artifactId)}>Keep old</button>}
         {!line?.kept && state === "misread" && <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "kept", line!.waiting!.artifactId)}>Discard</button>}
       </span>

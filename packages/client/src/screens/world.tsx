@@ -4941,9 +4941,7 @@ export function NewProductionScreen() {
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
-                  ) : (
-                    <span aria-hidden="true" style={{ color: "var(--muted-foreground)", fontSize: 24 }}>·</span>
-                  )}
+                  ) : null /* Other is the empty box (issue 1883): a "·" in it read as a stray mark. */}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />

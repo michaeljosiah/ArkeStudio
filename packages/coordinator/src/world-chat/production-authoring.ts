@@ -30,8 +30,10 @@ import {
   type WorldChatProductionSeasonAction,
   type WorldChatProductionSeriesAction,
   type ProductionBundle,
+  type EpisodeScript,
 } from "@arke-studio/contracts";
 import type { ProposalManager } from "../gate/proposals.js";
+import { ConversationActionPreparationError } from "../arke-actions/lifecycle.js";
 import { keepAdaptedText } from "../productions/audio-drama.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
@@ -47,6 +49,15 @@ export type WorldChatProductionAuthoredAction =
   | WorldChatProductionEpisodeAction
   | WorldChatProductionChapterAction
   | WorldChatProductionSceneAction;
+
+/**
+ * A refusal written for Arke (issue 1883). Every refusal here names what to read or change, and
+ * the action lifecycle passes only a preparation error's words on: as a bare Error each one
+ * reached the chat as "The action authority could not prepare this action", which says neither.
+ */
+function refuse(message: string): ConversationActionPreparationError {
+  return new ConversationActionPreparationError(message);
+}
 
 function proposalContext(intent: Pick<ConversationActionPrepareIntent, "actionId" | "conversationId">) {
   return {
@@ -65,7 +76,7 @@ function proposalContext(intent: Pick<ConversationActionPrepareIntent, "actionId
 
 async function readLive(store: WorldStore, path: string): Promise<string> {
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
-  if (raw === null) throw new Error(`${path} does not exist`);
+  if (raw === null) throw refuse(`${path} does not exist`);
   return raw;
 }
 
@@ -174,28 +185,28 @@ export function replacePassage(
   if (passage.paragraph !== undefined) {
     const span = paragraphSpans(body)[passage.paragraph - 1];
     if (span === undefined) {
-      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+      throw refuse(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
     }
     const paragraph = body.slice(span.start, span.end);
     // Found with whitespace folded (codex, round three): the file wraps its lines where the
     // editor showed one, so a quote across a soft break is still the same words.
     const hits = foldedOccurrences(paragraph, passage.find);
     if (hits.length === 0) {
-      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+      throw refuse(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
     }
     // Still exactly once inside the paragraph (codex, round two): a twin left standing after
     // the selected copy was typed over is exactly the wrong one to change.
     if (hits.length > 1) {
-      throw new Error(`that passage occurs more than once in paragraph ${passage.paragraph} of ${label} · quote more of it`);
+      throw refuse(`that passage occurs more than once in paragraph ${passage.paragraph} of ${label} · quote more of it`);
     }
     const [hit] = hits;
     return body.slice(0, span.start + hit!.start) + passage.with + body.slice(span.start + hit!.end);
   }
   const first = body.indexOf(passage.find);
-  if (first < 0) throw new Error(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
+  if (first < 0) throw refuse(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
   let count = 1;
   for (let at = body.indexOf(passage.find, first + passage.find.length); at >= 0; at = body.indexOf(passage.find, at + passage.find.length)) count++;
-  if (count > 1) throw new Error(`that passage occurs ${count} times in ${label} · quote more of it, or say which paragraph`);
+  if (count > 1) throw refuse(`that passage occurs ${count} times in ${label} · quote more of it, or say which paragraph`);
   return body.slice(0, first) + passage.with + body.slice(first + passage.find.length);
 }
 
@@ -213,26 +224,26 @@ function withoutCleared<T extends Record<string, unknown>>(
 
 function requireProduction(store: WorldStore, productionId: string) {
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
-  if (!production) throw new Error(`production ${productionId} is not in this world`);
+  if (!production) throw refuse(`production ${productionId} is not in this world`);
   return production;
 }
 
 function requireProductionIds(store: WorldStore, productionIds: readonly string[]): void {
   const ids = new Set(store.getBundle().productions.map((production) => production.meta.id));
   const missing = productionIds.find((id) => !ids.has(id));
-  if (missing) throw new Error(`production ${missing} is not in this world`);
+  if (missing) throw refuse(`production ${missing} is not in this world`);
 }
 
 function requireSceneIds(production: ReturnType<typeof requireProduction>, sceneIds: readonly string[]): void {
   const ids = new Set(production.scenes.map((scene) => scene.id));
   const missing = sceneIds.find((id) => !ids.has(id));
-  if (missing) throw new Error(`scene ${missing} is not in ${production.meta.id}`);
+  if (missing) throw refuse(`scene ${missing} is not in ${production.meta.id}`);
 }
 
 function requireEpisodeIds(production: ReturnType<typeof requireProduction>, episodeIds: readonly string[]): void {
   const ids = new Set(production.episodes.map((episode) => episode.id));
   const missing = episodeIds.find((id) => !ids.has(id));
-  if (missing) throw new Error(`episode ${missing} is not in ${production.meta.id}`);
+  if (missing) throw refuse(`episode ${missing} is not in ${production.meta.id}`);
 }
 
 function requireEpisodeReferences(
@@ -242,7 +253,7 @@ function requireEpisodeReferences(
 ): void {
   if (linked) requireEpisodeIds(production, [linked.closesInto, linked.opensFrom].filter((id): id is string => id !== undefined));
   if (thumbnailTakeId && !production.takes.some((take) => take.id === thumbnailTakeId)) {
-    throw new Error(`take ${thumbnailTakeId} is not in ${production.meta.id}`);
+    throw refuse(`take ${thumbnailTakeId} is not in ${production.meta.id}`);
   }
 }
 
@@ -254,9 +265,9 @@ function requireDraws(
   const sheets = new Set(store.getBundle().sheets.map((sheet) => sheet.id));
   const canon = new Set(store.getBundle().canon.map((entry) => entry.id));
   const missingSheet = draws.sheets.find((id) => !sheets.has(id));
-  if (missingSheet) throw new Error(`sheet ${missingSheet} is not in this world`);
+  if (missingSheet) throw refuse(`sheet ${missingSheet} is not in this world`);
   const missingCanon = draws.canon.find((id) => !canon.has(id));
-  if (missingCanon) throw new Error(`Canon entry ${missingCanon} is not in this world`);
+  if (missingCanon) throw refuse(`Canon entry ${missingCanon} is not in this world`);
 }
 
 /** Resolve against current characters; never choose between people sharing a short name. */
@@ -282,7 +293,7 @@ function resolveViewpointCharacter(store: WorldStore, productionId: string, valu
 export function resolveChapterViewpointEdit(store: WorldStore, productionId: string, value: string | null | undefined): string | undefined {
   const pov = resolveViewpointCharacter(store, productionId, value);
   if (value != null && !pov) {
-    throw new Error("The chapter named a viewpoint I could not match to one character. Choose a character from the cast, or clear the viewpoint explicitly.");
+    throw refuse("The chapter named a viewpoint I could not match to one character. Choose a character from the cast, or clear the viewpoint explicitly.");
   }
   return pov;
 }
@@ -290,7 +301,7 @@ export function resolveChapterViewpointEdit(store: WorldStore, productionId: str
 function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
   if (locationId === undefined) return;
   const location = store.getBundle().sheets.find((sheet) => sheet.id === locationId && sheet.type === "location");
-  if (!location) throw new Error(`location ${locationId} is not in this world`);
+  if (!location) throw refuse(`location ${locationId} is not in this world`);
 }
 
 function proposedTargetStems(store: WorldStore, pattern: RegExp): string[] {
@@ -309,6 +320,53 @@ export function bookAuthoringRefusal(production: ProductionBundle | undefined): 
   return `${production.meta.title} is an audio drama: its plan and episodes stand where a book's overview and prose style would. Propose no story overview or prose style for it.`;
 }
 
+/**
+ * Arke's episode script as it would be staged (SPEC-057 R-9, R-54), or why it cannot be, in words
+ * Arke can act on. Checked when the turn is prepared as well as when it is staged (issue 1883): a
+ * draft refused only at staging was refused after Arke's reply had already said it was drafted,
+ * and nothing in the chat said otherwise.
+ */
+export function episodeScriptDraft(store: WorldStore, action: Pick<WorldChatProductionEpisodeScriptAction["action"], "productionId" | "episode" | "title" | "baseHash" | "blocks">): EpisodeScript {
+  const production = requireProduction(store, action.productionId);
+  // An audio drama's episode, written whole: parsed as the scanner will read it, so the author is
+  // never offered a draft that cannot be kept.
+  if (!productionShape(production.meta).isAudioDrama) throw refuse(`${production.meta.title} is not an audio drama`);
+  const { episode } = action;
+  const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode);
+  // Fenced on the script Arke read (codex on PR 1874): an edit since is never written over. A new
+  // episode is named as one (issue 1883), so a guessed hash is told what to send.
+  if (!stored && action.baseHash !== null) throw refuse(`Episode ${episode} has no script yet. Write it with baseHash null.`);
+  if (stored && action.baseHash === null) throw refuse(`Episode ${episode} already has a script. Name the baseHash get_production read for it.`);
+  if (stored && stored.hash !== action.baseHash) throw refuse(`Episode ${episode}'s script changed since it was read. Read get_production again and redraft from it.`);
+  const current = stored?.script;
+  let blocks: EpisodeScript["blocks"];
+  try { blocks = settleDraftBlocks(action.blocks, current?.blocks ?? []); }
+  catch (error) { throw refuse(error instanceof Error ? error.message : String(error)); }
+  const parsed = EpisodeScriptSchema.safeParse({ version: current?.version ?? 1, episode, title: action.title ?? current?.title ?? "", blocks });
+  if (!parsed.success) throw refuse(`Episode ${episode}'s script cannot be kept as drafted: ${[...new Set(parsed.error.issues.slice(0, 3).map((issue) => issue.message))].join("; ")}`);
+  const record = parsed.data;
+  // Only sounds this production can play (codex on PR 1874), as a save is held to.
+  const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
+  if (sound) throw refuse(sound);
+  // A scene's source must be a chapter there is (codex on PR 1874): a pin the score cannot open is refused.
+  // A pin with no hash is given the chapter's now, at its version (codex on PR 1878), so an edit
+  // in place is still seen; and the text it points at is kept, as a direct save keeps it.
+  for (const block of record.blocks) {
+    if (block.kind !== "heading" || !block.source) continue;
+    const { story, chapter } = block.source;
+    const found = store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.find((candidate) => candidate.id === chapter);
+    if (!found) throw refuse(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
+    if (block.source.hash === undefined && found.hash !== undefined && (found.version ?? 1) === block.source.version) block.source.hash = found.hash;
+  }
+  // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
+  // and keeping either would make the other stale.
+  const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
+  if (store.getBundle().proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path))) {
+    throw refuse(`A draft of episode ${episode}'s script is waiting. Keep or discard it in the score first.`);
+  }
+  return record;
+}
+
 export async function stageWorldChatProductionAuthoredAction(
   store: WorldStore,
   gate: ProposalManager,
@@ -323,14 +381,14 @@ export async function stageWorldChatProductionAuthoredAction(
     const change = payload.action.change;
     if (change.operation === "create") {
       if (!productionShape(production.meta).isEpisodic) {
-        throw new Error(`${production.meta.title} is not an episodic production`);
+        throw refuse(`${production.meta.title} is not an episodic production`);
       }
       const existingSeries = store.getBundle().series.find((series) => series.seasons.includes(production.meta.id));
       if (existingSeries) {
-        throw new Error(`${production.meta.title} already belongs to Series ${existingSeries.title}`);
+        throw refuse(`${production.meta.title} already belongs to Series ${existingSeries.title}`);
       }
       if (change.seasons.some((id) => id !== production.meta.id)) {
-        throw new Error("A new Series begins with the current production; other seasons join through their own metadata action.");
+        throw refuse("A new Series begins with the current production; other seasons join through their own metadata action.");
       }
       const seasons = [production.meta.id];
       requireProductionIds(store, seasons);
@@ -356,9 +414,9 @@ export async function stageWorldChatProductionAuthoredAction(
       }, precondition);
     }
     const current = store.getBundle().series.find((series) => series.id === change.seriesId);
-    if (!current) throw new Error(`series ${change.seriesId} is not in this world`);
+    if (!current) throw refuse(`series ${change.seriesId} is not in this world`);
     if (!current.seasons.includes(production.meta.id)) {
-      throw new Error(`Series ${current.title} does not belong to ${production.meta.title}`);
+      throw refuse(`Series ${current.title} does not belong to ${production.meta.title}`);
     }
     if (change.changes.seasons) {
       requireProductionIds(store, change.changes.seasons);
@@ -366,7 +424,7 @@ export async function stageWorldChatProductionAuthoredAction(
         change.changes.seasons.length !== current.seasons.length ||
         new Set(change.changes.seasons).size !== change.changes.seasons.length ||
         change.changes.seasons.some((id) => !current.seasons.includes(id))
-      ) throw new Error("Series ordering must contain every current season exactly once; association changes through production metadata.");
+      ) throw refuse("Series ordering must contain every current season exactly once; association changes through production metadata.");
     }
     const record = SeriesSchema.parse(withoutCleared(current, {
       ...change.changes,
@@ -382,7 +440,7 @@ export async function stageWorldChatProductionAuthoredAction(
 
   if (payload.kind === "world-chat-production-overview" || payload.kind === "world-chat-production-prose-style") {
     const refused = bookAuthoringRefusal(production);
-    if (refused) throw new Error(refused);
+    if (refused) throw refuse(refused);
   }
 
   if (payload.kind === "world-chat-production-overview") {
@@ -416,50 +474,19 @@ export async function stageWorldChatProductionAuthoredAction(
   }
 
   if (payload.kind === "world-chat-production-episode-script") {
-    // An audio drama's episode, written whole (SPEC-057 R-9, R-54): parsed as the scanner will
-    // read it, so the author is never offered a draft that cannot be kept.
-    if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama`);
-    const { episode } = payload.action;
-    const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode);
-    // Fenced on the script Arke read (codex on PR 1874): an edit since is never written over.
-    if ((stored?.hash ?? null) !== payload.action.baseHash) throw new Error(`Episode ${episode}'s script changed since it was read. Read get_production again and redraft from it.`);
-    const current = stored?.script;
-    const record = EpisodeScriptSchema.parse({
-      version: current?.version ?? 1, episode,
-      title: payload.action.title ?? current?.title ?? "",
-      blocks: settleDraftBlocks(payload.action.blocks, current?.blocks ?? []),
-    });
-    // Only sounds this production can play (codex on PR 1874), as a save is held to.
-    const sound = unusableSound(record.blocks, store.getBundle().artifacts, production.meta.id);
-    if (sound) throw new Error(sound);
-    // A scene's source must be a chapter there is (codex on PR 1874): a pin the score cannot open is refused.
-    // A pin with no hash is given the chapter's now, at its version (codex on PR 1878), so an edit
-    // in place is still seen; and the text it points at is kept, as a direct save keeps it.
-    for (const block of record.blocks) {
-      if (block.kind !== "heading" || !block.source) continue;
-      const { story, chapter } = block.source;
-      const found = store.getBundle().productions.find((candidate) => candidate.meta.id === story)?.chapters.find((candidate) => candidate.id === chapter);
-      if (!found) throw new Error(`“${block.place}” names chapter ${chapter} of ${story}, which is not in this world.`);
-      if (block.source.hash === undefined && found.hash !== undefined && (found.version ?? 1) === block.source.version) block.source.hash = found.hash;
-    }
+    const record = episodeScriptDraft(store, payload.action);
     await keepAdaptedText(store, production.meta.id, record.blocks).catch(() => {});
-    // One draft of a script at a time (codex on PR 1874): a second would hide behind the first,
-    // and keeping either would make the other stale.
-    const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
-    if (store.getBundle().proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path))) {
-      throw new Error(`A draft of episode ${episode}'s script is waiting. Keep or discard it in the score first.`);
-    }
     return gate.stage({
       kind: "episode-script",
-      summary: `Episode ${episode} script: ${production.meta.title}`,
+      summary: `Episode ${record.episode} script: ${production.meta.title}`,
       ...context,
-      targets: [{ path, content: `${JSON.stringify(record, null, 2)}\n` }],
+      targets: [{ path: `productions/${production.meta.id}/scripts/${episodeScriptFile(record.episode)}`, content: `${JSON.stringify(record, null, 2)}\n` }],
     }, precondition);
   }
 
   if (payload.kind === "world-chat-production-season") {
     if (!productionShape(production.meta).isEpisodic) {
-      throw new Error(`${production.meta.title} is not an episodic production`);
+      throw refuse(`${production.meta.title} is not an episodic production`);
     }
     for (const arc of payload.action.changes.arcs ?? []) {
       requireEpisodeIds(production, [arc.setup, arc.turn, arc.payoff].filter((id): id is string => id !== undefined));
@@ -480,7 +507,7 @@ export async function stageWorldChatProductionAuthoredAction(
   if (payload.kind === "world-chat-production-episode") {
     const change = payload.action.change;
     if (!productionShape(production.meta).isEpisodic) {
-      throw new Error(`${production.meta.title} is not an episodic production`);
+      throw refuse(`${production.meta.title} is not an episodic production`);
     }
     if (change.operation === "create") {
       requireSceneIds(production, change.scenes);
@@ -528,7 +555,7 @@ export async function stageWorldChatProductionAuthoredAction(
     }
     const current = production.episodes.find((episode) => episode.id === change.episodeId);
     const stem = production.episodeFiles[change.episodeId];
-    if (!current || !stem) throw new Error(`episode ${change.episodeId} is not in ${production.meta.id}`);
+    if (!current || !stem) throw refuse(`episode ${change.episodeId} is not in ${production.meta.id}`);
     if (change.changes.scenes) requireSceneIds(production, change.changes.scenes);
     requireEpisodeReferences(production, change.changes.linked, change.changes.release?.thumbnailTakeId);
     const record = EpisodeSchema.parse(withoutCleared(current, change.changes));
@@ -545,7 +572,7 @@ export async function stageWorldChatProductionAuthoredAction(
 
   if (payload.kind === "world-chat-production-chapter") {
     if (!productionShape(production.meta).hasChapters) {
-      throw new Error(`${production.meta.title} does not use chapters`);
+      throw refuse(`${production.meta.title} does not use chapters`);
     }
     const change = payload.action.change;
     if (change.operation === "outline") {
@@ -623,7 +650,7 @@ export async function stageWorldChatProductionAuthoredAction(
     }
     const chapter = production.chapters.find((candidate) =>
       candidate.id === change.chapterId || candidate.file === change.chapterId);
-    if (!chapter) throw new Error(`chapter ${change.chapterId} is not in ${production.meta.id}`);
+    if (!chapter) throw refuse(`chapter ${change.chapterId} is not in ${production.meta.id}`);
     requireDraws(store, change.changes.draws);
     const pov = resolveChapterViewpointEdit(store, production.meta.id, change.changes.viewpointCharacter);
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
@@ -667,7 +694,7 @@ export async function stageWorldChatProductionAuthoredAction(
 
   const change = payload.action.change;
   if (!productionShape(production.meta).hasScenes) {
-    throw new Error(`${production.meta.title} does not use scenes`);
+    throw refuse(`${production.meta.title} does not use scenes`);
   }
   if (change.operation === "create") {
     requireSceneLocation(store, change.inherits?.location);
@@ -676,7 +703,7 @@ export async function stageWorldChatProductionAuthoredAction(
       : production.episodes.find((candidate) => candidate.id === change.episodeId);
     const episodeStem = episode ? production.episodeFiles[episode.id] : undefined;
     if (change.episodeId !== undefined && (!episode || !episodeStem)) {
-      throw new Error(`episode ${change.episodeId} is not in ${production.meta.id}`);
+      throw refuse(`episode ${change.episodeId} is not in ${production.meta.id}`);
     }
     const claimedStems = proposedTargetStems(
       store,
@@ -730,7 +757,7 @@ export async function stageWorldChatProductionAuthoredAction(
   }
   const current = production.scenes.find((scene) => scene.id === change.sceneId);
   const stem = production.sceneFiles[change.sceneId];
-  if (!current || !stem) throw new Error(`scene ${change.sceneId} is not in ${production.meta.id}`);
+  if (!current || !stem) throw refuse(`scene ${change.sceneId} is not in ${production.meta.id}`);
   const graph = isGraphScene(current) ? current : migrateLegacyScene(current);
   if (change.operation === "edit") requireSceneLocation(store, change.changes.inherits?.location);
   if (change.operation === "replace-script") {
@@ -742,7 +769,7 @@ export async function stageWorldChatProductionAuthoredAction(
       const reminted = oldBlocks.find((existing) =>
         existing.kind === block.kind && existing.speaker === block.speaker && existing.text === block.text);
       if (reminted) {
-        throw new Error(`unchanged script block ${reminted.id} must keep its stable id`);
+        throw refuse(`unchanged script block ${reminted.id} must keep its stable id`);
       }
     }
     for (const [index, oldBlock] of oldBlocks.entries()) {
@@ -753,7 +780,7 @@ export async function stageWorldChatProductionAuthoredAction(
         !oldIds.has(nextBlock.id) &&
         nextBlock.kind === oldBlock.kind &&
         nextBlock.speaker === oldBlock.speaker
-      ) throw new Error(`edited script block ${oldBlock.id} must keep its stable id`);
+      ) throw refuse(`edited script block ${oldBlock.id} must keep its stable id`);
     }
   }
   const record = change.operation === "replace-script"

@@ -29,6 +29,16 @@ describe("global Chat keeps presentation separate from conversation authority (2
     const historical = chatSurfaceForPage(state, `${root}/chat/${CHAT_ID}`)!;
     assert.equal(historical.title, "Builder Chat"); assert.equal(historical.entry.kind, "production");
   });
+  it("keeps a draft a page set before its conversation was found (issue 1883)", () => {
+    // Setup's conversation goes on as the new production's: it already holds values of its own.
+    const owner = new GlobalChatController(); owner.open(cut); owner.reportConversation(cut.key, CHAT_ID);
+    owner.setValue(cut.key, "languageModel", "a-model"); owner.setValue(cut.key, "draft", "");
+    owner.setValue(production.key, "draft", "Plan episodes 2–6 of this audio drama.");
+    owner.select(production); owner.reportConversation(production.key, CHAT_ID);
+    assert.equal(owner.value(production.key, "draft", ""), "Plan episodes 2–6 of this audio drama.");
+    assert.equal(owner.value(production.key, "languageModel", ""), "a-model");
+  });
+
   it("navigation retains the subject and draft until an explicit switch", () => {
     const owner = new GlobalChatController(); owner.setCurrent(production); owner.open();
     owner.setValue(production.key, "draft", "Keep the bells quiet."); owner.reportConversation(production.key, CHAT_ID);

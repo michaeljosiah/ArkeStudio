@@ -1561,6 +1561,12 @@ export const WorldChatLoadedSchema = z
      * what did NOT happen, and it belongs beside the sentence that may claim otherwise.
      */
     refusals: z.record(MessageIdSchema, RefusedToolsSchema).default({}),
+    /**
+     * What each studio reply proposed that could not be prepared, worded for a person: "Episode 1
+     * script: A draft of episode 1's script is waiting." Beside the reply for the reason
+     * `refusals` is (issue 1883): the reply had said the draft was made, and nothing else did.
+     */
+    notPrepared: z.record(MessageIdSchema, z.array(z.string().max(200))).default({}),
     /** Production filing rows, by the narration message they sit beside. */
     benchOutcomes: z.record(MessageIdSchema, BenchOutcomeReportSchema).default({}),
     /** Frame-run anchors, by narration message; report rows are joined from live frameRuns. */
@@ -2862,7 +2868,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
-  "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first, name the script's baseHash, and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
+  "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
   "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",

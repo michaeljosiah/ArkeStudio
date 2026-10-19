@@ -10,8 +10,8 @@ import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
 import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
-import { changedFields, draftRows } from "../src/lib/episode-script.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { changedFields, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -88,7 +88,7 @@ describe("the drama's Cast (230k)", () => {
     assert.match(rowText(container, "maren-kest"), /Maren Kest.*from character.*1$/);
     assert.match(rowText(container, "bray"), /BrayNo voice.*Warm, steady\. Counts when frightened\.When the narrator quotes them: A slower warmth\.2$/);
     assert.doesNotMatch(rowText(container, "maren-kest"), /When the narrator quotes/, "Maren is never quoted by the narrator");
-    assert.match(rowText(container, "harbour-clerk"), /harbour-clerk.*no character sheet/);
+    assert.match(rowText(container, "harbour-clerk"), /Harbour clerk.*no character sheet/);
   });
 
   it("opens a role to its notes and keeps a hidden identity in the production, both or neither", async () => {
@@ -201,6 +201,65 @@ describe("Arke's draft in the score (R-9, R-54)", () => {
   });
 });
 
+describe("issue 1882: one change of a draft and not another", () => {
+  it("writes each row as drafted or as it was, and lets a bed whose stop is left out run on", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const added = line("bray", "Four.");
+    const bed = { id: ulid(), kind: "ambience" as const, heard: "Gulls.", until: added.id };
+    const rows = draftRows([a, b, c], [bed, a, { ...b, words: "Two, climb." } as EpisodeScriptBlock, added]);
+    const key = (state: string, id: string) => `${state}:${id}`;
+    assert.deepEqual(keepDraftRows([a, b, c], rows, new Set()).map((block) => block.id), [bed.id, a.id, b.id, added.id], "nothing left out is the draft");
+    const some = keepDraftRows([a, b, c], rows, new Set([key("changed", b.id), key("removed", c.id), key("added", added.id)]));
+    assert.deepEqual(some.map((block) => block.id), [bed.id, a.id, b.id, c.id]);
+    assert.equal((some[2] as { words: string }).words, "Two.", "a rewrite left out keeps its old words");
+    assert.equal((some[0] as { until?: string }).until, undefined, "the bed's stop was left out, so it runs to the scene's end");
+  });
+
+  it("Keep N of M saves the script with the changes taken, and lets the draft go", async () => {
+    const a = line("maren-kest", "The log said two hours."), b = line("bray", "The log's wrong.");
+    const state = drama([a, b]);
+    const proposed = { version: 3, episode: 1, title: "", blocks: [a, { ...b, words: "The log's wrong. Climb." }, line("bray", "Now.")] };
+    state.world!.proposals = [{ proposal: { id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", kind: "episode-script", summary: "Episode 1 script", targets: [], draftRevision: 2 },
+      ripple: null, episodeScripts: { "productions/low-water-drama/scripts/episode-001.json": proposed } }] as never;
+    const { container, sent } = await mount(state, "script/1");
+    const leave = [...container.querySelectorAll("button[aria-label='Leave this change out']")];
+    assert.equal(leave.length, 2, "each change has its own choice");
+    await act(async () => props(leave[1]!).onClick!({}));
+    const keep = [...container.querySelectorAll("button")].find((button) => button.textContent === "Keep 1 of 2")!;
+    assert.ok(keep, "Keep names what it writes");
+    await act(async () => props(keep).onClick!({}));
+    assert.ok(sent.some((message) => message.kind === "proposal-discard"), "the draft is let go, so nothing left out can be kept later");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.deepEqual(save.blocks.map((block) => (block as { words: string }).words), ["The log said two hours.", "The log's wrong. Climb."]);
+  });
+
+  it("puts a removal left out back where it stood, among lines the draft moves (codex on PR 1884)", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const rows = draftRows([a, b, c], [c, b]);
+    assert.deepEqual(keepDraftRows([a, b, c], rows, new Set([`removed:${a.id}`])).map((block) => block.id), [a.id, c.id, b.id]);
+    const d = line("bray", "Four.");
+    assert.deepEqual(keepDraftRows([a, b, c, d], draftRows([a, b, c, d], [d, a, c]), new Set([`removed:${b.id}`])).map((block) => block.id),
+      [d.id, a.id, b.id, c.id], "after the line it followed");
+  });
+
+  it("keeps a drafted title with every line change left out (codex on PR 1884)", async () => {
+    const a = line("maren-kest", "The log said two hours."), b = line("bray", "The log's wrong.");
+    const state = drama([a, b]);
+    const proposed = { version: 3, episode: 1, title: "The log", blocks: [a, { ...b, words: "The log's wrong. Climb." }] };
+    state.world!.proposals = [{ proposal: { id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", kind: "episode-script", summary: "Episode 1 script", targets: [], draftRevision: 2 },
+      ripple: null, episodeScripts: { "productions/low-water-drama/scripts/episode-001.json": proposed } }] as never;
+    const { container, sent } = await mount(state, "script/1");
+    await act(async () => props(container.querySelector("button[aria-label='Leave this change out']")!).onClick!({}));
+    const keep = [...container.querySelectorAll("button")].find((button) => button.textContent === "Keep title") as HTMLButtonElement | undefined;
+    assert.equal(keep?.disabled, false, "the title is still taken");
+    await act(async () => props(keep!).onClick!({}));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.deepEqual([save.title, save.blocks.map((block) => (block as { words: string }).words)], ["The log", ["The log said two hours.", "The log's wrong."]]);
+  });
+});
+
 describe("codex round 1 on PR 1874", () => {
   it("names what a rewrite changes beyond its words", () => {
     const was = line("bray", "Two.");
@@ -223,6 +282,10 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     const read = sent.find((message) => message.kind === "read-audio-studio") as { chapterFile: string } | undefined;
     assert.equal(read?.chapterFile, "episode-001", "one arrangement an episode, on the same studio");
     assert.equal(container.querySelector("textarea[data-words]"), null, "the score is not drawn under it");
+    // Its own words (issue 1883): back to the script, the episode's bar and views above it (230o), an episode's mix.
+    assert.match(container.querySelector(".fy-cuthead")!.textContent!, /^Script/, "Back names the script, not Audiobook");
+    assert.ok(container.querySelector(".fy-ad-ep__bar nav[aria-label='Episode views'] [aria-current='page']")?.textContent === "Audio Studio");
+    assert.ok(container.querySelector("section[aria-label='Episode script']"));
   });
 });
 
@@ -258,6 +321,21 @@ describe("the show page and Publish (230p, 230q)", () => {
     await act(async () => props([...held.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
     assert.match(dom.document.body.textContent!, /Episode 1.*not performed/);
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
+  });
+
+  it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {
+    const a = line("maren-kest", "One.");
+    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");
+    assert.equal(container.querySelector('[data-episode="1"] button[aria-label="Play episode 1"]') !== null, true, "ready until the mix is checked");
+    // The coordinator checks the saved arrangement as Publish would, sources read live (codex on PR 1884).
+    const listing = sent.findLast((message) => message.kind === "list-drama-editions") as { requestId: string } | undefined;
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "drama.editions", requestId: listing!.requestId, editions: [],
+      mixes: [{ episode: 1, issues: ["Passage “One.” changed; bind it again"] }] }));
+    const row = container.querySelector('[data-episode="1"]')!;
+    assert.match(row.textContent!, /● Mix 1 to fix/);
+    assert.equal(row.querySelector("button[aria-label='Play episode 1']"), null, "an episode whose mix cannot resolve is not offered to play");
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    assert.match(dom.document.body.textContent!, /the saved mix has 1 problem to fix in Audio Studio/);
   });
 
   it("keeps gaps in the episodes not planned, and Cancel waits for a publish in flight (codex on PR 1880)", async () => {

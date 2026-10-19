@@ -2,6 +2,17 @@
 .fy-ad-ep { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .fy-ad-ep .gap { flex: 1; }
 .fy-ad-ep__bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+/* One row at a laptop's width with the rail open (issue 1883): the title and the scene give way
+   first, then the toggles keep their icons and the ring its time; it wraps only past that. */
+.fy-ad-ep { container: ad-ep / inline-size; }
+.fy-ad-ep__title { min-width: 0; flex: 0 1 auto; }
+.fy-ad-ep__title input { min-width: 6ch; flex: 1 1 auto; }
+.fy-ad-ep__scene { min-width: 0; flex: 0 1 auto; max-width: 26ch; text-overflow: ellipsis; }
+@container ad-ep (max-width: 1240px) {
+  .fy-ad-ep__toggle .fy-ad-ep__word, .fy-ad-ep__ring .fy-ad-ep__word { display: none; }
+  .fy-ad-ep__toggle { padding: 6px 8px; }
+  .fy-ad-ep__scene { max-width: 18ch; }
+}
 .fy-ad-ep__views { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--secondary); }
 .fy-ad-ep__views button { border: 0; background: none; color: var(--muted-foreground); font: 500 13px var(--font-sans); padding: 6px 12px; border-radius: 7px; cursor: pointer; }
 .fy-ad-ep__views button[aria-current="page"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
@@ -19,8 +30,20 @@
 .fy-ad-ep__menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 180px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); box-shadow: var(--shadow-lg); padding: 6px; }
 .fy-ad-ep__menu button { display: block; width: 100%; height: 36px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: inherit; font: 500 13px var(--font-sans); text-align: left; cursor: pointer; }
 .fy-ad-ep__menu button:hover, .fy-ad-ep__menu button:focus-visible { background: var(--secondary); outline: none; }
-.fy-ad-ep__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+/* Over the Hear bar at the foot of the score, the menu opens upward. */
+.fy-ad-ep__menu--up { top: auto; bottom: calc(100% + 6px); min-width: 220px; }
+.fy-ad-ep__menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+.fy-ad-ep__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .fy-ad-ep__body--source { grid-template-columns: minmax(0, 1fr) 360px; }
+/* Hear sits under the score, in its column, and a side column runs the body's height beside both
+   (issue 1883): auto-placed, the bar took the side column's cell and pushed Source under the score. */
+.fy-ad-ep__body > .fy-ad-hear { grid-column: 1; grid-row: 2; }
+@media (min-width: 600px) { .fy-ad-ep__body--source > .fy-ad-source { grid-column: 2; grid-row: 1 / span 2; } }
+.fy-ad-ep__dock, .fy-ad-show__dock { flex: none; display: flex; flex-direction: column; }
+/* An episode's studio under the episode's bar (230o): the studio takes the rest of the height. */
+.fy-ad-ep__studio { flex: 1; min-height: 0; display: flex; }
+.fy-ad-ep__studio > * { flex: 1; min-width: 0; }
+.fy-ad-show__dock { position: sticky; bottom: 0; z-index: 3; }
 .fy-ad-ep__foot { display: flex; gap: 12px; padding: 8px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
 
 /* The score: the two bed lanes, who, the words, the take (230e). */
@@ -28,6 +51,8 @@
 .fy-ad-score__empty { padding: 48px 0; display: grid; gap: 12px; justify-items: start; color: var(--muted-foreground); }
 .fy-ad-score__row { position: relative; display: grid; grid-template-columns: 14px 14px 120px minmax(0, 1fr) 48px; column-gap: 10px; align-items: start; padding: 6px 0; max-width: 900px; }
 .fy-ad-score__row--on { background: var(--secondary); border-radius: 8px; }
+/* Picked to hear, not open to edit (issue 1883): marked, and its fields stay as they read. */
+.fy-ad-score__row--picked { background: color-mix(in srgb, var(--secondary) 70%, transparent); border-radius: 8px; box-shadow: inset 2px 0 0 var(--foreground); }
 .fy-ad-score__row--heading { padding-top: 22px; }
 .fy-ad-score__row--heading > .fy-ad-score__heading { grid-column: 3 / -1; }
 .fy-ad-score__lane { align-self: stretch; position: relative; margin: -6px 0; }
@@ -83,6 +108,8 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-hear__dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); margin-right: 6px; }
 .fy-ad-hear__fail { color: var(--destructive, var(--warning)); }
 .fy-ad-heardlg { display: grid; gap: 14px; padding: 4px 2px 2px; font-size: 13px; }
+/* In a dialog, the body is inset as the dialog's head is (issue 1883); a phone's sheet pads its own. */
+.fy-editordialog__panel > .fy-ad-heardlg, .fy-editordialog__panel > .fy-ad-pub { padding: 14px 16px 16px; overflow: auto; }
 .fy-ad-heardlg__missing h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 .fy-ad-heardlg__choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .fy-ad-heardlg__sent { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; }
@@ -119,7 +146,8 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-gen footer { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Source (230e): the pinned chapter version, numbered by paragraph, the line's passage marked. */
-.fy-ad-source { border-left: 1px solid var(--border); overflow: auto; padding: 18px 20px 40px; font-size: 14px; line-height: 1.6; }
+/* It scrolls down, never across (issue 1883): a long word or a wide row wraps inside the column. */
+.fy-ad-source { border-left: 1px solid var(--border); overflow: hidden auto; min-width: 0; overflow-wrap: anywhere; padding: 18px 20px 40px; font-size: 14px; line-height: 1.6; }
 .fy-ad-source header { display: flex; align-items: baseline; gap: 8px; }
 .fy-ad-source header h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .fy-ad-source header small { color: var(--muted-foreground); }
@@ -210,6 +238,11 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-draftbar .gap { flex: 1; }
 .fy-ad-draftbar span { color: var(--muted-foreground); }
 .fy-ad-score--draft { padding-top: 12px; }
+/* A change taken or left out on its own (issue 1882): its toggle in the margin, a left one faded. */
+.fy-ad-score--draft [role="listitem"] { position: relative; }
+.fy-ad-draft__take { position: absolute; left: -2px; top: 6px; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 50%; background: var(--background); color: var(--foreground); font-size: 12px; line-height: 1; cursor: pointer; }
+.fy-ad-draft__take[aria-pressed="false"] { color: var(--muted-foreground); }
+.fy-ad-draft__left { opacity: 0.45; }
 .fy-ad-draft__row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 4px 0; font-size: 17px; line-height: 1.5; }
 .fy-ad-draft__who { font-size: 13px; font-weight: 600; text-align: right; padding-top: 3px; }
 .fy-ad-draft__row--added .fy-ad-draft__text, .fy-ad-draft__row--moved .fy-ad-draft__text { color: var(--muted-foreground); }
@@ -247,6 +280,15 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-map__ribbon--lit { opacity: 0.6; }
 .fy-ad-map__ribbon--dim { opacity: 0.08; }
 .fy-ad-map__side { border-left: 1px solid var(--border); padding-left: 20px; font-size: 13px; }
+/* The map keeps a scale its labels can be read at (issue 1883): with Chat open its column fell to a
+   third of the 760 viewBox and the labels to 3 px. Without room for both, the panel goes under the
+   map, and the map scrolls sideways rather than drawing smaller than 560 wide. */
+.fy-ad-map { container: ad-map / inline-size; }
+.fy-ad-map__svg { min-width: 560px; }
+@container ad-map (max-width: 1040px) {
+  .fy-ad-map__body { grid-template-columns: minmax(0, 1fr); overflow-x: auto; }
+  .fy-ad-map__side { border-left: 0; border-top: 1px solid var(--border); padding: 16px 0 0; }
+}
 .fy-ad-map__panel h2 { font-size: 18px; margin: 0 0 10px; }
 .fy-ad-map__panel h3 { font-size: 12px; color: var(--muted-foreground); margin: 14px 0 4px; font-weight: 500; }
 .fy-ad-map__panel dl { display: grid; grid-template-columns: 70px 1fr; gap: 6px; margin: 0 0 10px; }
@@ -272,6 +314,8 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-cmp__col h2 { font-size: 14px; margin: 0 0 12px; }
 .fy-ad-cmp__col h2 small, .fy-ad-cmp__col p > small { color: var(--muted-foreground); font-weight: 400; font-size: 11px; }
 .fy-ad-cmp__mark { background: var(--secondary); box-shadow: inset 3px 0 0 var(--warning); padding-left: 6px; }
+/* The words that differ, inside a changed paragraph (issue 1882). */
+.fy-ad-cmp__word { background: color-mix(in srgb, var(--warning) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .fy-ad-cmp__line small { display: inline-block; min-width: 64px; }
 .fy-ad-cmp__reason { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; font-size: 12px; color: var(--muted-foreground); }
 .fy-ad-cmp__reason textarea { font: inherit; font-size: 13px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); }
@@ -304,6 +348,7 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-show__num { border: 1px solid var(--border); }
 .fy-ad-show__open { display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
 .fy-ad-show__open small { color: var(--muted-foreground); font-weight: 400; }
+.fy-ad-show__ends { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .fy-ad-show__scenes { display: flex; gap: 3px; max-width: 420px; }
 .fy-ad-show__scenes i { height: 4px; border-radius: 2px; background: var(--border); min-width: 6px; }
 .fy-ad-show__scenes i.fy-ad-show__scene--done { background: var(--foreground); }
@@ -406,8 +451,13 @@ button.fy-ad-chip { cursor: pointer; }
   /* Add a sound's search takes the row, as the generation sheets' does. */
   .fy-ad-sound .fy-refpicker__searchwrap { width: 100%; min-width: 0; height: 44px; }
   .fy-ad-sound .fy-refpicker__search { min-width: 0; }
-  .fy-ad-show { padding-bottom: var(--held-bar-height, 0px); }
-  .fy-ad-show__hero { padding: 22px 18px 18px; }
+  /* Full-bleed (230u, issue 1882): the hero meets the screen's edges and top; the rest keeps a gutter. */
+  .fy-prodmain.fy-ad-show { padding: 0 0 var(--held-bar-height, 0px); gap: 20px; }
+  .fy-ad-show > :not(.fy-ad-show__hero, .fy-ad-show__dock) { padding-inline: 16px; }
+  .fy-ad-show__hero { padding: 8px 18px 20px; border-radius: 0; }
+  .fy-ad-show__ptop { display: flex; align-items: center; gap: 4px; margin: 0 -8px 18px; }
+  .fy-ad-show__ptop .ui-iconbtn { width: 44px; height: 44px; }
+  .fy-ad-show__ptop button:not(.ui-iconbtn) { min-height: 44px; padding: 0 10px; border: 0; background: none; color: inherit; font: 500 14px var(--font-sans); cursor: pointer; }
   .fy-ad-show__hero h1 { font-size: 32px; }
   .fy-ad-show__row { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; }
   .fy-ad-show__play, .fy-ad-show__num { width: 48px; height: 48px; }

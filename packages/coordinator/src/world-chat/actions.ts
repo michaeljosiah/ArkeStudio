@@ -178,7 +178,7 @@ import type {
   ConversationActionExecutionOutcome,
   PreparedConversationActionAuthority,
 } from "../arke-actions/lifecycle.js";
-import { ConversationActionLifecycle, conversationActionDigest } from "../arke-actions/lifecycle.js";
+import { ConversationActionLifecycle, ConversationActionPreparationError, conversationActionDigest } from "../arke-actions/lifecycle.js";
 import type { ProductionTakeFiling } from "./production-take-filing.js";
 import { clearShotFrame } from "../takes/boundary.js";
 import type { GenerationQuotes } from "./generation-quotes.js";
@@ -318,7 +318,7 @@ import { audioStudioProposalConversationAdapter } from "./audio-studio-proposals
 import { effectProposalConversationAdapter } from "./effect-proposals.js";
 import { effectOnlyTurnProblem, effectProposalRequestContext } from "./effect-proposal-scope.js";
 import type { EditorEffectDependencies } from "../productions/editor-effect-dependencies.js";
-import { bookAuthoringRefusal, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { bookAuthoringRefusal, episodeScriptDraft, foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -1508,6 +1508,9 @@ export function prepareWorldChatActions(
     }
     const actionId = actionIds[index]!;
     const baseObservations = worldActionObservations(store, turn.receipts ?? [], action, deps);
+    // Checked whole before the turn completes (issue 1883): refused only at staging, a draft was
+    // lost behind a reply that said it had been written, and Arke never heard why.
+    if (action.kind === "production-episode-script") episodeScriptDraft(store, action);
     let payload = preparedWorldPayload(store, action, productionId, turn.at, actionId, turn.subject);
     if (payload.kind === "world-chat-production-audio-cue" && payload.action.source.kind === "generation") {
       const ref = payload.action.source.actionRef;
@@ -4654,7 +4657,8 @@ export function worldChatActionAdapters(
     prepare: async ({ intent, payload }) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       const current = observationsCurrent(store, intent);
-      if (!current.ok) throw new Error(current.detail);
+      // Said as it is (issue 1883): a read gone stale is Arke's to read again, not an unknown failure.
+      if (!current.ok) throw new ConversationActionPreparationError(current.detail);
       const staged = await stage(intent, parse(payload), observationPrecondition(store, intent));
       return proposalProjection(store, gate, intent, staged.id);
     },

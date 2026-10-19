@@ -437,7 +437,7 @@ export function projectWorkspace(
         ...(receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
         ...(loaded.sourceReads?.[m.id] ? [wordSourceRead(loaded.sourceReads[m.id]!, options.sourceStory)] : []),
       ],
-      refusals: wordRefusals(loaded.refusals[m.id] ?? []),
+      refusals: [...wordRefusals(loaded.refusals[m.id] ?? []), ...(loaded.notPrepared?.[m.id] ?? [])],
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),

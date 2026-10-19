@@ -59,6 +59,7 @@ import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
+import { dramaCastRoles } from "../lib/audio-drama-cast.js";
 import { createEpisode, useAudiobookDoors } from "../lib/store.js";
 import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
@@ -153,7 +154,8 @@ function ProductionSwitcher({
         aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
         aria-haspopup={phone ? "dialog" : "menu"}
         aria-expanded={at !== null}
-        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
+        // The whole title on hover wherever the card cuts it short (issue 1883).
+        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : production?.meta.title}
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>
@@ -333,7 +335,10 @@ export function ProductionLayout() {
   // What the Cast page lists (design turn 192, 58a's rail): its guests, the guests staged for
   // review, and the world's cast it shares. Counting the guests alone put "Cast 0" over a page of
   // seven people.
-  const castCount = prodId
+  // An audio drama's Cast page lists its roles, not the world's sheets (issue 1883): counting
+  // every sheet put "Cast 12" over a page of three.
+  const castCount = production && productionShape(production.meta).isAudioDrama && world ? dramaCastRoles(world, production).length
+    : prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length +
       (["character", "location", "faction"] as const).flatMap((kind) =>
         pendingGuestsOf(pendingSheets(world?.proposals ?? [], kind, world?.conversations ?? []), prodId),
@@ -380,7 +385,10 @@ export function ProductionLayout() {
   const dramaStudio = new URLSearchParams(location.search).get("view") === "audio-studio";
   const dramaDeep = phone && dramaEpisode >= 1 && dramaEpisode <= 200 && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama
     && (!dramaStudio || (production.episodeScripts ?? []).some((entry) => entry.script.episode === dramaEpisode));
-  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  // An audio drama's show page on a phone (230u): its hero is the top of the screen, full-bleed,
+  // carrying the way back and the drama's pages (issue 1882), as the audiobook's show page does.
+  const dramaHome = phone && /^\/w\/[^/]+\/p\/[^/]+\/?$/.test(location.pathname) && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama;
+  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || dramaHome || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute && !audioStudioRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design
   // turn 196o): a drawer would put the production's pages a press away while the canvas is the

@@ -5,7 +5,7 @@ import {
   type DramaChapterDecision, type DramaVerdict, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
-import { CUT, adaptationMap, layoutMap, type MapChapter, type MapScene } from "../lib/adaptation.js";
+import { CUT, adaptationMap, layoutMap, pairChangedParagraphs, wordChanges, type MapChapter, type MapScene, type MarkedWords } from "../lib/adaptation.js";
 import { blockLine } from "../lib/episode-script.js";
 import {
   openChapter, readChapterVersion, readDramaSource, saveEpisodeScript, setDramaVerdict, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults,
@@ -71,7 +71,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
           <span className="fy-ad-map__chip">Not planned {map.counts.notPlanned}</span>
           {map.counts.changed > 0 && <span className="fy-ad-map__chip fy-ad-map__chip--warn">{map.counts.changed} changed</span>}
           {(map.counts.notPlanned > 0 || map.episodes.some((episode) => !episode.planned)) && surface && (
-            <Button size="sm" variant="primary" onClick={() => ask(`Plan the unplanned episodes of this audio drama from the chapters not yet planned, with production-episode-script for each episode.`)}>Plan with Arke</Button>
+            <Button size="sm" variant="primary" onClick={() => ask(`Plan the unplanned episodes of this audio drama from the chapters not yet planned, and draft each episode's script.`)}>Plan with Arke</Button>
           )}
         </header>
         <nav className="fy-ad-map__filters" aria-label="Verdicts">
@@ -211,7 +211,7 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
       ) : (
         <div className="fy-ad-map__acts">
           <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Change</Button>
-          {ask && <Button size="sm" variant="secondary" onClick={() => ask(`About chapter ${chapter.order}, “${chapter.title}”, in this audio drama: what should become of it? Propose script changes with production-episode-script.`)}>Ask Arke</Button>}
+          {ask && <Button size="sm" variant="secondary" onClick={() => ask(`About chapter ${chapter.order}, “${chapter.title}”, in this audio drama: what should become of it? Propose the script changes.`)}>Ask Arke</Button>}
           {map.story && <Link className="fy-linkbtn" to={`/w/${world.meta.worldId}/p/${map.story.meta.id}/story/chapters/${encodeURIComponent(chapter.id)}`}>Open in {map.story.meta.title}</Link>}
         </div>
       )}
@@ -274,6 +274,9 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   const [saving, setSaving] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const changed = Array.isArray(adapted) && Array.isArray(now) ? changedParagraphs(adapted, now) : [];
+  // A changed paragraph beside the one that took its place, its words marked (issue 1882).
+  const pairs = Array.isArray(adapted) && Array.isArray(now) ? pairChangedParagraphs(adapted, now, changed, remapParagraphs(adapted, now)) : new Map<number, number>();
+  const partnerOf = new Map([...pairs].map(([from, to]) => [to, from]));
   const adaptedSet = new Set((Array.isArray(adapted) ? adapted : []).map((paragraph) => paragraph.replace(/\s+/g, " ").trim()));
   const affected = new Set(affectedBlocks(scene.blocks, pin.paragraphs, changed));
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === scene.episode);
@@ -313,13 +316,22 @@ function Compare({ world, production, map, scene, ask, onClose }: {
     const requestId = saveEpisodeScript(world.meta.worldId, production.meta.id, scene.episode, stored.script.title, blocks, stored.hash);
     if (requestId === null) setFailure("The studio is disconnected."); else setSaving(requestId);
   };
-  const column = (title: string, sub: string, text: string[] | string | null, mark: (paragraph: string, n: number) => boolean) => (
+  const column = (title: string, sub: string, text: string[] | string | null, mark: (paragraph: string, n: number) => boolean,
+    words?: (n: number) => MarkedWords | null) => (
     <section className="fy-ad-cmp__col">
       <h2>{title} <small>{sub}</small></h2>
       {text === null ? <p className="fy-ad-map__meta">Reading…</p> : typeof text === "string" ? <p className="fy-ad-map__meta">{text}</p>
-        : text.map((paragraph, i) => <p key={i} className={cx(mark(paragraph, i + 1) && "fy-ad-cmp__mark")}><small>¶{i + 1}</small> {paragraph}</p>)}
+        : text.map((paragraph, i) => {
+          const marked = words?.(i + 1) ?? null;
+          return <p key={i} className={cx(mark(paragraph, i + 1) && "fy-ad-cmp__mark")}><small>¶{i + 1}</small>{" "}
+            {marked ? marked.map((word, at) => <span key={at}>{at > 0 ? " " : ""}{word.changed ? <mark className="fy-ad-cmp__word">{word.text}</mark> : word.text}</span>) : paragraph}</p>;
+        })}
     </section>
   );
+  const pairedWords = (from: number, side: "before" | "after") => {
+    const to = pairs.get(from);
+    return to === undefined || !Array.isArray(adapted) || !Array.isArray(now) ? null : wordChanges(adapted[from - 1]!, now[to - 1]!)[side];
+  };
   return (
     <div className="fy-ad-cmp" aria-label="Compare">
       <header className="fy-ad-cmp__bar">
@@ -329,8 +341,9 @@ function Compare({ world, production, map, scene, ask, onClose }: {
         <IconButton label="Close compare" onClick={onClose}><X size={14} /></IconButton>
       </header>
       <div className="fy-ad-cmp__cols">
-        {column(`Chapter ${chapter?.order} · v${pin.version}`, "adapted", adapted, (_, n) => changed.includes(n))}
-        {column(`Chapter ${chapter?.order} · v${chapter?.version}`, "now", now, (paragraph) => !adaptedSet.has(paragraph.replace(/\s+/g, " ").trim()))}
+        {column(`Chapter ${chapter?.order} · v${pin.version}`, "adapted", adapted, (_, n) => changed.includes(n), (n) => pairedWords(n, "before"))}
+        {column(`Chapter ${chapter?.order} · v${chapter?.version}`, "now", now, (paragraph) => !adaptedSet.has(paragraph.replace(/\s+/g, " ").trim()),
+          (n) => partnerOf.has(n) ? pairedWords(partnerOf.get(n)!, "after") : null)}
         <section className="fy-ad-cmp__col">
           <h2>Episode {scene.episode} · Scene {scene.n} <small>script v{stored?.script.version} · from v{pin.version}</small></h2>
           {scene.blocks.map((block) => {
@@ -343,7 +356,7 @@ function Compare({ world, production, map, scene, ask, onClose }: {
           {failure && <p className="fy-ad-cmp__fail" role="alert">{failure}</p>}
           <div className="fy-ad-map__acts">
             <Button size="sm" variant="secondary" disabled={saving !== null || !stored} onClick={keep}>{saving ? "Keeping…" : "Keep the script"}</Button>
-            {ask && <Button size="sm" variant="primary" onClick={() => ask(`Revise episode ${scene.episode}, scene ${scene.n} (“${scene.heading.place}”) for chapter ${chapter?.order} v${pin.version} → v${chapter?.version}: paragraphs ${changed.join(", ") || "none"} changed. Propose the change with production-episode-script, keeping every unchanged block and its id.`)}>Ask Arke to revise</Button>}
+            {ask && <Button size="sm" variant="primary" onClick={() => ask(`Revise episode ${scene.episode}, scene ${scene.n} (“${scene.heading.place}”) for chapter ${chapter?.order} v${pin.version} → v${chapter?.version}: paragraphs ${changed.join(", ") || "none"} changed. Propose the change to the script, keeping every line that has not changed.`)}>Ask Arke to revise</Button>}
           </div>
         </section>
       </div>

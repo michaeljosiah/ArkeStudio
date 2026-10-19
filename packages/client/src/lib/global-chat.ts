@@ -275,7 +275,16 @@ export class GlobalChatController {
     this.conversationIds.set(key, conversationId);
     const target = this.valueKey(key);
     if (this.openings.delete(previousKey)) this.openings.add(target);
-    if (existing && !this.values.has(target)) this.values.set(target, existing);
+    // A draft the page set while the conversation was still being found is kept (issue 1883): Plan
+    // with Arke's first press put its ask here, and a conversation that already held any value of
+    // its own dropped it, so Chat opened empty. Only the draft: the conversation's other values are
+    // its own, and a page writes a draft over the composer's once the conversation is known too.
+    const held = this.values.get(target);
+    if (existing && !held) this.values.set(target, existing);
+    else if (existing && held) {
+      const draft = existing.get("draft");
+      if (typeof draft === "string" && draft !== "") held.set("draft", draft);
+    }
     this.values.delete(key);
     this.changed({ selected: { ...selected, conversationId, newThread: false } });
   }

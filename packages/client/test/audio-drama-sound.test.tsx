@@ -106,3 +106,56 @@ describe("Add a sound in the score (230f, 230x)", () => {
     assert.equal(save.blocks[0]!.kind === "sound" && save.blocks[0]!.soundArtifact, "ar_new", "the cue places the artifact made");
   });
 });
+
+describe("issue 1883: the Add a sound picker", () => {
+  it("offers sounds and never a line's take, and says a sound's uses when it has none", () => {
+    const take = { ...sound("ar_take", "x", "x", "low-water-drama"), file: "episode-001-01ABC-take.mp3",
+      generation: { source: "audiobook", productionId: "low-water-drama", block: "01ABC" } } as unknown as ArtifactSidecar;
+    const { all } = soundSources([sound("ar_door", "Door", "A door slams.", "low-water-drama"), take], state().world!.productions.at(-1)!, "door");
+    assert.deepEqual(all.map((row) => row.name), ["Door"], "a dialogue take is not a sound");
+    assert.match(all[0]!.meta, /0:04 · not used yet|not used yet/);
+  });
+
+  it("is a dialog, and a tile is chosen and heard before Use sound places it", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+    const container = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      __setStateForTest(state([sound("ar_bell", "Harbour bell", "One deep stroke of the harbour bell.", "low-water-drama")]), { connection: "open" });
+      root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drama/script/1`]}>
+        <Routes><Route path="/w/:worldId/p/:prodId/script/:episode" element={<EpisodeScriptScreen />} /></Routes></MemoryRouter>);
+    });
+    const click = (el: Element) => act(async () => { el.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    await click([...container.querySelectorAll("button")].find((b) => b.textContent === "Add a sound")!);
+    const dialog = dom.document.body.querySelector(".fy-ad-sound")!;
+    assert.equal(dialog.getAttribute("role"), "dialog");
+    // The lanes and chips of 230w (R-41).
+    const lanes = [...dialog.querySelectorAll("[aria-label='Where from'] button")].map((b) => b.textContent!);
+    assert.match(lanes[0]!, /^All \d+$/);
+    assert.equal(lanes[1], "This production 1");
+    assert.match(lanes[2]!, /^World artifacts \d+$/, "the world's own sounds beyond this production");
+    const chips = [...dialog.querySelectorAll("[aria-label='Sound category'] button")].map((b) => b.textContent!);
+    assert.equal(chips[0], "All");
+    assert.ok(chips.includes("Sound 1"), chips.join(", "));
+    assert.match(dialog.querySelector(".fy-refpicker__foot")!.textContent!, /Nothing picked/);
+    const use = () => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Use sound")!;
+    assert.ok(use().disabled, "nothing is placed before a sound is chosen");
+    await click(dialog.querySelector("[data-testid='picker-tile']")!);
+    assert.ok([...dialog.querySelectorAll("button")].some((b) => b.textContent === "Play"), "the chosen sound can be heard first");
+    assert.ok(!use().disabled);
+    await click(use());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = sent.filter((m): m is Extract<ClientMessage, { kind: "save-episode-script" }> => m.kind === "save-episode-script").at(-1)!;
+    assert.equal(save.blocks[0]!.kind === "sound" && save.blocks[0]!.soundArtifact, "ar_bell");
+  });
+});
+
+describe("issue 1883: a made sound's name", () => {
+  it("keeps the phrase whole where it fits, and never ends on a small word", async () => {
+    const { soundName } = await import("../src/components/audio-drama-sound.js");
+    assert.equal(soundName("Far off, one deep stroke of the harbour bell."), "Far off, one deep stroke of the harbour bell");
+    assert.equal(soundName("A long low groan of timber as the hull settles against the quay wall at the turn of the tide."), "A long low groan of timber as the hull settles against");
+  });
+});

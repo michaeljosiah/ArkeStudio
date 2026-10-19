@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
-import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, splitBlock } from "../src/lib/episode-script.js";
+import { bedMarks, directionText, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
 import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -124,7 +124,7 @@ describe("the score (230e)", () => {
   it("sets only the spoken words large, with direction above them and never inside", async () => {
     const m = await mount(withScript(blocks));
     const row = m.container.querySelector(`[data-block="${maren.id}"]`)!;
-    assert.equal(row.querySelector(".fy-ad-score__line textarea")!.getAttribute("aria-label"), "maren's line");
+    assert.equal(row.querySelector(".fy-ad-score__line textarea")!.getAttribute("aria-label"), "Maren's line");
     // linkedom keeps a controlled textarea's value in React's props, not on the node.
     assert.equal(props(row.querySelector(".fy-ad-score__line textarea")!).value, "Bray, look.");
     assert.equal(props(row.querySelector(".fy-ad-score__direction")!).value, "breathless, delighted");
@@ -258,6 +258,105 @@ describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
     await click(standIn);
     await wait(350);
     assert.deepEqual(hearSent(m.sent).at(-1)!.decisions, { bray: "narrator" }, "the choice is the author's, sent with the next quote");
+  });
+});
+
+describe("issue 1883: the selection and the Hear dialog", () => {
+  const a = line("maren", "The log said two hours.");
+  const b = line("bray", "The log's wrong.");
+  const wait = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const click = (el: Element) => act(async () => { el.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+  const request = (block: string) => ({ block, speaker: "Maren", voice: "Low tide", model: "Multilingual v2", text: "x", estimatedMicroUsd: 1840, cached: false });
+
+  it("picks a line to hear without opening its editor, and offers Ask Arke, Source and Cast beside Hear", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const row = m.container.querySelector(`[data-block="${a.id}"]`)!;
+    assert.ok(row.className.includes("fy-ad-score__row--picked"), "the picked line is marked");
+    assert.equal(row.querySelector("select[aria-label='Speaker']"), null, "and its editor stays closed");
+    const bar = [...m.container.querySelectorAll(".fy-ad-hear button")].map(button => button.textContent);
+    for (const label of ["Source", "Cast", "Done"]) assert.ok(bar.includes(label), `${label} is on the selection bar`);
+  });
+
+  it("waits above the one-press limit the author set (issue 1882)", async () => {
+    const state = withScript([a]);
+    state.app.spend = { settings: { thresholdMicroUsd: 0, periodDays: 7, onePressMicroUsd: 1_000 }, rollingMicroUsd: 0, alerted: false, ledgerUnavailable: false };
+    const m = await mount(state);
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 1 line"))!;
+    assert.ok(hear.querySelector(".fy-ad-hear__dot"), "a press over the limit asks first");
+  });
+
+  it("titles the dialog with the lines the button named, and Choose a voice stays in the episode", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await act(async () => { const event = new dom.Event("click", { bubbles: true }); Object.assign(event, { shiftKey: true }); m.container.querySelector(`[data-block="${b.id}"]`)!.dispatchEvent(event); });
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines"))!;
+    assert.ok(hear, "the button counts both lines");
+    await click(hear);
+    assert.ok(dom.document.body.querySelector(".fy-editordialog__title")!.textContent === "Hear 2 lines", "and so does the dialog");
+    await click([...dom.document.body.querySelectorAll("button")].find(button => button.textContent === "Choose a voice")!);
+    assert.equal(dom.document.body.querySelector(".fy-editordialog"), null, "the dialog closes");
+    const role = [...m.container.querySelectorAll(".fy-ad-castcol__role h3 button")].find(button => /^bray/i.test(button.textContent ?? ""));
+    assert.equal(role?.getAttribute("aria-expanded"), "true", "Bray opens in the episode's Cast column");
+  });
+});
+
+describe("issue 1883: a direction's parentheses are the score's", () => {
+  it("drops a typed pair round the whole direction, and keeps one inside it (codex on PR 1884)", () => {
+    assert.equal(directionText("((quietly))"), "quietly");
+    assert.equal(directionText("(quietly)"), "quietly");
+    assert.equal(directionText("quiet (but urgent)"), "quiet (but urgent)");
+    assert.equal(directionText("(quiet) (but urgent)"), "(quiet) (but urgent)");
+    assert.equal(directionText("(quietly"), "quietly", "an opener typed first, before its closer");
+    assert.equal(directionText("quietly)"), "quietly");
+    assert.equal(directionText("quiet (but"), "quiet (but", "typing toward a closer");
+    assert.equal(directionText("quiet "), "quiet ", "a space before the next word stays");
+    assert.equal(directionText("("), undefined);
+  });
+});
+
+describe("issue 1883: speakers no sheet carries (R-55)", () => {
+  it("names them from their keys, and numbers each new unnamed speaker", () => {
+    assert.equal(speakerLabel("crowd"), "Crowd");
+    assert.equal(speakerLabel("someone-2"), "Someone 2");
+    assert.equal(speakerLabel("a-dockhand"), "A dockhand");
+    assert.equal(unnamedSpeaker(["maren"]), "someone");
+    assert.equal(unnamedSpeaker(["someone", "someone-2"]), "someone-3");
+  });
+
+  it("never mints a key a sheet or a cast role already holds (codex on PR 1884)", async () => {
+    const a = line("maren", "Climb.");
+    const state = withScript([a]);
+    state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.audioDrama!.cast = { someone: {} } as never;
+    const m = await mount(state);
+    await act(async () => { m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    await act(async () => props(m.container.querySelector(`[data-block="${a.id}"] select[aria-label='Speaker']`)!).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone-2", "the role kept in the cast is not reused");
+  });
+
+  it("offers a crowd and someone unnamed beside the world's characters, and the script's own", async () => {
+    const a = line("maren", "Climb."), b = line("a-dockhand", "Rope!");
+    const m = await mount(withScript([a, b]));
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => { words.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    const select = m.container.querySelector<HTMLSelectElement>(`[data-block="${a.id}"] select[aria-label='Speaker']`)!;
+    const labels = [...select.options].map(option => option.textContent);
+    for (const label of ["A dockhand", "Crowd", "Someone unnamed"]) assert.ok(labels.includes(label), `${label} is offered`);
+    await act(async () => props(select).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone", "an unnamed speaker is a key of its own");
   });
 });
 

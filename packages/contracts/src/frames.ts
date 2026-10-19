@@ -1401,6 +1401,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("set-spend-threshold"),
       thresholdMicroUsd: z.number().int().min(0),
       periodDays: z.number().int().min(1).max(365),
+      /** Hear's one-press limit (issue 1882); absent keeps the one set. */
+      onePressMicroUsd: z.number().int().min(0).max(100_000_000).optional(),
     })
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */

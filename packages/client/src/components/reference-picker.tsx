@@ -263,9 +263,15 @@ export function ReferencePickerBody({
   budget = "model",
   worldChoices,
   actions,
+  confirm,
 }: {
   /** Tiles after Upload that make a source rather than pick one — Generate, Record (SPEC-057 R-43). */
   actions?: ReadonlyArray<{ label: string; onPress: () => void }>;
+  /**
+   * Slot only: a tile is chosen first, heard if it can be, and placed by this button (issue 1883,
+   * Add a sound): a click that placed at once left no way to listen before the cue took it.
+   */
+  confirm?: { label: string; onListen?: (pick: PickerSource["pick"]) => void };
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
   worldChoices?: React.ReactNode;
@@ -293,7 +299,7 @@ export function ReferencePickerBody({
   onUpload: () => void;
   onClose: () => void;
 }) {
-  const [lane, setLane] = useState<"world" | "characters" | "session">("world");
+  const [lane, setLane] = useState<"world" | "characters" | "session" | "elsewhere">("world");
   const [kindFilter, setKindFilter] = useState<PickerSource["kind"] | null>(null);
   const [search, setSearch] = useState("");
   const [group, setGroup] = useState<string | null>(null);
@@ -301,9 +307,14 @@ export function ReferencePickerBody({
   const [picks, setPicks] = useState<StagedPick[]>([]);
   /** The image tile waiting on "which token gives way" at the ceiling. */
   const [replacing, setReplacing] = useState<PickerSource | null>(null);
+  /** Slot with `confirm`: the tile chosen, not yet placed. */
+  const [chosen, setChosen] = useState<PickerSource | null>(null);
 
   const offered = (list: PickerSource[]): PickerSource[] => (only !== undefined ? list.filter((s) => s.kind === only) : list);
-  const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : session);
+  // Sounds (230w, R-41): All, This production, and the world's own beyond it (issue 1883).
+  const sounds = only === "audio";
+  const elsewhere = sounds ? world.filter((source) => !session.some((mine) => mine.key === source.key)) : [];
+  const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : lane === "elsewhere" ? elsewhere : session);
   const searched = search.trim().toLowerCase();
   const visible = sources.filter(
     (s) =>
@@ -381,7 +392,9 @@ export function ReferencePickerBody({
   function pickTile(source: PickerSource): void {
     if (source.active) return;
     if (mode === "slot") {
-      if (refusalFor(source) === null) onChoose?.(source.pick);
+      if (refusalFor(source) !== null) return;
+      if (confirm) setChosen(chosen?.key === source.key ? null : source);
+      else onChoose?.(source.pick);
       return;
     }
     if (staged(source)) {
@@ -430,6 +443,8 @@ export function ReferencePickerBody({
           <h2 style={{ margin: 0, font: "650 17px var(--font-sans)", letterSpacing: "-0.01em" }}>
             {title ?? (mode === "slot" ? "Reference image" : "Add a reference")}
           </h2>
+          {/* With a confirm step the foot says what is picked, so what it is for sits under the title (230w). */}
+          {confirm && note && <small style={{ display: "block", marginTop: 3, font: "400 12px var(--font-sans)", color: "var(--muted-foreground)" }}>{note}</small>}
         </div>
         <button
           type="button"
@@ -445,7 +460,7 @@ export function ReferencePickerBody({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`${only === "audio" ? "World sounds" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
+            {`${sounds ? "All" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
           </button>
           {offered(characters ?? []).length > 0 && (
             <button
@@ -460,6 +475,11 @@ export function ReferencePickerBody({
           {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
               {`${sessionLabel} ${offered(session).length}`}
+            </button>
+          )}
+          {sounds && offered(elsewhere).length > 0 && (
+            <button type="button" aria-pressed={lane === "elsewhere"} onClick={() => setLane("elsewhere")}>
+              {`World artifacts ${offered(elsewhere).length}`}
             </button>
           )}
           <button type="button" aria-pressed={false} onClick={onUpload}>
@@ -478,7 +498,8 @@ export function ReferencePickerBody({
         </span>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* Sounds alone, no kind to filter by (issue 1883): "All 12 · Audio 12" said nothing. */}
+      {(only !== "audio" || capacityChip) && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <button
           type="button"
           className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")}
@@ -498,16 +519,25 @@ export function ReferencePickerBody({
         ))}
         <span style={{ flex: 1 }} />
         {capacityChip}
-      </div>
+      </div>}
 
       {/* Grouping is not proof of images (codex on PR 1872): the audio picker groups by cue. */}
-      {sources.some((source) => source.group) && (
-        <div className="fy-refpicker__lanes" role="group" aria-label={only === "audio" ? "Sound category" : "Image category"}>
+      {sources.some((source) => source.group) && (sounds ? (
+        // A sound's kind as chips, each with its count (230w).
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }} role="group" aria-label="Sound category">
           {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
-            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? (only === "audio" ? "All sounds" : "All images")}</button>
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} className={cx("fy-filterchip", group === value && "fy-filterchip--active")} onClick={() => setGroup(value)}>
+              {value === null ? "All" : `${value} ${sources.filter((source) => source.group === value).length}`}
+            </button>
           ))}
         </div>
-      )}
+      ) : (
+        <div className="fy-refpicker__lanes" role="group" aria-label="Image category">
+          {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? "All images"}</button>
+          ))}
+        </div>
+      ))}
 
       {searched.length > 0 && (
         <div
@@ -528,7 +558,7 @@ export function ReferencePickerBody({
           const isStaged = staged(source);
           const refusal = source.active || isStaged ? null : refusalFor(source);
           const preview = isStaged ? previews.get(source.key) : null;
-          const checked = source.active === true || isStaged;
+          const checked = source.active === true || isStaged || chosen?.key === source.key;
           return (
             <button
               key={source.key}
@@ -636,6 +666,13 @@ export function ReferencePickerBody({
                 </button>
               </>
             )
+          ) : confirm && !chosen ? (
+            "Nothing picked"
+          ) : confirm && chosen ? (
+            <>
+              <strong style={{ fontWeight: 600, color: "var(--foreground)" }}>{chosen.name}</strong>
+              {confirm.onListen && <Button size="sm" variant="ghost" onClick={() => confirm.onListen!(chosen.pick)}>Play</Button>}
+            </>
           ) : (
             note ?? "One picture rides with this brief."
           )}
@@ -657,6 +694,11 @@ export function ReferencePickerBody({
             >
               {picks.length > 0 ? `Add ${picks.length}` : "Add"}
             </Button>
+          </>
+        ) : confirm ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" disabled={chosen === null} onClick={() => { if (chosen) onChoose?.(chosen.pick); }}>{confirm.label}</Button>
           </>
         ) : (
           <Button variant="ghost" onClick={onClose}>

@@ -359,6 +359,19 @@ export function dramaTakeState(
   return line.kept.standIn ? "stand-in" : "kept";
 }
 
+/**
+ * Whether a kept take plays in the episode's mix: while it is in the role's voice now. An edited
+ * line's take keeps playing until it is retaken (R-36), marked out of date in the score; a take in
+ * another voice does not (R-60, codex on PR 1879). The studio left both out (issue 1883).
+ */
+export function dramaTakePlays(
+  block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>,
+  kept: DramaTake,
+  voice?: { provider: string; voiceId: string; model?: string | undefined },
+): boolean {
+  return dramaTakeState(block, { kept: { ...kept, textHash: dramaLineHash(block) } }, voice) !== "out of date";
+}
+
 /** What the author decides for a speaker with no voice (R-28): nothing is substituted unasked. */
 export const MissingVoiceChoiceSchema = z.enum(["narrator", "leave-out"]);
 export type MissingVoiceChoice = z.infer<typeof MissingVoiceChoiceSchema>;
@@ -413,6 +426,16 @@ export function estimateScriptSeconds(blocks: readonly EpisodeScriptBlock[]): nu
 // ---------------------------------------------------------------------------
 // Cast (SPEC-057 R-55..R-60, design turn 230k): who speaks, in what voice, and how they sound here.
 // ---------------------------------------------------------------------------
+
+/**
+ * A fact as it reads inside a sentence (issue 1883): "tells the listener the cost…", not "The
+ * cost…". Only a word that opens a sentence is lowered; a name ("Ilo is alive") keeps its capital.
+ */
+const OPENERS = new Set(["the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "its", "it", "there", "what", "who", "why", "how", "where", "when", "someone", "something", "nobody", "no", "one", "every", "each", "all", "some", "she", "he", "they", "we", "you", "i"]);
+export function midSentence(fact: string): string {
+  const first = /^\p{Lu}[\p{Ll}'’]*/u.exec(fact)?.[0];
+  return first && first !== "I" && OPENERS.has(first.toLowerCase()) ? first.toLowerCase() + fact.slice(first.length) : fact;
+}
 
 /** The role key the narrator is kept under in `cast`. */
 export const DRAMA_NARRATOR = "@narrator";
@@ -658,7 +681,7 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   for (const kept of withheld) {
     const leaks = blocks.filter((block) => spoken(block) && tells(block.words, kept.fact));
     for (const block of leaks) add("mystery", [block.id], `This may tell the listener “${kept.fact}” before episode ${kept.revealEpisode}.`);
-    if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${kept.fact.replace(/\.$/, "")}.` });
+    if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${midSentence(kept.fact.replace(/\.$/, ""))}.` });
   }
   const shared = sharedFirsts(Object.values(input.names));
   for (const [speaker, role] of hidden) {

@@ -62,3 +62,14 @@ describe("what Activity's panel remembers", () => {
     assert.deepEqual((await new AppSettingsFile(path).load()).activity, { inboxSeenAt: null, whatsNewSeenVersion: null }, "a version that is not one");
   });
 });
+
+describe("Hear's one-press limit (SPEC-057 §1.4, issue 1882)", () => {
+  it("is absent until set, kept when the alert is set without it, and set with it", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    assert.equal((await file.load()).spend.onePressMicroUsd, undefined, "absent is the $0.50 default");
+    assert.equal((await file.setSpend(0, 7, 250_000)).spend.onePressMicroUsd, 250_000);
+    assert.equal((await file.setSpend(5_000_000, 30)).spend.onePressMicroUsd, 250_000, "the alert alone leaves it as set");
+    assert.equal((await new AppSettingsFile(join(root, "settings.json")).load()).spend.onePressMicroUsd, 250_000);
+  });
+});

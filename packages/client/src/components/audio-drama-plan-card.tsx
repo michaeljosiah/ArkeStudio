@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_AUDIO_DRAMA_PLAN, type AudioDramaPlan } from "@arke-studio/contracts";
 import { Lock } from "./icons.js";
 import { Button } from "./ui.js";
@@ -11,7 +11,8 @@ export const NARRATOR_LABEL: Record<NonNullable<AudioDramaPlan["narrator"]>, str
 
 export function pilotChapters(chapters: readonly number[]): string {
   if (chapters.length === 0) return "";
-  return chapters.length === 1 ? `chapter ${chapters[0]}` : `chapters ${chapters.join(", ")}`;
+  // "chapters 1 and 2", never "chapter 1, 2" (issue 1883).
+  return chapters.length === 1 ? `chapter ${chapters[0]}` : `chapters ${chapters.slice(0, -1).join(", ")} and ${chapters.at(-1)}`;
 }
 
 /**
@@ -22,12 +23,15 @@ export function pilotChapters(chapters: readonly number[]): string {
  * Every edit replaces the plan whole, because that is how the draft holds it: a field sent alone
  * would wipe the rest.
  */
-export function AudioDramaPlanCard({ plan, disabled, onChange }: {
+export function AudioDramaPlanCard({ plan, disabled, onChange, editRequest = 0 }: {
   plan: AudioDramaPlan;
   disabled: boolean;
   onChange: (plan: AudioDramaPlan) => void;
+  /** Raised by Change the plan under Arke's reply (230c): the card opens to edit. */
+  editRequest?: number;
 }) {
   const [editing, setEditing] = useState(false);
+  useEffect(() => { if (editRequest > 0) setEditing(true); }, [editRequest]);
   const untouched = plan.episodes === DEFAULT_AUDIO_DRAMA_PLAN.episodes && plan.minutes === DEFAULT_AUDIO_DRAMA_PLAN.minutes &&
     !plan.narrator && !plan.pilot && plan.keptFromListener.length === 0;
   // A number left empty or out of range keeps what was there; the schema's limits are the only ones.

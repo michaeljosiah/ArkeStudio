@@ -2,6 +2,7 @@ import {
   DRAMA_NARRATOR, dramaRoleVoice, narrationQuotes, sheetSound,
   type AudiobookReader, type DramaRole, type EpisodeScriptBlock, type ProductionBundle, type Sheet, type WorldBundle,
 } from "@arke-studio/contracts";
+import { speakerLabel } from "./episode-script.js";
 
 /**
  * An audio drama's speaking roles (SPEC-057 R-55..R-58, design turn 230k): the narrator when the
@@ -68,7 +69,7 @@ export function dramaCastRoles(world: WorldBundle, production: ProductionBundle)
     const start = sheetSound(sheet);
     const voice = role?.voice ?? (sheet?.voice ? { provider: sheet.voice.provider, model: sheet.voice.model ?? "", voiceId: sheet.voice.voiceId, ...(sheet.voice.label ? { label: sheet.voice.label } : {}) } : null);
     return {
-      key, name: sheet?.name ?? key, sheet, role, voice,
+      key, name: sheet?.name ?? speakerLabel(key), sheet, role, voice,
       from: role?.voice ? "production" : sheet?.voice ? "character" : null,
       sound: role?.sound ?? start, sheetSound: start,
       narration: quoted.has(key) ? role?.narration ?? (sheet?.narration?.trim() || undefined) : undefined,

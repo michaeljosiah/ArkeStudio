@@ -76,6 +76,13 @@
 .fy-audio-timeline__ruler { min-height:28px; height:28px; font:var(--type-meta); color:var(--muted-foreground); }
 .fy-audio-timeline__ruler .fy-track__lane { cursor:crosshair; }
 .fy-audio-timeline__ruler .fy-track__lane > span { position:absolute; top:6px; transform:translateX(-50%); white-space:nowrap; }
+/* Eleven labels run together in a narrow lane (issue 1883): thinned by the lane's own width, and the
+   ends held inside it rather than cut in half. */
+.fy-audio-timeline__ruler .fy-track__lane { container: audio-ruler / inline-size; }
+.fy-audio-timeline__ruler .fy-track__lane > span:first-child { transform:none; }
+.fy-audio-timeline__ruler .fy-track__lane > span:last-child { transform:translateX(-100%); }
+@container audio-ruler (max-width: 720px) { .fy-audio-timeline__ruler .fy-track__lane > span:nth-child(even) { display:none; } }
+@container audio-ruler (max-width: 360px) { .fy-audio-timeline__ruler .fy-track__lane > span:not(:nth-child(5n+1)) { display:none; } }
 .fy-audio-timeline__head { position:absolute; top:0; bottom:0; width:1px; background:var(--foreground); z-index:3; pointer-events:none; }
 .fy-audio-timeline .fy-trackbtns button[aria-pressed="true"] { color:var(--foreground); background:var(--secondary); }
 .fy-audio-inspector { padding:12px; font:var(--type-ui); }

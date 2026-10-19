@@ -69,6 +69,48 @@ export function bedMarks(blocks: readonly EpisodeScriptBlock[]): Array<BedMark[]
   return marks;
 }
 
+/**
+ * A speaker no sheet carries (R-55), named from its key: "crowd" is Crowd, "someone-2" Someone 2,
+ * "a-dockhand" A dockhand. The score offered only the world's characters (issue 1883), so a line
+ * for an unnamed speaker or a crowd could not be written.
+ */
+export function speakerLabel(key: string): string {
+  const words = key.replace(/-(\d+)$/u, " $1").split("-").join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * A direction as typed, without the parentheses the score draws round it (issue 1883): typed ones
+ * read "((quietly))". Only a pair wrapping the whole direction, or an opener or closer left
+ * unmatched at its ends, is the score's (codex on PR 1884): "quiet (but urgent)" keeps its own.
+ */
+export function directionText(typed: string): string | undefined {
+  const balanced = (text: string) => {
+    let depth = 0;
+    for (const char of text) { if (char === "(") depth += 1; else if (char === ")" && --depth < 0) return false; }
+    return depth === 0;
+  };
+  let text = typed;
+  for (let wrapped = /^\s*\((.*)\)\s*$/su.exec(text); wrapped && balanced(wrapped[1]!); wrapped = /^\s*\((.*)\)\s*$/su.exec(text)) text = wrapped[1]!;
+  const count = (char: string) => [...text].filter((candidate) => candidate === char).length;
+  while (count("(") > count(")") && /^\s*\(/u.test(text)) text = text.replace(/^\s*\(/u, "");
+  while (count(")") > count("(") && /\)\s*$/u.test(text)) text = text.replace(/\)\s*$/u, "");
+  return text || undefined;
+}
+
+/**
+ * The key a new unnamed speaker takes: someone, then someone-2, and so on. Every key already
+ * meaning someone is taken (codex on PR 1884) — a sheet or a cast role as well as a line's
+ * speaker — or the new line would speak as them, in their voice.
+ */
+export function unnamedSpeaker(taken: Iterable<string>): string {
+  const used = new Set(taken);
+  if (!used.has("someone")) return "someone";
+  let n = 2;
+  while (used.has(`someone-${n}`)) n += 1;
+  return `someone-${n}`;
+}
+
 /** A speaker's voice colour, 1–6, in the order they first speak (the audiobook's tones). */
 export function speakerTones(blocks: readonly EpisodeScriptBlock[]): Map<string, number> {
   const tones = new Map<string, number>();
@@ -216,6 +258,47 @@ export function draftRows(current: readonly EpisodeScriptBlock[], proposed: read
   }
   flushRemoved(null);
   return rows;
+}
+
+/** A draft row's key, as the score names it: one change of Arke's to take or leave. */
+export const draftRowKey = (row: DraftRow): string => `${row.state}:${row.block.id}`;
+
+/** Whether a row is a change the author can take or leave: an order kept as drafted is not. */
+export const draftRowChoosable = (row: DraftRow): boolean => row.state === "added" || row.state === "removed" || row.state === "changed";
+
+/**
+ * The script Keep writes when some of Arke's changes are left out (issue 1882): Arke's draft was
+ * kept or discarded whole. Each row is taken as drafted or as it was — an addition left out, a
+ * removal undone where the line stood, a rewrite kept in its old words — in the draft's order.
+ * A bed whose stop was left out runs to its scene's end, and interruptions are mended.
+ */
+export function keepDraftRows(current: readonly EpisodeScriptBlock[], rows: readonly DraftRow[], declined: ReadonlySet<string>): EpisodeScriptBlock[] {
+  const leave = (row: DraftRow) => draftRowChoosable(row) && declined.has(draftRowKey(row));
+  const kept: EpisodeScriptBlock[] = [];
+  for (const row of rows) {
+    if (row.state === "removed") continue;
+    if (row.state === "added") { if (!leave(row)) kept.push(row.block); }
+    else if (row.state === "changed") kept.push(leave(row) ? row.was : row.block);
+    else kept.push(row.block);
+  }
+  // A removal left out goes back after the line it followed (codex on PR 1884): where a draft
+  // also moves lines, its struck row trails them, and [A, B, C] drafted as [C, B] kept A last.
+  const restored = new Set(rows.filter((row) => row.state === "removed" && leave(row)).map((row) => row.block.id));
+  current.forEach((block, i) => {
+    if (!restored.has(block.id)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const before = kept.findIndex((candidate) => candidate.id === current[j]!.id);
+      if (before >= 0) { at = before + 1; break; }
+    }
+    kept.splice(at, 0, block);
+  });
+  const ids = new Set(kept.map((block) => block.id));
+  return mendRelations(kept.map((block) => {
+    if ((block.kind !== "ambience" && block.kind !== "music") || block.until === undefined || ids.has(block.until)) return block;
+    const { until: _gone, ...rest } = block;
+    return rest as EpisodeScriptBlock;
+  }));
 }
 
 /**

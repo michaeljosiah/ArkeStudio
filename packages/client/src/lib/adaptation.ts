@@ -165,3 +165,53 @@ export function layoutMap(map: AdaptationMap, opts: { height: number; left: numb
   }
   return { height, chapters, scenes, episodes, cut, ribbons };
 }
+
+/** A paragraph's words and the spaces between them, each word marked where the other version differs. */
+export type MarkedWords = Array<{ text: string; changed: boolean }>;
+
+const wordsOf = (text: string) => text.match(/\S+/gu) ?? [];
+
+/**
+ * Each changed paragraph of the adapted text, paired with the paragraph now that took its place
+ * (issue 1882): the unplaced paragraph now that shares the most of its words, where at least a
+ * third of the longer one's are shared. A paragraph rewritten past that, or added, is unpaired.
+ */
+export function pairChangedParagraphs(adapted: readonly string[], now: readonly string[], changed: readonly number[], placed: ReadonlyMap<number, number>): Map<number, number> {
+  const taken = new Set(placed.values());
+  const pairs = new Map<number, number>();
+  for (const n of changed) {
+    const mine = new Set(wordsOf(adapted[n - 1] ?? "").map((word) => word.toLowerCase()));
+    let best = -1, bestShare = 0;
+    now.forEach((paragraph, j) => {
+      if (taken.has(j + 1)) return;
+      const theirs = wordsOf(paragraph).map((word) => word.toLowerCase());
+      const shared = new Set(theirs.filter((word) => mine.has(word))).size;
+      const share = shared / Math.max(1, mine.size, new Set(theirs).size);
+      if (share > bestShare) { best = j + 1; bestShare = share; }
+    });
+    if (best > 0 && bestShare >= 1 / 3) { pairs.set(n, best); taken.add(best); }
+  }
+  return pairs;
+}
+
+/**
+ * Two versions of a paragraph, word by word (issue 1882): Compare marked a changed paragraph whole,
+ * so a comma moved and a sentence rewritten read the same. Words kept in order by both are
+ * unmarked; the rest are marked on the side that has them. Past 600 words a side, all are marked.
+ */
+export function wordChanges(before: string, after: string): { before: MarkedWords; after: MarkedWords } {
+  const a = wordsOf(before), b = wordsOf(after);
+  if (a.length > 600 || b.length > 600) return { before: a.map((text) => ({ text, changed: true })), after: b.map((text) => ({ text, changed: true })) };
+  const width = b.length + 1, table = new Uint16Array((a.length + 1) * width);
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    table[i * width + j] = a[i] === b[j] ? table[(i + 1) * width + j + 1]! + 1 : Math.max(table[(i + 1) * width + j]!, table[i * width + j + 1]!);
+  }
+  const left: MarkedWords = [], right: MarkedWords = [];
+  let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) { left.push({ text: a[i++]!, changed: false }); right.push({ text: b[j++]!, changed: false }); }
+    else if (j < b.length && (i === a.length || table[i * width + j + 1]! >= table[(i + 1) * width + j]!)) right.push({ text: b[j++]!, changed: true });
+    else left.push({ text: a[i++]!, changed: true });
+  }
+  return { before: left, after: right };
+}
