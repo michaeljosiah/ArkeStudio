@@ -109,6 +109,24 @@ describe("the drama's Cast (230k)", () => {
     assert.deepEqual(sent.at(-1), { kind: "set-drama-role", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", role: "bray", value: { sound: "Warm, steadier.", publicLabel: "The counter", revealEpisode: 4 } }, "built on the edit before it");
   });
 
+  it("gives a role with no voice and no takes the voice it picks at once (issue 1888)", async () => {
+    const { container, sent } = await mount(drama([line("harbour-clerk", "Turn of tide.")]), "cast");
+    await act(async () => props(container.querySelector('[data-role="harbour-clerk"] [role="row"]')!).onClick!({}));
+    const choose = [...container.querySelectorAll("button")].find((button) => button.textContent === "Choose a voice…");
+    assert.ok(choose, "a role with no voice is offered a choice, not a change");
+    await act(async () => props(choose!).onClick!({}));
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "voice.catalogue", voices: [{ provider: "kokoro", model: "kokoro-82m",
+      voiceId: "am_michael", label: "Michael", attributes: ["deep"], facets: { gender: "male" }, local: true, canClone: false, usedBy: [], preview: { kind: "sample", microUsd: 0 } }] } as never));
+    const pick = dom.document.body.querySelector<HTMLButtonElement>('[aria-label="Select Michael"]');
+    assert.ok(pick, "the local voice is listed");
+    await act(async () => pick!.click());
+    const use = [...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Read with this voice")!;
+    await act(async () => use.click());
+    assert.deepEqual(sent.at(-1), { kind: "set-drama-role", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", role: "harbour-clerk",
+      value: { voice: { provider: "kokoro", model: "kokoro-82m", voiceId: "am_michael", label: "Michael" } } }, "no kept take goes out of date, so nothing waits to be confirmed");
+    assert.equal(container.querySelector('section[aria-label="Change voice"]'), null);
+  });
+
   it("shows a hidden role by its public label, locked until its episode", async () => {
     const { container } = await mount(drama([line("bray", "Climb.")], { cast: { bray: { publicLabel: "The counter", revealEpisode: 4 } } }), "cast");
     assert.match(rowText(container, "bray"), /The counter\s*Bray until episode 4/);
