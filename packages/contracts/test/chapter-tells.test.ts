@@ -3,12 +3,13 @@ import { it } from "node:test";
 import { verifiedTells, tellStretches, crowded, readTells, tellsPerThousand, tellsByKind, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
 import { ChapterReviewSchema, ReviewAnswerSchema, chapterReviewSummary } from "../src/chapter-review.js";
 
-// Paragraphs of numbered words: every word is unique, so a quote names exactly one place.
+// Paragraphs of numbered words, each closed so none is inside another ("w10" is in "w100";
+// "w10x" is not): a quote names exactly one place.
+const word = (n: number) => `w${n}x`;
 const chapter = (paragraphs: number, words: number) => Array.from({ length: paragraphs }, (_, p) =>
-  Array.from({ length: words }, (_, w) => `w${p * words + w}`).join(" ")).join("\n\n");
-const word = (n: number) => `w${n}`;
+  Array.from({ length: words }, (_, w) => word(p * words + w)).join(" ")).join("\n\n");
 
-it("places only exact quotations, the n-th repeat at the n-th occurrence", () => {
+it("places only exact quotations, at every occurrence when every occurrence is tagged", () => {
   const body = "He stopped. She looked up.\n\nHe stopped. Then nothing.";
   const drafts: TellDraft[] = [
     { kind: "pivot", quote: "He stopped." },
@@ -18,9 +19,19 @@ it("places only exact quotations, the n-th repeat at the n-th occurrence", () =>
     { kind: "metaphor", quote: "an invented figure" },
     { kind: "pivot", quote: "  " },
   ];
-  const { tells, unplaced } = verifiedTells(body, drafts);
+  const { tells, unplaced, ambiguous } = verifiedTells(body, drafts);
   assert.deepEqual(tells.map((t) => t.start), [0, body.lastIndexOf("He stopped.")]);
   assert.equal(unplaced, 4, "a third repeat, a paraphrase, an invention and blank space are dropped");
+  assert.equal(ambiguous, 0);
+});
+
+it("does not guess which of two identical lines a single tag meant", () => {
+  // The first "He stopped." is sequential action; the reviewer tagged only one of the two.
+  const body = "He stopped. He turned the key.\n\nShe was there.\n\nHe stopped.";
+  const { tells, ambiguous, unplaced } = verifiedTells(body, [{ kind: "pivot", quote: "He stopped." }, { kind: "pivot", quote: "She was there.\n\nHe stopped." }]);
+  assert.equal(ambiguous, 1, "dropped and counted, never anchored to the first occurrence");
+  assert.equal(unplaced, 0);
+  assert.deepEqual(tells.map((t) => t.start), [body.indexOf("She was there.")], "a quotation long enough to be unique is placed");
 });
 
 it("counts overlapping tags of one kind once and of two kinds twice", () => {
@@ -53,6 +64,18 @@ it("starts a stretch at every paragraph and stops at the first that reaches the 
   assert.equal(short.length, 1);
   assert.equal(short[0]!.words, 120, "a chapter under 450 words is one stretch of all of it");
   assert.deepEqual(tellStretches("", []), []);
+});
+
+it("reads the tail of a paragraph longer than a stretch", () => {
+  // One 1,000-word paragraph, as a chapter written with single line breaks splits.
+  const body = Array.from({ length: 1000 }, (_, w) => word(w)).join(" ");
+  const drafts: TellDraft[] = Array.from({ length: 8 }, (_, i) => ({ kind: (["three", "list", "pivot", "notxy"] as const)[i % 4]!, quote: word(880 + i * 10) }));
+  const reading = readTells(body, drafts);
+  assert.equal(reading.passages.length, 1, "eight tells in words 880..950 are found");
+  assert.equal(reading.passages[0]!.densest.count, 8);
+  const stretches = tellStretches(body, reading.tells);
+  assert.deepEqual(stretches.map((s) => body.slice(s.start).split(" ", 1)[0]), [word(0), word(150), word(300), word(450), word(600)],
+    "a start every 150 words inside it, up to the first that reaches the end");
 });
 
 it("is crowded at the line, or at the kind line for one kind", () => {

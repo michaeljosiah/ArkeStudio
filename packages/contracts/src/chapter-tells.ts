@@ -91,6 +91,8 @@ export const ReviewTellsSchema = z.object({
   strip: z.array(TellStripBarSchema).max(200),
   /** Tags whose quotation is not in the saved chapter, or repeats it more often than it occurs. */
   unplaced: z.number().int().nonnegative(),
+  /** Tags whose words occur in more places than they were tagged at, so which one is meant is unknown. */
+  ambiguous: z.number().int().nonnegative(),
   /** Same-kind tags that overlapped another and were counted once. */
   merged: z.number().int().nonnegative(),
 }).strict();
@@ -100,29 +102,34 @@ const emptyByKind = (): TellsByKind => ({ three: 0, list: 0, metaphor: 0, notxy:
 
 /**
  * Place each tag at its exact quotation. A quotation the chapter does not contain is dropped,
- * as review citations are. The n-th tag of the same kind and words takes the n-th occurrence,
- * so a pivot the chapter uses twice can be tagged twice; a repeat with no occurrence left is
- * dropped. Overlapping tags of one kind are one device; different kinds both count, as the
- * source counted one sentence as Not X but Y and as Metaphor.
+ * as review citations are. Words the chapter holds more than once are placed only when the
+ * reviewer tagged every occurrence: "He stopped." twice, tagged once, could be the sequential
+ * action or the pivot, and a guess could move the tell into another stretch and make or hide a
+ * crowded passage. The skill asks for a quotation that occurs once, so an ambiguous tag is the
+ * reviewer's miss, dropped and counted rather than anchored to words it may not mean (the review
+ * notes' rule, turn 227r). Overlapping tags of one kind are one device; different kinds both
+ * count, as the source counted one sentence as Not X but Y and as Metaphor.
  */
-export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tells: PlacedTell[]; unplaced: number; merged: number } {
-  const used = new Map<string, number>();
+export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tells: PlacedTell[]; unplaced: number; ambiguous: number; merged: number } {
   const dialogue = dialogueOf(body);
-  const placed: PlacedTell[] = [];
-  let unplaced = 0;
+  const groups = new Map<string, TellDraft[]>();
+  let unplaced = 0, ambiguous = 0;
   for (const draft of drafts) {
     // Blank quotation marks would otherwise be "found" at the chapter's first space.
     if (draft.quote.trim() === "") { unplaced++; continue; }
     const key = `${draft.kind}\u0000${draft.quote}`;
-    let from = 0, at = -1;
-    for (let n = used.get(key) ?? 0; n >= 0; n--) {
-      at = body.indexOf(draft.quote, from);
-      if (at < 0) break;
-      from = at + 1;
-    }
-    if (at < 0) { unplaced++; continue; }
-    used.set(key, (used.get(key) ?? 0) + 1);
-    placed.push({ kind: draft.kind, quote: draft.quote, start: at, end: at + draft.quote.length, inDialogue: dialogue(at) });
+    groups.set(key, [...(groups.get(key) ?? []), draft]);
+  }
+  const placed: PlacedTell[] = [];
+  for (const tags of groups.values()) {
+    const { kind, quote } = tags[0]!;
+    const at: number[] = [];
+    for (let i = body.indexOf(quote); i >= 0; i = body.indexOf(quote, i + 1)) at.push(i);
+    if (at.length === 0) { unplaced += tags.length; continue; }
+    if (tags.length < at.length) { ambiguous += tags.length; continue; }
+    // Every occurrence tagged; tags beyond them repeat one already placed.
+    unplaced += tags.length - at.length;
+    for (const start of at) placed.push({ kind, quote, start, end: start + quote.length, inDialogue: dialogue(start) });
   }
   placed.sort((a, b) => a.start - b.start || a.end - b.end);
   const tells: PlacedTell[] = [];
@@ -139,7 +146,7 @@ export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tel
     }
     tells.push({ ...tell });
   }
-  return { tells, unplaced, merged };
+  return { tells, unplaced, ambiguous, merged };
 }
 
 /** Whether an offset sits inside spoken words, by the cast's own quote rule. Splits the chapter once. */
@@ -167,18 +174,26 @@ function stretchOf(words: ReadonlyArray<{ start: number; end: number }>, from: n
 /**
  * Every 450 words that begin a paragraph, up to the first that reaches the chapter's end.
  * Sliding by paragraph means a crowded run cannot hide by straddling two fixed blocks; starting
- * each at a paragraph keeps what the margin marks a passage a reader would recognise.
+ * each at a paragraph keeps what the margin marks a passage a reader would recognise. A
+ * paragraph longer than a stretch also starts one every third of a stretch inside it: otherwise
+ * its tail is never read, and a chapter written with single line breaks is one paragraph.
  */
 export function tellStretches(body: string, tells: readonly PlacedTell[], size = TELL_STRETCH_WORDS): TellStretch[] {
   const words = wordsOf(body);
   if (words.length === 0) return [];
-  const stretches: TellStretch[] = [];
+  const starts: number[] = [];
   let w = 0;
   for (const paragraph of paragraphSpans(body)) {
     while (w < words.length && words[w]!.start < paragraph.start) w++;
-    if (w >= words.length) break;
-    stretches.push(stretchOf(words, w, size, tells));
-    if (w + size >= words.length) break;
+    let end = w;
+    while (end < words.length && words[end]!.start < paragraph.end) end++;
+    const step = Math.max(1, Math.floor(size / 3));
+    for (let at = w; at < end; at += end - w > size ? step : end - w) starts.push(at);
+  }
+  const stretches: TellStretch[] = [];
+  for (const from of starts) {
+    stretches.push(stretchOf(words, from, size, tells));
+    if (from + size >= words.length) break;
   }
   return stretches;
 }
@@ -224,11 +239,11 @@ export function tellStrip(body: string, tells: readonly PlacedTell[], passages: 
 
 /** The whole reading for one chapter, pinned in its review with the line it used. */
 export function readTells(body: string, drafts: readonly TellDraft[], line = TELL_LINE, kindLine = TELL_KIND_LINE): ReviewTells {
-  const { tells, unplaced, merged } = verifiedTells(body, drafts);
+  const { tells, unplaced, ambiguous, merged } = verifiedTells(body, drafts);
   const passages = crowdedPassages(tellStretches(body, tells), tells, line, kindLine);
   return {
     version: 1, line, kindLine, stretchWords: TELL_STRETCH_WORDS, words: wordsOf(body).length,
-    tells, passages, strip: tellStrip(body, tells, passages), unplaced, merged,
+    tells, passages, strip: tellStrip(body, tells, passages), unplaced, ambiguous, merged,
   };
 }
 

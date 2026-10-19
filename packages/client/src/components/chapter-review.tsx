@@ -99,8 +99,8 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} onClose={() => setOpen(false)} title="Chapter review" width={1050}>
       <div className="fy-chreview">
-        <p>Review saved prose and selected pictures using Arke’s script and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
-        <p>Up to 60,000 characters and 60 pictures. One script task, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
+        <p>Review saved prose and selected pictures using Arke’s script, AI tells and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
+        <p>Up to 60,000 characters and 60 pictures. One script task, one AI tells task over the whole chapter, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
         <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open"} onClick={() => {
           setError(null); setStarting(true);
           if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId)) { setStarting(false); setError("Not connected."); }

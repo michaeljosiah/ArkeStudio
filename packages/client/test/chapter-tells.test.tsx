@@ -10,8 +10,8 @@ Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElem
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); dom.document.body.innerHTML = ""; });
 
-// Twenty paragraphs of fifty numbered words: every word names exactly one place.
-const body = Array.from({ length: 20 }, (_, p) => Array.from({ length: 50 }, (_, w) => `w${p * 50 + w}`).join(" ")).join("\n\n");
+// Twenty paragraphs of fifty numbered words, each closed so none is inside another: a quote names one place.
+const body = Array.from({ length: 20 }, (_, p) => Array.from({ length: 50 }, (_, w) => `w${p * 50 + w}x`).join(" ")).join("\n\n");
 const prose: ReviewTask = { id: "prose", specialist: "prose", state: "complete", images: [], skill: "chapter-prose-review@v1" };
 const review = (tasks: ReviewTask[], drafts?: TellDraft[]): ChapterReview => ({ worldId: "world", productionId: "book", chapterId: "one", schemaVersion: 1, id: "11111111-1111-4111-a111-111111111111",
   requestId: "request", title: "One", createdAt: "now", updatedAt: "now", status: "complete", sourceHash: "hash", contextHash: "context", body, images: [], tasks, facts: [], findings: [],
@@ -24,20 +24,20 @@ async function render(value: ChapterReview) {
 
 it("shows the chapter's tells, the strip against the line and each crowded passage", async () => {
   const kinds = ["metaphor", "metaphor", "metaphor", "metaphor", "metaphor", "pivot", "pivot", "pivot", "notxy", "three"] as const;
-  const crowded: TellDraft[] = kinds.map((kind, i) => ({ kind, quote: `w${300 + i * 10}` }));
-  const container = await render(review([prose], [...crowded, { kind: "list", quote: "w900" }, { kind: "pivot", quote: "not in the chapter" }]));
+  const crowded: TellDraft[] = kinds.map((kind, i) => ({ kind, quote: `w${300 + i * 10}x` }));
+  const container = await render(review([prose], [...crowded, { kind: "list", quote: "w900x" }, { kind: "pivot", quote: "not in the chapter" }]));
   const text = container.textContent ?? "";
   assert.match(text, /11 tells/); assert.match(text, /1,000 words/); assert.match(text, /11 per 1,000 words/);
   assert.match(container.querySelector('[role="img"]')?.getAttribute("aria-label") ?? "", /start to end: 10, 0, 1\. The line is 8\./);
   assert.equal(container.querySelectorAll(".fy-tells__bar--crowded").length, 1);
   assert.match(text, /10 in 450 words · Metaphor 5 · Pivot sentence 3 · Rule of three 1 · Not X but Y 1/);
-  assert.match(container.querySelector(".fy-tells__passage q")?.textContent ?? "", /^w300 w301/);
+  assert.match(container.querySelector(".fy-tells__passage q")?.textContent ?? "", /^w300x w301x/);
   assert.match(text, /Not an AI detector/); assert.match(text, /The line is provisional/);
-  assert.match(text, /1 tagged quotation was not in the chapter and not counted/);
+  assert.match(text, /Not counted: 1 not in the chapter\./);
 });
 
 it("says none crowded when the tells are spread out", async () => {
-  const container = await render(review([prose], [{ kind: "metaphor", quote: "w10" }, { kind: "pivot", quote: "w600" }]));
+  const container = await render(review([prose], [{ kind: "metaphor", quote: "w10x" }, { kind: "pivot", quote: "w600x" }]));
   assert.match(container.textContent ?? "", /None crowded\. 2 in 1,000 words, spread out\./);
   assert.equal(container.querySelectorAll(".fy-tells__bar--crowded").length, 0);
 });

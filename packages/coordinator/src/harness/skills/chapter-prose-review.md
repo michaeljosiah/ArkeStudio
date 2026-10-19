@@ -2,7 +2,7 @@
 
 Tag the patterns that make prose read as AI-written. Each is ordinary craft on its own, and the writer may well have used it on purpose. You are not judging the writing, scoring it, or guessing who wrote it. Tag every instance in the supplied chapter, in reading order, and nothing else. The application counts the tags and decides what, if anything, to show; a chapter with many tags is not a verdict, and one with none is valid.
 
-For each instance return its kind and an exact quotation copied from the chapter: the shortest span that shows the device, normally a clause or a sentence and under thirty words. Copy it character for character, punctuation and quotation marks included. Never paraphrase, join separate passages with an ellipsis, or quote text that is not in the chapter. A device used again later is a separate instance; quote each one.
+For each instance return its kind and an exact quotation copied from the chapter: the shortest span that shows the device, normally a clause or a sentence and under thirty words. Copy it character for character, punctuation and quotation marks included. Never paraphrase, join separate passages with an ellipsis, or quote text that is not in the chapter. The quotation must occur only once in the chapter: if its words appear elsewhere too, lengthen it with the words around it until it is unique. A quotation that could be either of two places is not counted. A device used again later is a separate instance; quote each one.
 
 ## The six kinds
 

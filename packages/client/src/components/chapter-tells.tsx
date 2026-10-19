@@ -87,10 +87,15 @@ export function ChapterTellsReport({ review }: { review: ChapterReview }) {
       <p className="fy-tells__cover">
         Flagged at {reading.line} in any {reading.stretchWords} words, or {reading.kindLine} of one kind. The line is provisional.
         Counts are the model’s reading, checked against your words. Not an AI detector.
-        {reading.unplaced > 0 ? ` ${reading.unplaced} tagged ${reading.unplaced === 1 ? "quotation was" : "quotations were"} not in the chapter and not counted.` : ""}
+        {uncounted(reading)}
       </p>
     </section>
   );
+}
+
+function uncounted({ unplaced, ambiguous }: Pick<ReviewTells, "unplaced" | "ambiguous">): string {
+  const parts = [unplaced > 0 ? `${unplaced} not in the chapter` : "", ambiguous > 0 ? `${ambiguous} matching more than one place` : ""].filter(Boolean);
+  return parts.length ? ` Not counted: ${parts.join(", ")}.` : "";
 }
 
 /** The passage's first words, to find it by. */

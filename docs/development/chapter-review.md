@@ -65,8 +65,12 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
   tags: a kind and an exact quotation. It never returns a count, a score or a verdict.
 - **The app counts.** `readTells` in contracts `chapter-tells.ts` does every number:
   - it drops quotations that are not in the saved chapter;
+  - it drops tags whose words occur in more places than they were tagged at, since it cannot
+    tell which occurrence was meant (the skill asks for a quotation that occurs once);
   - it counts overlapping tags of one kind once;
-  - it reads every 450 words that begin a paragraph;
+  - it reads every 450 words that begin a paragraph, plus one every 150 words inside a
+    paragraph longer than 450 words, so a chapter written with single line breaks is read
+    to its end;
   - it merges crowded stretches into passages that span their tells;
   - it builds the report's strip of consecutive 450-word blocks.
 

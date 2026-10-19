@@ -2868,9 +2868,9 @@ async function sharedResourceProjection(
       authority = { kind: "production-store", id: intent.actionId };
       const chapter = bundle.productions.find(p => p.meta.id === payload.action.productionId)?.chapters.find(c => c.id === payload.action.chapterId && !c.retired);
       if (!chapter) throw new Error("The chapter is no longer available.");
-      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script and visual specialists. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
+      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script, AI tells and visual specialists: the saved chapter goes to the script and AI tells reviewers in one model call each. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
         affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
-        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
       break;
     }
     case "world-chat-production-episode-order":
