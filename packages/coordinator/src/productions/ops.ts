@@ -43,6 +43,7 @@ import {
   type Capability,
   orderedShots,
   countWords,
+  chapterManuscriptWords,
   ChapterFrontmatterSchema,
   type ChapterImplies,
   AudioDramaRecordSchema,
@@ -824,7 +825,11 @@ export async function saveChapter(
     const file = toExtendedLength(join(store.dir, fromPortable(path)));
     const live = await readFile(file, "utf8");
     const doc = MarkdownFile.parse(live);
-    const added = Math.max(0, countWords(body) - countWords(doc.body));
+    // The manuscript editor has no status picker. Replacing outline notes starts a draft,
+    // counted from zero manuscript words; unchanged or cleared notes remain an outline.
+    const status = typeof doc.data["status"] === "string" ? doc.data["status"] : undefined;
+    const replacesOutline = status === "outlined" && body.trim() !== "" && body.trim() !== doc.body.trim();
+    const added = Math.max(0, chapterManuscriptWords(body, replacesOutline ? "drafted" : status) - chapterManuscriptWords(doc.body, status));
     const progressFiles: CommitFileInput[] = [];
     if (added > 0) {
       const progressPath = `productions/${productionId}/progress.json`;
@@ -837,9 +842,6 @@ export async function saveChapter(
       progress.days[day] = (progress.days[day] ?? 0) + added;
       progressFiles.push({ path: progressPath, action: raw === null ? "create" : "replace", content: `${JSON.stringify(progress, null, 2)}\n`, baseHash: raw === null ? null : sha256(raw) });
     }
-    // The manuscript editor can replace an outline, but has no status picker. A real prose
-    // edit leaves that planning state; merely opening or clearing it must not mark it drafted.
-    const replacesOutline = doc.data["status"] === "outlined" && body.trim() !== "" && body.trim() !== doc.body.trim();
     doc.setBody(body);
     // The summary's word count follows the prose it summarises: every surface that reads
     // `words` (the chapter tree, the story dashboard) would otherwise report the count the

@@ -402,6 +402,25 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  it("accepted chapter drafts promote outlines when the optional status is omitted", async () => {
+    for (const status of [undefined, "outlined"] as const) {
+      const w = await setup();
+      const productionId = "the-ledger-of-nights";
+      const chapter = () => w.store.getBundle().productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id === "her-own-hand")!;
+      const proposal = await stageWorldChatProductionAuthoredAction(w.store, w.gate, { actionId: newId("act"), conversationId: w.conversationId }, {
+        kind: "world-chat-production-chapter", worldId: w.store.worldId,
+        action: { kind: "production-chapter", productionId, checkReceiptIds: [], change: {
+          operation: "edit", chapterId: "her-own-hand", changes: { body: "The bell stopped.", ...(status === undefined ? {} : { status }) },
+        } },
+      });
+      assert.equal(chapter().status, "outlined", "staging does not change the accepted chapter");
+      assert.equal(chapter().words, 0);
+      assert.equal((await w.gate.accept(proposal.id)).status, "accepted");
+      assert.equal(chapter().status, status ?? "drafted");
+      assert.equal(chapter().words, status === undefined ? 3 : 0, "an explicit outline status remains authoritative");
+    }
+  });
+
   it("reserves default episode order after accepted and pending creations", async () => {
     const w = await setup();
     const productionId = await createProduction(w.store, { title: "Ordered season", medium: "video", productionKind: "microdrama", seriesTitle: "Ordered series" });

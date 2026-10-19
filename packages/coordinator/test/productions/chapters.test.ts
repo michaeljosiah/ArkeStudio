@@ -234,26 +234,27 @@ describe("the chapter workspace's own commands (turn 126)", () => {
   });
 
   it("replaces an outline through a fenced manuscript save without leaving its count at zero", async () => {
-    const { dir, store } = await open();
-    const file = "04-her-own-hand";
-    const before = await openChapter(store, LEDGER, file);
-    const unchanged = await saveChapter(store, LEDGER, file, before.body, { baseHash: before.hash });
-    let chapter = (await chaptersOf(dir, LEDGER)).find(c => c.file === file)!;
-    assert.equal(chapter.status, "outlined");
-    assert.equal(chapter.words, 0, "saving the same outline does not call it drafted");
-    await assert.rejects(saveChapter(store, LEDGER, file, "A refused draft.", { baseHash: "sha256:" + "0".repeat(64) }));
-    const cleared = await saveChapter(store, LEDGER, file, "", { baseHash: unchanged.hash });
-    chapter = (await chaptersOf(dir, LEDGER)).find(c => c.file === file)!;
-    assert.equal(chapter.status, "outlined", "clearing notes is not a draft");
-    await saveChapter(store, LEDGER, file, "Maren closed the ledger.", { baseHash: cleared.hash });
-    await store.close();
-    const reopened = await WorldStore.open(dir, { clock: CLOCK });
-    closeOnCleanup(() => reopened.close());
-    chapter = reopened.getBundle().productions.find(p => p.meta.id === LEDGER)!.chapters.find(c => c.file === file)!;
-    assert.equal(chapter.status, "drafted");
-    assert.equal(chapter.words, 4);
-    assert.equal(chapter.version, before.version, "the ordinary save still keeps its version");
-    assert.equal((await openChapter(reopened, LEDGER, file)).body.trim(), "Maren closed the ledger.");
+    for (const body of ["", "Maren closed the ledger."]) {
+      const { dir, store } = await open();
+      const file = "04-her-own-hand";
+      const before = await openChapter(store, LEDGER, file);
+      const unchanged = await saveChapter(store, LEDGER, file, before.body, { baseHash: before.hash });
+      let chapter = (await chaptersOf(dir, LEDGER)).find(c => c.file === file)!;
+      assert.equal(chapter.status, "outlined");
+      assert.equal(chapter.words, 0, "saving the same outline does not call it drafted");
+      await assert.rejects(saveChapter(store, LEDGER, file, "A refused draft.", { baseHash: "sha256:" + "0".repeat(64) }));
+      await saveChapter(store, LEDGER, file, body, { baseHash: unchanged.hash });
+      await store.close();
+      const reopened = await WorldStore.open(dir, { clock: CLOCK });
+      closeOnCleanup(() => reopened.close());
+      const production = reopened.getBundle().productions.find(p => p.meta.id === LEDGER)!;
+      chapter = production.chapters.find(c => c.file === file)!;
+      assert.equal(chapter.status, body ? "drafted" : "outlined");
+      assert.equal(chapter.words, body ? 4 : 0);
+      assert.deepEqual(production.progress, body ? { days: { "2026-08-01": 4 } } : undefined, "outline notes are not yesterday's manuscript words");
+      assert.equal(chapter.version, before.version, "the ordinary save still keeps its version");
+      assert.equal((await openChapter(reopened, LEDGER, file)).body.trim(), body);
+    }
   });
 
   it("the plan saves in place, clears by null, rides on the summary, and keeps the version (turn 127)", async () => {
