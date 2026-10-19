@@ -110,7 +110,37 @@ export const AudioStudioProposalSchema = z.object({
 }).strict();
 export type AudioStudioProposal = z.infer<typeof AudioStudioProposalSchema>;
 
+/**
+ * A note heard audio earned (design turn 230o, issue 1882): what was observed on one line, on the
+ * interval actually heard, with the change that would answer it for Current and Suggested.
+ */
+export const AudioHeardNoteSchema = z.object({
+  key: z.string().regex(/^[a-f0-9]{16,64}$/),
+  check: z.literal("intelligibility"),
+  /** The line, by its passage key: an episode's block id. */
+  block: Id,
+  quote: z.string().max(300),
+  from: z.number().min(0), to: z.number().min(0),
+  observed: z.string().min(1).max(300),
+  fix: z.object({ label: z.string().min(1).max(200), commands: z.array(AudioArrangementCommandSchema).min(1).max(20) }).strict().optional(),
+}).strict();
+export type AudioHeardNote = z.infer<typeof AudioHeardNoteSchema>;
+/**
+ * What of an arrangement has been heard, and on which (issue 1882): spans in seconds of the mix
+ * whose base they were heard on, its length then, and the notes they earned. A changed arrangement
+ * lapses them all, since what was heard no longer exists.
+ */
+export const AudioHeardSchema = z.object({
+  base: z.string().regex(/^[a-f0-9]{64}$/),
+  seconds: z.number().min(0),
+  spans: z.array(z.tuple([z.number().min(0), z.number().min(0)])).max(500),
+  notes: z.array(AudioHeardNoteSchema).max(200),
+}).strict();
+export type AudioHeard = z.infer<typeof AudioHeardSchema>;
+
 export const AudioStudioSnapshotSchema = z.object({
+  /** What of this arrangement has been heard (issue 1882), when it is still the one heard. */
+  heard: AudioHeardSchema.optional(),
   proposals: z.array(AudioStudioProposalSchema).max(100).optional(),
   unavailable: z.array(z.object({ file: z.string(), message: z.string() }).strict()).optional(),
   base: z.string().regex(/^[a-f0-9]{64}$/), revision: z.number().int().min(0),

@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
+import { newId, resolveAudioArrangement, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
 import { hearDramaLines, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
-import { audioStudioSnapshot, editAudioStudio, openAudioStudio, savedEpisodeMixProblems } from "../../src/productions/audio-studio.js";
+import { audioStudioSnapshot, editAudioStudio, openAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "../../src/productions/audio-studio.js";
 import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
-import { DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { DRAMA_HEARD_SCHEMA_VERSION, DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { fileGeneratedArtifact } from "../../src/artifacts/filing.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -273,5 +273,34 @@ describe("issue 1882: Mixed reads the saved arrangement", () => {
     await rm(join(store.dir, bell));
     const [mix] = await savedEpisodeMixProblems(store, id);
     assert.match(mix?.issues.join(" ") ?? "", /unavailable on this machine/);
+  });
+});
+
+describe("issue 1882: what of an episode's mix was heard (230o)", () => {
+  it("records spans on the base heard, notes a line the bed drowns, and lapses when the mix changes", async () => {
+    const bed = ulid(), line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode((bell) => [{ id: ulid(), kind: "heading", place: "The quay" }, { id: bed, kind: "ambience", heard: "Gulls.", soundArtifact: bell }, line]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    // The gulls brought up over the line and let play straight through it.
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Gulls up", commands: [{ kind: "set-clip", id: `bed:${bed}`, changes: { gainDb: 6, duckDb: 0 } }] });
+    const snapshot = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(snapshot.heard, undefined, "nothing heard yet");
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: opened.base, spans: [[0, 2]] }), false, "a listen to a mix since changed records nothing");
+    const seconds = resolveAudioArrangement(snapshot.state, snapshot.script).samples / 48_000;
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: snapshot.base, spans: [[0, seconds]] }), true);
+    const heard = await readAudioHeard(store, id, "episode-001");
+    assert.deepEqual(heard?.spans, [[0, Math.round(seconds * 10) / 10]]);
+    const [note] = heard?.notes ?? [];
+    assert.match(note?.observed ?? "", /^Maren Kest \d+ dB under Ambience$/, JSON.stringify(heard?.notes));
+    assert.equal(note?.block, line.id, "on the line, by its block");
+    const duck = note?.fix?.commands[0];
+    assert.ok(duck?.kind === "set-clip" && duck.id === `bed:${bed}` && (duck.changes.duckDb ?? 0) > 6, `ducks the bed by what is missing: ${JSON.stringify(note?.fix)}`);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= DRAMA_HEARD_SCHEMA_VERSION, "the world is raised before the heard record lands");
+    const after = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(after.base, snapshot.base, "hearing the mix is no change to it");
+    assert.deepEqual(after.heard?.spans, heard?.spans);
+    assert.equal(await recordAudioHeard(store, id, "episode-001", { base: snapshot.base, spans: [[0, 1]] }), false, "already heard");
+    await editAudioStudio(store, id, "episode-001", snapshot.base, { kind: "commands", label: "Mute gulls", commands: [{ kind: "set-clip", id: `bed:${bed}`, changes: { gainDb: -6 } }] });
+    assert.equal(await readAudioHeard(store, id, "episode-001"), null, "what was heard no longer exists");
   });
 });

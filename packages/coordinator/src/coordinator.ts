@@ -365,7 +365,7 @@ import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { audioWaveform } from "./audio/waveform.js";
-import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, savedEpisodeMixProblems } from "./productions/audio-studio.js";
+import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -16213,6 +16213,23 @@ export class Coordinator {
           const rendered = await this.audioStudioPreviews.render(store, msg, this.opts.ffmpeg);
           this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, ...rendered });
         } catch (error) { this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(error) }); }
+        return;
+      }
+      case "record-audio-heard":
+      case "read-audio-heard": {
+        // An episode's listening (design turn 230o, issue 1882): recorded on the base it was heard
+        // on, and read back for the script's Review. Best effort: a refused record changes nothing.
+        const store = this.opts.provider.openStore?.();
+        const chapter = this.studioSubject(store, msg.worldId, msg.productionId, msg.chapterFile);
+        if (msg.kind === "read-audio-heard") {
+          const heard = store && chapter ? await readAudioHeard(store, msg.productionId, chapter.id).catch(() => null) : null;
+          this.emit({ at: this.nowIso(), type: "audio-studio.heard", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable", heard });
+          return;
+        }
+        if (!store || !chapter) return;
+        const recorded = await recordAudioHeard(store, msg.productionId, chapter.id, { base: msg.base, spans: msg.spans }, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}).catch(() => false);
+        // Its open studio and script read again, so the strip and the Review say what was heard.
+        if (recorded && this.opts.provider.openStore?.() === store) this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         return;
       }
       case "read-audio-studio":

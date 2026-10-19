@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { AudioArrangementSchema, AudioStudioProposalSchema, type AudioArrangementState, type AudioArrangementTrack, type AudioSource } from "./audio-arrangement-schema.js";
+import { AudioArrangementSchema, AudioHeardSchema, AudioStudioProposalSchema, type AudioArrangementState, type AudioArrangementTrack, type AudioSource } from "./audio-arrangement-schema.js";
 import { audioPassageId, audioSamples, newAudioClip, validateAudioArrangement, type AudioScript } from "./audio-arrangement.js";
 import { DRAMA_NARRATOR, dramaLineHash, dramaTakePlays, type EpisodeScriptBlock, type EpisodeTakes } from "./audio-drama.js";
 
@@ -16,6 +16,8 @@ export const DramaMixRecordSchema = z.object({
   episode: z.number().int().min(1).max(200),
   arrangement: AudioArrangementSchema.optional(),
   audioStudioProposals: z.array(AudioStudioProposalSchema).max(100).optional(),
+  /** What of this mix has been heard, and the notes it earned (230o, issue 1882). Never part of its base. */
+  heard: AudioHeardSchema.optional(),
   updatedAt: IsoDateTimeSchema.optional(),
 }).strict();
 export type DramaMixRecord = z.infer<typeof DramaMixRecordSchema>;
