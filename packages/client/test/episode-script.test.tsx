@@ -287,7 +287,7 @@ describe("issue 1883: the selection and the Hear dialog", () => {
     const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
     await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
       episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [] }));
-    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /^Hear 1 line/.test(button.textContent ?? ""))!;
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 1 line"))!;
     assert.ok(hear.querySelector(".fy-ad-hear__dot"), "a press over the limit asks first");
   });
 
@@ -299,7 +299,7 @@ describe("issue 1883: the selection and the Hear dialog", () => {
     const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
     await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
       episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
-    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /^Hear 2 lines/.test(button.textContent ?? ""))!;
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines"))!;
     assert.ok(hear, "the button counts both lines");
     await click(hear);
     assert.ok(dom.document.body.querySelector(".fy-editordialog__title")!.textContent === "Hear 2 lines", "and so does the dialog");
