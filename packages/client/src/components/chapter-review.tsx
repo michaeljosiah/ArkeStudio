@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChapterReview } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
+import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
 import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
@@ -39,6 +40,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
     <p role="status"><strong>{review.status}</strong> · {completed}/{review.tasks.length} tasks complete · {supplied.size}/{review.images.length} pictures supplied to completed reviews</p>
     <p>Audio delivery not listened to. Narration coverage is a saved-record audit, not an exact provider-request review.</p>
     {review.stale && <div role="alert" className="fy-chreview__notice"><strong>Source check needed — refresh or review again.</strong><ul>{review.staleReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>}
+    <ChapterTellsReport review={review} />
     <details><summary>Coverage, models and task results</summary>
       <ul>{review.checks.map((check, i) => <li key={i}>{check}</li>)}</ul>
       {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}

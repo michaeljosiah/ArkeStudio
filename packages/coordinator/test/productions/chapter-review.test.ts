@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ReviewAnswer, ChapterReview } from "@arke-studio/contracts";
-import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt } from "../../src/productions/chapter-review.js";
+import { ChapterReviewService, captureReviewSource, readChapterReview, saveChapterReview, reviewPrompt, verificationPrompt, consolidationPrompt, tellsPrompt } from "../../src/productions/chapter-review.js";
 import { emptyAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
 import { saveChapter } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -19,7 +19,10 @@ async function fixture() {
   closeOnCleanup(() => store.close());
   const target = { worldId: store.worldId, productionId: "the-ledger-of-nights", chapterId: "neap" };
   const updates: Array<ChapterReview | null> = [];
-  const service = (runner: ReviewTaskRunner) => new ChapterReviewService({ withWorld: async (id, work) => { assert.equal(id, store.worldId); return work(store); }, runner: () => runner, publish: (_target, review) => updates.push(review) });
+  // Script and visual tests answer every call as their own; AI tells gets an empty tag list unless a test opts in.
+  const service = (runner: ReviewTaskRunner, options: { prose?: boolean } = {}) => new ChapterReviewService({ withWorld: async (id, work) => { assert.equal(id, store.worldId); return work(store); },
+    runner: () => options.prose ? runner : (input, signal, receipt) => input.specialist === "prose" ? Promise.resolve({ facts: [], findings: [], tells: [] }) : runner(input, signal, receipt),
+    publish: (_target, review) => updates.push(review) });
   return { dir, store, target, service, updates };
 }
 it("checkpoints evidence and deduplicates request IDs across new services and later runs", async () => {
@@ -84,7 +87,7 @@ it("supplies image pixels with exact block passages and records a failed visual 
   assert.ok(reviewPrompt(fresh, [], [block.key]).includes(JSON.stringify(block.text)));
   assert.match(reviewPrompt(fresh, [], [block.key]), /older text/);
   const review = await f.service(async input => { if (input.specialist === "script") return answer; assert.equal(input.images.length, 1); assert.equal(Buffer.from(input.images[0]!.bytes).toString(), "test-image-bytes"); throw new Error("Vision unavailable"); }).start(f.target, "visual");
-  assert.equal(review.status, "partial"); assert.equal(review.tasks[1]?.state, "failed"); assert.equal(review.findings.length, 1);
+  assert.equal(review.status, "partial"); assert.equal(review.tasks.find(t => t.specialist === "visual")?.state, "failed"); assert.equal(review.findings.length, 1);
 });
 
 it("finishes in its retained world after the UI selects another world", async () => {
@@ -93,7 +96,7 @@ it("finishes in its retained world after the UI selects another world", async ()
   await provider.loadWorld(first.worldId);
   let release!: () => void, ready!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; }), started = new Promise<void>(resolve => { ready = resolve; });
-  const service = new ChapterReviewService({ withWorld: (id, work) => provider.withBackgroundWorldStore(id, work), runner: () => async () => { ready(); await barrier; return answer; }, publish: () => {} });
+  const service = new ChapterReviewService({ withWorld: (id, work) => provider.withBackgroundWorldStore(id, work), runner: () => async input => { ready(); await barrier; return input.specialist === "prose" ? { facts: [], findings: [], tells: [] } : answer; }, publish: () => {} });
   try {
     const work = service.start({ worldId: first.worldId, productionId: "the-ledger-of-nights", chapterId: "neap" }, "world-switch");
     await started; await provider.loadWorld(second.worldId);
@@ -341,4 +344,38 @@ it("reconciles contrary claims conservatively and preserves a rejected original"
   assert.equal(review.findings[0]!.certainty, "cannot-assess"); assert.equal(review.conflicts?.length, 1);
   assert.equal(review.candidates?.length, 2); assert.equal(review.assessments?.length, 2);
   assert.equal((await readChapterReview(f.store, f.target))?.conflicts?.length, 1);
+});
+
+it("tags AI tells with the prose reviewer and pins the counted reading in the review", async () => {
+  const f = await fixture(); const prose: string[] = [];
+  const review = await f.service(async (input, _signal, receipt) => {
+    if (input.specialist !== "prose") return answer;
+    prose.push(input.prompt); assert.equal(input.images.length, 0);
+    await receipt({ sessionId: "tells", model: "fake" });
+    return { facts: [], findings: [], tells: [{ kind: "metaphor", quote }, { kind: "pivot", quote: "an invented sentence" }] };
+  }, { prose: true }).start(f.target, "tells-request");
+  const task = review.tasks.find(t => t.specialist === "prose")!;
+  assert.equal(task.state, "complete"); assert.equal(task.skill, "chapter-prose-review@v1"); assert.equal(task.model, "fake");
+  assert.equal(review.status, "complete");
+  assert.equal(review.tells?.tells.length, 1); assert.equal(review.tells?.unplaced, 1, "an invented quotation is dropped, not counted");
+  assert.equal(review.tells?.tells[0]?.start, review.body.indexOf(quote));
+  assert.equal(review.tells?.line, 8); assert.deepEqual(review.tells?.passages, []);
+  assert.match(task.detail ?? "", /1 tells placed; 1 quotations not in the chapter dropped/);
+  assert.equal(prose.length, 1); assert.ok(prose[0]!.includes(review.body), "the prose reviewer reads the whole saved chapter");
+  assert.equal(review.findings.length, 1, "the script review is unchanged");
+  assert.deepEqual((await readChapterReview(f.store, f.target))?.tells, review.tells, "the reading is durable");
+});
+it("a prose answer without tags fails only its own task and leaves the reading absent", async () => {
+  const f = await fixture();
+  const review = await f.service(async () => answer, { prose: true }).start(f.target, "untagged");
+  assert.equal(review.tasks.find(t => t.specialist === "prose")?.state, "failed");
+  assert.match(review.tasks.find(t => t.specialist === "prose")?.detail ?? "", /no tells list/);
+  assert.equal(review.status, "partial"); assert.equal(review.tells, undefined); assert.equal(review.findings.length, 1);
+});
+it("asks only for kinds and exact quotations, never a count or a verdict", async () => {
+  const f = await fixture();
+  const prompt = tellsPrompt(await captureReviewSource(f.store, f.target));
+  assert.match(prompt, /"kind":"three\|list\|metaphor\|notxy\|pivot\|shorthand"/);
+  assert.match(prompt, /Do not count, score, summarise or judge who wrote it/);
+  assert.match(prompt, /SOURCE TEXT\n[\s\S]*\nEND SOURCE TEXT$/);
 });

@@ -744,7 +744,10 @@ interpretations and every consolidated source. See the chapter-review guide for 
 
 Chapter review v3: contracts `effectiveReviewVerdict` enforces visibility limits and `validateReviewConflicts` bounds conservative reconciliation. The coordinator retains original verdicts and conflict members; the report exposes both reasons without restoring rejected claims (issue #1787).
 
-AI tells (drawn, not built): [design turn 232](../../design-system/prose-review-232.notes.md)
+AI tells (issue #1952; slice S-1 built): contracts `chapter-tells.ts` places the prose
+specialist's tags and does every count (`readTells`). Coordinator `productions/chapter-review.ts`
+runs the `prose` task with `harness/skills/chapter-prose-review.md`, and client
+`components/chapter-tells.tsx` shows the report section. [Design turn 232](../../design-system/prose-review-232.notes.md)
 adds a prose check that counts six patterns per 450-word stretch and marks only crowded passages.
 Revision 2 adds Rewrite with Arke, checked for new tells before it is shown. The definition of each pattern is [ai-tells.md](../research/ai-tells.md); the turn's
 notes give the line, its calibration and what is new versus reused here (#1744, #1782).

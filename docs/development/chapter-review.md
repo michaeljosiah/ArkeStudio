@@ -54,3 +54,32 @@ results. Semantic equivalence remains a model judgment, not a mechanically prove
 Regression fixtures cover a hidden brace, opaque nested packaging, no-change findings, missing
 visibility fields, contrary verdicts, rejected-original preservation and conflict display. Live
 reviews remain necessary to assess actual visual accuracy.
+
+## AI tells (issue #1952)
+
+Design turn 232 adds a prose check that counts the patterns that read as AI-written. The six
+kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
+
+- **The prose specialist.** A read-only `chapter-prose-reviewer` session with its own versioned
+  skill (`chapter-prose-review.md`) runs as the `prose` task of every review. It returns only
+  tags: a kind and an exact quotation. It never returns a count, a score or a verdict.
+- **The app counts.** `readTells` in contracts `chapter-tells.ts` does every number:
+  - it drops quotations that are not in the saved chapter;
+  - it counts overlapping tags of one kind once;
+  - it reads every 450 words that begin a paragraph;
+  - it merges crowded stretches into passages that span their tells;
+  - it builds the report's strip of consecutive 450-word blocks.
+
+  The reading is pinned in the review as `tells`, with the line it was read against.
+- **The line is provisional.** It is 8 tells in a stretch, or 4 of one kind, until it is
+  calibrated against the author's own unaided chapters (S-6 of the issue).
+- **The report.** It shows the chapter's figures, the strip, the counts by kind and the crowded
+  passages. It calls the counts the model's reading, never a detector.
+- **Failure.** A prose answer without a tags list fails only its own task. The review is then
+  partial and holds no reading.
+- **Not yet built.** The in-page marks, per-check selection, per-passage recheck and the checked
+  Rewrite are later slices of the issue.
+
+Tests: contracts `test/chapter-tells.test.ts`; coordinator `test/productions/chapter-review.test.ts`
+and `test/harness/review-task.test.ts`; client `test/chapter-tells.test.tsx`.
+

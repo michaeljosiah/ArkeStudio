@@ -52,6 +52,7 @@ export * from "./routing.js";
 export * from "./frames.js";
 export * from "./world-chat.js";
 export * from "./chapter-review.js";
+export * from "./chapter-tells.js";
 export * from "./adapter.js";
 export * from "./roster.js";
 export * from "./skills.js";

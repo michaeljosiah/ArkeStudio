@@ -282,6 +282,11 @@ The summary has these sections, in this order, each a heading on its own line. W
     brief: "You are Arke's visual continuity reviewer. Inspect the supplied image pixels and source text. Separate observation from inference. Do not claim to inspect an image that was not supplied. Return only the requested JSON findings. Do not rewrite, delegate or generate media.",
   },
   {
+    name: "chapter-prose-reviewer", description: "Tag the patterns that read as AI-written prose, for the review to count",
+    needsProposal: false, readOnly: true,
+    brief: "You are Arke's prose pattern tagger. Tag each instance of the six patterns your skill defines, with its kind and an exact quotation from the supplied chapter. Tag; do not count, score, judge the writing or guess who wrote it. Return only the requested JSON. Do not rewrite, delegate or generate media.",
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,

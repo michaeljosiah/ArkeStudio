@@ -74,3 +74,13 @@ it("labels attachment order explicitly when a harness collects all text before i
   assert.match(text, /attachment order, not by the nearest text label/);
   assert.equal(f.sent().filter(p => p.type === "image").length, 2);
 });
+
+it("runs AI tells as the prose reviewer, with its own skill and no images", async () => {
+  const f = fake();
+  const run = makeReviewTaskRunner({ adapter: f.adapter, beforeDispatch: async () => {}, scratch: await tempDir("review-task-"), sessionInput: input => input, cloudAllowed: async () => true });
+  await run({ specialist: "prose", prompt: "AI TELLS", images: [] }, new AbortController().signal, f.receipt);
+  assert.equal(f.config()?.agent, "chapter-prose-reviewer");
+  assert.equal(f.config()?.skillFamily, "chapter-review");
+  assert.match(f.config()?.skillBodies?.["chapter-prose-review"] ?? "", /Tag every instance/);
+  assert.equal(f.sent().some(part => part.type === "image"), false);
+});
