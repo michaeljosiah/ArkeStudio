@@ -5,14 +5,21 @@ export function AudioStudioRepairs({ snapshot, plan, disabled, onSelect, onRevie
   snapshot: AudioStudioSnapshot; plan: ResolvedAudioArrangement; disabled: boolean; onSelect: (id: string) => void;
   onReview: (label: string, commands: AudioArrangementCommand[]) => void;
 }) {
-  if (!plan.issues.length && !snapshot.state.omissions.length) return null;
+  // A sound the first arrangement could not place has no clip to mark (issue 1888): the snapshot
+  // named it as unavailable and nothing on screen did, so a placed cue was simply missing.
+  const unplaced = (snapshot.unavailable ?? []).filter(entry => !snapshot.state.clips.some(clip => clip.source?.file === entry.file));
+  if (!plan.issues.length && !snapshot.state.omissions.length && !unplaced.length) return null;
   const bindings = bindAudioPassages(snapshot.state, snapshot.script);
-  return <details className="fy-audio-repairs"><summary>{plan.issues.length ? `${plan.issues.length} repairs before final delivery` : "Acknowledged omissions"}</summary><p>Draft listening is available. Final delivery requires every repair to be resolved or each omission explicitly acknowledged.</p>
+  // A passage by its words, not its key (issue 1888): an episode's keys are block ids.
+  const said = (key: string | undefined) => key === undefined ? undefined : snapshot.passages.find(entry => entry.key === key)?.text.slice(0, 120);
+  const count = plan.issues.length + unplaced.length;
+  return <details className="fy-audio-repairs"><summary>{count ? `${count} repair${count === 1 ? "" : "s"} before final delivery` : "Acknowledged omissions"}</summary><p>Draft listening is available. Final delivery requires every repair to be resolved or each omission explicitly acknowledged.</p>
+    {unplaced.map(entry => <div key={`unplaced/${entry.file}`}><p><b>Not placed</b> · {entry.message}</p></div>)}
     {plan.issues.map(issue => {
       const passage = snapshot.state.passages.find(entry => entry.id === issue.id), clip = snapshot.state.clips.find(entry => entry.id === issue.id);
       const current = snapshot.script.passages.find(entry => entry.key === issue.id);
       const omission = snapshot.state.omissions.find(entry => entry.id === issue.id);
-      return <div key={`${issue.kind}/${issue.id}`}><p><b>{passage?.key ?? clip?.label ?? current?.key ?? omission?.label ?? issue.id}</b> · {issue.message}</p>
+      return <div key={`${issue.kind}/${issue.id}`}><p><b>{said(passage?.key) ?? clip?.label ?? said(current?.key) ?? omission?.label ?? passage?.key ?? current?.key ?? issue.id}</b> · {issue.message}</p>
         {clip && <Button size="sm" onClick={() => onSelect(clip.id)}>Inspect clip</Button>}
         {passage && snapshot.state.clips.filter(entry => entry.passageId === passage.id).map(entry => <Button key={entry.id} size="sm" onClick={() => onSelect(entry.id)}>Inspect {entry.label}</Button>)}
         {omission && <Button size="sm" disabled={disabled} onClick={() => onReview("Acknowledge omission", [{ kind: "acknowledge-omission", id: omission.id, acknowledged: true }])}>Review omission</Button>}
