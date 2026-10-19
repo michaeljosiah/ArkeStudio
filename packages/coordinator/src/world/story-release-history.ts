@@ -21,6 +21,15 @@ export function isStoryReleaseLegacyChange(entity: unknown, productions: Readonl
   return ["canon", "characters", "locations", "factions", "references", "voices", "artifacts"].includes(parts[0]!);
 }
 
+/** A deleted authored file still belongs to the release's audit trail. */
+export function isStoryReleaseAuthoredPath(relative: string, productions: ReadonlySet<string>): boolean {
+  const parts = relative.split("/");
+  if (/[\\:\x00-\x1f]/.test(relative) || parts.some(p => !p || p.startsWith(".") || /[. ]$/.test(p))) return false;
+  if (parts.length === 1) return ["world.json", "world-art.png", "bible.md"].includes(relative);
+  if (parts[0] === "productions") return parts.length >= 3 && productions.has(parts[1]!);
+  return ["art-direction", "canon", "characters", "locations", "factions", "references", "voices"].includes(parts[0]!);
+}
+
 /** Match the known filename, so Markdown punctuation cannot become part of the lookup key. */
 export function referencesStoryArtifact(text: string, filename: string): boolean {
   const reference = `artifacts/${filename}`;

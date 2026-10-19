@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ZipFile } from "yazl";
 import { cleanupStoryDownload, downloadStory, type StoryDownload } from "../../src/world/story-download.js";
-import { isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../../src/world/story-release-history.js";
+import { isStoryReleaseAuthoredPath, isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../../src/world/story-release-history.js";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { installSampleWorld } from "../../src/world/sample-world.js";
 import { tempDir } from "../tmp.js";
 import { FIXTURE_WORLD } from "./helpers.js";
+import { containedWorldFilePath } from "../../src/world/contained-file.js";
 
 async function archive(extra: Array<{ name: string; mode?: number }> = []) {
   const world = await readFile(join(FIXTURE_WORLD, "world.json"));
@@ -94,6 +95,22 @@ it("finds media in normal Markdown links, encoded names and JSON references", ()
   for (const text of ["![portrait](artifacts/maren.png)", "[plate](<artifacts/maren.png>)", '{"file":"artifacts/maren.png"}']) assert.equal(referencesStoryArtifact(text, "maren.png"), true);
   assert.equal(referencesStoryArtifact("[plate](artifacts/wide%20view.png)", "wide view.png"), true);
   assert.equal(referencesStoryArtifact("ordinary prose", "maren.png"), false);
+});
+
+it("retains deleted authored-file audit records by namespace without admitting operational paths", () => {
+  const selected = new Set(["novel"]);
+  for (const p of ["productions/novel/scenes/deleted.json", "art-direction/record.json", "characters/retired.md", "bible.md"]) assert.equal(isStoryReleaseAuthoredPath(p, selected), true, p);
+  for (const p of ["productions/other/scenes/deleted.json", "productions/novel/.sessions/private.json", ".history/bible/prepared/action.json", "characters/../private", "C:/outside", "characters\\outside", "artifacts/unrelated.png.json"]) assert.equal(isStoryReleaseAuthoredPath(p, selected), false, p);
+});
+
+it("rejects linked release artifact media and sidecars before reading or copying", async t => {
+  const root = await tempDir("story-artifact-link-"), outside = join(await tempDir("story-outside-"), "private.txt");
+  await mkdir(join(root, "artifacts")); await writeFile(outside, "outside world");
+  for (const name of ["image.png", "image.png.json"]) {
+    try { await symlink(outside, join(root, "artifacts", name)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "EPERM" && process.platform === "win32") { t.skip("Windows symlink privilege unavailable"); return; } throw error; }
+    await assert.rejects(containedWorldFilePath(root, `artifacts/${name}`), /path-invalid/);
+  }
 });
 
 it("reports scratch cleanup failure separately from installation success", async () => {

@@ -9,7 +9,8 @@ import { scanWorld } from "../packages/coordinator/src/world/scan.js";
 import { recordUploadedPropImage } from "../packages/coordinator/src/references/takes.js";
 import { acceptPropStateReference } from "../packages/coordinator/src/references/props.js";
 import { WORLD_EXPORT_EXCLUDED } from "../packages/coordinator/src/takes/export.js";
-import { isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../packages/coordinator/src/world/story-release-history.js";
+import { isStoryReleaseAuthoredPath, isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../packages/coordinator/src/world/story-release-history.js";
+import { containedWorldFilePath } from "../packages/coordinator/src/world/contained-file.js";
 
 // This assembles a new release directory; it never edits the author's live world.
 const [sourceArg, outputArg, configArg] = process.argv.slice(2);
@@ -48,7 +49,7 @@ if (await exists(path.join(source, ".history"))) for (const file of await walk(p
 }
 const artifacts = new Map<string, any>(), byFile = new Map<string, any>();
 for (const name of await fs.readdir(path.join(source, "artifacts"))) if (name.endsWith(".json")) {
-  const a = JSON.parse(await fs.readFile(path.join(source, "artifacts", name), "utf8"));
+  const a = JSON.parse(await fs.readFile(await containedWorldFilePath(source, `artifacts/${name}`), "utf8"));
   if (a.id && a.file) { artifacts.set(a.id, a); byFile.set(a.file, a); }
 }
 const wanted = new Set<string>(config.artifactIds);
@@ -62,7 +63,7 @@ const copied = new Set<string>();
 while ([...wanted].some(id => !copied.has(id))) for (const id of [...wanted]) {
   if (copied.has(id)) continue; copied.add(id);
   const a = artifacts.get(id); if (!a || path.basename(a.file) !== a.file) throw Error("Missing or unsafe artifact " + id);
-  for (const suffix of ["", ".json"]) await fs.copyFile(path.join(source, "artifacts", a.file + suffix), path.join(target, "artifacts", a.file + suffix));
+  for (const suffix of ["", ".json"]) await fs.copyFile(await containedWorldFilePath(source, `artifacts/${a.file}${suffix}`), path.join(target, "artifacts", a.file + suffix));
   collect(JSON.stringify(a));
 }
 const changes = [];
@@ -70,7 +71,7 @@ for (const line of (await fs.readFile(path.join(source, "changes.jsonl"), "utf8"
   const change = JSON.parse(line);
   if (typeof change.path === "string") {
     const resolved = path.resolve(target, change.path);
-    if (resolved.startsWith(target + path.sep) && await exists(resolved)) changes.push(line);
+    if (isStoryReleaseAuthoredPath(change.path, selected) || (resolved.startsWith(target + path.sep) && await exists(resolved))) changes.push(line);
   } else if (isStoryReleaseLegacyChange(change.entity, selected)) changes.push(line);
 }
 await fs.writeFile(path.join(target, "changes.jsonl"), changes.join("\n") + "\n");
