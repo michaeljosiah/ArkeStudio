@@ -42,7 +42,7 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
     {world && production && stageShot ? <section className="fy-production-preview__stage" aria-label={`Stage preview for shot ${stageShot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: stageShot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
-          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} onCommand={() => false} head={false} />
       </SelectionProvider>
     </section> : <p>The frozen Stage target is unavailable.</p>}
   </div>;
@@ -87,7 +87,7 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
-          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} refusalVersion={0} onCommand={() => false} head={false} />
+          sceneFile={production.sceneFiles[scene.id]} locked frozenScene generatorPending={false} onCommand={() => false} head={false} />
       </SelectionProvider>
     </section>)}
   </div>;

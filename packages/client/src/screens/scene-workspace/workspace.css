@@ -420,6 +420,9 @@
    scope, then the state on the right, and a figure's label carries its cast colour. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction { margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__scope { font-size: inherit; opacity: 1; }
+/* Start from (231e): its small mono "start from" before the value, with room made for the words. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__preserve > .ui-select__mark { color: var(--muted-foreground); font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__preserve.ui-select--marked > .ui-select__control { padding-left: calc(var(--space-2) + 64px + var(--space-2)); }
 /* The draft bar (231b) takes the line's place at its height while a draft waits: who made it, then
    chips counted from the draft's own diff, added in the success colour and changed in the warning
    one, then Arke's notes, Discard and Keep. */

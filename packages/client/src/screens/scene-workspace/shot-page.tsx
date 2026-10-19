@@ -595,7 +595,6 @@ function ShotWorkspace({
               sceneFile={sceneFile}
               locked={disabled}
               generatorPending={generatorPending}
-              refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={() => openGenerator("video")}
               board={stageBoard}

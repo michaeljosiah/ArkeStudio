@@ -237,7 +237,7 @@ it("hydrates the same retained draft on the Stage screen, binds Keep to its revi
   let keptId: string | undefined;
   const { host } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
     <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
-      generatorPending={false} refusalVersion={0} onCommand={(_, id) => { keptId = id; return true; }} onRenderShot={() => {}} />
+      generatorPending={false} onCommand={(_, id) => { keptId = id; return true; }} onRenderShot={() => {}} />
   </SelectionProvider>);
   await act(async () => __setStateForTest({ ...FIXTURE_STATE, world, stageReviews: [review] }));
   const keep = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Keep");
@@ -253,7 +253,7 @@ it("preserves unsaved Stage edits until the person decides them before hydrating
   let keptId: string | undefined;
   const { host, sent } = await mount(<SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
     <SceneStage world={world} production={production} scene={scene} aspect="16:9" sceneFile="04-the-verse-rises" locked={false}
-      generatorPending={false} refusalVersion={0} onCommand={(_, id) => { keptId = id; return true; }} />
+      generatorPending={false} onCommand={(_, id) => { keptId = id; return true; }} />
   </SelectionProvider>);
   const input = host.querySelector<HTMLInputElement>('[aria-label="Rig intensity"]')!;
   const props = (input as unknown as Record<string, { onFocus: () => void; onChange: (event: { target: { value: string } }) => void }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;

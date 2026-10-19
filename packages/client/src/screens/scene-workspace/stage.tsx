@@ -174,7 +174,6 @@ export function SceneStage({
   sceneFile,
   locked,
   generatorPending,
-  refusalVersion,
   onCommand,
   onRenderShot,
   playblastRequest,
@@ -195,8 +194,6 @@ export function SceneStage({
   sceneFile: string | undefined;
   locked: boolean;
   generatorPending: boolean;
-  /** Counts up on every refused scene write, so a wait can end on a refusal as well as a landing. */
-  refusalVersion: number;
   onCommand: (command: Command, stageReviewId?: string) => boolean;
   onRenderShot?: (shotId: string) => void;
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
@@ -324,10 +321,10 @@ export function SceneStage({
   }, []);
   const keyDrag = useRef<{ pointerId: number; which: number; lane?: MotionLane; left: number; width: number; low: number; high: number } | null>(null);
   const [ghost, setGhost] = useState(false);
-  const [staging, setStaging] = useState(false);
   const [constructing, setConstructing] = useState(false);
   const [instruction, setInstruction] = useState("");
-  const [preserve, setPreserve] = useState<"blocking" | "camera" | "none">("blocking");
+  // Start from (design turn 231e): what a build keeps. Null is the default for the stage as it is.
+  const [preserve, setPreserve] = useState<"blocking" | "camera" | "none" | null>(null);
   const [inspectionRound, setInspectionRound] = useState<number | null>(null);
   // Build with Arke's working log (issue 1823, design turn 229f): a line per step as it lands, the
   // pictures a render looked at, and the build's clock.
@@ -455,7 +452,6 @@ export function SceneStage({
       promotingBlocking.current = false;
       return null;
     });
-    setStaging(false);
   }, [scene.blocking, resolvedPersisted, persistedScope, scope]);
   useEffect(() => {
     if (draft === null) setScope(persistedScope);
@@ -469,10 +465,6 @@ export function SceneStage({
     setDraftFrom(null);
     setNotesOpen(false);
   }, [draft]);
-  // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
-  useEffect(() => {
-    setStaging(false);
-  }, [refusalVersion]);
   useEffect(() => {
     cameraDirty.current = false;
     blockingDirty.current = false;
@@ -487,6 +479,8 @@ export function SceneStage({
     keyDrag.current = null;
     setNote(null);
     playStart.current = null;
+    // Start from is chosen for a shot: the next shot opens on its own default.
+    setPreserve(null);
   }, [shot?.id]);
   useEffect(() => {
     keyDrag.current = null;
@@ -978,13 +972,30 @@ export function SceneStage({
     construction.current = null; aiDraftVersion.current = null;
     setConstructing(false); setInspectionRound(null);
   }, [shot?.id, world.meta.worldId]);
-  // The preserve choice rides only when the bar shows it. An unstaged shot in a scene another shot
-  // had staged once sent "Keep blocking" unseen, and the build was refused every set it tried.
+  // What rides is what Start from shows. An unstaged shot in a scene another shot had staged once
+  // sent a blocking preserve it never showed, and the build was refused every set it tried (round 92).
+  // Start from (231e): Nothing builds the set, cast and camera fresh; This shot keeps the shot's own
+  // camera; The scene keeps the scene's shared blocking. The wire keeps its preserve values (none,
+  // camera, blocking). A choice with nothing to keep is drawn but cannot be chosen, and the default
+  // is the most there is to keep.
+  // Each is offered only where the build can keep it (codex on PR 1905): This shot needs a camera
+  // of two keys or more, which the build holds to; The scene needs a shared block with figures or
+  // sets in it (a block holding only a plate or lights keeps nothing, yet refused every figure the
+  // build added), and one this shot inherits: the build protects the shot's effective blocking, so
+  // on a shot with its own marks "blocking" would keep those, not the scene's.
+  const sharedMarks = scene.blocking !== undefined && (scene.blocking.cast.length > 0 || scene.blocking.sets.length > 0);
+  const startFromChoices = [
+    { value: "none" as const, label: "Nothing", missing: undefined },
+    { value: "camera" as const, label: "This shot", missing: (persisted?.keys.length ?? 0) >= 2 ? undefined : "no marks yet" },
+    { value: "blocking" as const, label: "The scene", missing: !sharedMarks ? "no blocking yet" : persistedScope === "shot" ? "shot has own marks" : undefined },
+  ];
+  const startFromDefault = startFromChoices[2]!.missing === undefined ? "blocking" : startFromChoices[1]!.missing === undefined ? "camera" : "none";
+  const startFrom = startFromChoices.find((choice) => choice.value === preserve && choice.missing === undefined)?.value ?? startFromDefault;
   const construct = (request?: typeof constructionRequest) => {
     if (!shot || moved || frozen) return;
     stop();
     const id = crypto.randomUUID();
-    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
+    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? startFrom, ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
       construction.current = { id, version: scene.version }; setConstructing(true); setNote(null);
       const started = Date.now();
       setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null; buildRun.current = { started, calls: 0 };
@@ -1010,12 +1021,23 @@ export function SceneStage({
     );
   }
 
+  // Quick layout is a draft that waits for Keep, as Build's does (design turn 231d, rule 5): the
+  // deterministic first pass lands in the draft bar named Quick layout, and nothing from it reaches
+  // the scene until it is kept. It wrote straight to the scene before, so a stray press overwrote
+  // kept blocking with no way back but Undo.
   const stage = () => {
+    if (frozen || locked || moved) return;
+    stop();
     const inherited = effectiveStageBlocking(scene, undefined);
-    const firstBlock = scene.blocking === undefined
+    // A shot with its own marks is laid out over them, and keeps them; otherwise over the scene's.
+    // Only a scene with no blocking and a shot with none of its own gets a first shared block: a
+    // shot that owns its marks (a kept build on an empty scene) had them replaced by generated
+    // defaults, and no shared block was written either (codex on PR 1903).
+    const own = scope === "shot" && working !== null ? working : null;
+    const firstBlock = scene.blocking === undefined && own === null
       ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
-    const availableCast = firstBlock?.cast ?? inherited.cast;
+    const availableCast = own?.cast ?? firstBlock?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
@@ -1032,12 +1054,19 @@ export function SceneStage({
       if (!key.anchor && !key.track) { key.l[0] += placed.x - first.x; key.l[2] += placed.z - first.z; }
     }
     const { cast: _cast, sets: _sets, version: _version, playblast: _playblast, ...camera } = fresh;
-    if (onCommand({
-      kind: "edit-stage",
-      shotId: shot.id,
-      staging: camera,
-      ...(firstBlock === null ? {} : { blocking: { cast: firstBlock.cast, sets: firstBlock.sets } }),
-    })) setStaging(true);
+    cameraDirty.current = true;
+    // A scene with no blocking yet gets its first block shared, written with the camera on Keep.
+    if (firstBlock !== null) { blockingDirty.current = true; promotingBlocking.current = scope === "scene"; }
+    // Held against this version, as a build's draft is: a snapshot that moves the scene retires it.
+    aiDraftVersion.current = scene.version;
+    setDraft({
+      ...camera,
+      version: persisted?.version ?? 1,
+      cast: own?.cast ?? firstBlock?.cast ?? inherited.cast,
+      sets: own?.sets ?? firstBlock?.sets ?? inherited.sets,
+    } as ResolvedShotStaging);
+    setDraftFrom({ who: "quick" });
+    setNote(null);
   };
   const keep = () => {
     if (frozen || draft === null || working === null) return;
@@ -1397,19 +1426,32 @@ export function SceneStage({
   // version, and a draft is pinned to the version it was made on, so its Keep would be refused.
   const sceneEditReason = moved ? "Keep the move first" : undefined;
   const sceneLights = scene.blocking?.lights ?? [];
+  // While a draft waits, a light added, changed or removed, and the atmosphere, join the draft
+  // (design turn 231b, rule 8): Keep writes them with its blocking in one command and Discard drops
+  // them, and on Arke's draft they are the person's edit too (codex on PR 1904). Without a draft
+  // they are the scene's own and land at once, as before.
   const writeLight = (index: number, next: StageLight | null) => {
-    const lights = next === null ? sceneLights.filter((_, at) => at !== index) : sceneLights.map((light, at) => (at === index ? next : light));
-    writeScene({ lights: lights.length === 0 ? null : lights });
+    const base = moved ? shownLights : sceneLights;
+    const lights = next === null ? base.filter((_, at) => at !== index) : base.map((light, at) => (at === index ? next : light));
+    if (moved) { setDraftLook((look) => ({ ...look, lights })); markEdited(); }
+    else writeScene({ lights: lights.length === 0 ? null : lights });
+  };
+  const writeAtmosphere = (atmosphere: SceneAtmosphere) => {
+    if (moved) { setDraftLook((look) => ({ ...look, atmosphere })); markEdited(); }
+    else writeScene({ atmosphere });
   };
   const addLight = () => {
     if (working === null) return;
-    const taken = new Set(sceneLights.map((light) => light.name));
+    const base = moved ? shownLights : sceneLights;
+    const taken = new Set(base.map((light) => light.name));
     let name = "light";
     for (let n = 2; taken.has(name); n++) name = `light ${n}`;
     const figure = working.cast[0];
-    writeScene({ lights: [...sceneLights, stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 })] });
+    const light = stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 });
+    if (moved) { setDraftLook((look) => ({ ...look, lights: [...base, light] })); markEdited(); }
+    else writeScene({ lights: [...base, light] });
     setSelection(null); viewport.current?.select(null); setPlateSelected(false);
-    setLightSelected(sceneLights.length);
+    setLightSelected(base.length);
   };
   const pickPlate = (candidate: PlateCandidate) => {
     if (shot === null) return;
@@ -1622,7 +1664,6 @@ export function SceneStage({
   const filed = persisted?.playblast;
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
-  const busy = staging && persisted === null;
   const boardPin = board === null ? null : stageBoardAnimatic(scene, board.memberShotIds);
   const boardStale = boardPin !== null && stageBoardAnimaticIsStale(scene, boardPin, aspect);
   const boardLines = boardOn && board !== null ? stageBoardLineFindings(scene, board.memberShotIds, aspect) : [];
@@ -1714,9 +1755,12 @@ export function SceneStage({
           {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} locationId={sceneLocationIds[0]} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
           <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
           {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
-          {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
-            <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
-          </Select> : null}
+          <Select label="Start from" mark="start from" wrapClassName="fy-swstage__preserve" value={startFrom} onChange={e => setPreserve(e.target.value as typeof startFrom)} disabled={constructing}>
+            {startFromChoices.map((choice) => (
+              <option key={choice.value} value={choice.value} disabled={choice.missing !== undefined}>{choice.label}{choice.missing === undefined ? "" : ` · ${choice.missing}`}</option>
+            ))}
+          </Select>
+          {constructing ? null : <Button size="sm" disabled={frozen || locked || moved} onClick={stage}>Quick layout</Button>}
           {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
           <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
           {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
@@ -1728,13 +1772,11 @@ export function SceneStage({
       <div className="fy-swstage__work">
         <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode} data-building={constructing && buildLog !== null ? "true" : undefined} data-notes={waiting && notesOpen && draftFrom?.who === "arke" ? "true" : undefined}>
           {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
-          {working === null && !busy ? (
+          {working === null ? (
             <div className="fy-swstage__empty">
               <span>Nothing staged yet.</span>
-              <Button variant="primary" size="sm" disabled={locked} onClick={stage}>Quick layout</Button>
             </div>
           ) : null}
-          {busy ? <div className="fy-swstage__busy">staging…</div> : null}
           {constructing && buildLog !== null ? (
             <div className="fy-swstage__log" data-testid="stage-build-log" aria-live="polite">
               <div className="fy-swstage__loghead">
@@ -1938,8 +1980,8 @@ export function SceneStage({
                     <span>{light.kind} · {light.strength}</span>
                   </button>
                 ))}
-                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || boardOn || sceneLights.length >= 24}
-                  title={sceneEditReason ?? (sceneLights.length >= 24 ? "24 lights at most" : undefined)} onClick={addLight}><Plus size={12} />Add light</button>
+                <button type="button" className="fy-swstage__add" disabled={frozen || locked || boardOn || shownLights.length >= 24}
+                  title={shownLights.length >= 24 ? "24 lights at most" : undefined} onClick={addLight}><Plus size={12} />Add light</button>
               </div>
 
               {boardOn && board !== null ? (
@@ -1980,11 +2022,11 @@ export function SceneStage({
                   <LightForm
                     light={shownLights[lightSelected]!}
                     sets={working.sets}
-                    disabled={frozen || locked || moved}
+                    disabled={frozen || locked}
                     onChange={(next) => writeLight(lightSelected, next)}
                     onRemove={() => { const index = lightSelected; setLightSelected(null); writeLight(index, null); }}
                   />
-                  <AtmosphereRows atmosphere={shownAtmosphere} disabled={frozen || locked || moved} onChange={(atmosphere) => writeScene({ atmosphere })} />
+                  <AtmosphereRows atmosphere={shownAtmosphere} disabled={frozen || locked} onChange={writeAtmosphere} />
                 </>
               ) : null}
               {plateSelected && scene.blocking?.plate !== undefined ? (
@@ -2485,7 +2527,7 @@ export function SceneStage({
       </div>
       {touch && <div className="fy-stage-gestures"><span>1 finger · orbit</span><span>2 fingers · pan / pinch</span><span>Double-tap · follow figure</span></div>}
 
-      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep blocking</Button>{onRenderShot && <Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button>}</div>}
+      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep</Button>{onRenderShot && <Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button>}</div>}
       {working === null ? null : (
         <div className="fy-swstage__timeline">
           <div className="fy-swstage__transport">
