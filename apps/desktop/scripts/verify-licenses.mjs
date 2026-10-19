@@ -72,14 +72,30 @@ for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
 }
 
 // Components always in the bundle regardless of build-resources.
-for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist"]) {
+for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist", "PDFKit", "fontkit", "PDF.js", "DejaVu", "Noto Emoji", "brotli.js"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);
 }
 for (const [path, reason] of [
   ["apps/desktop/assets/Geist-Regular.ttf", "the redistributed Geist slate font is absent"],
   ["licenses/LICENSE.Geist.txt", "the redistributed Geist slate font has no retained OFL text in licenses/"],
+  ["licenses/story-pdf/pdfkit-LICENSE.txt", "PDFKit has no retained MIT licence"],
+  ["licenses/story-pdf/pdfjs-dist-LICENSE.txt", "PDF.js has no retained Apache licence"],
+  ["licenses/story-pdf/fontkit-package.json", "fontkit's upstream licence declaration is absent"],
+  ["licenses/story-pdf/brotli-decoder-NOTICE.txt", "the Brotli decoder's upstream copyright notice is absent"],
+  ["packages/coordinator/src/publications/fonts/LICENSE", "the redistributed DejaVu fonts have no retained licence"],
+  ["packages/coordinator/src/publications/fonts/NotoEmoji-OFL.txt", "the redistributed Noto Emoji font has no retained OFL licence"],
 ]) {
   if (!existsSync(join(repoRoot, path))) failures.push(reason);
+}
+// The renderer's captured identity is also the reviewed redistribution inventory. A font file
+// missing or changed before a build must fail packaging, not first reveal itself to an author.
+const pdfCompiler = readFileSync(join(repoRoot, "packages/coordinator/src/publications/story-pdf.ts"), "utf8");
+const pdfFonts = [...pdfCompiler.matchAll(/"((?:DejaVu[^"\n]+|NotoEmoji)\.ttf)": "([a-f0-9]{64})"/g)];
+if (pdfFonts.length !== 9) failures.push("the story PDF font identity must contain all eight reviewed DejaVu faces and Noto Emoji");
+for (const [, name, expected] of pdfFonts) {
+  const path = join(repoRoot, "packages/coordinator/src/publications/fonts", name);
+  if (!existsSync(path) || createHash("sha256").update(readFileSync(path)).digest("hex") !== expected)
+    failures.push(`the story PDF font ${name} is missing or differs from its reviewed identity`);
 }
 const geistFont = join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf");
 if (existsSync(geistFont)) {

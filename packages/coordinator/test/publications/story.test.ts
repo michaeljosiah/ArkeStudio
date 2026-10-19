@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile, rename, mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { StoryPublicationSettings } from "@arke-studio/contracts";
+import { DEFAULT_STORY_PDF_SETTINGS, type StoryPublicationSettings } from "@arke-studio/contracts";
 import { StoryPublicationService } from "../../src/publications/story.js";
 import { readStoryPublication } from "../../src/publications/story-review.js";
 import { openChapter } from "../../src/productions/ops.js";
@@ -23,6 +23,109 @@ async function setup() {
   return { store, dir, root, productionId: production.meta.id, chapter, settings, service: new StoryPublicationService(root) };
 }
 describe("private story publication", () => {
+  it("prepares a verified PDF without audio tools, creates the same bytes, and restores only its exact file", async () => {
+    const h = await setup();
+    const settings: StoryPublicationSettings = { ...h.settings, title: "A".repeat(99) + "😀 story", outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS }, subtitle: "A novel", editionLabel: "Reading copy" };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    assert.deepEqual(review.blockers, []);
+    assert.deepEqual(review.chapters[0]!.audioProblems, [], "PDF does not require narration");
+    const phases: string[] = [];
+    const preview = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, edition => phases.push(edition.phase));
+    assert.equal(preview.status, "preview", preview.error);
+    const file = preview.files[0]!;
+    assert.equal(file.format, "pdf"); assert.ok(file.pdf!.pageCount >= 3);
+    assert.equal(file.pdf!.chapters[0]!.id, h.chapter.id);
+    assert.ok(phases.includes("Formatting pages"));
+    assert.equal(await h.service.serve(preview.id, "story.pdf"), null);
+    const media = await h.service.previewMedia(preview.id, "story.pdf");
+    assert.equal(media?.contentType, "application/pdf");
+    const bytes = await readFile(media!.path);
+    assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
+    const ready = await h.service.create(h.store, h.productionId, preview.id);
+    assert.equal(ready.files[0]!.sha256, file.sha256, "Create does not re-typeset the preview");
+    const served = (await h.service.serve(ready.id, "story.pdf"))!;
+    assert.doesNotThrow(() => encodeURIComponent(served.downloadName), "download names cannot truncate half of a non-BMP character");
+    assert.deepEqual(await readFile(served.path), bytes);
+    const backup = join(h.root, "preserved.pdf"), wrong = join(h.root, "wrong.pdf");
+    await writeFile(backup, bytes); await writeFile(wrong, "%PDF-wrong");
+    await writeFile(served.path, "damaged");
+    assert.equal(await h.service.serve(ready.id, "story.pdf"), null);
+    await assert.rejects(h.service.restoreFile(ready.id, "story.pdf", wrong));
+    await h.service.restoreFile(ready.id, "story.pdf", backup);
+    await h.store.close();
+    assert.deepEqual(await readFile((await new StoryPublicationService(h.root).serve(ready.id, "story.pdf"))!.path), bytes);
+  });
+  it("rejects PDF creation after source edits and retries only the captured text and renderer identity", async () => {
+    const h = await setup();
+    const settings: StoryPublicationSettings = { ...h.settings, outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS, contents: false } };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    const preview = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    const current = await openChapter(h.store, h.productionId, h.chapter.id);
+    await new ProseAuthoringService(h.store).save(h.productionId, h.chapter.file, "The source has moved.", { baseHash: current.hash });
+    await assert.rejects(h.service.create(h.store, h.productionId, preview.id), /source changed/);
+    const snapshot = JSON.parse(await readFile(join(h.root, preview.id, "inputs.json"), "utf8"));
+    assert.equal(snapshot.compiler.compilerVersion, "3"); assert.ok(snapshot.pdfIdentity.fonts);
+    const receiptPath = join(h.root, preview.id, "edition.json");
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    receipt.edition.status = "failed";
+    await writeFile(receiptPath, JSON.stringify(receipt));
+    const retried = await new StoryPublicationService(h.root).retry(preview.id, () => {});
+    assert.equal(retried.status, "preview", retried.error);
+    const retained = JSON.parse(await readFile(join(h.root, preview.id, "inputs.json"), "utf8"));
+    assert.deepEqual(retained, snapshot, "retry cannot pick up the edited world");
+    assert.equal(await h.service.serve(preview.id, "story.pdf"), null);
+  });
+  it("requires all selected files and cancels a PDF before rendering without delivering partial files", async () => {
+    const h = await setup();
+    const settings: StoryPublicationSettings = { ...h.settings, outputs: ["epub", "pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS } };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    const cancelled = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, edition => {
+      if (edition.phase === "Formatting pages") h.service.cancel(edition.id);
+    });
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(await h.service.serve(cancelled.id, "story.epub"), null);
+    assert.equal(await h.service.previewMedia(cancelled.id, "story.epub"), null);
+    const preview = await h.service.retry(cancelled.id, () => {});
+    assert.equal(preview.status, "preview", preview.error);
+    assert.deepEqual(preview.files.map(file => file.format), ["epub", "pdf"]);
+    assert.equal((await h.service.create(h.store, h.productionId, preview.id)).status, "ready");
+  });
+  it("allows only one concurrent retry to render a captured PDF edition", async () => {
+    const h = await setup();
+    const settings: StoryPublicationSettings = { ...h.settings, outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS } };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    const captured = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, edition => {
+      if (edition.phase === "Formatting pages") h.service.cancel(edition.id);
+    });
+    assert.equal(captured.status, "cancelled");
+    const phases: string[] = [];
+    const attempts = await Promise.allSettled([
+      h.service.retry(captured.id, edition => phases.push(edition.phase)),
+      h.service.retry(captured.id, edition => phases.push(edition.phase)),
+    ]);
+    const successful = attempts.filter(result => result.status === "fulfilled");
+    const refused = attempts.filter(result => result.status === "rejected");
+    assert.equal(successful.length, 1, "one retry owns rendering and the edition receipt");
+    assert.equal(refused.length, 1);
+    assert.match(String(refused[0]!.reason), /already being prepared/);
+    const preview = successful[0]!.value;
+    assert.equal(preview.status, "preview", preview.error);
+    assert.equal(phases.filter(phase => phase === "Checking PDF").length, 1, "exactly one PDF renderer completed");
+    assert.equal((await h.service.create(h.store, h.productionId, captured.id)).status, "ready");
+    assert.deepEqual((await h.service.retry(captured.id, () => {})).files, preview.files, "the winning file remains immutable");
+  });
+  it("cannot start a new preparation or a loading retry after shutdown begins", async () => {
+    const h = await setup();
+    const review = await h.service.review(h.store, h.productionId, h.settings);
+    const preview = await h.service.preview(h.store, h.productionId, h.settings, review.fingerprint, () => {});
+    assert.equal(preview.status, "preview");
+    const retried = h.service.retry(preview.id, () => { throw new Error("No new preparation may begin."); });
+    const rejected = assert.rejects(retried, /Publishing is stopping/);
+    await h.service.stop(); await rejected;
+    await assert.rejects(h.service.preview(h.store, h.productionId, h.settings, review.fingerprint, () => {}), /Publishing is stopping/);
+    await assert.rejects(h.service.retry(preview.id, () => {}), /Publishing is stopping/);
+  });
   it("creates the previewed EPUB with metadata, then serves that immutable edition after source edits", async () => {
     const h = await setup();
     const review = await h.service.review(h.store, h.productionId, h.settings);

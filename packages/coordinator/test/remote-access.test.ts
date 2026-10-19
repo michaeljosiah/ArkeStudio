@@ -206,6 +206,7 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
   const clientDirectory = join(root, "client"); await mkdir(clientDirectory);
   const desktopPage = '<head><meta http-equiv="Content-Security-Policy" content="connect-src ws://127.0.0.1:*"></head><body>Studio</body>';
   await writeFile(join(clientDirectory, "index.html"), desktopPage);
+  await writeFile(join(clientDirectory, "pdf.worker.fixture.mjs"), 'self.postMessage("worker ready");');
   const manifest = await readFile(new URL("../../client/public/manifest.webmanifest", import.meta.url));
   await writeFile(join(clientDirectory, "manifest.webmanifest"), manifest);
   await writeFile(join(root, "private.txt"), "private");
@@ -256,6 +257,13 @@ it("real gateway pairs a browser, protects media and closes only revoked device 
     const credentialCookie = approved.headers["set-cookie"]![0]!.split(";")[0]!;
     const proof = credentialCookie.split("=")[1]!;
     assert.equal((await get(port, "/remote/session", { headers: { Cookie: credentialCookie } })).status, 204);
+    for (const method of ["GET", "HEAD"]) {
+      const module = await get(port, "/pdf.worker.fixture.mjs", { method, headers: { Cookie: credentialCookie } });
+      assert.equal(module.status, 200);
+      assert.equal(module.headers["content-type"], "text/javascript", "paired module workers need a JavaScript MIME type");
+      assert.equal(module.headers["x-content-type-options"], "nosniff");
+      assert.equal(module.body, method === "HEAD" ? "" : 'self.postMessage("worker ready");');
+    }
     const media = await get(port, "/media/world/a.png?token=ignored", { headers: { Cookie: credentialCookie, Range: "bytes=0-2" } });
     assert.equal(media.status, 206); assert.equal(media.headers["content-range"], "bytes 0-2/10");
     assert.match(String(media.headers["content-security-policy"]), /sandbox/);

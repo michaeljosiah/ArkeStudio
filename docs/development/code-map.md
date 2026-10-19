@@ -681,10 +681,21 @@ client `test/audiobook-player.test.ts`; public design drawings and approval are 
 
 Private story Publish (approved turn 224): contracts src/story-publication.ts owns settings,
 review and edition messages; coordinator src/publications/story-review.ts owns fresh-source
-readiness/approved prose changes and story.ts owns capture, EPUB/M4B build, retry and delivery.
+readiness/approved prose changes and story.ts owns capture, EPUB/M4B/PDF build, retry and delivery.
 Client components/story-publish.tsx is shared by Story, Audiobook and Publications. Desktop
 arke:save-story-publication resolves an inventoried edition through the coordinator before a
 native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
+
+Story PDF (SPEC-058): coordinator `publications/story-pdf.ts` owns font preflight, page planning,
+typesetting and independent extraction/geometry/navigation checks; `story-pdf-runner.ts` and
+`story-pdf-worker.ts` isolate bounded work and terminate it on cancellation. Contracts
+`story-publication.ts` owns versioned PDF settings and navigation metadata. Client
+`components/story-pdf-preview.tsx` / `lib/story-pdf-preview.ts` show the actual candidate through
+the authenticated media route; `lib/chapter-drafts.ts` waits for editor-owned saves before
+review/creation. Desktop `story-publication-file.ts` owns the exact format/file allowlist.
+Tests: contracts `story-publication.test.ts`, coordinator `publications/story-pdf.test.ts`,
+`publications/story.test.ts`, `story-pdf-runner.test.ts`, client `story-pdf.test.tsx` and desktop
+`story-publication-file.test.ts`; built renderer smoke `apps/desktop/scripts/smoke-story-pdf.mjs`.
 
 
 Audiobook v4 request direction: contracts `audiobook-performance.ts` retains structured

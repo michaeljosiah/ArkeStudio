@@ -6,15 +6,41 @@ import { SlugSchema, UlidSchema } from "./ids.js";
 /** Turn 224, SPEC-048: author-approved source changes and private, frozen editions. */
 const Text = z.string().max(512);
 const Hash = z.string().regex(/^[a-f0-9]{64}$/);
+/** SPEC-058: resolved values travel with the edition; new defaults never reinterpret old files. */
+export const StoryPdfSettingsSchema = z.object({
+  version: z.literal(1), preset: z.enum(["book", "a4", "letter"]), font: z.enum(["serif", "sans"]),
+  bodySize: z.number().finite().min(10).max(14), lineSpacing: z.number().finite().min(1.25).max(1.6),
+  contents: z.boolean(), runningHeaders: z.boolean(),
+}).strict();
+export type StoryPdfSettings = z.infer<typeof StoryPdfSettingsSchema>;
+export const DEFAULT_STORY_PDF_SETTINGS: StoryPdfSettings = {
+  version: 1, preset: "book", font: "serif", bodySize: 11, lineSpacing: 1.4, contents: true, runningHeaders: false,
+};
+export const StoryPdfMetadataSchema = z.object({
+  pageCount: z.number().int().min(1).max(5000),
+  chapters: z.array(z.object({ id: SlugSchema, title: Text, pageNumber: z.number().int().positive(),
+    physicalPage: z.number().int().positive(), destination: z.string().max(256) }).strict()).min(1).max(200),
+  pageLabels: z.array(z.string().max(128)).min(1).max(5000),
+}).strict().superRefine((value, ctx) => {
+  if (value.pageLabels.length !== value.pageCount || value.chapters.some(chapter => chapter.physicalPage > value.pageCount) ||
+    new Set(value.chapters.map(chapter => chapter.id)).size !== value.chapters.length ||
+    new Set(value.chapters.map(chapter => chapter.destination)).size !== value.chapters.length ||
+    value.chapters.some((chapter, index) => index > 0 && chapter.physicalPage <= value.chapters[index - 1]!.physicalPage))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "PDF navigation does not match its pages." });
+});
+export type StoryPdfMetadata = z.infer<typeof StoryPdfMetadataSchema>;
 export const StoryPublicationSettingsSchema = z.object({
   title: Text.refine(value => value.trim().length > 0, "Enter a title."),
   author: Text, language: z.string().refine(isManuscriptLanguage),
   description: z.string().max(4000), label: Text,
   cover: z.string().max(512).nullable(),
   chapterIds: z.array(SlugSchema).min(1).max(200).refine(ids => new Set(ids).size === ids.length),
-  outputs: z.array(z.enum(["epub", "m4b"])).min(1).max(2).refine(values => new Set(values).size === values.length),
+  outputs: z.array(z.enum(["epub", "m4b", "pdf"])).min(1).max(3).refine(values => new Set(values).size === values.length),
+  subtitle: Text.optional(), editionLabel: Text.optional(), pdf: StoryPdfSettingsSchema.optional(),
   avoidEmDashes: z.boolean(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.outputs.includes("pdf") && !value.pdf) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pdf"], message: "Choose PDF formatting before preparing the edition." });
+});
 export type StoryPublicationSettings = z.infer<typeof StoryPublicationSettingsSchema>;
 
 export const StoryStyleFindingSchema = z.object({
@@ -37,7 +63,8 @@ export const StoryEditionSchema = z.object({
   createdAt: z.string(), settings: StoryPublicationSettingsSchema, fingerprint: Hash,
   status: z.enum(["preview", "creating", "ready", "failed", "cancelled"]),
   phase: z.string(), error: z.string().optional(),
-  files: z.array(z.object({ format: z.enum(["epub", "m4b"]), name: z.string(), bytes: z.number().int().nonnegative(), sha256: Hash }).strict()),
+  files: z.array(z.object({ format: z.enum(["epub", "m4b", "pdf"]), name: z.string(), bytes: z.number().int().nonnegative(), sha256: Hash,
+    pdf: StoryPdfMetadataSchema.optional() }).strict()),
 }).strict();
 export type StoryEdition = z.infer<typeof StoryEditionSchema>;
 export const StoryPublishActionSchema = z.discriminatedUnion("action", [

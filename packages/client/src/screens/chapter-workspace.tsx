@@ -1,4 +1,5 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
 import { AudioStudioPassagePanel } from "./audio-studio-passage-panel.js";
 import { Composer } from "../components/composer.js";
@@ -252,9 +253,7 @@ function flushAfter(
  * older save of the same screen carried, `landedBody`, if that is what is on disk — and says so
  * if the record has genuinely moved.
  */
-type ParkedDraft = { value: string; baseHash: string; landedBody: string | null; conflict?: boolean; cancel?: () => void };
-const parkedDrafts = new Map<string, ParkedDraft>();
-const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
+// Shared with Publish, which waits for these editor-owned saves before capturing the manuscript.
 
 /**
  * Asks from the passage menu, by chapter, until the dock is done with them (codex on PR 1232).
