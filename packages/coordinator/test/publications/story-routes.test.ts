@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { it } from "node:test";
+import { DEFAULT_STORY_PDF_SETTINGS, type StoryPublicationSettings } from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
+import { ProseAuthoringService } from "../../src/application/prose-authoring.js";
+import { openChapter } from "../../src/productions/ops.js";
+import { StoryPublicationService } from "../../src/publications/story.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
+import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+
+it("authenticates actual PDF preview and ranges, and only delivers the same bytes after Create", async t => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
+    transportAuth: { token: "a".repeat(64), allowedOrigins: ["null", "file://"] },
+    changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
+  const service = new StoryPublicationService(join(root, "story-publications"));
+  t.after(async () => { await service.stop(); await coordinator.stop(); await provider.close(); });
+  const store = provider.openStore()!;
+  const production = store.getBundle().productions.find(row => row.meta.id === "the-ledger-of-nights")!;
+  const chapter = production.chapters[0]!;
+  const opened = await openChapter(store, production.meta.id, chapter.id);
+  await new ProseAuthoringService(store).save(production.meta.id, chapter.file, "Ọlamma found the letter. She read it twice.", { baseHash: opened.hash });
+  const settings: StoryPublicationSettings = { title: "The Letter", author: "A. Writer", language: "en", label: "Reading copy", description: "", cover: null,
+    chapterIds: [chapter.id], outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS }, avoidEmDashes: false };
+  const review = await service.review(store, production.meta.id, settings);
+  const edition = await service.preview(store, production.meta.id, settings, review.fingerprint, () => {});
+  assert.equal(edition.status, "preview", edition.error);
+  const { port, token } = await coordinator.start(0);
+  const base = `http://127.0.0.1:${port}`;
+  const preview = `${base}/story-preview-media/${edition.id}/story.pdf`;
+  const delivery = `${base}/story-edition-media/${edition.id}/story.pdf`;
+  const headers = { Authorization: `Bearer ${token}`, Origin: "null" };
+  assert.equal((await fetch(preview)).status, 401);
+  assert.equal((await fetch(delivery)).status, 401);
+  assert.equal((await fetch(preview, { headers: { ...headers, Origin: "https://foreign.example" } })).status, 401);
+  assert.equal((await fetch(delivery, { headers })).status, 404, "preview is not ready delivery");
+  const actual = await fetch(preview, { headers });
+  assert.equal(actual.status, 200);
+  assert.equal(actual.headers.get("content-type"), "application/pdf");
+  const bytes = Buffer.from(await actual.arrayBuffer());
+  assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
+  const range = await fetch(preview, { headers: { ...headers, Range: "bytes=0-4" } });
+  assert.equal(range.status, 206);
+  assert.equal(range.headers.get("content-range"), `bytes 0-4/${bytes.length}`);
+  assert.equal(await range.text(), "%PDF-");
+  assert.equal((await fetch(`${preview}.exe`, { headers })).status, 404);
+  await service.create(store, production.meta.id, edition.id);
+  const ready = await fetch(delivery, { headers });
+  assert.equal(ready.status, 200);
+  assert.match(ready.headers.get("content-disposition") ?? "", /attachment/);
+  assert.deepEqual(Buffer.from(await ready.arrayBuffer()), bytes);
+  const file = join(root, "story-publications", edition.id, "files", "story.pdf");
+  assert.deepEqual(await readFile(file), bytes);
+  await writeFile(file, "damaged");
+  assert.equal((await fetch(delivery, { headers })).status, 404, "changed bytes cannot be delivered");
+});

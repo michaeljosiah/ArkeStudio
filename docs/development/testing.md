@@ -1,5 +1,20 @@
 # Running and validating changes
 
+Story PDF publishing (SPEC-058) uses contracts `test/story-publication.test.ts`, coordinator
+`test/publications/story-pdf.test.ts`, `test/publications/story.test.ts` and
+`test/story-pdf-runner.test.ts`, client `test/story-pdf.test.tsx`, `test/manuscript.test.tsx`
+and `test/chapter-workspace.test.tsx`, plus desktop `test/story-publication-file.test.ts`.
+Run these with `node --import tsx --test` from their respective workspace directories.
+After `npm run build`, run `node apps/desktop/scripts/smoke-story-pdf.mjs`: it copies the built
+worker/fonts outside the checkout and creates a real Unicode PDF without resolving development
+dependencies from the repository. Run desktop `npm run smoke:main --workspace @arke-studio/desktop`
+and `npm run verify:licenses --workspace @arke-studio/desktop` for packaging/asset changes.
+The focused cases cover exact preview/create bytes, old formats, damage/Locate, cancellation,
+timeout, captured-input retry and font/navigation/text fidelity. Actual browser worker/text-layer
+rendering and every-page visual inspection of a long book are separate acceptance evidence;
+passing extraction or mocked UI tests does not establish them. Keep private manuscripts and
+their generated pages out of committed fixtures.
+
 Shared media evidence: from `packages/coordinator`, run
 `node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/world-chat/media-inspection.test.ts`.
 The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`

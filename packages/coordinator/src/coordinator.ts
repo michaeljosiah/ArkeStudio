@@ -3896,9 +3896,9 @@ export class Coordinator {
       serveFile: async (urlPath) => {
         const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.wav|episode-\d{3}-script\.txt|transcript\.txt|credits\.txt)$/.exec(urlPath);
         if (drama) return this.dramaEditions.serve(drama[1]!, drama[2]!);
-        const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
+        const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
-        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
+        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
         const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;
@@ -21917,7 +21917,7 @@ export class Coordinator {
       for (const run of this.makingIllustrations.values()) run.control.abort();
       for (const run of this.readingBooks.values()) run.control.abort();
       for (const run of this.readingAudiobooks.values()) run.control.abort();
-      this.storyPublications.stop();
+      await this.storyPublications.stop();
       this.dramaEditions.stop();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

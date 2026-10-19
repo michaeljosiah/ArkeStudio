@@ -9,6 +9,7 @@ export default async function verifyPackagedRuntimes(context) {
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
   assertAudioListenerWorker(resources);
+  assertStoryPdfAssets(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);
@@ -117,6 +118,22 @@ export function assertAudioListenerWorker(resources) {
   const installed = join(resources, "audio-listener", "local-audio-listener.py");
   const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
   if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
+}
+
+/** PDF support must run offline from the installed worker and the exact reviewed font faces. */
+export function assertStoryPdfAssets(resources, source = fileURLToPath(new URL("../dist/", import.meta.url))) {
+  const installed = join(resources, "app.asar.unpacked", "dist");
+  const verify = (relative) => {
+    const expected = join(source, relative), actual = join(installed, relative);
+    if (!existsSync(expected) || !existsSync(actual) ||
+        createHash("sha256").update(readFileSync(actual)).digest("hex") !== createHash("sha256").update(readFileSync(expected)).digest("hex"))
+      throw new Error(`Packaged story PDF asset is missing or changed: ${relative}`);
+  };
+  verify("story-pdf-worker.mjs");
+  for (const folder of ["fonts", "story-pdf-licenses"]) {
+    if (!existsSync(join(source, folder))) throw new Error(`Build story PDF assets before packaging: ${folder}`);
+    for (const file of readdirSync(join(source, folder))) verify(join(folder, file));
+  }
 }
 
 /**
