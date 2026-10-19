@@ -87,7 +87,7 @@ export function deriveEpisodeArrangement(
       const source = sourceOf(block.soundArtifact);
       if (!source) return;
       const clip = newAudioClip(`sound:${block.id}`, track("sounds", "Sound").id, source, source.samples);
-      clip.label = block.heard.slice(0, 200);
+      clip.label = block.heard.slice(0, 200); clip.role = "sfx";
       const at = here();
       clip.placement = "at" in at ? { kind: "fixed", at: at.at } : { kind: "passage", anchor: at };
       state.clips.push(clip);
@@ -140,7 +140,8 @@ export function deriveEpisodeArrangement(
     const from = boundary(cue), to = boundary(cues[end]!);
     const lane = ambience ? track("ambience", "Ambience") : track("music", "Music");
     const clip = newAudioClip(`bed:${block.id}`, lane.id, source, source.samples);
-    clip.label = block.heard.slice(0, 200); clip.role = "music"; clip.duckDb = 6;
+    // Named for what it is (issue 1888): an ambience read "music · -12 dB" on its own track.
+    clip.label = block.heard.slice(0, 200); clip.role = ambience ? "ambience" : "music"; clip.duckDb = 6;
     clip.gainDb = ambience ? -12 : -10;
     clip.loop = ambience;
     if (ambience || (length > 0 && source.samples > length)) {

@@ -74,7 +74,7 @@ describe("an episode in Audio Studio (SPEC-057 R-67, R-68)", () => {
     assert.deepEqual(sound.placement, { kind: "passage", anchor: { passageId: opened.state.passages[1]!.id, edge: "end", offset: 0 } });
     const resolved = opened.resolved;
     assert.equal(resolved.issues.length, 0, JSON.stringify(resolved.issues));
-    assert.deepEqual(opened.state.tracks.map((track) => track.name), ["Maren Kest", "bray", "Sound"]);
+    assert.deepEqual(opened.state.tracks.map((track) => track.name), ["Maren Kest", "Bray", "Sound"], "a speaker no sheet carries is named, not keyed (issue 1888)");
   });
 
   it("keeps the episode's edits in its own record, never a chapter's", async () => {
@@ -203,7 +203,7 @@ describe("issue 1883: the episode's studio", () => {
       blocks: [...entry.script.blocks, { id: cue, kind: "sound", heard: "Harbour bells.", soundArtifact: bells.id }] });
     const snapshot = await audioStudioSnapshot(store, id, "episode-001");
     assert.equal(snapshot.state.clips.some((clip) => clip.id === `sound:${cue}`), false);
-    assert.match(snapshot.unavailable?.map((entry) => entry.message).join(" ") ?? "", /^Harbour bells\.: /, "the cue is named, with why");
+    assert.match(snapshot.unavailable?.map((entry) => entry.message).join(" ") ?? "", /^Harbour bells: /, "the cue is named, with why");
   });
 });
 

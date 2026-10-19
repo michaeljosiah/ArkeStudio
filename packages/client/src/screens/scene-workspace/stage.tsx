@@ -149,6 +149,19 @@ function holdsPosition(from: StagingKey, to: StagingKey): boolean {
  * override is the deliberate exception. Both halves share one draft and one atomic Stage command,
  * so a dozen gizmo drags remain one version rather than twelve.
  */
+/**
+ * The lens a camera's keys are drawn through, in words (issue 1865 §7): once a key has its own
+ * focal length the viewport draws every key at its own or the shot's, so this says the same, and a
+ * zoom as its range. Undefined when neither the keys nor the shot name a lens.
+ */
+export function keysLensWords(keys: readonly { focalMm?: number | undefined }[], lens: string | undefined, aspect: string): string | undefined {
+  const shotMm = lens === undefined ? undefined : String(Number.parseFloat(lens) || "");
+  if (!keys.some((key) => key.focalMm !== undefined)) return shotMm ? `${shotMm} mm` : undefined;
+  const fallback = stagingFocalForFov(stagingFov(lens, aspect), aspectNumber(aspect));
+  const lenses = [...new Set(keys.map((key) => Math.round(key.focalMm ?? fallback)))];
+  return lenses.length === 1 ? `${lenses[0]} mm` : `${Math.min(...lenses)}–${Math.max(...lenses)} mm`;
+}
+
 export function SceneStage({
   scene,
   production,
@@ -277,7 +290,9 @@ export function SceneStage({
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
   const stageRoot = useRef<HTMLElement | null>(null);
   const phone = useMediaQuery("(max-width: 599px)");
-  const touch = useMediaQuery("(hover: none)");
+  // Touch hints for a touch screen (issue 1888): "hover: none" alone also matched a desktop with no
+  // touch at all (no touch points, no coarse pointer), which showed finger gestures over the Stage.
+  const touch = useMediaQuery("(hover: none) and (pointer: coarse)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [stageWidth, setStageWidth] = useState(Number.POSITIVE_INFINITY);
   // The lens's box inside the viewport, for the safe frame (229c: it frames the lens, not the panel).
@@ -599,7 +614,9 @@ export function SceneStage({
       at,
       fov: stagingFov(framing.lens, aspect),
       aspect: aspectNumber(aspect),
-      lensLabel: framing.lens ?? "lens unset",
+      // The picture's caption says what the camera's line says (issue 1888): it read the shot's
+      // lens field, "lens unset", beside a line reading "31–50 mm" from the keys' own lenses.
+      lensLabel: keysLensWords(working.keys, framing.lens, aspect) ?? "lens unset",
       rig: working.rig,
       seed: working.seed,
       rigIntensity: working.rigIntensity,
@@ -650,7 +667,7 @@ export function SceneStage({
       at: local,
       fov: stagingFov(member.lens, aspect),
       aspect: aspectNumber(aspect),
-      lensLabel: member.lens ?? "lens unset",
+      lensLabel: keysLensWords(resolved.keys, member.lens, aspect) ?? "lens unset",
       rig: resolved.rig,
       seed: resolved.seed,
       rigIntensity: resolved.rigIntensity,
@@ -1448,12 +1465,7 @@ export function SceneStage({
   // The camera's line names the lens its keys are drawn through (issue 1865 §7): once a key has its
   // own focal length the viewport draws every key at its own or the shot's, so the line says the
   // same, and a zoom as its range — "locked off · 14 mm" where it read the shot's unset lens.
-  const keyLensWords = (() => {
-    if (!keys.some((key) => key.focalMm !== undefined)) return shotLensMm ? `${shotLensMm} mm` : undefined;
-    const fallback = stagingFocalForFov(stagingFov(framing.lens, aspect), aspectNumber(aspect));
-    const lenses = [...new Set(keys.map((key) => Math.round(key.focalMm ?? fallback)))];
-    return lenses.length === 1 ? `${lenses[0]} mm` : `${Math.min(...lenses)}–${Math.max(...lenses)} mm`;
-  })();
+  const keyLensWords = keysLensWords(keys, framing.lens, aspect);
   // The folds: same-kind kit items (two or more) and set dressing, while nothing in them is selected.
   const dressing = new Set(["planter", "tree", "lamp"]);
   const setFolds: Array<{ label: string; state: string; members: number[] }> = [];

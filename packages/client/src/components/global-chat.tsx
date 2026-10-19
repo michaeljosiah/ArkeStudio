@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
-import { chatKey, chatSubjectKey, chatTitle, chatSurfaceForPage, conversationProps, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
+import { chatKey, chatSubjectKey, chatTitle, chatSurfaceForPage, conversationProps, createdSetupCarriesOn, createGlobalChatController, type GlobalChatController, type ChatSurface } from "../lib/global-chat.js";
 import { isSettingsPath, settingsReturnPath } from "../lib/settings-return.js";
 import { useDictation, useStore } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -73,6 +73,13 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   }, [conversationId, location.pathname, state?.world?.meta.worldId, surface?.conversationId, worldId, navigate]);
   const latest = useRef(surface); latest.current = surface;
   useLayoutEffect(() => host.current && latest.current ? owner.register(latest.current, host.current) : undefined, [owner, worldId, conversationId, surface?.key]);
+  // A route that names its conversation is the author going to it (issue 1888). Registering only
+  // selects when nothing is selected, and the last conversation is remembered across sessions, so
+  // Plan with Arke landed on a page whose body stayed parked until "Open Builder Chat" was pressed.
+  useLayoutEffect(() => {
+    const page = latest.current;
+    if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
+  }, [owner, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
   return <div className="fy-global-chat-slot">{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></div>;
 }
@@ -174,6 +181,11 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
     owner.history(surface); setHistory(false); setRowMenu(null);
   };
   const page = owner.forPage() ?? current;
+  // A setup that made its production carries on as that production's Builder Chat (issue 1888):
+  // the selection kept the setup's scope, so every page of the new production said "This
+  // conversation stays about … New production" over the conversation that had just created it.
+  const carriedOn = createdSetupCarriesOn(selected, page, world?.conversations ?? []);
+  useEffect(() => { if (carriedOn) owner.select(carriedOn); }, [owner, carriedOn?.key, carriedOn?.conversationId]);
   const mismatch = !!selected && !!page && (chatSubjectKey(selected) !== chatSubjectKey(page) ||
     !!page.conversationId && page.conversationId !== selected.conversationId);
   const presentation = selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,

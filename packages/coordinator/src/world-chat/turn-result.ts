@@ -239,8 +239,24 @@ export function preparationProblem(error: unknown): TurnProblem {
   const why = reason.trim() === "" ? "" : `: ${truncate(reason.trim().replace(/[.\s]+$/, ""), MAX_PROBLEM_CHARS)}`;
   return problem(
     "action-preparation",
-    `The requested change could not be prepared${why}. If a read is missing or no longer current, read it again and return the complete result with the change; otherwise answer without it.`,
+    // "Say so" (issue 1888): told only to answer without it, the corrective reply described the
+    // draft it had meant to make, beside a page that still had no script.
+    `${REFUSED_CHANGE}${why}. If a read is missing or no longer current, read it again and return the complete result with the change; otherwise answer without it, and say plainly that nothing was written.`,
   );
+}
+
+const REFUSED_CHANGE = "The requested change could not be prepared";
+
+/**
+ * Why a turn's change was refused, read back from its corrective run's detail: the first sentence
+ * of the reason `preparationProblem` gave, or undefined when the retry was for something else.
+ */
+export function refusedChangeReason(detail: string | undefined): string | undefined {
+  const at = detail?.indexOf(REFUSED_CHANGE) ?? -1;
+  if (!detail || at < 0) return undefined;
+  const rest = detail.slice(at + REFUSED_CHANGE.length);
+  const reason = rest.startsWith(": ") ? rest.slice(2).split(/\. (?:If a read|Cite only)/)[0]!.replace(/[.\s]+$/, "") : "";
+  return reason === "" ? "the change was refused." : `${reason}.`;
 }
 
 /**

@@ -24,3 +24,22 @@ it("offers a reviewed removal for a deleted passage even when no reattachment ta
     assert.deepEqual(review.removed.map(entry => entry.clip.label), ["Deleted line"], "unresolved clips are named in the review even though they have no timeline position");
   } finally { await act(async () => root.unmount()); }
 });
+
+it("names a sound it could not place, and an episode's unread line by its words (issue 1888)", async () => {
+  const { document, window } = parseHTML("<html><body><main></main></body></html>");
+  Object.assign(globalThis, { window, document, HTMLElement: window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });
+  const key = "01M59437SMGZY0V4MP1DZMXHH2";
+  const snapshot: AudioStudioSnapshot = { base: "a".repeat(64), revision: 0, undo: null, redo: null, library: [],
+    passages: [{ key, text: "Narrator: Prediction is written at dusk." }], script: { hash: "s", passages: [{ key, textHash: "t" }] },
+    unavailable: [{ file: "artifacts/harbour-bells.wav", message: "A page turned close to the lamp: the file could not be decoded" }],
+    state: { manuscriptHash: "s", passages: [{ id: "p1", key, textHash: "t" }], tracks: [{ id: "voice", name: "Voice", gainDb: 0, muted: false }], clips: [], omissions: [], master: { targetLufs: -18, ceilingDb: -1 } } };
+  const root = createRoot(document.querySelector("main")!);
+  try {
+    await act(async () => root.render(<AudioStudioRepairs snapshot={snapshot} plan={resolveAudioArrangement(snapshot.state, snapshot.script)} disabled={false} onSelect={() => {}} onReview={() => {}} />));
+    const text = document.querySelector("details")!.textContent!;
+    assert.match(text, /Not placed · A page turned close to the lamp: the file could not be decoded/);
+    assert.match(text, /Narrator: Prediction is written at dusk\. · /, "the line by its words");
+    assert.doesNotMatch(text, new RegExp(key), "never by its block id");
+    assert.match(document.querySelector("summary")!.textContent!, /^2 repairs before final delivery$/);
+  } finally { await act(async () => root.unmount()); }
+});

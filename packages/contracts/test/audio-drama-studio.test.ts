@@ -51,6 +51,16 @@ describe("codex round 1 on PR 1879", () => {
     assert.equal(unperformed.at(c.id)!.at, RATE, "the broken line has no take, so nothing earlier is overlapped");
   });
 
+  it("names a sound as a sound effect and an ambience as an ambience (issue 1888)", () => {
+    const a = line("Climb.");
+    const bell: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: ulid() };
+    const wind: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Wind.", soundArtifact: ulid() };
+    const tune: EpisodeScriptBlock = { id: ulid(), kind: "music", heard: "A drone.", soundArtifact: ulid() };
+    const { at } = arrange([wind, tune, a, bell], { [a.id]: 1, [(bell as { soundArtifact: string }).soundArtifact]: 0.5,
+      [(wind as { soundArtifact: string }).soundArtifact]: 2, [(tune as { soundArtifact: string }).soundArtifact]: 2 });
+    assert.deepEqual([at(bell.id)!.clip.role, at(wind.id)!.clip.role, at(tune.id)!.clip.role], ["sfx", "ambience", "music"]);
+  });
+
   it("hears a scene change after a sound-only cold open", () => {
     const a = line("Climb.");
     const bell: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: ulid() };

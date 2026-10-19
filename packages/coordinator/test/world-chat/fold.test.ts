@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { newId, type WorldChangeCandidate, type WorldChatStoredEvent, type WorldChatEventEnvelope } from "@arke-studio/contracts";
 import { WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation, summarise } from "../../src/world-chat/fold.js";
+import { preparationProblem } from "../../src/world-chat/turn-result.js";
 import {
   checkpointPath,
   clearCheckpoint,
@@ -406,5 +407,31 @@ describe("world chat checkpoint", () => {
     const raw = await readFile(checkpointPath(s.dir), "utf8");
     assert.doesNotThrow(() => JSON.parse(raw), "an atomic rename never leaves a partial file");
     assert.equal((await readCheckpoint(s.dir, second.seq)).checkpoint?.throughSeq, second.seq);
+  });
+});
+
+describe("a change dropped by the corrective turn is said under the reply (issue 1888)", () => {
+  it("names why nothing was written when the retry answered without the refused change", async () => {
+    const s = await store();
+    await s.append({ type: "conversation.created", title: "Low Water", entryContext: { kind: "world" } }, { at: AT });
+    const reply = turn("I kept this first pass tight and forensic.");
+    if (reply.type !== "turn.completed") throw new Error("Expected a completed turn");
+    const refused = preparationProblem(new Error("A world action requires the final receipt from a complete target read: check_1 is a search or draw, not a read of a target. Cite only those receipts."));
+    await s.append({ type: "run.retry-started", run: { ...reply.run, status: "running", safeDetail: refused.safeMessage } }, { at: AT });
+    await s.append(reply, { at: AT });
+    const { view } = foldConversation(CV, AT, (await s.read()).events);
+    assert.deepEqual(view.notPrepared[reply.message.id], [
+      "Nothing was written: A world action requires the final receipt from a complete target read: check_1 is a search or draw, not a read of a target.",
+    ]);
+  });
+  it("says nothing when the retry was for something other than a refused change", async () => {
+    const s = await store();
+    await s.append({ type: "conversation.created", title: "Low Water", entryContext: { kind: "world" } }, { at: AT });
+    const reply = turn("A shorter answer.");
+    if (reply.type !== "turn.completed") throw new Error("Expected a completed turn");
+    await s.append({ type: "run.retry-started", run: { ...reply.run, status: "running", safeDetail: "reply allows at most 8000 characters; this one was 9932." } }, { at: AT });
+    await s.append(reply, { at: AT });
+    const { view } = foldConversation(CV, AT, (await s.read()).events);
+    assert.equal(view.notPrepared[reply.message.id], undefined);
   });
 });

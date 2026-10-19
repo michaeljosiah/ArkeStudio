@@ -91,6 +91,9 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
   const [sent, setSent] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState<VoiceChoice | null>(null);
+  const confirmRef = useRef<HTMLElement>(null);
+  // The confirm opens under a long detail: brought into view, or it reads as nothing saved.
+  useEffect(() => { if (pending) confirmRef.current?.scrollIntoView?.({ block: "nearest" }); }, [pending]);
   const [problem, setProblem] = useState<string | null>(null);
   const [label, setLabel] = useState(role.role?.publicLabel ?? "");
   const [reveal, setReveal] = useState(role.role?.revealEpisode ? String(role.role.revealEpisode) : "");
@@ -159,12 +162,12 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
         <span className="gap" />
         {/* Back to the character's voice, or to none, so a speaker can stand in or be left out again (codex on PR 1873). */}
         {role.from === "production" && <Button size="sm" variant="ghost" onClick={() => setPending({ voice: null, label: sheetVoice ? sheetVoice.label ?? sheetVoice.voiceId : "No voice" })}>{sheetVoice ? "Use the character's voice" : "No voice"}</Button>}
-        <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>Change voice…</Button>
+        <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>{role.voice ? "Change voice…" : "Choose a voice…"}</Button>
       </div>
       {problem && <p className="fy-ad-cast__problem" role="alert">{problem}</p>}
       {sent && <RoleSent world={world} production={production} role={role} />}
       {pending && (
-        <section className="fy-ad-cast__confirm" aria-label="Change voice">
+        <section ref={confirmRef} className="fy-ad-cast__confirm" aria-label="Change voice">
           <p><b>{role.name} → {pending.label}</b></p>
           {stale.length === 0 ? <p>No kept take goes out of date.</p> : (
             <>
@@ -187,7 +190,11 @@ function CastDetail({ world, production, role }: { world: WorldBundle; productio
         onClose={() => setPicking(false)}
         onPick={(voice) => {
           setPicking(false);
-          setPending({ voice: { provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label }, label: voice.label });
+          const chosen = { provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label };
+          // Asked only when a kept take would go out of date (R-60, issue 1888): a Crowd with no
+          // voice was given one, and the confirm that saved it waited below the fold, unseen.
+          if (takesOutOfDate(production, role.key, chosen).length === 0) { save({ voice: chosen }); return; }
+          setPending({ voice: chosen, label: voice.label });
         }} />
     </div>
   );

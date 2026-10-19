@@ -19,6 +19,7 @@ import type {
   WorldChatSummary,
 } from "@arke-studio/contracts";
 import { chaptersReadWhole } from "./source-reads.js";
+import { refusedChangeReason } from "./turn-result.js";
 import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 import { foldWorldChatInputs } from "./input-fold.js";
@@ -134,6 +135,8 @@ export function foldConversation(
   const actionIntents = new Map<string, ConversationActionPrepareIntent>();
   const failedActionIntents = new Set<string>();
   const preparationFailures = new Map<string, string>();
+  /** A turn's corrective retry after its change was refused, by turn: why it was refused. */
+  const refusedThenRetried = new Map<string, string>();
   const actions = new Map<string, ConversationActionRecord>();
   const preparedBindings = new Map<string, ConversationActionBinding>();
   const runs = new Map<string, WorldChatRun>();
@@ -315,6 +318,10 @@ export function foldConversation(
         break;
       case "run.retry-started":
         runs.set(e.run.id, e.run);
+        {
+          const why = refusedChangeReason(e.run.safeDetail);
+          if (why !== undefined) refusedThenRetried.set(e.run.turnId, why);
+        }
         break;
       case "run.session-created": {
         const run = runs.get(e.runId);
@@ -681,6 +688,18 @@ export function foldConversation(
           const line = `${intent.targets[0]?.label ?? "A change"}: ${detail}`;
           return [line.length > 200 ? `${line.slice(0, 199)}…` : line];
         });
+        /*
+         * A change refused, then dropped by the corrective turn (issue 1888). The retry is told
+         * "otherwise answer without it", so the reply that follows carries no change at all,
+         * while its prose may still describe the draft it meant to make: Arke said "I kept this
+         * first pass tight" beside a page reading "No script yet", and nothing said why.
+         */
+        const dropped = failed.length === 0 && refusedThenRetried.has(m.turnId) &&
+          ![...actionIntents.values()].some((intent) => intent.turnId === m.turnId);
+        if (dropped) {
+          const line = `Nothing was written: ${refusedThenRetried.get(m.turnId)}`;
+          failed.push(line.length > 200 ? `${line.slice(0, 199)}…` : line);
+        }
         return failed.length > 0 ? [[m.id, failed] as const] : [];
       }),
     ),

@@ -473,8 +473,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                         <>
                           {(on || block.direction) && (
                             // How, in parentheses above the words, never part of them (R-13).
-                            <span className="fy-ad-score__dirwrap">(<input className="fy-ad-score__direction" aria-label="Direction" placeholder="direction" value={block.direction ?? ""} maxLength={240}
-                              // The parentheses are the score's own (issue 1883): typed ones read "((quietly))".
+                            <span className="fy-ad-score__dirwrap">(<input className="fy-ad-score__direction" aria-label="Direction" placeholder="direction" value={directionText(block.direction ?? "") ?? ""} maxLength={240}
+                              // The parentheses are the score's own (issue 1883): typed ones read "((quietly))", and a
+                              // direction saved with its own before that fix is shown without them too (issue 1888).
                               onChange={(event) => change(block.id, { direction: directionText(event.target.value) } as Partial<EpisodeScriptBlock>)} />)</span>
                           )}
                           <span className="fy-ad-score__line">
@@ -718,7 +719,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const [passage, setPassage] = useState<string | null>(null);
   const phone = useMediaQuery("(max-width: 599px)");
   const episodes = Math.max(production.audioDrama?.plan.episodes ?? 1, episode);
-  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? speakerLabel(slug);
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
   const [exportProblem, setExportProblem] = useState<string | null>(null);

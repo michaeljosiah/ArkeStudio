@@ -165,10 +165,17 @@ export class WorldStore {
       // run and the scan writes nothing — and gives the open's progress a total to read against:
       // how many files the world held when it was last opened.
       let scanState = await readScanState(dir);
-      const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).length;
+      // Counted as the scan counts (issue 1888): it leaves out proposals, and a total that kept
+      // them was never reached, so the count stood short of it ("4,331 of 4,380") for seconds.
+      const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).filter((path) => !path.startsWith(".proposals/")).length;
       const onProgress = opts.onProgress;
       const scan = await scanWorld(dir, onProgress === undefined ? {} : {
-        onProgress: (done) => onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) }),
+        onProgress: (done) => {
+          onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) });
+          // Every record read: what is left (media, history, the change log) is checking, said
+          // now rather than after it, when the count had sat at its last figure for seconds.
+          if (lastRead > 0 && done === lastRead) onProgress({ phase: "checking" });
+        },
       });
       onProgress?.({ phase: "checking" });
       if (pending.length > 0) {

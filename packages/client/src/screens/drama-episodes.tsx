@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
-  DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
+  DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
   type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
@@ -35,7 +35,7 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   const performed = lines.filter((line) => { const kept = takes?.lines[line.id]?.kept; return kept && kept.textHash === dramaLineHash(line); }).length;
   const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
   const draft = world.proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path));
-  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
   const scenes: Array<{ seconds: number; done: boolean }> = [];
   let scene: EpisodeScriptBlock[] = [];
   const close = () => {

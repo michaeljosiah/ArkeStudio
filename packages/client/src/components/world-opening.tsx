@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Loading } from "./loading.js";
 import { useStore, type WorldOpenProgress } from "../lib/store.js";
 
@@ -40,5 +41,10 @@ export function worldOpeningLabel(progress: WorldOpenProgress | null): string {
 }
 
 export function WorldOpening({ worldId }: { worldId: string | undefined }) {
-  return <Loading label={worldOpeningLabel(useWorldOpenProgress(worldId))} />;
+  const progress = useWorldOpenProgress(worldId);
+  // The progress is forgotten just before the world arrives (codex on PR 1887); an open that has
+  // said its phases is finishing then, not starting again at "opening the world" (issue 1888).
+  const seen = useRef<string | undefined>(undefined);
+  if (progress) seen.current = worldId;
+  return <Loading label={progress === null && seen.current === worldId && worldId !== undefined ? "finishing" : worldOpeningLabel(progress)} />;
 }

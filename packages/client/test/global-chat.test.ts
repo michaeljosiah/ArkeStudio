@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chatKey, chatSurfaceForPage, GlobalChatController, type ChatSurface } from "../src/lib/global-chat.js";
+import { chatKey, chatSurfaceForPage, createdSetupCarriesOn, GlobalChatController, type ChatSurface } from "../src/lib/global-chat.js";
 import { developLayoutFixture, CHAT_ID } from "./develop-layout-fixture.js";
 import { parseHTML } from "linkedom";
 
@@ -313,5 +313,20 @@ describe("global Chat keeps presentation separate from conversation authority (2
     assert.deepEqual([...restored.value<ReadonlySet<string>>(production.key, "omittedAttachments", new Set())], ["wca_1"]);
     const broken = new GlobalChatController({ getItem: () => "invalid", setItem: () => { throw Error("quota"); } });
     broken.open(production); broken.setValue(production.key, "draft", "Still editable"); assert.equal(broken.value(production.key, "draft", ""), "Still editable");
+  });
+});
+
+describe("a created setup carries on as its production's Builder Chat (issue 1888)", () => {
+  const setup = chatSurfaceForPage(state, `${root}/productions/setup/${CHAT_ID}`)!;
+  const row = (setupStatus: string, productionId = "saltlight") => [{ id: CHAT_ID, setupStatus, entryContext: { kind: "production" as const, productionId } }];
+  it("moves the selection to the production page, keeping the conversation", () => {
+    const carried = createdSetupCarriesOn(setup, production, row("created"));
+    assert.equal(carried?.key, production.key);
+    assert.equal(carried?.conversationId, CHAT_ID);
+  });
+  it("stays put while setup is still a draft, on another production, or with another selection", () => {
+    assert.equal(createdSetupCarriesOn(setup, production, row("draft")), null);
+    assert.equal(createdSetupCarriesOn(setup, production, row("created", "elsewhere")), null);
+    assert.equal(createdSetupCarriesOn(worldChat, production, row("created")), null);
   });
 });

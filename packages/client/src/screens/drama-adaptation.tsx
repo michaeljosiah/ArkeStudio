@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
+  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, dramaSpeakerLabel, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
   type DramaChapterDecision, type DramaVerdict, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
@@ -109,7 +109,8 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
                 <g key={episode.episode} className="fy-ad-map__episode">
                   {episode.planned ? (
                     <text x={MAP.right + MAP.block + 8} y={at.y + 14}><tspan className="fy-ad-map__ep">Episode {episode.episode}{episode.title ? ` · ${episode.title}` : ""}</tspan>
-                      <tspan x={MAP.right + MAP.block + 8} dy="13" className="fy-ad-map__meta">{Math.round(episode.seconds / 60)} min · {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}</tspan></text>
+                      {/* Under a minute in seconds (issue 1888): a 24 s pilot read "0 min". */}
+                      <tspan x={MAP.right + MAP.block + 8} dy="13" className="fy-ad-map__meta">{episode.seconds < 60 ? `${Math.max(1, Math.round(episode.seconds))} s` : `${Math.round(episode.seconds / 60)} min`} · {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}</tspan></text>
                   ) : (
                     <>
                       <rect x={MAP.right} y={at.y} width={MAP.block} height={at.h} rx="2" className="fy-ad-map__block fy-ad-map__block--open" />
@@ -282,7 +283,7 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === scene.episode);
   const takes = production.episodeTakes?.find((entry) => entry.episode === scene.episode);
   const keptTakes = scene.blocks.filter((block) => takes?.lines[block.id]?.kept).length;
-  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);

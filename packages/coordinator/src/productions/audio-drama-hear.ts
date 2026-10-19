@@ -1,7 +1,7 @@
 import { access, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote,
+  DRAMA_NARRATOR, EpisodeTakesSchema, dramaLineHash, dramaSpeakerLabel, episodeScriptFile, episodeTakesFile, legacyVoiceModel, narrationQuotes, performanceNote,
   productionShape, quoteSpeech, sheetSound, textDigest, voiceFormatForModel, voiceSourceFor,
   type AudiobookReader, type ClonedVoice, type DramaRequest, type DramaTake, type EpisodeScriptBlock, type EpisodeTakes, type Job, type ManifestModel,
   type MissingVoiceChoice, type SpeechQuote,
@@ -118,7 +118,7 @@ export async function hearDramaLines(
     }
     if (block.kind === "dialogue") {
       const sheet = bundle.sheets.find((candidate) => candidate.id === block.speaker);
-      speakerName = sheet?.name ?? block.speaker;
+      speakerName = sheet?.name ?? dramaSpeakerLabel(block.speaker);
       note = cast[block.speaker]?.sound ?? sheetSound(sheet);
       const assigned = cast[block.speaker]?.voice ?? sheet?.voice;
       const model = assigned ? readerModel(deps.models, assigned) : null;

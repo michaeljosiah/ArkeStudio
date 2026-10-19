@@ -28,6 +28,20 @@ function chatHostVisible(host: HTMLElement): boolean {
 }
 
 /** Route fallback; mounted workspace registrations supply their exact per-turn selection. */
+/**
+ * The page a created setup's conversation carries on in (issue 1888): once setup has made its
+ * production, that production's page is the conversation's home, and the selection kept the
+ * setup's scope, so every page of the new production said "This conversation stays about …
+ * New production". Null when the selection is not a created setup or the page is not its production.
+ */
+export function createdSetupCarriesOn(selected: ChatSurface | null | undefined, page: ChatSurface | null | undefined,
+  rows: ReadonlyArray<{ id: string; setupStatus?: string | undefined; entryContext?: WorldChatContext | undefined }>): ChatSurface | null {
+  if (!selected || !page || selected.entry.kind !== "production-setup" || page.conversationId) return null;
+  const setupId = selected.entry.setupId, row = rows.find(entry => entry.id === setupId);
+  const made = row?.setupStatus === "created" && row.entryContext && "productionId" in row.entryContext ? row.entryContext.productionId : undefined;
+  return made && "productionId" in page.entry && page.entry.productionId === made ? { ...page, conversationId: setupId, newThread: false } : null;
+}
+
 export function chatSurfaceForPage(state: ClientState | null, path: string): ChatSurface | null {
   const world = state?.world;
   if (!world) return null;

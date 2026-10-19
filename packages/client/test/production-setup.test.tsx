@@ -8,7 +8,7 @@ import { ProductionSetupStateSchema, WorldChatWorkspaceSchema, presetTarget, typ
 import { ProductionSetupScreen, ProductionSetupView } from "../src/screens/production-setup.js";
 import { GlobalWorldChatEntry } from "../src/components/global-chat.js";
 import { GlobalChatContext } from "../src/components/global-chat-context.js";
-import { GlobalChatController } from "../src/lib/global-chat.js";
+import { GlobalChatController, chatSurfaceForPage } from "../src/lib/global-chat.js";
 import { NewProductionScreen } from "../src/screens/world.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -94,6 +94,19 @@ describe("production setup interaction (issue #976)", () => {
       <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}><Entry /></MemoryRouter></GlobalChatContext.Provider>); });
     assert.equal(container.querySelector('[data-test-route]')?.textContent, `/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`);
     assert.equal(owner.getSnapshot().selected?.kind, "setup");
+  });
+  it("the setup route takes the page from a conversation chosen before it (issue 1888)", async () => {
+    const container = dom.document.createElement("div") as unknown as HTMLElement, owner = new GlobalChatController();
+    dom.document.body.append(container); root = createRoot(container);
+    __setStateForTest(fixture(draft()), { connection: "open" });
+    // A world conversation left selected, as a remembered session leaves it.
+    const earlier = chatSurfaceForPage(fixture(draft()), `/w/${FIXTURE_WORLD_ID}/chat`)!;
+    owner.select(earlier); assert.notEqual(owner.getSnapshot().selected?.kind, "setup");
+    await act(async () => { root!.render(
+      <GlobalChatContext.Provider value={owner}><MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/productions/setup/${ID}`]}>
+        <GlobalWorldChatEntry worldId={FIXTURE_WORLD_ID} conversationId={ID} /></MemoryRouter></GlobalChatContext.Provider>); });
+    assert.equal(owner.getSnapshot().selected?.kind, "setup");
+    assert.match(owner.getSnapshot().selected?.path ?? "", new RegExp(ID));
   });
   for (const status of ["created", "discarded"] as const) it(`a direct embedded setup chat follows its ${status} result`, async () => {
     const sent: ClientMessage[] = [], container = dom.document.createElement("div") as unknown as HTMLElement;

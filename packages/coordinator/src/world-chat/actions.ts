@@ -1,3 +1,4 @@
+import { readToolsFor } from "./action-guide.js";
 import { DEFAULT_AUDIO_DRAMA_PLAN, WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
 import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
@@ -870,7 +871,10 @@ function worldActionObservations(
         : receipt.tool !== "target-read" ? "is a search or draw, not a read of a target"
         : receipt.nextCursor !== null || receipt.complete !== true ? "is an earlier page; read on to the last page and cite that one"
         : "is not a complete read";
-      throw new Error(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.`);
+      // Which reads would do (issue 1888): told only that a drama's get_production receipt was a
+      // search or draw, Arke cited it again; the read this action needs is named, not guessed.
+      const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(WORLD_ACTION_REQUIREMENTS[action.kind] ?? []) : [];
+      throw new Error(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
     }
     const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
@@ -1682,7 +1686,9 @@ async function proposalProjection(
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
   if (productionPreview) await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
   const fields = review.targets.flatMap((target) =>
-    target.fields.map((field) => ({
+    // A script's JSON is the review's, for the changes its lines do not show; on the card it was
+    // printed whole beside the readable script and the draft in the score (issue 1888).
+    target.fields.filter((field) => !(proposal.kind === "episode-script" && field.field === "Script JSON")).map((field) => ({
       label: `${target.label}: ${field.field}`.slice(0, 200),
       before: clipped(field.before),
       after: clipped(field.proposed),

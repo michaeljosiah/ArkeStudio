@@ -114,7 +114,7 @@ describe("the script on a phone (230r–v)", () => {
     const bray = [...cast.querySelectorAll("h3 button")].find((role) => role.textContent?.startsWith("Bray"))!;
     assert.match(bray.textContent!, /No voice/);
     await act(async () => props(bray).onClick!({}));
-    assert.ok([...cast.querySelectorAll("button")].some((candidate) => candidate.textContent === "Change voice…"), "the voice is chosen here, not on another page");
+    assert.ok([...cast.querySelectorAll("button")].some((candidate) => candidate.textContent === "Choose a voice…"), "the voice is chosen here, not on another page");
   });
 
   it("selects lines by tap, and Type adds a line to the scene in view (codex on PR 1881)", async () => {
