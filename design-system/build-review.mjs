@@ -840,6 +840,8 @@ const PAGES = [
   { file: "crossfade-216.review.html", what: "Approved crossfade designs 216–219 and isolated prototype: fixed cuts, bulk authoring, protection and Arke review.", state: "approved · SPEC-054 implementation" },
   { file: "editor-effects-213.review.html", what: "Approved designs 213–215: effect targets, optional audio reaction and editable AI arrangement review; isolated clickable prototype.", state: "design approved · SPEC-053 proposed · not implemented" },
   { file: "Arke Studio.dc.html", what: "The design master. Every decision, newest first.", state: "current" },
+  { file: "Arke Player.dc.html", what: "The Arke Player’s design master: the phone app that plays worlds shared through an Arke account and Arke packages added from a file. Turns P1–P6, newest first; written by <code>arke-player.mjs</code>.", state: "proposed, 20 October 2026" },
+  { file: "arke-player.review.html", what: "Arke Player P1–P6: every frame by turn with its rules, light and dark.", state: "proposed, 20 October 2026" },
   { file: "design-review.html", what: "This page — generated from the master by <code>npm run design:review</code>.", state: "current" },
   { file: "settings-models.html", what: "Working prototype of the AI models page, in real CSS; linked from turn 124.", state: "current" },
   { file: "Arke Website.dc.html", what: "The website's design canvas.", state: "current" },

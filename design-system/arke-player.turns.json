@@ -1,0 +1,11 @@
+{
+  "note": "Every turn the Arke Player master has held, with its count of dv-rule paragraphs. check-master fails if a turn drops out or its rules fall; add a new turn with node design-system/check-master.mjs --record.",
+  "turns": {
+    "p1": 10,
+    "p2": 9,
+    "p3": 5,
+    "p4": 5,
+    "p5": 6,
+    "p6": 6
+  }
+}
