@@ -177,6 +177,23 @@
   :where([data-screen="shot"]) .fy-swrow__frameactions > button { width: 44px; height: 44px; }
 }
 
+/* The Stage as its own workspace in the page (231a): one column with the dock away, 231a's 8/12/10
+   around the work, and the Stage's own head as the page's one 40px line. The views and the scope
+   are drawn alike there, as 231a draws them. */
+.fy-sw[data-workspace="stage"] { grid-template-columns: minmax(0, 1fr); }
+.fy-sw[data-workspace="stage"] .fy-sw__centre { padding: 8px 12px 10px; }
+.fy-sw[data-workspace="stage"] .fy-swstage { padding: 0; gap: 8px; }
+.fy-sw[data-workspace="stage"] .fy-swstage__head { min-height: 40px; gap: 10px; }
+.fy-sw[data-workspace="stage"] .fy-swstage__head > strong { font: var(--weight-semibold) var(--text-sm)/1.4 var(--font-sans); }
+.fy-sw[data-workspace="stage"] .fy-swstage__head > .fy-swstage__meta { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); }
+.fy-sw[data-workspace="stage"] .fy-swstage__head > .fy-sw__tabs { flex: none; gap: 2px; margin-left: 8px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: transparent; }
+.fy-sw[data-workspace="stage"] .fy-swstage__head .fy-sw__tab { min-height: 24px; height: 24px; padding: 0 12px; border-radius: 6px; font: var(--type-label); }
+.fy-sw[data-workspace="stage"] .fy-swstage__head .fy-sw__tab[data-on="true"] { background: var(--foreground); color: var(--background); box-shadow: none; }
+/* Export and Render hold the inspector's foot however long its list grows, and the transport's
+   rows sit 4px apart, so two performance lanes still leave the viewport its 560px. */
+.fy-sw[data-workspace="stage"] .fy-swstage__block--ways { position: sticky; bottom: 0; z-index: 1; background: var(--background); }
+.fy-sw[data-workspace="stage"] .fy-swstage__timeline { padding: 0 6px; row-gap: 4px; }
+
 /* Full screen: the Stage alone, as on the scene page (135, 144). */
 .fy-sw[data-full="true"]:where([data-screen="shot"]) .fy-sw__centre > :not(.fy-swstage):not(.fy-sw__fullpill) { display: none; }
 

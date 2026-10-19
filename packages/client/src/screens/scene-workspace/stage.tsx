@@ -1,6 +1,6 @@
 import { StageInspectorSheet } from "./responsive-chrome.js";
 import { useMediaQuery } from "../../lib/media-query.js";
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Link as RouterLink } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
@@ -63,7 +63,7 @@ import { send, useStore, subscribeStageConstruction, beginStageExport, cancelSta
 import { Button, Select } from "../../components/ui.js";
 import { languageChoiceReason } from "../../components/harness-models.js";
 import { productionModel } from "../../components/dispatch-bar.js";
-import { Check, ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
+import { Check, ChevronLeft, ChevronRight, Lamp, Maximize2, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type MotionLane = { kind: "performance" | "object"; id: string };
@@ -179,6 +179,8 @@ export function SceneStage({
   frozenScene = false,
   fullscreen = null,
   head = true,
+  views,
+  onFullscreen,
   board = null,
   onRenderBoard,
 }: {
@@ -202,10 +204,15 @@ export function SceneStage({
   fullscreen?: { leave: () => void } | null;
   /**
    * The head row — the shot stepper and the staging words. On the shot page (turn 145) the
-   * filmstrip steps and the view row carries the words, so the row goes; in full screen it comes
-   * back for the way out alone, which 144 put on this row.
+   * filmstrip stepped and the view row carried the words, so the row went; in full screen it comes
+   * back for the way out, which 144 put on this row. Since turn 231a the Stage in the page is its
+   * own workspace and this row is the page's one head, so the page passes it back.
    */
   head?: boolean;
+  /** The page's Shot · Stage switch, drawn on the head after the shot's title (231a). */
+  views?: ReactNode;
+  /** The way into full screen, at the head's end where full screen puts its way out (231a). */
+  onFullscreen?: () => void;
   /** The board this shot cuts into (issue 1824, design turn 229g); null when it stands alone. */
   board?: { letter: string; memberShotIds: string[]; capSec: number } | null;
   onRenderBoard?: (memberShotIds: string[]) => void;
@@ -381,6 +388,10 @@ export function SceneStage({
   const inspected = working?.authorship !== undefined;
   useEffect(() => { if (!inspected) inspection.current?.removeAttribute("open"); }, [inspected]);
   const cameraWarnings = useMemo(() => working ? [...stageCameraStandoffWarnings(working, durationSec), ...stageCameraMotionWarnings(working, durationSec)] : [], [working, durationSec]);
+  // Where the Stage has its own head (the page's workspace, 231a, and full screen) its line stays
+  // one row: a camera warning is said on the camera's list line, in the warning colour, and in the
+  // camera's form, as 229 says a figure's, rather than as a sentence taking the viewport's height.
+  const warningsInList = head || fullscreen !== null;
   const motionSpeeds = useMemo(() => working ? stageMotionSpeeds(working, durationSec) : [], [working, durationSec]);
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
   const motionChanged = draft !== null && (
@@ -1540,16 +1551,21 @@ export function SceneStage({
             </>
           ) : null}
           <span className="fy-swstage__meta">{boardOn ? `${boardCuts.length} shots · ${boardTotal.toFixed(1)}s` : `${shot.title} · ${durationSec.toFixed(1)}s`}</span>
+          {views}
           {boardScope}
           <span className="fy-swstage__gap" />
-          {working === null ? null : (
+          {working === null ? <span className="fy-swstage__version">not staged</span> : (
             <span className="fy-swstage__version">
               {boardOn
                 ? `v${scene.version} · ${boardLines.length === 0 ? "180° clear" : `${boardLines.length} line ${boardLines.length === 1 ? "crossing" : "crossings"}`}`
                 : constructing ? `building · v${persisted?.version ?? 1}` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec) === "static" ? "locked off" : stagingMotionWord(working,durationSec)}`}
             </span>
           )}
-          {fullscreen === null ? null : (
+          {fullscreen === null ? (onFullscreen === undefined ? null : (
+            <button type="button" className="fy-swstage__exit" title="Full screen" aria-label="Full screen" onClick={onFullscreen}>
+              <Maximize2 size={14} />
+            </button>
+          )) : (
             <button type="button" className="fy-swstage__exit" title="Leave full screen · Esc" aria-label="Leave full screen" onClick={fullscreen.leave}>
               <Minimize2 size={14} />
             </button>
@@ -1583,7 +1599,7 @@ export function SceneStage({
           <summary tabIndex={working?.authorship ? undefined : -1} onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />{constructing ? "Working" : "AI inspection and assumptions"}</summary>
           {working?.authorship ? <><p>{working.authorship.assessment}</p><ul>{working.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{working.authorship.model} · {working.authorship.inspectedFrames} views inspected</small></> : null}
         </details>
-        {cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet fy-swstage__linewarning">{warning}</p>)}
+        {warningsInList ? null : cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet fy-swstage__linewarning">{warning}</p>)}
       </div>
       <div className="fy-swstage__work">
         <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode} data-building={constructing && buildLog !== null ? "true" : undefined}>
@@ -1694,7 +1710,7 @@ export function SceneStage({
                 >
                   <span className="fy-swstage__mark" data-kind="camera" aria-hidden="true" />
                   <span>camera</span>
-                  <span>{boardOn ? `${boardCuts.length} cameras` : (() => {
+                  <span {...(warningsInList && cameraWarnings.length > 0 && !boardOn ? { className: "fy-swstage__warnstate", title: cameraWarnings.join("\n") } : {})}>{boardOn ? `${boardCuts.length} cameras` : (() => {
                     const word = stagingMotionWord(working, durationSec);
                     return `${word === "static" ? "locked off" : word} · ${keyLensWords ?? `${keys.length} ${keys.length === 1 ? "key" : "keys"}`}`;
                   })()}</span>
@@ -1852,6 +1868,7 @@ export function SceneStage({
               {(selection?.kind === "rig" || selection?.kind === "aim") && activeKey !== null ? (
                 <div className="fy-swstage__block">
                   <Eyebrow title="Camera" meta={`key ${active + 1} of ${keys.length}`} />
+                  {warningsInList ? cameraWarnings.map((warning) => <span key={warning} className="fy-swstage__quiet fy-swstage__warnstate">{warning}</span>) : null}
                   <CameraWords
                     words={activeKey.frame}
                     cast={working.cast.map((figure) => ({ sheetId: figure.sheetId, name: nameOf(figure.sheetId) }))}
