@@ -27,7 +27,7 @@ if (process.argv.includes('--preview')) { console.log(`Wrote stage-231.review.ht
 
 export const rules = [
   ['Review status', '19 October 2026. Proposed. It closes what turn 229 left undrawn and #1865’s review found: the Stage inside the page, and the Stage after Build. The owner settled four calls before drawing: the Stage is its own workspace in the page, Quick layout waits for Keep, the Bench sends the plate and the cast’s pictures, and the plate picker lists locations first. The viewport pictures are turn 229’s renders.'],
-  ['The Stage in the page', 'The Stage view is its own workspace (231a). The shot’s head folds to one line: the shot and its arrows, its title and length, Shot · Stage, This shot · Board 1, its version, and Full screen. The filmstrip and the production dock step away while Stage is open; the rail stays collapsed. The inspector keeps 264 px, and Keep, Export playblast and Render with this sit at its foot, never in a row of their own. In a 1360 × 850 page the viewport is at least 1000 × 560 (231a draws 1004 × 580). Opening Chat narrows the viewport, never the inspector. Full screen remains, for presenting.'],
+  ['The Stage in the page', 'The Stage view is its own workspace (231a). The shot’s head folds to one line: the shot and its arrows, its title and length, Shot · Stage, This shot · Board 1, its version, and Full screen. The filmstrip and the production dock step away while Stage is open; the rail stays collapsed. The inspector keeps 264 px, and Export playblast and Render with this sit at its foot, never in a row of their own. Keep is not at the foot: it appears only while a draft waits, in the draft bar (231b). In a 1360 × 850 page the viewport is at least 1000 × 560 (231a draws 1004 × 580). Opening Chat narrows the viewport, never the inspector. Full screen remains, for presenting.'],
   ['After Build', 'While a draft waits, the draft bar takes the blockout line’s place, at the line’s height (231b): who made it (Arke’s blockout, Quick layout), then what it changed as counted chips built from the draft itself (added in the success colour, changed in the warning colour), then Arke’s notes, Discard and Keep. No sentence in the bar comes from the model. The viewport draws the draft in its own look, lights and atmosphere. The stage list marks each new line + and each changed line ~, and its header counts the changes. Export playblast and Render with this wait for Keep. Keep and Discard each clear the draft and its note.'],
   ['Arke’s notes', 'The model’s account of its build sits behind the bar’s disclosure, Arke’s notes (231c), over the viewport’s top-left with the round, calls and time. It is the model’s words, kept apart from the summary of what the draft did; a note that warns is drawn in the warning colour. The notes go with the draft.'],
   ['Quick layout', 'Quick layout is a draft like Build (231d): the same bar, named Quick layout, with Discard and Keep and no notes. Nothing from Arke or a preset lands until it is kept.'],
@@ -54,7 +54,10 @@ if (start >= 0) {
   if (!below) throw new Error('No turn below 231 to place against');
   master = master.slice(0, below.index) + turn + master.slice(below.index);
 }
-if (!master.includes(STYLE)) master = master.replace('<helmet>', '<helmet>\n' + STYLE);
+// After 229's sheet, never before it: 231 overrides 229 rules of equal specificity (.head's margin),
+// and the review page loads them in that order too.
+master = master.replace(STYLE + '\n', '');
+master = master.includes(STYLE229) ? master.replace(STYLE229, STYLE229 + '\n' + STYLE) : master.replace('<helmet>', '<helmet>\n' + STYLE);
 write('Arke Studio.dc.html', master);
 
 let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN STAGE 231[\s\S]*?  \/\/ END STAGE 231(?:\r?\n)*/g, '\n');

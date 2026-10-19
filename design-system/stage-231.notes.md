@@ -7,8 +7,8 @@ undrawn. Round 92 measured the page-mode viewport at 668 × 180 in a 1360 × 900
 ## The owner's calls, settled before drawing
 
 1. **The Stage is its own workspace in the page.** The head folds to one line, the filmstrip and
-   the production dock step away while Stage is open, and Keep and Render sit at the inspector's
-   foot, as 229a draws.
+   the production dock step away while Stage is open, and Export and Render sit at the inspector's
+   foot, as 231a draws. Keep sits in the draft bar while a draft waits (231b).
 2. **Quick layout waits for Keep, like Build.** Nothing from Arke or a preset lands until kept.
 3. **The Bench sends the plate and the cast's pictures**, not the greybox opening still.
 4. **The plate picker lists location pictures first**, with Show all pictures for the rest.

@@ -121,7 +121,7 @@ ${li('l', 'niche wash · lamp · pendant · 2 strips', 'warm')}
 <div class="add">${I.plus} Add set</div><div class="add">${I.plus} Add light</div>`, cameraForm, foot({ waiting: true })))}${transport()}`);
 
 // Start from, on a stage with nothing on it yet: only Nothing can be chosen.
-const FROM_MENU = `<div class="menu" style="right:278px;top:142px">
+const FROM_MENU = `<div class="menu" style="right:278px;top:98px">
 <div class="opt on"><span class="tick">${I.check}</span><span>Nothing</span><span class="mono">set · cast · camera</span></div>
 <div class="opt off"><span class="tick"></span><span>This shot</span><span class="mono">no marks yet</span></div>
 <div class="opt off"><span class="tick"></span><span>The scene</span><span class="mono">no blocking yet</span></div></div>`;
@@ -135,7 +135,7 @@ ${row('size', 'wide')}${row('lens', 'unset')}${row('rig', sel('Sticks'))}`, `<di
 
 // The plate picker: the world's location pictures by name; every other picture is a switch away.
 const tile = (img, name, on = false) => `<div class="tile${on ? ' on' : ''}"><i style="background-image:url(${img})"></i><span>${esc(name)}</span></div>`;
-const PICKER = `<div class="picker" style="left:12px;top:142px">
+const PICKER = `<div class="picker" style="left:12px;top:98px">
 <div class="ph"><b>Plate</b><span class="search">${I.search}<span style="margin-left:6px">Search locations</span></span></div>
 <div class="eyebrow" style="padding:0">Locations<span class="mono">3</span></div>
 <div class="tiles">${tile(PLATE, 'Lobby · night', true)}${tile('assets/launch-harbour.webp', 'The marina')}${tile('assets/world-undersong.png', 'The headland')}<div class="makes"><button type="button">${I.plus}Generate</button><button type="button">${I.up}Upload</button></div></div>
@@ -144,7 +144,7 @@ const PICKER = `<div class="picker" style="left:12px;top:142px">
 const framePicker = () => page(`${head()}${line()}${PICKER}${main(vp(), panel(stageList(), cameraForm, foot()))}${transport()}`);
 
 export const FRAMES = [
-  ['a', 'The Stage in the page. Its own workspace: the head on one line, the dock away, Keep and Render at the inspector’s foot, and a viewport of 1004 × 580 at 1360 × 850.', 1360, 850, frameRoom()],
+  ['a', 'The Stage in the page. Its own workspace: the head on one line, the dock away, Export and Render at the inspector’s foot, and a viewport of 1004 × 580 at 1360 × 850.', 1360, 850, frameRoom()],
   ['b', 'After Build. The draft takes the line’s place: what it changed, counted and named from the draft itself, then Discard and Keep. The viewport draws the draft in its own look and lights.', 1360, 850, frameDraft()],
   ['c', 'Arke’s notes, opened. The model’s own words sit behind the bar’s disclosure, apart from the summary of what the draft did.', 1360, 850, frameNotes()],
   ['d', 'Quick layout waits too. The same bar, named Quick layout: nothing from Arke or a preset lands until it is kept.', 1360, 850, frameQuick()],
