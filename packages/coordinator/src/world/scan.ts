@@ -26,6 +26,7 @@ import {
   ChangeRecordSchema,
   ChapterFrontmatterSchema,
   type ChapterFrontmatter,
+  chapterManuscriptWords,
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
@@ -803,7 +804,13 @@ export async function scanWorld(
         // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
         // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
         // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
-        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
+        // Imported chapters can carry planned or stale counts. Summaries measure saved prose
+        // without rewriting the file or treating an explicit outline as a draft (#1922).
+        const fm = ChapterFrontmatterSchema.parse(doc.data);
+        return {
+          fm: { ...fm, words: chapterManuscriptWords(doc.body, fm.status) },
+          bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body),
+        };
       });
       if (!parsed) continue;
       const { fm, bodyHash } = parsed;

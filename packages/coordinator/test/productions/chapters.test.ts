@@ -92,7 +92,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
       "the shipped `number` shape reads as order, and the summary carries the stem",
     );
     assert.equal(before[0]?.status, "drafted", "authored status survives");
-    assert.equal(before[0]?.words, 3120, "authored word count survives");
+    assert.equal(before[0]?.words, 291, "summary measures saved prose rather than the declared 3,120");
 
     // The regression this issue exists for: writing `order` into a shipped chapter must not
     // make it fail the read schema and disappear from the bundle.
@@ -119,6 +119,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
     assert.equal(data["number"], 1, "the legacy field is left where it was, not rewritten");
     assert.equal(data["order"], 2, "the authority field is written beside it");
     assert.equal(data["version"], 4, "reorder cuts no version");
+    assert.equal(data["words"], 3120, "reading and reordering do not rewrite legacy metadata");
   });
 
   it("ties and invalid orders fall back to filename order, deterministically", async () => {
@@ -230,6 +231,30 @@ describe("the chapter workspace's own commands (turn 126)", () => {
         { id: "untitled-2", order: 2 },
       ],
     );
+  });
+
+  it("replaces an outline through a fenced manuscript save without leaving its count at zero", async () => {
+    for (const body of ["", "Maren closed the ledger."]) {
+      const { dir, store } = await open();
+      const file = "04-her-own-hand";
+      const before = await openChapter(store, LEDGER, file);
+      const unchanged = await saveChapter(store, LEDGER, file, before.body, { baseHash: before.hash });
+      let chapter = (await chaptersOf(dir, LEDGER)).find(c => c.file === file)!;
+      assert.equal(chapter.status, "outlined");
+      assert.equal(chapter.words, 0, "saving the same outline does not call it drafted");
+      await assert.rejects(saveChapter(store, LEDGER, file, "A refused draft.", { baseHash: "sha256:" + "0".repeat(64) }));
+      await saveChapter(store, LEDGER, file, body, { baseHash: unchanged.hash });
+      await store.close();
+      const reopened = await WorldStore.open(dir, { clock: CLOCK });
+      closeOnCleanup(() => reopened.close());
+      const production = reopened.getBundle().productions.find(p => p.meta.id === LEDGER)!;
+      chapter = production.chapters.find(c => c.file === file)!;
+      assert.equal(chapter.status, body ? "drafted" : "outlined");
+      assert.equal(chapter.words, body ? 4 : 0);
+      assert.deepEqual(production.progress, body ? { days: { "2026-08-01": 4 } } : undefined, "outline notes are not yesterday's manuscript words");
+      assert.equal(chapter.version, before.version, "the ordinary save still keeps its version");
+      assert.equal((await openChapter(reopened, LEDGER, file)).body.trim(), body);
+    }
   });
 
   it("the plan saves in place, clears by null, rides on the summary, and keeps the version (turn 127)", async () => {
