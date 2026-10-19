@@ -396,6 +396,63 @@ async function read(path: string, signal?: AbortSignal): Promise<string> {
 const scanIo = { exists, listDir, read };
 
 /**
+ * How many record files a scan has in flight at once (issue 1841).
+ *
+ * Read one at a time, a large world's scan sat about 70% idle waiting on the disk: na-love-or-juju's
+ * 3,898 artifact sidecars took 2.6 s in turn and 0.71 s sixteen at once. Sixteen is the figure
+ * that was measured, and few enough open files at once that no platform minds.
+ */
+const SCAN_READ_AHEAD = 16;
+
+/**
+ * Each item beside what `load` found for it, in the order given, with up to sixteen loads in flight.
+ *
+ * Only the reading moves. The loop that consumes this still takes one item at a time in the order
+ * it always has, so problems, the manifest's key order and every record list come out exactly as
+ * a scan reading in turn made them — which is why `load` does I/O and pure parsing only, and never
+ * touches the scan's shared state: a load runs out of turn, and its effects would too.
+ *
+ * Loads start in item order, so the one the loop waits on is never queued behind later ones.
+ */
+async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<R>): AsyncGenerator<[T, R]> {
+  const settle: Array<{ resolve: (value: R) => void; reject: (error: unknown) => void }> = [];
+  const loads: Array<Promise<R> | null> = items.map(() => {
+    const loaded = new Promise<R>((resolve, reject) => settle.push({ resolve, reject }));
+    // A loop that stops early — an aborted scan — leaves later loads that nobody will await, and
+    // their failure is that same abort, already being reported.
+    loaded.catch(() => {});
+    return loaded;
+  });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let index = next++; index < items.length; index = next++) {
+      try {
+        settle[index]!.resolve(await load(items[index]!));
+      } catch (error) {
+        settle[index]!.reject(error);
+      }
+    }
+  };
+  const workers = Array.from({ length: Math.min(SCAN_READ_AHEAD, items.length) }, worker);
+  try {
+    for (const [index, item] of items.entries()) {
+      const found = await loads[index]!;
+      // Handed on, it is the loop's to keep: a large world's text need not all sit here at once.
+      loads[index] = null;
+      yield [item, found];
+    }
+  } finally {
+    // Nor does it leave a read still open behind it: nothing new starts, and what had started is
+    // waited out, so a scan that has refused holds no file a caller may be about to remove.
+    next = items.length;
+    await Promise.allSettled(workers);
+  }
+}
+
+/** What one read found: the text, or why there is none. The scan decides which it is owed. */
+type ReadAttempt = { raw: string } | { error: unknown };
+
+/**
  * Read world.json alone — the openability gate (R-1, R-25).
  *
  * `supports` is the newest schema this reader accepts. It exists so an older build's refusal can
@@ -470,17 +527,31 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
    */
   const mediaManifest: Record<string, string> = {};
 
-  const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => {
+  // A record file read and settled are two steps (issue 1841), so a loop can read ahead and still
+  // settle in turn. `attempt` is the read, safe to run out of order; `settle` is everything that
+  // touches the manifest and problems, and runs in the order the loop walks.
+  const attempt = async (rel: string): Promise<ReadAttempt> => {
     try {
-      const raw = await read(join(dir, rel));
-      manifest[toPortable(rel)] = sha256(raw);
-      return parse(raw);
+      return { raw: await read(join(dir, rel)) };
+    } catch (error) {
+      return { error };
+    }
+  };
+  const settle = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null => {
+    try {
+      if ("error" in found) throw found.error;
+      manifest[toPortable(rel)] = sha256(found.raw);
+      return parse(found.raw);
     } catch (err) {
       signal?.throwIfAborted();
       problems.push({ path: toPortable(rel), message: (err as Error).message.slice(0, 500) });
       return null;
     }
   };
+  const tryParse = async <T>(rel: string, parse: (raw: string) => T): Promise<T | null> => settle(rel, await attempt(rel), parse);
+  // For a record whose absence is ordinary: null when there is no file, which is never a problem.
+  const attemptIfPresent = async (rel: string): Promise<ReadAttempt | null> =>
+    (await exists(join(dir, rel))) ? attempt(rel) : null;
 
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
 
@@ -521,8 +592,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
 
   const sheets: Sheet[] = [];
   for (const { dir: sub, type } of SHEET_DIRS) {
-    for (const file of (await listDir(join(dir, sub))).filter((f) => f.endsWith(".md")).sort()) {
-      const sheet = await tryParse(`${sub}/${file}`, (raw) => {
+    const files = (await listDir(join(dir, sub))).filter((f) => f.endsWith(".md")).sort();
+    for await (const [file, found] of readAhead(files, (file) => attempt(`${sub}/${file}`))) {
+      const sheet = settle(`${sub}/${file}`, found, (raw) => {
         const doc = MarkdownFile.parse(raw);
         return SheetSchema.parse({ ...doc.data, type, sections: doc.sections() });
       });
@@ -531,8 +603,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   }
 
   const canon = [];
-  for (const file of (await listDir(join(dir, "canon"))).filter((f) => f.endsWith(".md")).sort()) {
-    const entry = await tryParse(`canon/${file}`, (raw) => {
+  const canonFiles = (await listDir(join(dir, "canon"))).filter((f) => f.endsWith(".md")).sort();
+  for await (const [file, found] of readAhead(canonFiles, (file) => attempt(`canon/${file}`))) {
+    const entry = settle(`canon/${file}`, found, (raw) => {
       const doc = MarkdownFile.parse(raw);
       return CanonEntrySchema.parse({ ...doc.data, body: doc.body.trim() });
     });
@@ -547,29 +620,41 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   const propEntries: Array<{ prop: Prop; path: string }> = [];
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
-  for (const sheetId of await listDir(join(dir, "references"))) {
-    if (await exists(join(dir, "references", sheetId, "kit.json"))) {
-      const kit = await tryParse(`references/${sheetId}/kit.json`, (raw) =>
+  // One sheet's directory is one load: its records and listings are read ahead together, and
+  // settled below in the order this walk has always taken them.
+  const readReferenceDir = async (sheetId: string) => {
+    const kit = await attemptIfPresent(`references/${sheetId}/kit.json`);
+    const prop = await attemptIfPresent(`references/${sheetId}/prop.json`);
+    const candidates = await listDir(join(dir, "references", sheetId, "candidates"));
+    const takes: Array<{ takeDir: string; found: ReadAttempt }> = [];
+    for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
+      const found = await attemptIfPresent(`references/${sheetId}/takes/${takeDir}/take.json`);
+      if (found) takes.push({ takeDir, found });
+    }
+    return { kit, prop, candidates, takes };
+  };
+  for await (const [sheetId, found] of readAhead(await listDir(join(dir, "references")), readReferenceDir)) {
+    if (found.kit) {
+      const kit = settle(`references/${sheetId}/kit.json`, found.kit, (raw) =>
         ReferenceKitSchema.parse(JSON.parse(raw)),
       );
       if (kit) referenceKits.push(kit);
     }
     // A prop keeps the directory shape a sheet's kit does — record, candidates, takes — so the
     // walk below finds its takes and candidates without learning what a prop is (issue 535).
-    if (await exists(join(dir, "references", sheetId, "prop.json"))) {
-      const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
+    if (found.prop) {
+      const prop = settle(`references/${sheetId}/prop.json`, found.prop, (raw) => PropSchema.parse(JSON.parse(raw)));
       if (prop) {
         props.push(prop);
         propEntries.push({ prop, path: toPortable(`references/${sheetId}/prop.json`) });
       }
     }
-    const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
+    const candidates = found.candidates
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
       .sort();
     const sheetTakes = [];
-    for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
-      if (!(await exists(join(dir, "references", sheetId, "takes", takeDir, "take.json")))) continue;
-      const take = await tryParse(`references/${sheetId}/takes/${takeDir}/take.json`, (raw) =>
+    for (const { takeDir, found: takeFound } of found.takes) {
+      const take = settle(`references/${sheetId}/takes/${takeDir}/take.json`, takeFound, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) {
@@ -598,8 +683,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   }
 
   const artifacts = [];
-  for (const file of (await listDir(join(dir, "artifacts"))).filter((f) => f.endsWith(".json")).sort()) {
-    const sidecar = await tryParse(`artifacts/${file}`, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
+  const artifactFiles = (await listDir(join(dir, "artifacts"))).filter((f) => f.endsWith(".json")).sort();
+  for await (const [file, found] of readAhead(artifactFiles, (file) => attempt(`artifacts/${file}`))) {
+    const sidecar = settle(`artifacts/${file}`, found, (raw) => ArtifactSidecarSchema.parse(JSON.parse(raw)));
     if (sidecar) artifacts.push(sidecar);
   }
 
@@ -642,16 +728,11 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
     const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null; audiobook: ChapterAudiobookState | null }> = [];
-    for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
-        const doc = MarkdownFile.parse(raw);
-        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
-        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
-        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
-        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
-      });
-      if (!parsed) continue;
-      const { fm, bodyHash } = parsed;
+    // A chapter and the derived records beside it are one load. The records are read whether or
+    // not the chapter parses, and dropped with it when it does not: they touch no shared state,
+    // so reading one for nothing costs a read and changes no result.
+    const readChapter = async (file: string) => {
+      const found = await attempt(`productions/${id}/chapters/${file}`);
       const stem = file.slice(0, -".md".length);
       // The continuity record beside the chapter (turn 129, SPEC-012 §2.4.1): derived, not
       // authored, so it is read plainly rather than through `tryParse` — it belongs in no
@@ -683,7 +764,20 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
           return parsed.success ? summariseAudiobook(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices, audiobook });
+      return { found, continuity, voices, audiobook };
+    };
+    const chapterFiles = (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort();
+    for await (const [file, { found, continuity, voices, audiobook }] of readAhead(chapterFiles, readChapter)) {
+      const parsed = settle(`productions/${id}/chapters/${file}`, found, (raw) => {
+        const doc = MarkdownFile.parse(raw);
+        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
+        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
+        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
+        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
+      });
+      if (!parsed) continue;
+      const { fm, bodyHash } = parsed;
+      chapterEntries.push({ file: file.slice(0, -".md".length), fm, bodyHash, continuity, voices, audiobook });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
@@ -731,8 +825,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // (R-59, R-60) — no consumer downstream ever meets a graph it would have to guess about.
     const sceneEntries: Array<{ file: string; scene: SceneRecord }> = [];
     const sceneFiles: Record<string, string> = {};
-    for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => {
+    const sceneFileNames = (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(sceneFileNames, (file) => attempt(`productions/${id}/scenes/${file}`))) {
+      const scene = settle(`productions/${id}/scenes/${file}`, found, (raw) => {
         const record = parseSceneRecord(raw);
         const sequence = linearizeSceneFlow(record);
         if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
@@ -755,8 +850,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // Episodes (SPEC-023 R-12): explicit order with stem tie-break; stems captured like scenes'.
     const episodeEntries: Array<{ file: string; episode: Episode }> = [];
     const episodeFiles: Record<string, string> = {};
-    for (const file of (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const episode = await tryParse(`productions/${id}/episodes/${file}`, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
+    const episodeFileNames = (await listDir(join(pdir, "episodes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(episodeFileNames, (file) => attempt(`productions/${id}/episodes/${file}`))) {
+      const episode = settle(`productions/${id}/episodes/${file}`, found, (raw) => EpisodeSchema.parse(JSON.parse(raw)));
       if (!episode) continue;
       const stem = file.slice(0, -".json".length);
       if (episodeFiles[episode.id] !== undefined) {
@@ -774,9 +870,19 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
 
     const takes = [];
     const takeMediaInfo: ProductionBundle["takeMediaInfo"] = {};
-    for (const takeDir of (await listDir(join(pdir, "takes"))).sort()) {
-      if (!(await exists(join(pdir, "takes", takeDir, "take.json")))) continue;
-      const take = await tryParse(`productions/${id}/takes/${takeDir}/take.json`, (raw) =>
+    // A take and its measurement are one load. The measurement is read straight through, absent
+    // or not, and is dropped with a take that will not parse; what it means is settled below.
+    const readTake = async (takeDir: string) => {
+      const found = await attemptIfPresent(`productions/${id}/takes/${takeDir}/take.json`);
+      if (found === null) return null;
+      const info = await read(join(dir, `productions/${id}/takes/${takeDir}/media-info.json`)).catch(
+        (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
+      );
+      return { found, info };
+    };
+    for await (const [takeDir, loaded] of readAhead((await listDir(join(pdir, "takes"))).sort(), readTake)) {
+      if (loaded === null) continue;
+      const take = settle(`productions/${id}/takes/${takeDir}/take.json`, loaded.found, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
       if (take) takes.push(take);
@@ -802,9 +908,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
          * served until an unrelated reload.
          */
         const rel = `productions/${id}/takes/${takeDir}/media-info.json`;
-        const raw = await read(join(dir, rel)).catch(
-          (err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : err),
-        );
+        const raw = loaded.info;
         let record: TakeMediaInfoRecord | null = null;
         if (raw instanceof Error) {
           problems.push({ path: toPortable(rel), message: raw.message.slice(0, 500) });
@@ -924,17 +1028,19 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     // These are record inventories, not authored order. Stable path order keeps a copied world
     // independent of directory enumeration and also breaks equal-time take ordering ties above.
     performanceEntries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const entry of performanceEntries) {
-      if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
-      if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
-      const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
-      if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
+    const performanceDirs = performanceEntries
+      .filter(entry => entry.isDirectory() && /^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)).map(entry => entry.name);
+    for await (const [name, found] of readAhead(performanceDirs, name => attemptIfPresent(`productions/${id}/performances/${name}/performance.json`))) {
+      if (found === null) continue;
+      const record = settle(`productions/${id}/performances/${name}/performance.json`, found, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
+      if (record && record.id === name && record.target.productionId === id) performances.push(record);
     }
     const rehearsals: ProductionBundle["rehearsals"] = [], rehearsalHashes: Record<string, string> = {};
-    for (const file of (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()) {
-      if (!/^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file)) continue;
+    const rehearsalFiles = (await readdir(join(pdir, "rehearsals")).catch(() => [])).sort()
+      .filter(file => /^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file));
+    for await (const [file, found] of readAhead(rehearsalFiles, file => attempt(`productions/${id}/rehearsals/${file}`))) {
       const path = `productions/${id}/rehearsals/${file}`;
-      const rehearsal = await tryParse(path, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
+      const rehearsal = settle(path, found, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
       if (!rehearsal || `${rehearsal.id}.json` !== file) continue;
       rehearsals.push(rehearsal); if (manifest[path]) rehearsalHashes[rehearsal.id] = manifest[path]!;
       const scene = scenes.find(s => s.id === rehearsal.sceneId);
@@ -966,9 +1072,10 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     }
     // An audio drama's episode scripts (SPEC-057 R-83), whole, with the hash a save is fenced on.
     const episodeScripts: Array<{ file: string; hash: string; script: EpisodeScript }> = [];
-    for (const file of (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort()) {
+    const scriptFiles = (await listDir(join(pdir, "scripts"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(scriptFiles, (file) => attempt(`productions/${id}/scripts/${file}`))) {
       const rel = `productions/${id}/scripts/${file}`;
-      const script = await tryParse(rel, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
+      const script = settle(rel, found, (raw) => EpisodeScriptSchema.parse(JSON.parse(raw)));
       // A file is the script of the episode it is named for (codex on PR 1870): a copied or renamed
       // one would open as another episode and every save would land elsewhere, so it is reported.
       if (script && file !== episodeScriptFile(script.episode)) {
@@ -979,9 +1086,10 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
     }
     // Its takes (SPEC-057 R-29), by episode.
     const episodeTakes: EpisodeTakes[] = [];
-    for (const file of (await listDir(join(pdir, "drama-takes"))).filter((f) => f.endsWith(".json")).sort()) {
+    const dramaTakeFiles = (await listDir(join(pdir, "drama-takes"))).filter((f) => f.endsWith(".json")).sort();
+    for await (const [file, found] of readAhead(dramaTakeFiles, (file) => attempt(`productions/${id}/drama-takes/${file}`))) {
       const rel = `productions/${id}/drama-takes/${file}`;
-      const takes = await tryParse(rel, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
+      const takes = settle(rel, found, (raw) => EpisodeTakesSchema.parse(JSON.parse(raw)));
       // Named for its episode, as a script is (codex on PR 1871): a stale copy never shadows the file.
       if (takes && file !== episodeTakesFile(takes.episode)) {
         problems.push({ path: toPortable(rel), message: `this file holds episode ${takes.episode}'s takes; it must be named ${episodeTakesFile(takes.episode)}` });
@@ -1036,8 +1144,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   // series/<slug>.json — thin Series records (SPEC-023 R-9). A file that fails to parse is a
   // named problem and the row is dropped; the seasons it referenced remain ordinary productions.
   const series = [];
-  for (const file of (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort()) {
-    const record = await tryParse(`series/${file}`, (raw) => {
+  const seriesFiles = (await listDir(join(dir, "series"))).filter((f) => f.endsWith(".json")).sort();
+  for await (const [file, found] of readAhead(seriesFiles, (file) => attempt(`series/${file}`))) {
+    const record = settle(`series/${file}`, found, (raw) => {
       const value = SeriesSchema.parse(JSON.parse(raw));
       const stem = file.slice(0, -".json".length);
       if (value.id !== stem) throw new Error(`series id "${value.id}" does not match file "${stem}"`);
@@ -1284,10 +1393,11 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
   const performanceBibles: NonNullable<WorldBundle["performanceBibles"]> = [];
   const bibleSheetIds = new Set([...sheets.filter(s => s.type === "character").map(s => s.id),
     ...(await readdir(join(dir, "references")).catch(() => [])).filter(id => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))]);
-  for (const sheetId of bibleSheetIds) {
+  const readPerformanceBible = (sheetId: string) => attemptIfPresent(`references/${sheetId}/performance-bible.jsonl`);
+  for await (const [sheetId, found] of readAhead([...bibleSheetIds], readPerformanceBible)) {
     const path = `references/${sheetId}/performance-bible.jsonl`;
-    if (!(await exists(join(dir, path)))) continue;
-    const raw = await tryParse(path, text => text);
+    if (found === null) continue;
+    const raw = settle(path, found, text => text);
     const events: NonNullable<WorldBundle["performanceBibles"]>[number]["events"] = [];
     let damaged = raw === null || (Boolean(raw) && !raw!.endsWith("\n"));
     const lines = (raw ?? "").split("\n");
