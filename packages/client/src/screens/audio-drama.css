@@ -32,6 +32,8 @@
 .fy-ad-score__empty { padding: 48px 0; display: grid; gap: 12px; justify-items: start; color: var(--muted-foreground); }
 .fy-ad-score__row { position: relative; display: grid; grid-template-columns: 14px 14px 120px minmax(0, 1fr) 48px; column-gap: 10px; align-items: start; padding: 6px 0; max-width: 900px; }
 .fy-ad-score__row--on { background: var(--secondary); border-radius: 8px; }
+/* Picked to hear, not open to edit (issue 1883): marked, and its fields stay as they read. */
+.fy-ad-score__row--picked { background: color-mix(in srgb, var(--secondary) 70%, transparent); border-radius: 8px; box-shadow: inset 2px 0 0 var(--foreground); }
 .fy-ad-score__row--heading { padding-top: 22px; }
 .fy-ad-score__row--heading > .fy-ad-score__heading { grid-column: 3 / -1; }
 .fy-ad-score__lane { align-self: stretch; position: relative; margin: -6px 0; }
@@ -87,6 +89,8 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-hear__dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); margin-right: 6px; }
 .fy-ad-hear__fail { color: var(--destructive, var(--warning)); }
 .fy-ad-heardlg { display: grid; gap: 14px; padding: 4px 2px 2px; font-size: 13px; }
+/* In a dialog, the body is inset as the dialog's head is (issue 1883); a phone's sheet pads its own. */
+.fy-editordialog__panel > .fy-ad-heardlg, .fy-editordialog__panel > .fy-ad-pub { padding: 14px 16px 16px; overflow: auto; }
 .fy-ad-heardlg__missing h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 .fy-ad-heardlg__choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .fy-ad-heardlg__sent { margin: 0; padding-left: 1.4em; display: grid; gap: 10px; }

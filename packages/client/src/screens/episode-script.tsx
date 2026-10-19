@@ -96,6 +96,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [retake, setRetake] = useState(false);
   // The cue whose sound is being chosen (230w).
   const [adding, setAdding] = useState<string | null>(null);
+  // The role the Cast column opens on: Hear's Choose a voice stays in the episode (issue 1883).
+  const [castRole, setCastRole] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
   const focusNext = useRef<{ id: string; at: number } | null>(null);
 
@@ -158,7 +160,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const estimate = estimateScriptSeconds(blocks);
   const headings = blocks.filter((block): block is ScriptHeading => block.kind === "heading");
   const selectedIndex = blocks.findIndex((block) => block.id === selected);
-  const selectedScene = selectedIndex >= 0 ? scenes[selectedIndex] : headings.find((heading) => heading.id === sceneInView) ?? headings[0] ?? null;
+  // The line Source and the scene follow: the one being edited, or else the first picked to hear.
+  const pointedIndex = selectedIndex >= 0 ? selectedIndex : blocks.findIndex((block) => block.id === lines[0]);
+  const selectedScene = pointedIndex >= 0 ? scenes[pointedIndex] : headings.find((heading) => heading.id === sceneInView) ?? headings[0] ?? null;
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
   const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
   const spokenIds = blocks.filter((block) => block.kind === "dialogue" || block.kind === "narration").map((block) => block.id);
@@ -373,6 +377,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           {blocks.map((block, i) => {
             const scene = scenes[i] ?? null;
             const on = selected === block.id;
+            const picked = lines.includes(block.id);
             const lanes = beds[i]!;
             // Every bed in the lane is drawn, side by side where two overlap (codex on PR 1870).
             const lane = (which: "ambience" | "music") => (
@@ -385,11 +390,20 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             );
             const isNew = (block.kind === "dialogue" || block.kind === "narration") && !!scene?.source && !block.paragraphs?.length;
             return (
-              <div key={block.id} role="listitem" data-block={block.id} aria-selected={on}
-                className={cx("fy-ad-score__row", `fy-ad-score__row--${block.kind}`, on && "fy-ad-score__row--on",
+              <div key={block.id} role="listitem" data-block={block.id} aria-selected={on || picked}
+                className={cx("fy-ad-score__row", `fy-ad-score__row--${block.kind}`, on && "fy-ad-score__row--on", picked && !on && "fy-ad-score__row--picked",
                   block.kind === "dialogue" && `fy-voice--${tones.get(block.speaker) ?? 1}`,
                   block.kind === "dialogue" && block.overlapsPrevious && "fy-ad-score__row--breaks-in")}
-                onClick={(event) => { setSelected(block.id); pick(block.id, event.shiftKey); }}>
+                // Shift extends the run to hear, never the page's text selection (issue 1883).
+                onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}
+                onClick={(event) => {
+                  // A spoken line clicked outside its fields is picked to hear, not opened to edit
+                  // (issue 1883); its words, a field, or any other row opens the editor.
+                  const spokenRow = block.kind === "dialogue" || block.kind === "narration";
+                  const inField = (event.target as Partial<HTMLElement> | undefined)?.closest?.("input, textarea, select, button, a") != null;
+                  if (!spokenRow || inField) setSelected(block.id); else if (selected !== null && selected !== block.id) setSelected(null);
+                  pick(block.id, event.shiftKey);
+                }}>
                 {lane("ambience")}{lane("music")}
                 {block.kind === "heading" ? (
                   <HeadingRow block={block} n={headings.indexOf(block) + 1} on={on} production={production} world={world}
@@ -502,14 +516,26 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           <HearBar worldId={world.meta.worldId} productionId={production.meta.id} episode={episode} lines={lines} script={blocks}
             scriptHash={!dirty && saving === null && failure === null ? baseHash : null}
             takes={takes} worldSlug={world.meta.slug} name={name} retake={retake} onClear={() => { setLines([]); setRetake(false); }}
-            onHeard={() => setRetake(false)} />
+            onHeard={() => setRetake(false)} onChooseVoice={(speaker) => { setCastRole(speaker); setSide("cast"); }}
+            // What else the selection can do (R-28): ask about it, read its source, see who says it.
+            actions={<>
+              {chatSurface && <Button variant="ghost" size="sm" onClick={() => {
+                const quoted = blocks.filter((block): block is Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }> => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"))
+                  .map((block) => `${block.kind === "dialogue" ? name(block.speaker) : "Narrator"}: “${block.words}”`);
+                chat!.setValue(chatSurface.key, "draft", `About these lines in episode ${episode}'s script:\n${quoted.join("\n")}\n`);
+                chat!.open(chatSurface);
+              }}>Ask Arke</Button>}
+              <Button variant="ghost" size="sm" aria-pressed={side === "source"} onClick={() => toggle("source")}>Source</Button>
+              <Button variant="ghost" size="sm" aria-pressed={side === "cast"} onClick={() => { setCastRole(null); toggle("cast"); }}>Cast</Button>
+            </>} />
         )}
         {side === "source" && asSheet("Source", (
           <SourceColumn world={world} story={selectedScene?.source ? world.productions.find((p) => p.meta.id === selectedScene.source!.story) ?? null : source}
-            heading={selectedScene ?? null} block={selectedIndex >= 0 ? blocks[selectedIndex]! : null} onClose={() => setSide(null)} />
+            heading={selectedScene ?? null} block={pointedIndex >= 0 ? blocks[pointedIndex]! : null} onClose={() => setSide(null)} />
         ))}
         {side === "cast" && asSheet("Cast", (
-          <CastColumn world={world} production={production} base={base} onClose={() => setSide(null)}
+          <CastColumn key={castRole ?? ""} world={world} production={production} base={base} onClose={() => { setSide(null); setCastRole(null); }}
+            {...(castRole ? { openRole: castRole } : {})}
             blocks={headings.length === 0 ? blocks : blocks.filter((_, i) => scenes[i]?.id === selectedScene?.id)} />
         ))}
         {side === "review" && asSheet("Review", (

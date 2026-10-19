@@ -261,6 +261,42 @@ describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
   });
 });
 
+describe("issue 1883: the selection and the Hear dialog", () => {
+  const a = line("maren", "The log said two hours.");
+  const b = line("bray", "The log's wrong.");
+  const wait = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const click = (el: Element) => act(async () => { el.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+  const request = (block: string) => ({ block, speaker: "Maren", voice: "Low tide", model: "Multilingual v2", text: "x", estimatedMicroUsd: 1840, cached: false });
+
+  it("picks a line to hear without opening its editor, and offers Ask Arke, Source and Cast beside Hear", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const row = m.container.querySelector(`[data-block="${a.id}"]`)!;
+    assert.ok(row.className.includes("fy-ad-score__row--picked"), "the picked line is marked");
+    assert.equal(row.querySelector("select[aria-label='Speaker']"), null, "and its editor stays closed");
+    const bar = [...m.container.querySelectorAll(".fy-ad-hear button")].map(button => button.textContent);
+    for (const label of ["Source", "Cast", "Done"]) assert.ok(bar.includes(label), `${label} is on the selection bar`);
+  });
+
+  it("titles the dialog with the lines the button named, and Choose a voice stays in the episode", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await act(async () => { const event = new dom.Event("click", { bubbles: true }); Object.assign(event, { shiftKey: true }); m.container.querySelector(`[data-block="${b.id}"]`)!.dispatchEvent(event); });
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /^Hear 2 lines/.test(button.textContent ?? ""))!;
+    assert.ok(hear, "the button counts both lines");
+    await click(hear);
+    assert.ok(dom.document.body.querySelector(".fy-editordialog__title")!.textContent === "Hear 2 lines", "and so does the dialog");
+    await click([...dom.document.body.querySelectorAll("button")].find(button => button.textContent === "Choose a voice")!);
+    assert.equal(dom.document.body.querySelector(".fy-editordialog"), null, "the dialog closes");
+    const role = [...m.container.querySelectorAll(".fy-ad-castcol__role h3 button")].find(button => /^bray/i.test(button.textContent ?? ""));
+    assert.equal(role?.getAttribute("aria-expanded"), "true", "Bray opens in the episode's Cast column");
+  });
+});
+
 describe("codex round 2 on PR 1870", () => {
   it("keeps parked drafts apart by world, and parks a draft it cannot send yet", () => {
     __setBridgeForTest(null);

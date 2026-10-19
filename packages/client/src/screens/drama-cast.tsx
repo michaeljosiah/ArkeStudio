@@ -210,13 +210,16 @@ function RoleSent({ world, production, role }: { world: WorldBundle; production:
 }
 
 /** The score's Cast column (230j): the scene's roles, each with How they sound. */
-export function CastColumn({ world, production, blocks, base, onClose }: {
+export function CastColumn({ world, production, blocks, base, onClose, openRole }: {
   world: WorldBundle; production: ProductionBundle; blocks: readonly EpisodeScriptBlock[]; base: string; onClose: () => void;
+  /** The role to open on: a speaker Hear found with no voice (issue 1883), shown whatever the scene. */
+  openRole?: string;
 }) {
   const here = new Set(blocks.flatMap((block) => block.kind === "dialogue" ? [block.speaker] : block.kind === "narration" ? [DRAMA_NARRATOR] : []));
+  if (openRole) here.add(openRole);
   const roles = dramaCastRoles(world, production).filter((role) => here.has(role.key));
   // A role opens in place (230v): its voice chosen here, without leaving the script.
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(openRole ?? null);
   return (
     <aside className="fy-ad-source fy-ad-castcol" aria-label="Cast">
       <header><h2>Cast</h2><small>this scene</small><span className="gap" /><IconButton label="Close cast" onClick={onClose}><X size={14} /></IconButton></header>
