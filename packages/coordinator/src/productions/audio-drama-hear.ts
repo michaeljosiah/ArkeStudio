@@ -12,7 +12,8 @@ import { speechConsentToken } from "../voice/quote.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
-import { compareAudioTranscript } from "../audio/transcript-comparison.js";
+import { FILLERS, alignWords, annotations, textTokens } from "../audio/heard-match.js";
+import { splitLexicon } from "./audiobook-split.js";
 import { oneAtATime } from "./audio-drama.js";
 
 /**
@@ -38,7 +39,9 @@ export interface DramaHearDeps {
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 type Planned = { block: Spoken; voice: AudiobookReader; model: ManifestModel; text: string; instructions?: string;
-  request: DramaRequest; quote: SpeechQuote | null; standIn: boolean; cloned?: ClonedVoice };
+  request: DramaRequest; quote: SpeechQuote | null; standIn: boolean; cloned?: ClonedVoice;
+  /** The world's names and the line's capitalised words, which whisper is expected to mishear. */
+  lexicon: ReadonlySet<string> };
 
 export type DramaHearResult =
   | { disposition: "quoted"; quote: { token: string; estimatedMicroUsd: number; requests: DramaRequest[] }; missing: Array<{ speaker: string; name: string; blocks: string[] }> }
@@ -95,6 +98,8 @@ export async function hearDramaLines(
   for (const key of Object.keys(cast)) if (key !== DRAMA_NARRATOR) roleNames[key] ??= key;
   const missing = new Map<string, { speaker: string; name: string; blocks: string[] }>();
   const planned: Planned[] = [];
+  const lexicon = splitLexicon(bundle.sheets.filter((sheet) => sheet.retired !== true || scripted.has(sheet.id))
+    .flatMap((sheet) => [sheet.name, ...(sheet.region !== undefined ? [sheet.region] : [])]), lines.map((block) => block.words));
   for (const block of lines) {
     let voice: AudiobookReader | null = narrator;
     let standIn = false;
@@ -166,7 +171,7 @@ export async function hearDramaLines(
       keptWith === textDigest(instructions ?? "");
     const quote = cached ? null : quoteSpeech(model, text, { ...(instructions !== undefined ? { instructions } : {}), at: store.now() });
     planned.push({
-      block, voice, model, text, ...(instructions !== undefined ? { instructions } : {}), quote, standIn,
+      block, voice, model, text, ...(instructions !== undefined ? { instructions } : {}), quote, standIn, lexicon,
       ...(source.kind === "cloned" ? { cloned: source.voice } : {}),
       request: {
         block: block.id, speaker: speakerName, voice: voice.label ?? voice.voiceId, model: model.displayName, text,
@@ -305,10 +310,34 @@ async function heardOtherWords(bytes: Uint8Array, format: string, entry: Planned
   if (!deps.transcribe) return undefined;
   try {
     const heard = await deps.transcribe(bytes, format === "wav" ? "audio/wav" : format === "flac" ? "audio/flac" : "audio/mpeg");
-    const compared = compareAudioTranscript({ audioHash: `sha256:${sha256(Buffer.from(bytes)).replace(/^sha256:/, "")}`, authoredText: entry.block.words,
-      transcriber: { id: "voxa-whisper", version: "runtime-unreported" }, observedText: heard });
-    return compared.status === "compared" && compared.result === "mismatch" ? heard.slice(0, 2_000) : undefined;
+    return saysLine(entry.block.words, heard, entry.lexicon) ? undefined : heard.slice(0, 2_000);
   } catch { return undefined; /* an unavailable check is no verdict */ }
+}
+
+/**
+ * Whether what was heard is the line (issue 1883). Compared word for word with its punctuation,
+ * whisper's "Same ink both columns." for "Same ink. Both columns." was a changed word, and every
+ * first take waited as a misread. Case, punctuation, a number written as digits, whisper's notes
+ * and fillers are set aside, and a name may be heard near rather than exactly, as the audiobook's
+ * split allows; every other word must be heard as written. The split's own judgement is looser
+ * than this on purpose — it finds where a block ends — and here "the dog said two flowers" is not
+ * "The log said two hours."
+ */
+export function saysLine(written: string, heard: string, lexicon: ReadonlySet<string>): boolean {
+  const want = textTokens(written);
+  const wanted = new Set(want);
+  const words = heard.split(/\s+/u).filter((word) => word !== "");
+  const notes = annotations(words);
+  const got = words.filter((_, at) => !notes[at]).flatMap(textTokens).filter((token) => !FILLERS.has(token) || wanted.has(token));
+  if (want.join(" ") === got.join(" ")) return true;
+  const matches = alignWords(want, got, { loose: (at) => lexicon.has(want[at]!) });
+  let matched = 0, said = 0;
+  for (const match of matches) {
+    if (match.similarity < 1 && !want.slice(match.w, match.w + match.wn).some((token) => lexicon.has(token))) return false;
+    matched += match.wn;
+    said += match.hn;
+  }
+  return matched === want.length && said === got.length;
 }
 
 /**

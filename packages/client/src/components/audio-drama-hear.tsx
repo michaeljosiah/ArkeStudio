@@ -247,7 +247,8 @@ export function TakeCell({ block, line, voice, worldId, productionId, episode, w
       <small>{state === "misread" ? `heard “${line!.waiting!.misread}”` : "new or kept?"}</small>
       <span className="fy-ad-take__acts">
         {state === "misread" && <button type="button" onClick={onRetake}>Retake</button>}
-        <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "new", line!.waiting!.artifactId)}>Keep new</button>
+        {/* A first take has nothing to be new against (issue 1883): it is kept, or discarded. */}
+        <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "new", line!.waiting!.artifactId)}>{line?.kept ? "Keep new" : "Keep"}</button>
         {line?.kept && <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "kept", line.waiting!.artifactId)}>Keep old</button>}
         {!line?.kept && state === "misread" && <button type="button" onClick={() => decideDramaTake(worldId, productionId, episode, block.id, "kept", line!.waiting!.artifactId)}>Discard</button>}
       </span>

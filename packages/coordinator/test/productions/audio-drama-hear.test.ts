@@ -6,7 +6,7 @@ import { DRAMA_NARRATOR, newId, ulid, type EpisodeScriptBlock, type Job } from "
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { decideDramaNote, saveEpisodeScript, setDramaRole, setDramaVerdict } from "../../src/productions/audio-drama.js";
-import { decideDramaTake, hearDramaLines, placeTake, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
+import { decideDramaTake, hearDramaLines, placeTake, saysLine, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { WorldStore } from "../../src/world/store.js";
 import { DRAMA_ADAPTATION_SCHEMA_VERSION, DRAMA_CAST_SCHEMA_VERSION, DRAMA_TAKE_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -105,6 +105,29 @@ describe("hearing an audio drama's lines (SPEC-057 R-25..R-31)", () => {
     const line = takes()!.lines[a.id]!;
     assert.equal(line.kept, undefined, "a misread first take is not kept on its own");
     assert.equal(line.waiting!.misread, "the dog said two flowers");
+  });
+
+  it("a take heard in other punctuation or case keeps itself; a word left out still waits (issue 1883, R-34)", async () => {
+    const a = maren("Same ink. Both columns."), b = maren("Maren never signed the ledger.");
+    const { store, id, deps, takes } = await drama([a, b]);
+    const heard = deps({ transcribe: async (bytes) => Buffer.from(bytes).toString().includes("Same ink") ? "Same ink both columns." : "Maren signed the ledger." });
+    const quoted = await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id] }, heard);
+    await hearDramaLines(store, id, { episode: 1, blocks: [a.id, b.id], quoteToken: quoted.disposition === "quoted" ? quoted.quote.token : "" }, heard);
+    assert.ok(takes()!.lines[a.id]!.kept, "whisper's punctuation is not a misread");
+    assert.equal(takes()!.lines[a.id]!.waiting, undefined);
+    assert.equal(takes()!.lines[b.id]!.kept, undefined, "a negation left out is the take wrong");
+    assert.equal(takes()!.lines[b.id]!.waiting!.misread, "Maren signed the ledger.");
+  });
+
+  it("hears a line as said through punctuation, case, digits, notes and a misheard name, never another word", () => {
+    const names = new Set(["maren", "kest"]);
+    assert.ok(saysLine("Same ink. Both columns.", "Same ink both columns.", names));
+    assert.ok(saysLine("Phase 1, then.", "phase one then", names));
+    assert.ok(saysLine("Maren Kest. Again.", "Marin Kessed, again.", names), "a name heard near is still the name");
+    assert.ok(saysLine("Goodnight.", "Good night. [laughs]", names));
+    assert.ok(!saysLine("The log said two hours.", "the dog said two flowers", names));
+    assert.ok(!saysLine("Climb.", "Climb now.", names), "a word put in is another line");
+    assert.ok(!saysLine("Climb now.", "Climb.", names), "a word left out is another line");
   });
 
   it("places takes: a first keeps itself, one for changed words replaces, a retake or misread waits", () => {
