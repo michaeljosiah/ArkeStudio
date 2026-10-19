@@ -396,16 +396,16 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
     await click(one(item, ".fy-swrow__chevron")!);
     assert.equal(glyph(), null, "not on the shot page's Shot view");
     await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
-    assert.ok(glyph(), "the Stage carries it on the page");
+    assert.ok(one(item, '.fy-swstage__head [aria-label="Full screen"]'), "the Stage carries it at its head's end, the page's one line (231a)");
   });
 
   it("sits at the row's right end, and fills the frame with the Stage on the shot page as it does with Flow on the scene's", async () => {
     const item = await mount(FIXTURE_STATE);
     await click(one(item, ".fy-swrow__chevron")!);
     await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
-    const row = one(item, ".fy-sw__full")!.parentElement!;
-    assert.equal(row.lastElementChild?.className, "fy-sw__full", "the glyph is the row's last control (R-37)");
-    await click(one(item, ".fy-sw__full")!);
+    const enter = one(item, '.fy-swstage__head [aria-label="Full screen"]')!;
+    assert.equal(one(item, ".fy-swstage__head")!.lastElementChild, enter, "the glyph is the head's last control (R-37, 231a)");
+    await click(enter);
     const workspace = one(item, ".fy-sw")!;
     assert.equal(workspace.getAttribute("data-full"), "true");
     const pill = one(item, ".fy-sw__fullpill")?.textContent ?? "";
@@ -421,9 +421,10 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
     assert.equal(one(item, ".fy-swstage__head")!.lastElementChild, exit, "the row's last control");
     await click(exit);
     assert.equal(workspace.getAttribute("data-full"), null, "the reversed glyph returns");
-    assert.equal(one(item, ".fy-swstage__exit"), null, "and leaves with the mode");
-    assert.equal(one(item, ".fy-swstage__head"), null, "and the head row with it: the filmstrip steps");
+    assert.equal(one(item, '[aria-label="Leave full screen"]'), null, "and leaves with the mode");
+    assert.ok(one(item, '.fy-swstage__head [aria-label="Full screen"]'), "the head stays: it is the page's one line in the Stage's workspace (231a)");
 
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Shot")!);
     await click(one(item, ".fy-sw__back")!);
     await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Flow")!);
     await click(one(item, ".fy-sw__full")!);
