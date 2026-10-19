@@ -44,9 +44,15 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   };
   for (const block of blocks) { if (block.kind === "heading") { close(); scene = []; } else scene.push(block); }
   close();
+  const readiness = episodeReadiness(blocks, takes, name, (line) => dramaRoleVoice(production.audioDrama?.cast, world.sheets, line));
+  // A saved arrangement's own problems hold the episode back too (issue 1882), as Publish's render would.
+  const mixIssues = production.dramaMixes?.find((mix) => mix.episode === episode)?.issues ?? [];
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, readiness: episodeReadiness(blocks, takes, name, (line) => dramaRoleVoice(production.audioDrama?.cast, world.sheets, line)),
+    voiceless: voiceless.size, draft, scenes, mixIssues,
+    readiness: readiness.ready && mixIssues.length > 0
+      ? { ...readiness, ready: false, reasons: [`the saved mix has ${mixIssues.length} problem${mixIssues.length === 1 ? "" : "s"} to fix in Audio Studio`] }
+      : readiness,
   };
 }
 
@@ -178,7 +184,10 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                 <span className={cx(state.draft ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.draft ? "● Script draft" : "✓ Script"}</span>
                 <span className={cx(state.voiceless > 0 ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.voiceless > 0 ? `● Cast ${state.voiceless} missing` : "✓ Cast"}</span>
                 <span className={cx(state.performed < state.lines ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.performed < state.lines ? `● Performed ${state.performed} of ${state.lines}` : "✓ Performed"}</span>
-                <span className={cx(state.readiness.ready ? "fy-ad-show__ok" : "fy-ad-show__off")}>{state.readiness.ready ? "✓ Mixed" : "○ Mixed"}</span>
+                <span className={cx(state.readiness.ready ? "fy-ad-show__ok" : state.mixIssues.length > 0 ? "fy-ad-show__warn" : "fy-ad-show__off")}
+                  title={state.mixIssues.length > 0 ? state.mixIssues.join("\n") : undefined}>
+                  {state.readiness.ready ? "✓ Mixed" : state.mixIssues.length > 0 ? `● Mix ${state.mixIssues.length} to fix` : "○ Mixed"}
+                </span>
               </span>
             </li>
           ))}

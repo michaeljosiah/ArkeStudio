@@ -265,6 +265,18 @@ describe("the show page and Publish (230p, 230q)", () => {
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
   });
 
+  it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {
+    const a = line("maren-kest", "One.");
+    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);
+    state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.dramaMixes = [{ episode: 1, issues: ["Passage “One.” changed; bind it again"] }];
+    const { container } = await mount(state, "home");
+    const row = container.querySelector('[data-episode="1"]')!;
+    assert.match(row.textContent!, /● Mix 1 to fix/);
+    assert.equal(row.querySelector("button[aria-label='Play episode 1']"), null, "an episode whose mix cannot resolve is not offered to play");
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    assert.match(dom.document.body.textContent!, /the saved mix has 1 problem to fix in Audio Studio/);
+  });
+
   it("keeps gaps in the episodes not planned, and Cancel waits for a publish in flight (codex on PR 1880)", async () => {
     const a = line("maren-kest", "One.");
     const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);

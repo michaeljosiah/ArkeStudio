@@ -206,3 +206,19 @@ describe("issue 1883: the episode's studio", () => {
     assert.match(snapshot.unavailable?.map((entry) => entry.message).join(" ") ?? "", /^Harbour bells\.: /, "the cue is named, with why");
   });
 });
+
+describe("issue 1882: Mixed reads the saved arrangement", () => {
+  it("carries an edited episode's mix and what it cannot resolve on the bundle", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const mixes = () => store.getBundle().productions.find((p) => p.meta.id === id)!.dramaMixes;
+    assert.equal(mixes(), undefined, "an episode never edited in Audio Studio has no saved mix");
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
+    assert.deepEqual(mixes(), [{ episode: 1, issues: [] }]);
+    // The line is rewritten and taken out: the saved arrangement still holds a passage the script no longer has.
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash, blocks: entry.script.blocks.filter((block) => block.id !== line.id) });
+    assert.ok((mixes()?.[0]?.issues.length ?? 0) > 0, JSON.stringify(mixes()));
+  });
+});
