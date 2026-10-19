@@ -54,7 +54,7 @@ async function verifySource(dir: string, source: AudioSource, signal: AbortSigna
  * the mix as the mix plays it (issue 1882): ducked under all of the mix's speech, at the mix's own
  * master gain, so an edition's stems sum back to its episode. Solo is an audition and does neither.
  */
-export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { cacheRoot?: string; ffmpeg?: FfmpegRunner; signal?: AbortSignal; retainUntil?: AbortSignal; final?: boolean; solo?: string[]; stem?: { trackId: string; gainDb: number }; unavailable?: ReadonlyMap<string, string> } = {}) {
+export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { cacheRoot?: string; ffmpeg?: FfmpegRunner; signal?: AbortSignal; retainUntil?: AbortSignal; final?: boolean; solo?: string[]; stem?: { trackId: string; gainDb: number; label?: string }; unavailable?: ReadonlyMap<string, string> } = {}) {
   const cacheRoot = options.cacheRoot ?? dir;
   const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
@@ -148,6 +148,11 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     const measured = meter.measure();
     const wanted = measured.lufs === null ? 0 : state.master.targetLufs - measured.lufs;
     const gainDb = options.stem ? options.stem.gainDb : Math.min(wanted, measured.peakDb === null ? wanted : state.master.ceilingDb - measured.peakDb);
+    // A lane can peak above the mix it is part of, where it and another cancel (codex on PR 1945):
+    // at the mix's gain it would clip, and no longer sum back to the episode. Refused by name.
+    if (options.stem && measured.peakDb !== null && measured.peakDb + gainDb > 0) {
+      throw new AudioArrangementRefusal(`${options.stem.label ?? "A lane"} would clip as a stem at the episode's level; lower it, or publish without stems`);
+    }
     output = await open(wavPath, "wx"); await output.writeFile(header);
     for (let from = 0; from < plan.samples; from += CHUNK) {
       signal.throwIfAborted();

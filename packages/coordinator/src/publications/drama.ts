@@ -115,7 +115,7 @@ export class DramaEditionService {
           await mkdir(work, { recursive: true });
           for (const [index, track] of lanes.entries()) {
             signal.throwIfAborted();
-            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { final: true, signal, unavailable, cacheRoot: work, stem: { trackId: track.id, gainDb: mix.gainDb },
+            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { final: true, signal, unavailable, cacheRoot: work, stem: { trackId: track.id, gainDb: mix.gainDb, label: track.name },
               ...(ffmpeg ? { ffmpeg } : {}) });
             const slug = track.name.normalize("NFKD").replace(/[^\x20-\x7e]/gu, "").toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 40).replace(/-+$/u, "");
             const file = `${stem}-stem-${String(index + 1).padStart(2, "0")}${slug ? `-${slug}` : ""}.wav`;

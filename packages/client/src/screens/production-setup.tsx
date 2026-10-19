@@ -89,8 +89,9 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const askForPilot = (created: ProductionSetupState) => {
     const pilot = created.draft.kind === AUDIO_DRAMA_KIND ? created.draft.audioDrama?.pilot : undefined;
     if (!worldId || !setupId || draftPilot.current !== setupId || !pilot) return;
-    draftPilot.current = null;
-    sendWorldChat(worldId, setupId, pilotAsk(pilot), [], undefined, modelRef.current || undefined);
+    // Held until the ask is sent (codex on PR 1945): a setup still open here asks again on
+    // reconnect; one left for the pilot's page has its empty page's Draft the pilot with Arke.
+    if (sendWorldChat(worldId, setupId, pilotAsk(pilot), [], undefined, modelRef.current || undefined) !== null) draftPilot.current = null;
   };
   useEffect(() => {
     if (!startingPilot.current || !setup?.review || pending) return;
@@ -149,6 +150,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   useEffect(() => {
     if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(createdPath(worldId!, setup), { replace: true });
   }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
+  useEffect(() => { if (connection === "open" && setup?.status === "created") askForPilot(setup); }, [connection, setup?.status]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   /*
    * Plan with Arke is the request (SPEC-057 R-3): a setup the door seeded with a story opens with

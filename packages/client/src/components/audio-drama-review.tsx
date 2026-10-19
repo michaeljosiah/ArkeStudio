@@ -121,11 +121,17 @@ export function useAudioHeard(world: WorldBundle, production: ProductionBundle, 
   const signal = useAudiobookRecords()[`${world.meta.worldId}/${production.meta.id}/${stem}`]?.seq ?? 0;
   const script = production.episodeScripts?.find((entry) => entry.script.episode === episode)?.hash ?? "";
   const takes = JSON.stringify(production.episodeTakes?.find((entry) => entry.episode === episode) ?? null);
-  const [heard, setHeard] = useState<AudioHeard | null>(null);
+  const subject = `${world.meta.worldId}/${production.meta.id}/${stem}`;
+  const [heard, setHeard] = useState<{ subject: string; heard: AudioHeard | null } | null>(null);
   const asked = useRef<string | null>(null);
-  useEffect(() => subscribeAudioHeard((event) => { if (event.requestId === asked.current) setHeard(event.heard); }), []);
-  useEffect(() => { asked.current = readAudioHeard(world.meta.worldId, production.meta.id, stem); }, [world.meta.worldId, production.meta.id, stem, signal, script, takes]);
-  return heard;
+  useEffect(() => subscribeAudioHeard((event) => { if (event.requestId === asked.current) setHeard({ subject: `${event.worldId}/${event.productionId}/${event.chapterId}`, heard: event.heard }); }), []);
+  useEffect(() => {
+    asked.current = readAudioHeard(world.meta.worldId, production.meta.id, stem);
+    // Unsent, nothing is known of what was heard (codex on PR 1945): the last answer is not kept.
+    if (asked.current === null) setHeard(null);
+  }, [world.meta.worldId, production.meta.id, stem, signal, script, takes]);
+  // Another episode's listening is never shown while this one's is read (codex on PR 1945).
+  return heard?.subject === subject ? heard.heard : null;
 }
 
 /** The script's review (230j, R-52), on what the page holds: its names, voices, cast and pinned chapters. */

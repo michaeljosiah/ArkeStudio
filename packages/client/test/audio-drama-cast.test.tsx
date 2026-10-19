@@ -185,6 +185,10 @@ describe("Review in the score (230j)", () => {
     const closed = [...container.querySelectorAll(".fy-ad-review__note--closed .fy-ad-review__kind")].map((kind) => kind.textContent);
     assert.ok(closed.includes("Intelligibility · audio · heard"));
     assert.ok([...container.querySelectorAll("button")].some((button) => button.textContent === "Review audio in Audio Studio"), "230j's way to the audio");
+    // Asked again and not sent (codex on PR 1945): the last answer is no longer said.
+    __setBridgeForTest(null);
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001" }));
+    assert.equal(container.querySelector('[data-testid="review-coverage"]')?.textContent, "Script v3 · no audio heard yet");
   });
 
   it("decides a note Intentional, kept in the production, and leaves it closed", async () => {
@@ -466,6 +470,11 @@ describe("the show page and Publish (230p, 230q)", () => {
     state.app.jobs = (state.app.jobs as Array<{ status: string }>).map((entry) => ({ ...entry, status: "succeeded" })) as never;
     await act(async () => __setStateForTest(state, { connection: "open" }));
     assert.equal(container.querySelector('[data-episode="1"] [role="status"]'), null, "nothing going, nothing shown");
+    // Parked for a person, or another world's (codex on PR 1945): neither is this episode performing.
+    state.app.jobs = [job(b.id, "needs-reconciliation", "2026-10-19T10:00:00.000Z", "2026-10-19T10:00:00.000Z"),
+      { ...job(b.id, "running", "2026-10-19T10:00:00.000Z", "2026-10-19T10:00:00.000Z"), worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ" }] as never;
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    assert.equal(container.querySelector('[data-episode="1"] [role="status"]'), null, "a parked job, or another world's, is not a press going");
   });
 
   it("names what an edition delivers, and asks for stems only when there are lanes to separate (issue 1882)", async () => {
@@ -477,6 +486,7 @@ describe("the show page and Publish (230p, 230q)", () => {
     const archive = [...dom.document.body.querySelectorAll("[role='radio']")].find((button) => button.textContent === "Archive · WAV")!;
     await act(async () => props(archive).onClick!({}));
     assert.match(outputs.textContent!, /Episode audio · WAV/);
+    assert.match(dom.document.body.querySelector(".fy-ad-pub__frozen")!.textContent!, /Voices.*·/, "the kept takes' voices, by engine (codex on PR 1945)");
     const stems = dom.document.body.querySelector(".fy-ad-pub__stems")!;
     assert.equal(stems.getAttribute("aria-pressed"), "false", "off unless asked for");
     await act(async () => props(stems).onClick!({}));

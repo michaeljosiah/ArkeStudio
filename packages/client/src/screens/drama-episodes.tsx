@@ -30,10 +30,13 @@ const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "d
  * a minute of the one before it ending. Its lines made so far count before the world's snapshot
  * does, which refreshes only once the press is over. None while nothing is going.
  */
-export function episodeActivity(jobs: readonly JobSummary[], productionId: string, episode: number): { live: Set<string>; made: Set<string> } | null {
+export function episodeActivity(jobs: readonly JobSummary[], worldId: string, productionId: string, episode: number): { live: Set<string>; made: Set<string> } | null {
   const dir = `.staging/drama/${productionId}/${episodeScriptFile(episode).replace(/\.json$/, "")}`;
-  const mine = jobs.filter((job) => job.target.kind === "voice-preview" && job.landing?.dir === dir).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const going = (job: JobSummary) => job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled";
+  // This world's own (codex on PR 1945): another world may hold the same slug and episode.
+  const mine = jobs.filter((job) => job.worldId === worldId && job.target.kind === "voice-preview" && job.landing?.dir === dir).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Only what is being made counts as going (codex on PR 1945): a job parked for reconciliation
+  // waits on a person, and may wait indefinitely while nothing is performed.
+  const going = (job: JobSummary) => job.status === "queued" || job.status === "submitting" || job.status === "running";
   const block = (job: JobSummary) => typeof job.params["block"] === "string" ? job.params["block"] : "";
   const newest = mine.findIndex(going);
   if (newest < 0) return null;
@@ -56,7 +59,7 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   const cast = production.audioDrama?.cast ?? {};
   const voiceless = new Set(lines.flatMap((line) => line.kind === "dialogue" && !cast[line.speaker]?.voice && !world.sheets.find((sheet) => sheet.id === line.speaker)?.voice ? [line.speaker] : []));
   const current = (line: Spoken) => { const kept = takes?.lines[line.id]?.kept; return kept !== undefined && kept.textHash === dramaLineHash(line); };
-  const activity = episodeActivity(jobs, production.meta.id, episode);
+  const activity = episodeActivity(jobs, world.meta.worldId, production.meta.id, episode);
   // While a press runs, its lines made so far count as performed; the snapshot catches up after.
   const performed = lines.filter((line) => current(line) || activity?.made.has(line.id) === true).length;
   const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
@@ -342,13 +345,15 @@ function PublishDialog({ world, production, states, onClose }: {
     if (answer.refused) setFailure(answer.refused); else onClose();
   }), [pressed]);
   const seconds = states.filter((state) => chosen.includes(state.n)).reduce((sum, state) => sum + state.seconds, 0);
-  // The voices the chosen episodes' lines are in, by engine: "Wren, Bram · elevenlabs eleven_v3".
+  // The voices the chosen episodes' kept takes are in, by engine: "Wren, Bram · elevenlabs eleven_v3".
+  // The takes', never the roles' (codex on PR 1945): a stand-in kept is published in its own voice.
   const voices = (() => {
     const engines = new Map<string, Set<string>>();
     for (const state of states.filter((candidate) => chosen.includes(candidate.n))) {
+      const takes = production.episodeTakes?.find((candidate) => candidate.episode === state.n);
       for (const block of state.entry?.script.blocks ?? []) {
         if (block.kind !== "dialogue" && block.kind !== "narration") continue;
-        const voice = dramaRoleVoice(production.audioDrama?.cast, world.sheets, block);
+        const voice = takes?.lines[block.id]?.kept?.voice;
         if (!voice) continue;
         const engine = `${voice.provider}${voice.model ? ` ${voice.model}` : ""}`;
         engines.set(engine, (engines.get(engine) ?? new Set()).add((voice as { label?: string }).label ?? voice.voiceId));
