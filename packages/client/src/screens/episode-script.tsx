@@ -338,16 +338,16 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           <span className="fy-ad-ep__ring" title="Estimated listening time">
             <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8"
               style={{ strokeDasharray: `${Math.min(1, estimate / Math.max(1, (plan?.minutes ?? 25) * 60)) * 50.3} 50.3` }} /></svg>
-            <b>{clock(estimate)}</b><span>/ {plan?.minutes ?? 25}:00</span>
+            <b>{clock(estimate)}</b><span className="fy-ad-ep__word">/ {plan?.minutes ?? 25}:00</span>
           </span>
-          <button type="button" className={cx("fy-ad-ep__toggle", side === "source" && "fy-ad-ep__toggle--on")} aria-pressed={side === "source"} onClick={() => toggle("source")}>
-            <BookOpen size={14} />Source
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "source" && "fy-ad-ep__toggle--on")} aria-pressed={side === "source"} aria-label="Source" title="Source" onClick={() => toggle("source")}>
+            <BookOpen size={14} /><span className="fy-ad-ep__word">Source</span>
           </button>
-          <button type="button" className={cx("fy-ad-ep__toggle", side === "cast" && "fy-ad-ep__toggle--on")} aria-pressed={side === "cast"} onClick={() => toggle("cast")}>
-            <Users size={14} />Cast
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "cast" && "fy-ad-ep__toggle--on")} aria-pressed={side === "cast"} aria-label="Cast" title="Cast" onClick={() => toggle("cast")}>
+            <Users size={14} /><span className="fy-ad-ep__word">Cast</span>
           </button>
-          <button type="button" className={cx("fy-ad-ep__toggle", side === "review" && "fy-ad-ep__toggle--on")} aria-pressed={side === "review"} onClick={() => toggle("review")}>
-            <ListCheck size={14} />Review
+          <button type="button" className={cx("fy-ad-ep__toggle", side === "review" && "fy-ad-ep__toggle--on")} aria-pressed={side === "review"} aria-label="Review" title="Review" onClick={() => toggle("review")}>
+            <ListCheck size={14} /><span className="fy-ad-ep__word">Review</span>
           </button>
           {more}
         </header>

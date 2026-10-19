@@ -2,6 +2,17 @@
 .fy-ad-ep { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .fy-ad-ep .gap { flex: 1; }
 .fy-ad-ep__bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+/* One row at a laptop's width with the rail open (issue 1883): the title and the scene give way
+   first, then the toggles keep their icons and the ring its time; it wraps only past that. */
+.fy-ad-ep { container: ad-ep / inline-size; }
+.fy-ad-ep__title { min-width: 0; flex: 0 1 auto; }
+.fy-ad-ep__title input { min-width: 6ch; flex: 1 1 auto; }
+.fy-ad-ep__scene { min-width: 0; flex: 0 1 auto; max-width: 26ch; text-overflow: ellipsis; }
+@container ad-ep (max-width: 1240px) {
+  .fy-ad-ep__toggle .fy-ad-ep__word, .fy-ad-ep__ring .fy-ad-ep__word { display: none; }
+  .fy-ad-ep__toggle { padding: 6px 8px; }
+  .fy-ad-ep__scene { max-width: 18ch; }
+}
 .fy-ad-ep__views { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--secondary); }
 .fy-ad-ep__views button { border: 0; background: none; color: var(--muted-foreground); font: 500 13px var(--font-sans); padding: 6px 12px; border-radius: 7px; cursor: pointer; }
 .fy-ad-ep__views button[aria-current="page"] { background: var(--background); color: var(--foreground); box-shadow: var(--shadow-sm); }
@@ -255,6 +266,15 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-map__ribbon--lit { opacity: 0.6; }
 .fy-ad-map__ribbon--dim { opacity: 0.08; }
 .fy-ad-map__side { border-left: 1px solid var(--border); padding-left: 20px; font-size: 13px; }
+/* The map keeps a scale its labels can be read at (issue 1883): with Chat open its column fell to a
+   third of the 760 viewBox and the labels to 3 px. Without room for both, the panel goes under the
+   map, and the map scrolls sideways rather than drawing smaller than 560 wide. */
+.fy-ad-map { container: ad-map / inline-size; }
+.fy-ad-map__svg { min-width: 560px; }
+@container ad-map (max-width: 1040px) {
+  .fy-ad-map__body { grid-template-columns: minmax(0, 1fr); overflow-x: auto; }
+  .fy-ad-map__side { border-left: 0; border-top: 1px solid var(--border); padding: 16px 0 0; }
+}
 .fy-ad-map__panel h2 { font-size: 18px; margin: 0 0 10px; }
 .fy-ad-map__panel h3 { font-size: 12px; color: var(--muted-foreground); margin: 14px 0 4px; font-weight: 500; }
 .fy-ad-map__panel dl { display: grid; grid-template-columns: 70px 1fr; gap: 6px; margin: 0 0 10px; }
