@@ -263,9 +263,15 @@ export function ReferencePickerBody({
   budget = "model",
   worldChoices,
   actions,
+  confirm,
 }: {
   /** Tiles after Upload that make a source rather than pick one — Generate, Record (SPEC-057 R-43). */
   actions?: ReadonlyArray<{ label: string; onPress: () => void }>;
+  /**
+   * Slot only: a tile is chosen first, heard if it can be, and placed by this button (issue 1883,
+   * Add a sound): a click that placed at once left no way to listen before the cue took it.
+   */
+  confirm?: { label: string; onListen?: (pick: PickerSource["pick"]) => void };
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
   worldChoices?: React.ReactNode;
@@ -301,6 +307,8 @@ export function ReferencePickerBody({
   const [picks, setPicks] = useState<StagedPick[]>([]);
   /** The image tile waiting on "which token gives way" at the ceiling. */
   const [replacing, setReplacing] = useState<PickerSource | null>(null);
+  /** Slot with `confirm`: the tile chosen, not yet placed. */
+  const [chosen, setChosen] = useState<PickerSource | null>(null);
 
   const offered = (list: PickerSource[]): PickerSource[] => (only !== undefined ? list.filter((s) => s.kind === only) : list);
   const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : session);
@@ -381,7 +389,9 @@ export function ReferencePickerBody({
   function pickTile(source: PickerSource): void {
     if (source.active) return;
     if (mode === "slot") {
-      if (refusalFor(source) === null) onChoose?.(source.pick);
+      if (refusalFor(source) !== null) return;
+      if (confirm) setChosen(chosen?.key === source.key ? null : source);
+      else onChoose?.(source.pick);
       return;
     }
     if (staged(source)) {
@@ -478,7 +488,8 @@ export function ReferencePickerBody({
         </span>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {/* Sounds alone, no kind to filter by (issue 1883): "All 12 · Audio 12" said nothing. */}
+      {(only !== "audio" || capacityChip) && <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <button
           type="button"
           className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")}
@@ -498,7 +509,7 @@ export function ReferencePickerBody({
         ))}
         <span style={{ flex: 1 }} />
         {capacityChip}
-      </div>
+      </div>}
 
       {/* Grouping is not proof of images (codex on PR 1872): the audio picker groups by cue. */}
       {sources.some((source) => source.group) && (
@@ -528,7 +539,7 @@ export function ReferencePickerBody({
           const isStaged = staged(source);
           const refusal = source.active || isStaged ? null : refusalFor(source);
           const preview = isStaged ? previews.get(source.key) : null;
-          const checked = source.active === true || isStaged;
+          const checked = source.active === true || isStaged || chosen?.key === source.key;
           return (
             <button
               key={source.key}
@@ -636,6 +647,11 @@ export function ReferencePickerBody({
                 </button>
               </>
             )
+          ) : confirm && chosen ? (
+            <>
+              <strong style={{ fontWeight: 600, color: "var(--foreground)" }}>{chosen.name}</strong>
+              {confirm.onListen && <Button size="sm" variant="ghost" onClick={() => confirm.onListen!(chosen.pick)}>Play</Button>}
+            </>
           ) : (
             note ?? "One picture rides with this brief."
           )}
@@ -657,6 +673,11 @@ export function ReferencePickerBody({
             >
               {picks.length > 0 ? `Add ${picks.length}` : "Add"}
             </Button>
+          </>
+        ) : confirm ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" disabled={chosen === null} onClick={() => { if (chosen) onChoose?.(chosen.pick); }}>{confirm.label}</Button>
           </>
         ) : (
           <Button variant="ghost" onClick={onClose}>

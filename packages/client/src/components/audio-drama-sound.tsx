@@ -6,6 +6,8 @@ import {
 import { ReferencePickerBody, type PickerSource } from "./reference-picker.js";
 import { generateDramaSound, subscribeDramaSound, subscribeQueueResults, uploadArtifacts, type DramaSound } from "../lib/store.js";
 import { recordingToWav } from "../lib/wav.js";
+import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
+import { mediaUrl } from "../lib/media.js";
 
 import { Button } from "./ui.js";
 
@@ -34,7 +36,9 @@ const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+
 export function soundSources(artifacts: readonly ArtifactSidecar[], production: ProductionBundle, heard: string): { all: PickerSource[]; mine: PickerSource[] } {
   const uses = soundUses(production);
   const wanted = words(heard);
-  const rows = pickableArtifacts(artifacts).filter((artifact) => artifact.kind === "audio" && (artifact.production === undefined || artifact.production === production.meta.id))
+  // A line's take is a performance, not a sound (issue 1883): the picker listed them by block id.
+  const rows = pickableArtifacts(artifacts).filter((artifact) => artifact.kind === "audio" && artifact.generation?.source !== "audiobook" &&
+    (artifact.production === undefined || artifact.production === production.meta.id))
     .map((artifact) => {
       const generation = artifact.generation?.source === "sound" ? artifact.generation : null;
       const said = generation ? `${generation.name} ${generation.heard} ${generation.prompt}` : artifact.file;
@@ -42,7 +46,8 @@ export function soundSources(artifacts: readonly ArtifactSidecar[], production: 
       const used = uses.get(artifact.id) ?? 0;
       const row: PickerSource = {
         key: `artifact:${artifact.id}`, kind: "audio", name: generation?.name ?? artifact.file,
-        meta: [artifact.mediaInfo ? formatSeconds(artifact.mediaInfo.durationSec) : null, used > 0 ? `${used} use${used === 1 ? "" : "s"}` : null,
+        // Its uses always, so a sound placed nowhere says so (issue 1883).
+        meta: [artifact.mediaInfo ? formatSeconds(artifact.mediaInfo.durationSec) : null, used > 0 ? `${used} use${used === 1 ? "" : "s"}` : "not used yet",
           artifact.production === undefined ? "world" : null].filter(Boolean).join(" · "),
         group: generation ? CUE_LABEL[generation.cue] : "Other",
         durationSec: artifact.mediaInfo?.durationSec ?? null,
@@ -73,13 +78,20 @@ export function AddSoundDialog({ open, onClose, world, production, cue, onPlace 
   const sources = soundSources(world.artifacts, production, cue.heard);
   const place = (artifactId: string) => { onPlace(artifactId); dialog.current?.close?.(); onClose(); };
   return (
-    <dialog ref={dialog} className="fy-gendialog fy-gendialog--wide fy-ad-sound" aria-label="Add a sound" onClose={onClose}
+    <dialog ref={dialog} className="fy-gendialog fy-gendialog--wide fy-ad-sound" role="dialog" aria-modal="true" aria-label="Add a sound" onClose={onClose}
       onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close?.(); }}>
       <div className="fy-gendialog__panel">
         {open && view === "pick" && (
           <ReferencePickerBody mode="slot" only="audio" budget="none" model={null} carried={[]} worldSlug={world.meta.slug}
             title="Add a sound" note={`For: ${cue.heard}`} world={sources.all} session={sources.mine} sessionLabel="This production"
             onChoose={(pick) => { if (pick.source === "artifact") place(pick.artifactId); }}
+            // Chosen, heard, then placed (issue 1883): a click no longer places unheard.
+            confirm={{ label: "Use sound", onListen: (pick) => {
+              const artifact = pick.source === "artifact" ? world.artifacts.find((candidate) => candidate.id === pick.artifactId) : undefined;
+              if (!artifact) return;
+              loadPlaylist([{ id: artifact.id, url: mediaUrl(world.meta.slug, `artifacts/${artifact.file}`), title: artifact.generation?.source === "sound" ? artifact.generation.name : artifact.file, lineId: cue.id, speakerSheetId: "sound" }]);
+              void playPlaylistLine(0);
+            } }}
             onUpload={() => uploadArtifacts(world.meta.worldId, undefined, production.meta.id)}
             actions={[{ label: "Generate", onPress: () => setView("generate") }, { label: "Record", onPress: () => setView("record") }]}
             onClose={() => dialog.current?.close?.()} />
