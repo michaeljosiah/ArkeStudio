@@ -23,7 +23,7 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
 import { ReviewColumn } from "../components/audio-drama-review.js";
-import { pilotChapters } from "../components/audio-drama-plan-card.js";
+import { pilotAsk } from "../components/audio-drama-plan-card.js";
 import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
@@ -403,10 +403,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
               {chatSurface && (
                 <Button variant="primary" onClick={() => {
                   const pilot = plan?.pilot;
-                  // Said as the author would say it (issue 1883): Arke's guidance names the action.
-                  chat!.setValue(chatSurface.key, "draft", pilot && episode === 1
-                    ? `Draft the pilot scene, “${pilot.title}”${pilot.chapters.length ? `, from ${pilotChapters(pilot.chapters)},` : ""} as episode 1's script.`
-                    : `Draft episode ${episode}'s script.`);
+                  chat!.setValue(chatSurface.key, "draft", pilot && episode === 1 ? pilotAsk(pilot) : `Draft episode ${episode}'s script.`);
                   chat!.open(chatSurface);
                 }}>{plan?.pilot && episode === 1 ? "Draft the pilot with Arke" : "Draft with Arke"}</Button>
               )}

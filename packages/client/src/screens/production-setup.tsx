@@ -13,7 +13,7 @@ import {
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
+import { listHarnessModels, openWorldChat, send, sendWorldChat, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
 import { ConversationTranscript, useReadsFromEnd } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
@@ -23,7 +23,7 @@ import { Button } from "../components/ui.js";
 import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
-import { AudioDramaPlanCard, NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
+import { AudioDramaPlanCard, NARRATOR_LABEL, pilotAsk, pilotChapters } from "../components/audio-drama-plan-card.js";
 
 type SetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 
@@ -79,6 +79,19 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   // Change the plan opens the plan card to edit (230c); Start the pilot reviews, then creates.
   const [planEdit, setPlanEdit] = useState(0);
   const startingPilot = useRef(false);
+  /*
+   * The pilot drafts on creation (R-9, 230c to 230d): Start the pilot, or Create, for an audio
+   * drama with a pilot asks Arke for it once, in the same conversation, which carries on as the
+   * production's. Only a press on this page asks; reopening a created setup never asks again.
+   */
+  const draftPilot = useRef<string | null>(null);
+  const modelRef = useRef(modelId); modelRef.current = modelId;
+  const askForPilot = (created: ProductionSetupState) => {
+    const pilot = created.draft.kind === AUDIO_DRAMA_KIND ? created.draft.audioDrama?.pilot : undefined;
+    if (!worldId || !setupId || draftPilot.current !== setupId || !pilot) return;
+    draftPilot.current = null;
+    sendWorldChat(worldId, setupId, pilotAsk(pilot), [], undefined, modelRef.current || undefined);
+  };
   useEffect(() => {
     if (!startingPilot.current || !setup?.review || pending) return;
     startingPilot.current = false;
@@ -115,6 +128,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     }
     setFailure(result.detail ?? null);
     if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
+    if (result.state?.status === "created" && result.state.productionId) askForPilot(result.state);
     if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(createdPath(worldId!, result.state), { replace: true });
   }), [worldId, setupId, navigate, onSetupPage, presentation?.owner]);
   useEffect(() => {
@@ -162,7 +176,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const planProposed = audioDrama && !!draft?.audioDrama?.pilot && !running && !locked && workspace?.messages.at(-1)?.role === "studio";
   const startPilot = () => {
     if (!draft || !setup) return;
-    if (setup.review) { command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); return; }
+    if (setup.review) { draftPilot.current = setupId ?? null; command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); return; }
+    draftPilot.current = setupId ?? null;
     startingPilot.current = true;
     command({ operation: "review", expectedRevision: draft.revision });
   };
@@ -299,7 +314,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               <div className="fy-production-setup__actions">
                 <Button disabled={!!pending || running || problems.length > 0} onClick={() => {
                   setTab("outline");
-                  if (setup.review) command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id });
+                  if (setup.review) { draftPilot.current = setupId ?? null; command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); }
                   else command({ operation: "review", expectedRevision: draft.revision });
                 }}>{setup.review ? "Create production" : "Review production"}</Button>
                 <Button variant="ghost" disabled={!!pending || running} onClick={() => command({ operation: "discard" })}>Discard setup</Button>

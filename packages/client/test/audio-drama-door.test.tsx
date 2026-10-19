@@ -290,6 +290,14 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     await answer(review, reviewed);
     const create = m.setup().at(-1)!;
     assert.deepEqual(create.action, { operation: "create", expectedRevision: 4, reviewId: REVIEW }, "and creates once the review is in");
+    // Created, the pilot drafts (R-9, 230d): Arke is asked once, in the conversation that carries on.
+    const created = ProductionSetupStateSchema.parse({ ...reviewed, status: "created", productionId: "low-water-2" });
+    await answer(create, created);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "world-chat-send" }> => message.kind === "world-chat-send");
+    assert.equal(asked.length, 1);
+    assert.deepEqual([asked[0]!.conversationId, asked[0]!.text], [SETUP, "Draft the pilot scene, “The tide turns”, from chapter 1, as episode 1's script."]);
+    await act(async () => { __applyEventForTest({ type: "production-setup.result", at: AT, worldId: FIXTURE_WORLD_ID, setupId: SETUP, requestId: create.requestId, state: created }); });
+    assert.equal(m.sent.filter((message) => message.kind === "world-chat-send").length, 1, "never asked twice");
   });
 
   it("leaving the kind drops the plan and restores a frame", async () => {
