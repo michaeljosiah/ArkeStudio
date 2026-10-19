@@ -32,7 +32,11 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
     // Its episode scripts, by episode (SPEC-057 R-83): blocks carry the ids an edit names.
     // With the hash a whole-script proposal is fenced on (codex on PR 1874).
     ...(production.episodeScripts?.length ? { episodeScripts: production.episodeScripts.map((entry) => ({ ...entry.script, baseHash: entry.hash })) } : {}),
-    episodes: production.episodes.map((e) => ({
+    // The planned episodes with no script yet (issue 1883): read as an empty `episodes` list, a
+    // new drama told Arke it had no saved episodes to write, and Plan with Arke stalled there.
+    ...(shape.isAudioDrama ? { unwrittenEpisodes: unwritten(production) } : {}),
+    // A drama's episodes are its scripts, never scene episodes: an empty list here read as none.
+    ...(shape.isAudioDrama ? {} : { episodes: production.episodes.map((e) => ({
       id: e.id,
       order: e.order,
       title: e.title,
@@ -45,6 +49,16 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
       title: s.title,
       ...(s.synopsis !== undefined ? { synopsis: s.synopsis } : {}),
       shots: orderedShots(s).length,
-    })),
+    })) }),
+  };
+}
+
+function unwritten(production: ProductionBundle): { episodes: number[]; baseHash: null; howToWrite: string } {
+  const written = new Set((production.episodeScripts ?? []).map((entry) => entry.script.episode));
+  const planned = production.audioDrama?.plan.episodes ?? 0;
+  return {
+    episodes: Array.from({ length: planned }, (_, i) => i + 1).filter((n) => !written.has(n)),
+    baseHash: null,
+    howToWrite: "Each of these has no script yet. Write one whole with production-episode-script, its baseHash null.",
   };
 }

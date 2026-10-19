@@ -133,6 +133,7 @@ export function foldConversation(
   const tombstones = new Map<string, CandidateTombstone>();
   const actionIntents = new Map<string, ConversationActionPrepareIntent>();
   const failedActionIntents = new Set<string>();
+  const preparationFailures = new Map<string, string>();
   const actions = new Map<string, ConversationActionRecord>();
   const preparedBindings = new Map<string, ConversationActionBinding>();
   const runs = new Map<string, WorldChatRun>();
@@ -517,10 +518,14 @@ export function foldConversation(
         preparedBindings.set(e.binding.actionId, e.binding);
         actions.set(e.binding.actionId, { ...e.binding });
         failedActionIntents.delete(e.binding.actionId);
+        preparationFailures.delete(e.binding.actionId);
         break;
       }
       case "action.prepare-failed":
-        if (!actions.has(e.actionId)) failedActionIntents.add(e.actionId);
+        if (!actions.has(e.actionId)) {
+          failedActionIntents.add(e.actionId);
+          preparationFailures.set(e.actionId, e.detail);
+        }
         break;
       case "action.decision-recorded": {
         const action = actions.get(e.actionId);
@@ -665,6 +670,18 @@ export function foldConversation(
       shown.flatMap((m) => {
         const refused = refusals.get(m.id);
         return refused ? [[m.id, [...refused]] as const] : [];
+      }),
+    ),
+    notPrepared: Object.fromEntries(
+      shown.flatMap((m) => {
+        if (m.role !== "studio") return [];
+        const failed = [...actionIntents.values()].flatMap((intent) => {
+          const detail = intent.turnId === m.turnId ? preparationFailures.get(intent.actionId) : undefined;
+          if (detail === undefined) return [];
+          const line = `${intent.targets[0]?.label ?? "A change"}: ${detail}`;
+          return [line.length > 200 ? `${line.slice(0, 199)}…` : line];
+        });
+        return failed.length > 0 ? [[m.id, failed] as const] : [];
       }),
     ),
     benchOutcomes: Object.fromEntries(

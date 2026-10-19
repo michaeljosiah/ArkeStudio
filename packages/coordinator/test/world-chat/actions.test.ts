@@ -1479,7 +1479,8 @@ describe("World Chat authority adapters", () => {
     });
     const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
     await appendTurn(w.log, oneTurn, prepared);
-    await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare/i);
+    // Its own reason, not "could not prepare" (issue 1883).
+    await assert.rejects(bindAll(w.lifecycle, prepared), /unchanged script block blk_opening must keep its stable id/);
     assert.deepEqual(
       w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
         .scenes.find((candidate) => candidate.id === current.id)!.script!.blocks,
@@ -2704,7 +2705,8 @@ it("fences chapter viewpoints and refuses invalid edits before completing the tu
     ...oneTurn, actions: [{ ...action, change: { operation: "outline", chapters: [{ title: "Opening", synopsis: "A plan.", viewpointCharacter: "maren" }] } }],
   }), /sheets read is no longer current/);
   await appendTurn(w.log, oneTurn, prepared);
-  await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare this action/);
+  // The reason, not "could not prepare" (issue 1883): a stale read is Arke's to read again.
+  await assert.rejects(bindAll(w.lifecycle, prepared), /sheets changed after this action was prepared/);
 });
 
 it("shows every omitted viewpoint beyond the card title limit (#967)", async () => {
@@ -3134,5 +3136,28 @@ describe("chapter review delegation", () => {
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.deepEqual(calls, [["the-ledger-of-nights", "neap", card.actionId]]);
     await decide(w.lifecycle, w.log, card); assert.equal(calls.length, 1);
+  });
+});
+
+describe("Arke's episode scripts reach the score or say why (issue 1883)", () => {
+  it("refuses a draft before the turn completes, and says beside the reply why one was refused after", async () => {
+    const w = await setup();
+    const id = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const receipts = [currentReceipt(w.store, "production-metadata", id)];
+    const draft = (baseHash: string | null, place: string) => ModelWorldChatActionSchema.parse({
+      kind: "production-episode-script", productionId: id, episode: 1, baseHash, blocks: [{ kind: "heading", place }], checkReceiptIds: receipts.map((receipt) => receipt.id),
+    });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts, actions: [draft("sha256:guessed", "The quay")] })),
+      /Episode 1 has no script yet\. Write it with baseHash null/, "a guessed hash for a new episode is told what to send");
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [draft(null, "The quay")] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    // Another draft lands first: staging refuses this one, and says so where the reply is.
+    await stageWorldChatProductionAuthoredAction(w.store, w.gate, { actionId: newId("act"), conversationId: w.conversationId },
+      { kind: "world-chat-production-episode-script", worldId: w.store.worldId, action: { ...draft(null, "Elsewhere"), kind: "production-episode-script" } as never });
+    await assert.rejects(bindAll(w.lifecycle, prepared), /is waiting/);
+    const view = await loaded(w.log);
+    const reply = view.messages.find((message) => message.role === "studio")!;
+    assert.match(view.notPrepared[reply.id]?.[0] ?? "", /^Episode 1 script: A draft of episode 1's script is waiting/);
   });
 });

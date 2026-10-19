@@ -290,6 +290,8 @@
 .fy-ad-home__open { display: contents; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .fy-ad-home__episodes li { cursor: pointer; }
 .fy-ad-home__pilot { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+/* The pilot opens episode 1 (issue 1883): a link in the plan's own type, not a button's. */
+.fy-ad-home__pilot.fy-linkbtn { display: block; font: inherit; font-size: 14px; text-align: left; }
 .fy-ad-home__kept { gap: 8px; }
 .fy-ad-home__kept li { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
 .fy-ad-home__kept li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }

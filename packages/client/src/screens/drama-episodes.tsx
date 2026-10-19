@@ -106,7 +106,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
     <div className="fy-prodmain fy-ad-show" data-screen="production-dashboard">
       <header className="fy-ad-show__hero">
         <h1>{production.meta.title}</h1>
-        <p>Audio drama · {count} episode{count === 1 ? "" : "s"}{source ? ` · from ${source.meta.title}` : ""}</p>
+        {/* The count once, in the plan line, where a plan says it (issue 1883). */}
+        <p>Audio drama{plan ? "" : ` · ${count} episode${count === 1 ? "" : "s"}`}{source ? ` · from ${source.meta.title}` : ""}</p>
         <p className="fy-ad-show__plan">
           {plan ? `${plan.episodes} episode${plan.episodes === 1 ? "" : "s"} · about ${plan.minutes} minutes each${plan.narrator ? ` · ${NARRATOR_LABEL[plan.narrator].toLowerCase()}` : ""}` : "no plan"}
         </p>
@@ -119,6 +120,10 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
         )}
         <div className="fy-ad-show__acts">
           {next && <Button variant="primary" disabled={playing !== null} onClick={() => play(next.n)}><Play size={14} /> Episode {next.n} {formatSeconds(next.seconds)}</Button>}
+          {/* A new drama's way in (issue 1883, R-9): nothing is planned, so the pilot is the next thing to write. */}
+          {!next && planned.length === 0 && count > 0 && (
+            <Button variant="primary" onClick={() => navigate(`${base}/script/1`)}>{plan?.pilot ? "Start the pilot" : "Write episode 1"}</Button>
+          )}
           <Button variant="secondary" disabled={planned.length === 0} onClick={() => setPublishing(true)}>Publish…</Button>
         </div>
         {problem && <p className="fy-ad-show__problem" role="alert">{problem}</p>}
@@ -146,7 +151,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
       {plan?.pilot && (
         <div>
           <div className="fy-listhead">Pilot</div>
-          <p className="fy-ad-home__pilot">{[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}</p>
+          <button type="button" className="fy-ad-home__pilot fy-linkbtn" onClick={() => navigate(`${base}/script/1`)}>
+            {[plan.pilot.title, pilotChapters(plan.pilot.chapters)].filter(Boolean).join(" · ")}
+          </button>
         </div>
       )}
       <section aria-label="Episodes">
@@ -174,9 +181,12 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           {unplanned.length > 0 && (
             <li className="fy-ad-show__row fy-ad-show__row--open">
               <span className="fy-ad-show__num">…</span>
-              <span className="fy-ad-show__open"><b>{range(unplanned)} · not planned</b></span>
+              {/* Each unplanned episode is a page to write (issue 1883): the first opens from here. */}
+              <button type="button" className="fy-ad-show__open" onClick={() => navigate(`${base}/script/${unplanned[0]!.n}`)}>
+                <b>{range(unplanned)} · not planned</b>
+              </button>
               {surface && <Button size="sm" variant="secondary" onClick={() => {
-                chat!.setValue(surface.key, "draft", `Plan ${range(unplanned).toLowerCase()} of this audio drama, drafting each script with production-episode-script.`);
+                chat!.setValue(surface.key, "draft", `Plan ${range(unplanned).toLowerCase()} of this audio drama, and draft each episode's script.`);
                 chat!.open(surface);
               }}>Plan with Arke</Button>}
             </li>

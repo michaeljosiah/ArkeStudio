@@ -71,7 +71,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
           <span className="fy-ad-map__chip">Not planned {map.counts.notPlanned}</span>
           {map.counts.changed > 0 && <span className="fy-ad-map__chip fy-ad-map__chip--warn">{map.counts.changed} changed</span>}
           {(map.counts.notPlanned > 0 || map.episodes.some((episode) => !episode.planned)) && surface && (
-            <Button size="sm" variant="primary" onClick={() => ask(`Plan the unplanned episodes of this audio drama from the chapters not yet planned, with production-episode-script for each episode.`)}>Plan with Arke</Button>
+            <Button size="sm" variant="primary" onClick={() => ask(`Plan the unplanned episodes of this audio drama from the chapters not yet planned, and draft each episode's script.`)}>Plan with Arke</Button>
           )}
         </header>
         <nav className="fy-ad-map__filters" aria-label="Verdicts">
@@ -211,7 +211,7 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
       ) : (
         <div className="fy-ad-map__acts">
           <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Change</Button>
-          {ask && <Button size="sm" variant="secondary" onClick={() => ask(`About chapter ${chapter.order}, “${chapter.title}”, in this audio drama: what should become of it? Propose script changes with production-episode-script.`)}>Ask Arke</Button>}
+          {ask && <Button size="sm" variant="secondary" onClick={() => ask(`About chapter ${chapter.order}, “${chapter.title}”, in this audio drama: what should become of it? Propose the script changes.`)}>Ask Arke</Button>}
           {map.story && <Link className="fy-linkbtn" to={`/w/${world.meta.worldId}/p/${map.story.meta.id}/story/chapters/${encodeURIComponent(chapter.id)}`}>Open in {map.story.meta.title}</Link>}
         </div>
       )}
@@ -343,7 +343,7 @@ function Compare({ world, production, map, scene, ask, onClose }: {
           {failure && <p className="fy-ad-cmp__fail" role="alert">{failure}</p>}
           <div className="fy-ad-map__acts">
             <Button size="sm" variant="secondary" disabled={saving !== null || !stored} onClick={keep}>{saving ? "Keeping…" : "Keep the script"}</Button>
-            {ask && <Button size="sm" variant="primary" onClick={() => ask(`Revise episode ${scene.episode}, scene ${scene.n} (“${scene.heading.place}”) for chapter ${chapter?.order} v${pin.version} → v${chapter?.version}: paragraphs ${changed.join(", ") || "none"} changed. Propose the change with production-episode-script, keeping every unchanged block and its id.`)}>Ask Arke to revise</Button>}
+            {ask && <Button size="sm" variant="primary" onClick={() => ask(`Revise episode ${scene.episode}, scene ${scene.n} (“${scene.heading.place}”) for chapter ${chapter?.order} v${pin.version} → v${chapter?.version}: paragraphs ${changed.join(", ") || "none"} changed. Propose the change to the script, keeping every line that has not changed.`)}>Ask Arke to revise</Button>}
           </div>
         </section>
       </div>

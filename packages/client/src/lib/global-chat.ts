@@ -275,7 +275,10 @@ export class GlobalChatController {
     this.conversationIds.set(key, conversationId);
     const target = this.valueKey(key);
     if (this.openings.delete(previousKey)) this.openings.add(target);
-    if (existing && !this.values.has(target)) this.values.set(target, existing);
+    // What the page set while the conversation was still being found is kept over what was
+    // restored for it (issue 1883): Plan with Arke's first press put its draft here, and a
+    // conversation with any remembered value dropped it, so Chat opened empty.
+    if (existing) this.values.set(target, new Map([...(this.values.get(target) ?? []), ...[...existing].filter(([, value]) => value !== "")]));
     this.values.delete(key);
     this.changed({ selected: { ...selected, conversationId, newThread: false } });
   }

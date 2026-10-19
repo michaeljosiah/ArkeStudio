@@ -11,7 +11,8 @@ export const NARRATOR_LABEL: Record<NonNullable<AudioDramaPlan["narrator"]>, str
 
 export function pilotChapters(chapters: readonly number[]): string {
   if (chapters.length === 0) return "";
-  return chapters.length === 1 ? `chapter ${chapters[0]}` : `chapters ${chapters.join(", ")}`;
+  // "chapters 1 and 2", never "chapter 1, 2" (issue 1883).
+  return chapters.length === 1 ? `chapter ${chapters[0]}` : `chapters ${chapters.slice(0, -1).join(", ")} and ${chapters.at(-1)}`;
 }
 
 /**

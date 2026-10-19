@@ -5,6 +5,8 @@ import { ProposalManager } from "../../src/gate/proposals.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { readDramaSource, saveEpisodeScript } from "../../src/productions/audio-drama.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { ConversationActionPreparationError } from "../../src/arke-actions/lifecycle.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -110,5 +112,28 @@ describe("codex round 2 on PR 1878", () => {
     const pin = staged.blocks[0]!.kind === "heading" ? staged.blocks[0]!.source : undefined;
     assert.equal(pin?.hash, chapter.hash);
     assert.ok((await readDramaSource(store, id, chapter.hash!)).length > 0, "the pinned text is kept when the draft is staged");
+  });
+});
+
+describe("issue 1883: a new drama's pilot", () => {
+  it("lists the planned episodes with no script for Arke, written with baseHash null, and no scene episodes", async () => {
+    const { store, id } = await drama([]);
+    const record = productionRecord(store.getBundle(), id) as { unwrittenEpisodes?: { episodes: number[]; baseHash: null }; episodes?: unknown };
+    assert.deepEqual(record.unwrittenEpisodes?.episodes, [1, 2, 3, 4, 5, 6]);
+    assert.equal(record.unwrittenEpisodes?.baseHash, null);
+    assert.equal(record.episodes, undefined, "an empty scene-episode list read as no episodes to write");
+    await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [{ id: ulid(), kind: "heading", place: "The quay" }], baseHash: null });
+    assert.deepEqual((productionRecord(store.getBundle(), id) as { unwrittenEpisodes: { episodes: number[] } }).unwrittenEpisodes.episodes, [2, 3, 4, 5, 6]);
+  });
+
+  it("refuses in words Arke can act on, which the lifecycle passes on", async () => {
+    const { store, id, gate, intent } = await drama([]);
+    const stage = (baseHash: string | null) => stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-episode-script", worldId: store.worldId,
+      action: { kind: "production-episode-script", productionId: id, episode: 1, baseHash, checkReceiptIds: [], blocks: [] },
+    });
+    await assert.rejects(stage("sha256:guessed"), (error) => error instanceof ConversationActionPreparationError && /no script yet\. Write it with baseHash null/.test(error.message));
+    await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [], baseHash: null });
+    await assert.rejects(stage(null), /already has a script\. Name the baseHash/);
   });
 });

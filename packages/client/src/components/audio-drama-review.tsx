@@ -71,7 +71,7 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
   const surface = chat?.forPage() ?? null;
   const fix = (note: (typeof open)[number], n: number) => {
     if (!chat || !surface) return;
-    chat.setValue(surface.key, "draft", `Fix review note ${n} on episode ${episode}'s script (${CHECK[note.check]} · ${note.evidence}): ${note.says}${note.quote ? ` The line: “${note.quote}”` : ""} Propose the change with production-episode-script.`);
+    chat.setValue(surface.key, "draft", `Fix review note ${n} on episode ${episode}'s script (${CHECK[note.check]} · ${note.evidence}): ${note.says}${note.quote ? ` The line: “${note.quote}”` : ""} Propose the change to the script.`);
     chat.open(surface);
   };
   const decide = (key: string, decision: "intentional" | "dismissed") => {
