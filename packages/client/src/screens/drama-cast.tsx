@@ -215,14 +215,19 @@ export function CastColumn({ world, production, blocks, base, onClose }: {
 }) {
   const here = new Set(blocks.flatMap((block) => block.kind === "dialogue" ? [block.speaker] : block.kind === "narration" ? [DRAMA_NARRATOR] : []));
   const roles = dramaCastRoles(world, production).filter((role) => here.has(role.key));
+  // A role opens in place (230v): its voice chosen here, without leaving the script.
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <aside className="fy-ad-source fy-ad-castcol" aria-label="Cast">
       <header><h2>Cast</h2><small>this scene</small><span className="gap" /><IconButton label="Close cast" onClick={onClose}><X size={14} /></IconButton></header>
       {roles.length === 0 ? <p className="fy-ad-castcol__empty">No one speaks here yet.</p> : roles.map((role) => (
-        <section key={role.key} className="fy-ad-castcol__role">
-          <h3>{role.name}<small>{role.voice ? role.voice.label ?? role.voice.voiceId : role.key === DRAMA_NARRATOR ? "App narrator" : "No voice"}</small></h3>
+        <section key={role.key} className={cx("fy-ad-castcol__role", !role.voice && role.key !== DRAMA_NARRATOR && "fy-ad-castcol__role--none")}>
+          <h3><button type="button" aria-expanded={open === role.key} onClick={() => setOpen(open === role.key ? null : role.key)}>
+            {role.name}<small>{role.voice ? role.voice.label ?? role.voice.voiceId : role.key === DRAMA_NARRATOR ? "App narrator" : "No voice"}</small>
+          </button></h3>
           <p>{role.sound ?? "No note yet."}</p>
           {role.narration && <p><small>When the narrator quotes them: {role.narration}</small></p>}
+          {open === role.key && <CastDetail world={world} production={production} role={role} />}
         </section>
       ))}
       <Link className="fy-linkbtn" to={`${base}/cast`}>Open Cast</Link>

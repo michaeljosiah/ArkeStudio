@@ -8,6 +8,8 @@ import { decideDramaTake, hearDramaLines, subscribeDramaHeard, type DramaHeard }
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EditorDialog } from "./editor-dialog.js";
+import { PageSheet } from "./page-sheet.js";
+import { useMediaQuery } from "../lib/media-query.js";
 import { Button, cx } from "./ui.js";
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
@@ -40,13 +42,15 @@ export function useHearQuote(worldId: string, productionId: string, episode: num
   return quote?.key === key ? quote.result : null;
 }
 
-export function HearBar({ worldId, productionId, episode, lines, script, scriptHash, takes, worldSlug, name, onClear, onHeard, retake = false }: {
+export function HearBar({ worldId, productionId, episode, lines, script, scriptHash, takes, worldSlug, name, onClear, onHeard, retake = false, compact = false }: {
   worldId: string; productionId: string; episode: number; lines: readonly string[]; script: readonly EpisodeScriptBlock[];
   /** The saved script's hash; null while the score holds unsaved edits (codex on PR 1871). */
   scriptHash: string | null;
   takes: EpisodeTakes | undefined; worldSlug: string; name: (slug: string) => string; onClear: () => void; onHeard?: () => void;
   /** A new take beside a current one, to wait for the author (R-30). */
   retake?: boolean;
+  /** The press alone, for a phone's tool bar (230r): the bar around it is the page's. */
+  compact?: boolean;
 }) {
   const [decisions, setDecisions] = useState<Record<string, MissingVoiceChoice>>({});
   const [open, setOpen] = useState(false);
@@ -121,20 +125,28 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
   };
 
   const count = spoken.length;
+  const said = failure ?? (quote?.disposition === "refused" ? quote.reason : null);
+  const press = (
+    <Button variant="primary" size={compact ? undefined : "sm"} disabled={!quoted || pressed !== null} onClick={() => waits ? setOpen(true) : hear()}>
+      {waits && <i className="fy-ad-hear__dot" aria-label="a decision waits" />}
+      {pressed !== null ? "Making…" : `${retake ? "Retake" : `Hear ${count} line${count === 1 ? "" : "s"}`}${price > 0 ? ` · ${formatMicroUsd(price)}` : ""}`}
+    </Button>
+  );
+  const dialog = (
+    <HearDialog open={open} onClose={() => setOpen(false)} quote={quoted} decisions={decisions} worldId={worldId}
+      onDecide={(speaker, choice) => setDecisions((current) => ({ ...current, [speaker]: choice }))}
+      onHear={hear} busy={pressed !== null} />
+  );
+  if (compact) return <>{said && <span className="fy-ad-hear__fail fy-ad-hear__fail--above" role="alert">{said}</span>}{press}{dialog}</>;
   return (
     <div className="fy-ad-hear" role="region" aria-label="Selected lines">
       <span>{count} line{count === 1 ? "" : "s"}</span>
       <span className="gap" />
       {/* A refused price is said with its reason, not left as a dead button (codex on PR 1871). */}
-      {(failure ?? (quote?.disposition === "refused" ? quote.reason : null)) && <span className="fy-ad-hear__fail" role="alert">{failure ?? (quote?.disposition === "refused" ? quote.reason : null)}</span>}
+      {said && <span className="fy-ad-hear__fail" role="alert">{said}</span>}
       <Button variant="ghost" size="sm" onClick={onClear}>Done</Button>
-      <Button variant="primary" size="sm" disabled={!quoted || pressed !== null} onClick={() => waits ? setOpen(true) : hear()}>
-        {waits && <i className="fy-ad-hear__dot" aria-label="a decision waits" />}
-        {pressed !== null ? "Making…" : `${retake ? "Retake" : `Hear ${count} line${count === 1 ? "" : "s"}`}${price > 0 ? ` · ${formatMicroUsd(price)}` : ""}`}
-      </Button>
-      <HearDialog open={open} onClose={() => setOpen(false)} quote={quoted} decisions={decisions} worldId={worldId}
-        onDecide={(speaker, choice) => setDecisions((current) => ({ ...current, [speaker]: choice }))}
-        onHear={hear} busy={pressed !== null} />
+      {press}
+      {dialog}
     </div>
   );
 }
@@ -148,11 +160,13 @@ function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear
   onDecide: (speaker: string, choice: MissingVoiceChoice) => void; onHear: () => void; busy: boolean;
 }) {
   const [sent, setSent] = useState(false);
+  // On a phone the dialog is a sheet (230s): it holds the focus, and the page behind is inert.
+  const phone = useMediaQuery("(max-width: 599px)");
   const missing = quote?.missing ?? [];
   const requests = quote?.quote?.requests ?? [];
   const price = quote?.quote?.estimatedMicroUsd ?? 0;
-  return (
-    <EditorDialog open={open} title={`Hear ${requests.length} line${requests.length === 1 ? "" : "s"}`} subtitle={price > 0 ? formatMicroUsd(price) : "already performed"} onClose={onClose} width={520}>
+  const title = `Hear ${requests.length} line${requests.length === 1 ? "" : "s"}`, subtitle = price > 0 ? formatMicroUsd(price) : "already performed";
+  const body = (
       <div className="fy-ad-heardlg">
         {missing.map((entry) => (
           <section key={entry.speaker} className="fy-ad-heardlg__missing" aria-label={`${entry.name} has no voice`}>
@@ -173,8 +187,10 @@ function HearDialog({ open, onClose, quote, decisions, worldId, onDecide, onHear
           </Button>
         </div>
       </div>
-    </EditorDialog>
   );
+  return phone
+    ? <PageSheet open={open} title={title} subtitle={subtitle} onClose={onClose} className="fy-ad-sheet">{body}</PageSheet>
+    : <EditorDialog open={open} title={title} subtitle={subtitle} onClose={onClose} width={520}>{body}</EditorDialog>;
 }
 
 /**
