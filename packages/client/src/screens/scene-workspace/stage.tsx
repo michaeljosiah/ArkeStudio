@@ -1750,7 +1750,7 @@ export function SceneStage({
               <option key={choice.value} value={choice.value} disabled={choice.missing !== undefined}>{choice.label}{choice.missing === undefined ? "" : ` · ${choice.missing}`}</option>
             ))}
           </Select>
-          {constructing || working === null ? null : <Button size="sm" disabled={frozen || locked || moved} onClick={stage}>Quick layout</Button>}
+          {constructing ? null : <Button size="sm" disabled={frozen || locked || moved} onClick={stage}>Quick layout</Button>}
           {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
           <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
           {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
