@@ -495,6 +495,7 @@ import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
+import { downloadStory, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -879,6 +880,8 @@ export interface CoordinatorOptions {
    * here as a path rather than being looked for.
    */
   sampleWorldPath?: string | null;
+  /** Optional build-pinned on-demand story. Local paths remain available for small tests. */
+  sampleWorldDownload?: StoryDownload;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
   /**
@@ -3273,6 +3276,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  private sampleInstallAbort: AbortController | null = null;
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -7087,23 +7091,38 @@ export class Coordinator {
         return;
       }
       case "install-sample-world": {
+        if (this.stopping || this.sampleInstallAbort) return;
         const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
         const source = this.opts.sampleWorldPath ?? null;
+        const release = this.opts.sampleWorldDownload;
         const refuse = (reason: string) => {
           this.readModel.setSampleWorld({ installing: false, note: { text: reason, refused: true } });
           this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
         };
-        if (!install || source === null) {
-          refuse("this build does not carry the sample world");
+        if (!install || (source === null && (!release || !this.opts.appRoot))) {
+          refuse("this build has no story download configured");
           this.transport.broadcastSnapshot();
           return;
         }
         // Megabytes of art take a moment to copy. The flag is what stops a second click
         // starting a second copy while the first is still being written.
+        const control = new AbortController();
+        this.sampleInstallAbort = control;
         this.readModel.setSampleWorld({ installing: true, note: null });
         this.transport.broadcastSnapshot();
+        let downloaded: Awaited<ReturnType<typeof downloadStory>> | undefined;
         try {
-          const { worldId, slug, name } = await install(source);
+          if (release && source === null) downloaded = await downloadStory(release, join(this.opts.appRoot!, "downloads"), {
+            signal: control.signal,
+            progress: text => {
+              if (this.stopping) return;
+              this.readModel.setSampleWorld({ note: { text, refused: false } });
+              this.transport.broadcastSnapshot();
+            },
+          });
+          control.signal.throwIfAborted();
+          const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
+          if (this.stopping) return;
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.readModel.setSampleWorld({
             installing: false,
@@ -7111,9 +7130,12 @@ export class Coordinator {
           });
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
-          refuse(describeCoordinatorError(err));
+          if (!this.stopping) refuse(describeCoordinatorError(err));
+        } finally {
+          try { await downloaded?.dispose(); }
+          finally { this.sampleInstallAbort = null; }
         }
-        this.transport.broadcastSnapshot();
+        if (!this.stopping) this.transport.broadcastSnapshot();
         return;
       }
       case "reconcile-external-edit": {
@@ -21876,7 +21898,10 @@ export class Coordinator {
     this.readModel.setSampleWorld({
       available:
         this.opts.provider.installSampleWorld !== undefined &&
-        (await sampleWorldAvailable(this.opts.sampleWorldPath ?? null)),
+        ((this.opts.sampleWorldDownload !== undefined && this.opts.appRoot !== undefined) || (await sampleWorldAvailable(this.opts.sampleWorldPath ?? null))),
+      ...(this.opts.sampleWorldDownload ? { download: {
+        version: this.opts.sampleWorldDownload.version, bytes: this.opts.sampleWorldDownload.bytes, summary: this.opts.sampleWorldDownload.summary,
+      } } : {}),
     });
   }
 
@@ -21915,6 +21940,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the
