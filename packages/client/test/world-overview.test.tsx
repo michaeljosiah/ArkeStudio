@@ -7,6 +7,7 @@ import { App } from "../src/App.js";
 import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { parseHTML } from "linkedom";
+import { productionsLayoutFixture } from "./productions-layout-fixture.js";
 
 /**
  * The world hub's cast fan (SPEC-007 R-18, R-19).
@@ -108,6 +109,31 @@ function renderHub(world: Partial<typeof WORLD> = {}): string {
     __setStateForTest(FIXTURE_STATE);
   }
 }
+
+describe("format-aware world overview progress (#1951)", () => {
+  it("counts live novel chapters while preserving video shot coverage in a mixed world", () => {
+    const world = productionsLayoutFixture().world!;
+    world.productions[0]!.chapters[0]!.retired = true;
+    const { document } = parseHTML(renderHub(world));
+    assert.match(document.querySelector(".fy-ctas .fy-cta__sub")!.textContent!, /23 chapters · in-progress/);
+    const cards = [...document.querySelectorAll(".fy-prodtile")];
+    assert.match(cards[0]!.textContent!, /23 chapters · in-progress/);
+    assert.doesNotMatch(cards[0]!.textContent!, /shots|scenes|%|boards/);
+    assert.match(cards[1]!.textContent!, /shots? · \d+ accepted/);
+    assert.ok(cards[1]!.querySelector(".fy-prodtile__pct"));
+  });
+
+  it("does not call an empty novel or film ready", () => {
+    const world = productionsLayoutFixture().world!;
+    for (const production of world.productions) {
+      production.chapters = []; production.scenes = [];
+      const { document } = parseHTML(renderHub({ productions: [production] }));
+      const summary = document.querySelector(".fy-ctas .fy-cta__sub")!.textContent!;
+      assert.doesNotMatch(summary, /ready|0 of 0/);
+      assert.match(summary, production.meta.medium === "story" ? /0 chapters/ : /No shots yet/);
+    }
+  });
+});
 
 /**
  * The hero carries nothing to operate (design 63a).
