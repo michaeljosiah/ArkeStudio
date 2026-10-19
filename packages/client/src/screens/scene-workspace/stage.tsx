@@ -290,7 +290,9 @@ export function SceneStage({
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
   const stageRoot = useRef<HTMLElement | null>(null);
   const phone = useMediaQuery("(max-width: 599px)");
-  const touch = useMediaQuery("(hover: none)");
+  // Touch hints for a touch screen (issue 1888): "hover: none" alone also matched a desktop with no
+  // touch at all (no touch points, no coarse pointer), which showed finger gestures over the Stage.
+  const touch = useMediaQuery("(hover: none) and (pointer: coarse)");
   const compact = useMediaQuery("(max-width: 1099px)");
   const [stageWidth, setStageWidth] = useState(Number.POSITIVE_INFINITY);
   // The lens's box inside the viewport, for the safe frame (229c: it frames the lens, not the panel).
