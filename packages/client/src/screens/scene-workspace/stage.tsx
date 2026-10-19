@@ -1009,12 +1009,15 @@ export function SceneStage({
     if (frozen || locked || moved) return;
     stop();
     const inherited = effectiveStageBlocking(scene, undefined);
-    const firstBlock = scene.blocking === undefined
+    // A shot with its own marks is laid out over them, and keeps them; otherwise over the scene's.
+    // Only a scene with no blocking and a shot with none of its own gets a first shared block: a
+    // shot that owns its marks (a kept build on an empty scene) had them replaced by generated
+    // defaults, and no shared block was written either (codex on PR 1903).
+    const own = scope === "shot" && working !== null ? working : null;
+    const firstBlock = scene.blocking === undefined && own === null
       ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
-    // A shot with its own marks is laid out over them; otherwise over the scene's.
-    const own = scope === "shot" && working !== null ? working : null;
-    const availableCast = firstBlock?.cast ?? own?.cast ?? inherited.cast;
+    const availableCast = own?.cast ?? firstBlock?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
@@ -1039,8 +1042,8 @@ export function SceneStage({
     setDraft({
       ...camera,
       version: persisted?.version ?? 1,
-      cast: firstBlock?.cast ?? own?.cast ?? inherited.cast,
-      sets: firstBlock?.sets ?? own?.sets ?? inherited.sets,
+      cast: own?.cast ?? firstBlock?.cast ?? inherited.cast,
+      sets: own?.sets ?? firstBlock?.sets ?? inherited.sets,
     } as ResolvedShotStaging);
     setDraftFrom({ who: "quick" });
     setNote(null);
