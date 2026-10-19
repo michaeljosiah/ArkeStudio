@@ -11,7 +11,7 @@ import {
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerTones, splitBlock,
+  blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
@@ -36,6 +36,8 @@ import { EmptyState, Screen } from "../components/layout.js";
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
 
 const CUE_LABEL = { sound: "Sound", ambience: "Ambience", music: "Music" } as const;
+/** The speaker list's way to a new unnamed speaker: never a key, since no slug starts with "@". */
+const NEW_UNNAMED = "@unnamed";
 const INSERTS: Array<[EpisodeScriptBlock["kind"], string]> = [
   ["dialogue", "Line"], ["narration", "Narration"], ["sound", "Sound"], ["ambience", "Ambience"],
   ["music", "Music"], ["silence", "Silence"], ["note", "Note"], ["heading", "Scene"],
@@ -153,7 +155,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const cast = useMemo(() => pickableSheets(world.sheets, production.meta.id).filter((sheet) => sheet.type === "character"), [world.sheets, production.meta.id]);
   // Choices are the pickable cast; a speaker already in the script is named from every sheet,
   // a guest of another production included (codex on PR 1870).
-  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? speakerLabel(slug);
+  // Speakers no sheet carries (R-55): an unnamed one, a crowd, or any the script already gives lines.
+  const others = [...new Set(blocks.flatMap((block) => block.kind === "dialogue" && !cast.some((sheet) => sheet.id === block.speaker) ? [block.speaker] : []))];
   const scenes = scenesOf(blocks);
   const beds = bedMarks(blocks);
   const tones = speakerTones(blocks);
@@ -412,9 +416,13 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                   <>
                     <div className="fy-ad-score__who">
                       {block.kind === "dialogue" && (on
-                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => change(block.id, { speaker: event.target.value })}>
-                            {!cast.some((sheet) => sheet.id === block.speaker) && <option value={block.speaker}>{block.speaker}</option>}
+                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => change(block.id, {
+                            speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker(blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : [])) : event.target.value,
+                          })}>
                             {cast.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}
+                            {others.map((key) => <option key={key} value={key}>{name(key)}</option>)}
+                            {!others.includes("crowd") && !cast.some((sheet) => sheet.id === "crowd") && <option value="crowd">Crowd</option>}
+                            <option value={NEW_UNNAMED}>Someone unnamed</option>
                           </select>
                         : <b className="fy-ad-score__speaker">{name(block.speaker)}</b>)}
                       {block.kind === "dialogue" && block.channel && !on && <small>{block.channel}</small>}

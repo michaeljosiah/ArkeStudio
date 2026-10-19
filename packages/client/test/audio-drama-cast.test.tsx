@@ -88,7 +88,7 @@ describe("the drama's Cast (230k)", () => {
     assert.match(rowText(container, "maren-kest"), /Maren Kest.*from character.*1$/);
     assert.match(rowText(container, "bray"), /BrayNo voice.*Warm, steady\. Counts when frightened\.When the narrator quotes them: A slower warmth\.2$/);
     assert.doesNotMatch(rowText(container, "maren-kest"), /When the narrator quotes/, "Maren is never quoted by the narrator");
-    assert.match(rowText(container, "harbour-clerk"), /harbour-clerk.*no character sheet/);
+    assert.match(rowText(container, "harbour-clerk"), /Harbour clerk.*no character sheet/);
   });
 
   it("opens a role to its notes and keeps a hidden identity in the production, both or neither", async () => {

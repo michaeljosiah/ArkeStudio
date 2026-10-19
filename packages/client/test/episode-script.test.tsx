@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
-import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, splitBlock } from "../src/lib/episode-script.js";
+import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
 import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -124,7 +124,7 @@ describe("the score (230e)", () => {
   it("sets only the spoken words large, with direction above them and never inside", async () => {
     const m = await mount(withScript(blocks));
     const row = m.container.querySelector(`[data-block="${maren.id}"]`)!;
-    assert.equal(row.querySelector(".fy-ad-score__line textarea")!.getAttribute("aria-label"), "maren's line");
+    assert.equal(row.querySelector(".fy-ad-score__line textarea")!.getAttribute("aria-label"), "Maren's line");
     // linkedom keeps a controlled textarea's value in React's props, not on the node.
     assert.equal(props(row.querySelector(".fy-ad-score__line textarea")!).value, "Bray, look.");
     assert.equal(props(row.querySelector(".fy-ad-score__direction")!).value, "breathless, delighted");
@@ -294,6 +294,30 @@ describe("issue 1883: the selection and the Hear dialog", () => {
     assert.equal(dom.document.body.querySelector(".fy-editordialog"), null, "the dialog closes");
     const role = [...m.container.querySelectorAll(".fy-ad-castcol__role h3 button")].find(button => /^bray/i.test(button.textContent ?? ""));
     assert.equal(role?.getAttribute("aria-expanded"), "true", "Bray opens in the episode's Cast column");
+  });
+});
+
+describe("issue 1883: speakers no sheet carries (R-55)", () => {
+  it("names them from their keys, and numbers each new unnamed speaker", () => {
+    assert.equal(speakerLabel("crowd"), "Crowd");
+    assert.equal(speakerLabel("someone-2"), "Someone 2");
+    assert.equal(speakerLabel("a-dockhand"), "A dockhand");
+    assert.equal(unnamedSpeaker(["maren"]), "someone");
+    assert.equal(unnamedSpeaker(["someone", "someone-2"]), "someone-3");
+  });
+
+  it("offers a crowd and someone unnamed beside the world's characters, and the script's own", async () => {
+    const a = line("maren", "Climb."), b = line("a-dockhand", "Rope!");
+    const m = await mount(withScript([a, b]));
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => { words.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    const select = m.container.querySelector<HTMLSelectElement>(`[data-block="${a.id}"] select[aria-label='Speaker']`)!;
+    const labels = [...select.options].map(option => option.textContent);
+    for (const label of ["A dockhand", "Crowd", "Someone unnamed"]) assert.ok(labels.includes(label), `${label} is offered`);
+    await act(async () => props(select).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone", "an unnamed speaker is a key of its own");
   });
 });
 

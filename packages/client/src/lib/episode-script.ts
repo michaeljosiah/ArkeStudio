@@ -69,6 +69,25 @@ export function bedMarks(blocks: readonly EpisodeScriptBlock[]): Array<BedMark[]
   return marks;
 }
 
+/**
+ * A speaker no sheet carries (R-55), named from its key: "crowd" is Crowd, "someone-2" Someone 2,
+ * "a-dockhand" A dockhand. The score offered only the world's characters (issue 1883), so a line
+ * for an unnamed speaker or a crowd could not be written.
+ */
+export function speakerLabel(key: string): string {
+  const words = key.replace(/-(\d+)$/u, " $1").split("-").join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The key a new unnamed speaker takes: someone, then someone-2, and so on. */
+export function unnamedSpeaker(taken: Iterable<string>): string {
+  const used = new Set(taken);
+  if (!used.has("someone")) return "someone";
+  let n = 2;
+  while (used.has(`someone-${n}`)) n += 1;
+  return `someone-${n}`;
+}
+
 /** A speaker's voice colour, 1–6, in the order they first speak (the audiobook's tones). */
 export function speakerTones(blocks: readonly EpisodeScriptBlock[]): Map<string, number> {
   const tones = new Map<string, number>();
