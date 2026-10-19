@@ -1408,15 +1408,16 @@ export function SceneStage({
   const sceneLights = scene.blocking?.lights ?? [];
   // While a draft waits, a light added, changed or removed, and the atmosphere, join the draft
   // (design turn 231b, rule 8): Keep writes them with its blocking in one command and Discard drops
-  // them. Without a draft they are the scene's own and land at once, as before.
+  // them, and on Arke's draft they are the person's edit too (codex on PR 1904). Without a draft
+  // they are the scene's own and land at once, as before.
   const writeLight = (index: number, next: StageLight | null) => {
     const base = moved ? shownLights : sceneLights;
     const lights = next === null ? base.filter((_, at) => at !== index) : base.map((light, at) => (at === index ? next : light));
-    if (moved) setDraftLook((look) => ({ ...look, lights }));
+    if (moved) { setDraftLook((look) => ({ ...look, lights })); markEdited(); }
     else writeScene({ lights: lights.length === 0 ? null : lights });
   };
   const writeAtmosphere = (atmosphere: SceneAtmosphere) => {
-    if (moved) setDraftLook((look) => ({ ...look, atmosphere }));
+    if (moved) { setDraftLook((look) => ({ ...look, atmosphere })); markEdited(); }
     else writeScene({ atmosphere });
   };
   const addLight = () => {
@@ -1427,7 +1428,7 @@ export function SceneStage({
     for (let n = 2; taken.has(name); n++) name = `light ${n}`;
     const figure = working.cast[0];
     const light = stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 });
-    if (moved) setDraftLook((look) => ({ ...look, lights: [...base, light] }));
+    if (moved) { setDraftLook((look) => ({ ...look, lights: [...base, light] })); markEdited(); }
     else writeScene({ lights: [...base, light] });
     setSelection(null); viewport.current?.select(null); setPlateSelected(false);
     setLightSelected(base.length);
