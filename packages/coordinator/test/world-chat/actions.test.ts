@@ -3160,4 +3160,21 @@ describe("Arke's episode scripts reach the score or say why (issue 1883)", () =>
     const reply = view.messages.find((message) => message.role === "studio")!;
     assert.match(view.notPrepared[reply.id]?.[0] ?? "", /^Episode 1 script: A draft of episode 1's script is waiting/);
   });
+
+  it("shows a drafted script on its card as a radio script, not as JSON (issue 1888)", async () => {
+    const w = await setup();
+    const id = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const receipts = [currentReceipt(w.store, "production-metadata", id)];
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [ModelWorldChatActionSchema.parse({
+      kind: "production-episode-script", productionId: id, episode: 1, baseHash: null,
+      blocks: [{ kind: "heading", place: "The quay" }, { kind: "narration", words: "The tide was out." }], checkReceiptIds: receipts.map((receipt) => receipt.id),
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find((candidate) => candidate.actionId === prepared[0]!.intent.actionId)!;
+    const body = card.shown.body as { family: string; fields: Array<{ label: string; before: string | null; after: string | null }> };
+    assert.equal(body.family, "authored-diff");
+    assert.ok(body.fields.some((field) => field.label === "Episode 1 script: Script" && field.after === "SCENE · The quay\nNARRATOR: The tide was out."), JSON.stringify(body.fields));
+    assert.ok(body.fields.every((field) => !(field.after ?? "").includes('"kind"')), "never the blocks as JSON");
+  });
 });

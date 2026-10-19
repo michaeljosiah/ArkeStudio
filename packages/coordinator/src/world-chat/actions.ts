@@ -1686,7 +1686,9 @@ async function proposalProjection(
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
   if (productionPreview) await store.ensureSchemaVersion(PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, "production-card-preview");
   const fields = review.targets.flatMap((target) =>
-    target.fields.map((field) => ({
+    // A script's JSON is the review's, for the changes its lines do not show; on the card it was
+    // printed whole beside the readable script and the draft in the score (issue 1888).
+    target.fields.filter((field) => !(proposal.kind === "episode-script" && field.field === "Script JSON")).map((field) => ({
       label: `${target.label}: ${field.field}`.slice(0, 200),
       before: clipped(field.before),
       after: clipped(field.proposed),
