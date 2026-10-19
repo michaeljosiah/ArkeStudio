@@ -83,8 +83,9 @@ selectable text, page/zoom/chapter controls and no native download/annotation ac
 ready edition offers Save PDF. Desktop resolves the inventoried `story.pdf` through the same
 digest checks as other formats; Locate must restore matching bytes. The standalone file needs
 neither Arke nor the original world. This is a reading PDF with tagged text and bookmarks, not
-a claim of PDF/UA, PDF/X, print-house or retailer certification. Complex scripts outside the
-renderer’s supported coverage are refused; a language tag alone does not establish coverage.
+a claim of PDF/UA, PDF/X, print-house or retailer certification. V1 accepts Latin prose,
+including Igbo/Yoruba diacritics, plus supported symbols and emoji. Non-Latin letters and
+unsupported glyphs are refused with their location; a language tag alone does not establish coverage.
 
 Desktop builds bundle the worker and font assets. Headless development uses the source worker
 through tsx. See [maintenance](maintenance.md) for asset ownership and [testing](testing.md)
