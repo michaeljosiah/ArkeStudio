@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { lookViewFor, type PictureWho } from "@arke-studio/contracts";
+import { lookViewFor, PICTURE_CHECK_NOTE_MAX, PictureCheckSchema, type PictureWho } from "@arke-studio/contracts";
 import { BRIEF_EXAMPLES, briefRiders, briefRules, holdBrief, namedInText, pictureChecks, type RawBrief } from "../../src/productions/audiobook-picture-brief.js";
 import { buildPicturePrompt } from "../../src/productions/audiobook-picture-suggest.js";
 import type { ChapterPerson } from "../../src/productions/audiobook-look.js";
@@ -47,6 +47,20 @@ const checksOf = (raw: RawBrief, block: string, who = riding((raw.inFrame ?? [])
   const held = hold(raw);
   return Object.fromEntries(pictureChecks({ held, who, people: PEOPLE, lines: LINES, block, mood }).map((check) => [check.id, check]));
 };
+
+it("bounds joined expression summaries while retaining the full prompt and each expression (#1946)", () => {
+  const expression = "eyes fixed on the doorway, mouth closed, brows raised with quiet concern, chin lifted toward the dim window, waiting for an answer without turning away";
+  const held = hold({ frame: "Medium shot", inFrame: PEOPLE.map(p => p.key), expressions: Object.fromEntries(PEOPLE.map(p => [p.key, expression])),
+    prompt: "Medium shot. " + PEOPLE.map(p => `${p.name}: ${expression}.`).join(" ") });
+  const before = structuredClone(held);
+  const checks = pictureChecks({ held, who: riding(PEOPLE.map(p => p.key)), people: PEOPLE, lines: LINES, block: "", mood: MOOD });
+  for (const check of checks) PictureCheckSchema.parse(check);
+  const summary = checks.find(check => check.id === "expression")!;
+  assert.equal(summary.ok, true);
+  assert.ok(summary.note!.length <= PICTURE_CHECK_NOTE_MAX);
+  assert.ok(summary.note!.endsWith("…"));
+  assert.deepEqual(held, before);
+});
 
 describe("the eyes: a close frame on her, without him (193i)", () => {
   it("keeps Ife in frame, Ade and Tunde out of it by the names the model used, and her expression", () => {
