@@ -196,6 +196,8 @@ const DRAWS_ON_LINE = "This chapter draws on ";
 
 type OpenedRecord = {
   body: string;
+  /** A successful outline replacement, retained until the authoritative summary is refreshed. */
+  drafted?: boolean;
   version: number;
   hash: string;
   versions: number[];
@@ -827,6 +829,8 @@ export function ChapterWorkspace({
         const savedBody = savedText.current;
         const saved = {
           body: savedBody ?? recordRef.current?.body ?? "",
+          drafted: recordRef.current?.drafted === true || (chapter.status === "outlined" && savedBody !== null &&
+            savedBody.trim() !== "" && savedBody.trim() !== recordRef.current?.body.trim()),
           version: result.version,
           hash: result.hash,
           versions: recordRef.current?.versions ?? [],
@@ -895,7 +899,7 @@ export function ChapterWorkspace({
         setReopen((n) => n + 1);
       }
     });
-  }, [flushSave]);
+  }, [flushSave, chapter.status]);
 
   /*
    * A save in flight when the transport drops never answers: the connection coming back brings
@@ -1426,7 +1430,8 @@ export function ChapterWorkspace({
 
   // Loaded outlines are planning text. A changed manuscript replacement counts while being
   // typed, matching the status transition its normal save will make (issue 1960).
-  const manuscriptStatus = chapter.status === "outlined" && text.trim() !== "" && text.trim() !== live.trim() ? "drafted" : chapter.status;
+  const savedStatus = record?.drafted === true ? "drafted" : chapter.status;
+  const manuscriptStatus = savedStatus === "outlined" && text.trim() !== "" && text.trim() !== live.trim() ? "drafted" : savedStatus;
   const words = record === null ? (chapter.words ?? 0) : chapterManuscriptWords(text, manuscriptStatus);
   // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
   // status stays "planned" until the author sets one, which read as a chapter not yet written.
