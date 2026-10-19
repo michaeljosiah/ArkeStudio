@@ -1,6 +1,6 @@
 import type { Capability, WorldBundle, WorldSummary, WorldImageReference } from "@arke-studio/contracts";
 import type { ProposalManager } from "./gate/proposals.js";
-import type { WorldStore } from "./world/store.js";
+import type { WorldStore, WorldStoreOpenProgress } from "./world/store.js";
 
 /**
  * Reads the world model (SPEC-001 §2.6). SPEC-002 replaced the SPEC-001 mock with the real
@@ -14,7 +14,8 @@ export interface WorldProvider {
   listWorlds(): Promise<WorldSummary[]>;
   /** Read-only image catalogue; opens no second store and acquires no world lock. */
   listReferenceImages?(slug: string): Promise<WorldImageReference[]>;
-  loadWorld(worldId: string): Promise<WorldBundle>;
+  /** `onProgress` hears how far opening the store has got, when there is one to open (issue 1844). */
+  loadWorld(worldId: string, opts?: { onProgress?: (progress: WorldStoreOpenProgress) => void }): Promise<WorldBundle>;
   createWorld?(input: {
     creationId?: string;
     name: string;

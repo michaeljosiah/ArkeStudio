@@ -501,8 +501,12 @@ const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", 
 /**
  * Input discovery can omit operational/session projections and cancel authored reads and media
  * hashing. The ordinary world scan retains those projections and its existing default behavior.
+ * `onProgress` hears how many record files have been read so far, once per file (issue 1844).
  */
-export async function scanWorld(dir: string, opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean } = {}): Promise<ScanResult> {
+export async function scanWorld(
+  dir: string,
+  opts: { supports?: number; signal?: AbortSignal; includeOperationalState?: boolean; onProgress?: (read: number) => void } = {},
+): Promise<ScanResult> {
   const { signal } = opts;
   const operational = opts.includeOperationalState !== false;
   const read = (path: string) => scanIo.read(path, signal);
@@ -537,7 +541,9 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       return { error };
     }
   };
+  let settled = 0;
   const settle = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null => {
+    opts.onProgress?.(++settled);
     try {
       if ("error" in found) throw found.error;
       manifest[toPortable(rel)] = sha256(found.raw);
