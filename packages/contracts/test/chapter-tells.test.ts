@@ -35,17 +35,28 @@ it("does not guess which of two identical lines a single tag meant", () => {
   assert.deepEqual(tells.map((t) => t.start), [body.indexOf("She was there.")], "a quotation long enough to be unique is placed");
 });
 
-it("counts overlapping tags of one kind once and of two kinds twice", () => {
+it("counts one tell tagged twice once, and two kinds at one place twice", () => {
   const body = "Not dramatically, not with the tidy violence of lust, but with the dull click of a lock turning.";
   const { tells, merged } = verifiedTells(body, [
-    { kind: "notxy", quote: "Not dramatically, not with the tidy violence of lust, but with" },
-    { kind: "notxy", quote: "but with the dull click" },
+    { kind: "notxy", quote: "Not dramatically, not with the tidy violence of lust" },
+    { kind: "notxy", quote: "Not dramatically, not with the tidy violence of lust, but with the dull click" },
     { kind: "metaphor", quote: "the dull click of a lock turning" },
   ]);
-  assert.equal(merged, 1);
+  assert.equal(merged, 1, "two tags of one kind beginning at one place are one tell");
   assert.deepEqual(tells.map((t) => t.kind), ["notxy", "metaphor"]);
-  assert.equal(tells[0]!.quote, "Not dramatically, not with the tidy violence of lust, but with the dull click");
-  assert.equal(tells[0]!.end, body.indexOf(" of a lock"));
+  assert.equal(tells[0]!.quote, "Not dramatically, not with the tidy violence of lust, but with the dull click", "the longer span is kept");
+});
+
+it("keeps a tell that begins inside a lengthened quotation of the same kind", () => {
+  // Codex on PR 1956: a repeated simile lengthened forward to be unique runs into a separate
+  // personification. Both are metaphors, and both count.
+  const body = "He ran like a dog. Then he ran like a dog in the rain, the sky weeping on his back.";
+  const { tells, merged } = verifiedTells(body, [
+    { kind: "metaphor", quote: "like a dog in the rain, the sky weeping" },
+    { kind: "metaphor", quote: "the sky weeping on his back" },
+  ]);
+  assert.equal(merged, 0);
+  assert.deepEqual(tells.map((t) => t.start), [body.indexOf("like a dog in"), body.indexOf("the sky")]);
 });
 
 it("records whether a tell sits inside spoken words", () => {

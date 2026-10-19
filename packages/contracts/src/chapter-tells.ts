@@ -40,7 +40,7 @@ export const TELL_ANSWER_MAX = 800;
 
 export const PlacedTellSchema = z.object({
   kind: TellKindSchema,
-  /** The tagged words; their first 600 characters when overlapping tags merged into a longer span. */
+  /** The tagged words; their first 600 characters when two tags of one tell merged into a longer span. */
   quote: z.string().min(1).max(600),
   start: z.number().int().nonnegative(),
   end: z.number().int().positive(),
@@ -95,7 +95,7 @@ export const ReviewTellsSchema = z.object({
   repeated: z.number().int().nonnegative(),
   /** Tags whose words occur in more places than they were tagged at, so which one is meant is unknown. */
   ambiguous: z.number().int().nonnegative(),
-  /** Same-kind tags that overlapped another and were counted once. */
+  /** Same-kind tags beginning where another began: one tell tagged twice, counted once. */
   merged: z.number().int().nonnegative(),
 }).strict();
 export type ReviewTells = z.infer<typeof ReviewTellsSchema>;
@@ -110,8 +110,10 @@ const emptyByKind = (): TellsByKind => ({ three: 0, list: 0, metaphor: 0, notxy:
  * crowded passage. The skill asks for a quotation that occurs once, lengthened forward so it
  * still begins where the device does (its start is what is counted), so an ambiguous tag is the
  * reviewer's miss, dropped and counted rather than anchored to words it may not mean (the review
- * notes' rule, turn 227r). Overlapping tags of one kind are one device; different kinds both
- * count, as the source counted one sentence as Not X but Y and as Metaphor.
+ * notes' rule, turn 227r). Two tags of one kind that begin at the same place are one device: a
+ * tell is where it begins. One that begins inside another is a separate device, since a quotation
+ * lengthened to be unique can run on into the next figure (codex on PR 1956). Different kinds at
+ * one place both count, as the source counted one sentence as Not X but Y and as Metaphor.
  */
 export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tells: PlacedTell[]; unplaced: number; repeated: number; ambiguous: number; merged: number } {
   const dialogue = dialogueOf(body);
@@ -139,7 +141,7 @@ export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tel
   let merged = 0;
   for (const tell of placed) {
     const same = tells.findLast((kept) => kept.kind === tell.kind);
-    if (same !== undefined && tell.start < same.end) {
+    if (same !== undefined && tell.start === same.start) {
       merged++;
       if (tell.end > same.end) {
         same.end = tell.end;

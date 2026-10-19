@@ -166,7 +166,8 @@ about hearts, truths or wanting, instead of being shown through what someone doe
 One sentence can carry two kinds, and both count. The source counted *not with the tidy violence
 of lust, but with the dull, irreversible click of a lock turning* as Not X but Y and as Metaphor.
 
-Two overlapping spans of the same kind are one instance.
+Two tags of the same kind that begin at the same place are one instance. A tag that begins
+inside another of its kind is a separate one: the first may run on past its own device.
 
 ## What this means for a check
 

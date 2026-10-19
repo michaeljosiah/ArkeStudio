@@ -69,7 +69,7 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
     tell which occurrence was meant. The skill asks for a quotation that occurs once,
     lengthened with the words after it so it still begins where the device begins;
   - it counts a tag listed twice for one place once;
-  - it counts overlapping tags of one kind once;
+  - it counts two tags of one kind that begin at the same place once;
   - it reads the 450 words that begin at each tell. Any crowded 450 words in the chapter
     hold their own first tell, so this finds every one wherever it falls, including in a
     chapter written with single line breaks, which splits as one paragraph;

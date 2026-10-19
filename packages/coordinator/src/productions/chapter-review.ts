@@ -274,7 +274,7 @@ export class ChapterReviewService {
             if (!tagged.tells) throw new Error("The prose reviewer returned no tells list.");
             review.tells = readTells(source.chapter.body, tagged.tells);
             const { tells, passages, unplaced, repeated, ambiguous, merged, line, stretchWords } = review.tells;
-            task.detail = `${tells.length} tells placed; ${unplaced} quotations not in the chapter dropped; ${repeated} repeated tags counted once; ${ambiguous} matching more places than they were tagged at dropped; ${merged} overlapping tags of one kind counted once. ${passages.length} crowded ${passages.length === 1 ? "passage" : "passages"} at the provisional line of ${line} in ${stretchWords} words. Tagging is the model's reading, checked against the saved words.`;
+            task.detail = `${tells.length} tells placed; ${unplaced} quotations not in the chapter dropped; ${repeated} repeated tags counted once; ${ambiguous} matching more places than they were tagged at dropped; ${merged} tags of one tell, beginning at one place, counted once. ${passages.length} crowded ${passages.length === 1 ? "passage" : "passages"} at the provisional line of ${line} in ${stretchWords} words. Tagging is the model's reading, checked against the saved words.`;
             task.state = "complete";
             task.completedAt = new Date().toISOString();
             await persist();

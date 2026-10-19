@@ -32,7 +32,7 @@ The check follows from that:
 
 | | Rule |
 |---|---|
-| Instance | One device, tagged by the model with its kind and an exact quotation. Different kinds may overlap; the same kind overlapping is one instance. |
+| Instance | One device, tagged by the model with its kind and an exact quotation that begins where the device begins. Different kinds may overlap; two tags of one kind beginning at the same place are one instance. |
 | Verification | The coordinator drops any quotation that is not in the saved chapter, exactly as `verifiedReviewAnswer` does today. |
 | Stretch | The 450 words that begin at each tell. Any crowded 450 words hold their own first tell, so the stretch starting there finds them wherever they fall; windows sampled at paragraphs or fixed steps can miss a run between two starts (codex on PR 1956). |
 | Crowded | 8 or more tells in a stretch, or 4 or more of one kind. |
