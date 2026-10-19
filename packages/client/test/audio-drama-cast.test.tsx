@@ -4,7 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { initialAudioArrangement, newAudioClip, ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { emitForTest, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { ProductionCastScreen } from "../src/screens/production-cast.js";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
@@ -148,6 +149,24 @@ describe("Review in the score (230j)", () => {
     const closed = [...container.querySelectorAll(".fy-ad-review__note--closed .fy-ad-review__kind")].map((kind) => kind.textContent);
     assert.ok(closed.includes("Intelligibility · audio · not heard"));
     assert.ok(closed.includes("Pacing · script v3 · checked"));
+  });
+
+  it("says what of the mix was heard, with the heard audio's notes beside the script's (issue 1882)", async () => {
+    const bray = line("bray", "Climb.");
+    const { container, sent } = await mount(drama([{ id: ulid(), kind: "heading", place: "The quay" }, bray]), "script/1");
+    const toggle = [...container.querySelectorAll("button")].find((button) => button.textContent === "Review")!;
+    await act(async () => props(toggle).onClick!({}));
+    const asked = sent.findLast((message) => message.kind === "read-audio-heard") as { requestId: string; chapterFile: string };
+    assert.equal(asked.chapterFile, "episode-001");
+    await act(async () => __applyEventForTest({ type: "audio-studio.heard", at: new Date().toISOString(), requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      chapterId: "episode-001", heard: { base: "a".repeat(64), seconds: 150, spans: [[0, 88]], notes: [{ key: "d".repeat(32), check: "intelligibility", block: bray.id, quote: "Bray: Climb.",
+        from: 57.8, to: 59.4, observed: "Bray 4 dB under Ambience" }] } }));
+    assert.equal(container.querySelector('[data-testid="review-coverage"]')?.textContent, "heard 0:00–1:28 of 2:30");
+    const kinds = [...container.querySelectorAll(".fy-ad-review__note:not(.fy-ad-review__note--closed) .fy-ad-review__kind")].map((kind) => kind.textContent);
+    assert.ok(kinds.includes("2 Intelligibility · heard 0:57.8–0:59.4"), JSON.stringify(kinds));
+    const closed = [...container.querySelectorAll(".fy-ad-review__note--closed .fy-ad-review__kind")].map((kind) => kind.textContent);
+    assert.ok(closed.includes("Intelligibility · audio · heard"));
+    assert.ok([...container.querySelectorAll("button")].some((button) => button.textContent === "Review audio in Audio Studio"), "230j's way to the audio");
   });
 
   it("decides a note Intentional, kept in the production, and leaves it closed", async () => {
@@ -314,6 +333,65 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     // The coordinator's signal for an episode carries no chapter record, only that its studio changed.
     await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001" }));
     assert.equal(reads(), before + 1, "the studio reads again, so Current/Suggested has the suggestion");
+  });
+});
+
+describe("issue 1882: the episode's review strip and what was heard (230o)", () => {
+  const studioOf = (line: EpisodeScriptBlock, heard?: object) => {
+    const source = { file: "artifacts/take.wav", label: "Take", hash: `sha256:${"b".repeat(64)}`, samples: 96_000, rate: 48_000, channels: 2 as const };
+    const clip = { ...newAudioClip("voice", "voice:bray", source, 96_000), role: "speech" as const, passageId: "p1", placement: { kind: "sequence" as const, offset: 0 } };
+    const arrangement = initialAudioArrangement({ manuscriptHash: "script", passages: [{ id: "p1", key: line.id, textHash: dramaLineHash(line as never) }],
+      tracks: [{ id: "voice:bray", name: "Bray", gainDb: 0, muted: false }], clips: [clip], omissions: [], master: { targetLufs: -18, ceilingDb: -1.5 } }, "{}");
+    return { base: "a".repeat(64), revision: 1, undo: null, redo: null, state: arrangement.current, script: { hash: "script", passages: [{ key: line.id, textHash: dramaLineHash(line as never) }] },
+      passages: [{ key: line.id, text: "Bray: Climb." }], library: [], ...(heard ? { heard } : {}) };
+  };
+  const open = async (line: EpisodeScriptBlock, heard?: object) => {
+    const m = await mount(drama([{ id: ulid(), kind: "heading", place: "The quay" } as EpisodeScriptBlock, line]), "script/1?view=audio-studio");
+    const read = m.sent.find((message) => message.kind === "read-audio-studio") as { requestId: string };
+    await act(async () => __applyEventForTest({ type: "audio-studio.state", at: new Date().toISOString(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001",
+      requestId: read.requestId, source: null, studio: studioOf(line, heard) as never }));
+    return m;
+  };
+
+  it("draws the whole episode: its scene, what was heard, the note pinned where it was heard, and Hear the rest", async () => {
+    const line = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Climb." } as EpisodeScriptBlock;
+    const note = { key: "c".repeat(32), check: "intelligibility", block: line.id, quote: "Bray: Climb.", from: 0, to: 1, observed: "Bray 4 dB under Ambience",
+      fix: { label: "Duck Ambience 10 dB more under Bray", commands: [{ kind: "set-clip", id: "voice", changes: { duckDb: 10 } }] } };
+    const { container, sent } = await open(line, { base: "a".repeat(64), seconds: 2, spans: [[0, 1]], notes: [note] });
+    const strip = container.querySelector("[role='region'][aria-label='Review']")!;
+    assert.equal(strip.querySelector("[data-testid='strip-coverage']")?.textContent, "heard 0:00–0:01 of 0:02");
+    assert.equal(strip.querySelector(".fy-review-strip__scene")?.getAttribute("title"), "1 · The quay");
+    assert.equal(strip.querySelectorAll(".fy-review-strip__heard i").length, 1, "what was heard is solid over the hatching");
+    assert.ok([...strip.querySelectorAll("button")].some((button) => button.textContent === "Hear the rest"));
+    assert.ok(container.querySelector(".fy-audio-timeline__region"), "the scene is a region on the ruler too");
+    await act(async () => props(strip.querySelector("button[aria-label^='Note 1']")!).onClick!({}));
+    const section = container.querySelector("[aria-label='Review note']")!;
+    assert.match(section.textContent!, /Review · note 1 · heard.*“Climb\.”.*Heard0:00\.0–0:01\.0.*ObservedBray 4 dB under Ambience.*KindIntelligibility/);
+    await act(async () => props([...section.querySelectorAll("button")].find((button) => button.textContent === "Fix")!).onClick!({}));
+    assert.match(container.querySelector("[aria-label='Review audio changes']")?.textContent ?? "", /Duck Ambience 10 dB more under Bray/, "Fix is Current and Suggested");
+    await act(async () => props([...section.querySelectorAll("button")].find((button) => button.textContent === "Dismiss")!).onClick!({}));
+    assert.deepEqual(sent.filter((message) => message.kind === "decide-drama-note").map((message) => (message as { key: string; decision: string }).decision), ["dismissed"]);
+  });
+
+  it("records what of the saved mix played whole, on the base it was heard on", async () => {
+    const element = { src: "", currentTime: 0, duration: 2, loop: false, playbackRate: 1, play: async () => {}, pause: () => {}, load: () => {}, removeAttribute: () => {},
+      addEventListener: () => {}, removeEventListener: () => {} };
+    setAudioFactoryForTest(() => element as never);
+    try {
+      const line = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Climb." } as EpisodeScriptBlock;
+      const { container, sent } = await open(line);
+      assert.equal(container.querySelector("[data-testid='strip-coverage']")?.textContent, "Script v3 · no audio heard yet");
+      await act(async () => props(container.querySelector("[aria-label='Play']")!).onClick!({}));
+      const preview = sent.find((message) => message.kind === "preview-audio-studio") as { requestId: string };
+      await act(async () => __applyEventForTest({ type: "audiobook.mix", at: new Date().toISOString(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001",
+        requestId: preview.requestId, mix: { file: ".cache/audio-studio/mix/x.wav", seconds: 2, from: 0 } }));
+      await act(async () => { emitForTest("play"); });
+      for (const at of [0.25, 0.75, 1.25, 1.75]) await act(async () => { element.currentTime = at; emitForTest("timeupdate"); });
+      await act(async () => { emitForTest("pause"); });
+      const heard = sent.filter((message) => message.kind === "record-audio-heard") as Array<{ base: string; spans: Array<[number, number]>; chapterFile: string }>;
+      assert.equal(heard.length, 1);
+      assert.deepEqual([heard[0]!.base, heard[0]!.chapterFile, heard[0]!.spans], ["a".repeat(64), "episode-001", [[0, 2]]], "played to its end, it is heard to its end");
+    } finally { setAudioFactoryForTest(null); }
   });
 });
 

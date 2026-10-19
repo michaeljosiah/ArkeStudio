@@ -7,7 +7,7 @@ import {
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
-  renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords,
+  renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords, decideDramaNote,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
@@ -22,7 +22,7 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
-import { ReviewColumn } from "../components/audio-drama-review.js";
+import { ReviewColumn, useDramaScriptReview } from "../components/audio-drama-review.js";
 import { pilotAsk } from "../components/audio-drama-plan-card.js";
 import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
@@ -591,6 +591,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         {side === "review" && asSheet("Review", (
           // The saved script it names as evidence, never an unsaved draft (codex on PR 1873).
           <ReviewColumn world={world} production={production} episode={episode} version={stored?.script.version ?? 1} blocks={stored?.script.blocks ?? []} onClose={() => setSide(null)}
+            onStudio={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/script/${episode}?view=audio-studio`)}
             onPick={(id) => { setSide(phone ? null : side); setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
         ))}
       </div>
@@ -720,6 +721,20 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   // Arke's suggestion staged for this episode (issue 1882) is signalled by its studio's record key:
   // the studio reads again, and Current/Suggested has it to compare.
   const signalled = useAudiobookRecords()[`${world.meta.worldId}/${production.meta.id}/${stem}`]?.seq ?? 0;
+  // The one Review (230o, issue 1882): the saved script's notes and scenes, decided as the script's are.
+  const version = stored?.script.version ?? 1, saved = stored?.script.blocks ?? [];
+  const scripted = useDramaScriptReview(world, production, episode, version, saved);
+  const review = {
+    version,
+    scenes: saved.flatMap((block, i) => {
+      if (block.kind !== "heading") return [];
+      const line = saved.slice(i + 1).find((next) => next.kind === "heading" || next.kind === "dialogue" || next.kind === "narration");
+      return line && line.kind !== "heading" ? [{ key: block.id, title: block.place, firstLine: line.id }] : [];
+    }).map((scene, index) => ({ ...scene, n: saved.filter((block) => block.kind === "heading").findIndex((block) => block.id === scene.key) + 1 || index + 1 })),
+    notes: scripted.notes.map((note) => ({ key: note.key, block: note.blocks.find((id) => saved.some((block) => block.id === id && (block.kind === "dialogue" || block.kind === "narration"))), says: note.says, evidence: note.evidence })),
+    decided: production.audioDrama?.review ?? {},
+    onDecide: (key: string, decision: "intentional" | "dismissed") => decideDramaNote(world.meta.worldId, production.meta.id, key, decision),
+  };
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? speakerLabel(slug);
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
@@ -771,7 +786,7 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       conversation={(context) => <ProductionConversation worldId={world.meta.worldId} productionId={production.meta.id} entry={{ kind: "production", productionId: production.meta.id }}
         dock={{ title: "Arke", subject: `Episode ${episode}`, conversationFirst: true, subjectPrefix: `${context} About episode ${episode}:`, about: `episode ${episode}` }}
         placeholder={`Ask about episode ${episode}`} emptyLine={`No conversation about episode ${episode} yet.`} />}
-      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode"
+      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode" review={review}
       onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />
       </div>

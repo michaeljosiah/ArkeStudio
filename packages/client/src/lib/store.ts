@@ -1929,6 +1929,7 @@ function handleFrame(json: string): void {
       for (const listener of audiobookMixListeners) listener(event);
     }
     if (event.type === "audio-studio.state") for (const listener of audioStudioListeners) listener(event);
+    if (event.type === "audio-studio.heard") for (const listener of audioHeardListeners) listener(event);
     if (event.type === "audiobook.timing-proposal") {
       for (const listener of audiobookTimingProposalListeners) listener(event);
     }
@@ -5987,6 +5988,20 @@ export function setAudiobookTiming(worldId: string, productionId: string, chapte
 export function readAudioStudio(worldId: string, productionId: string, chapterFile: string): string | null {
   const requestId = ulid();
   return send({ kind: "read-audio-studio", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+/** Spans of an episode's saved mix that just played whole, on the base heard (design turn 230o, issue 1882). */
+export function recordAudioHeard(worldId: string, productionId: string, chapterFile: string, base: string, spans: Array<[number, number]>): boolean {
+  return send({ kind: "record-audio-heard", worldId, productionId, chapterFile, base, spans });
+}
+const audioHeardListeners = new Set<(event: Extract<DomainEvent, { type: "audio-studio.heard" }>) => void>();
+/** What of an episode's mix has been heard, for the script's Review (issue 1882). */
+export function readAudioHeard(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-heard", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+export function subscribeAudioHeard(listener: (event: Extract<DomainEvent, { type: "audio-studio.heard" }>) => void): () => void {
+  audioHeardListeners.add(listener);
+  return () => audioHeardListeners.delete(listener);
 }
 export function editAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, edit: import("@arke-studio/contracts").AudioArrangementEdit): string | null {
   const requestId = ulid();
