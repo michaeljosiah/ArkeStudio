@@ -1,3 +1,4 @@
+import { DramaEditionSchema } from "./audio-drama-edition.js";
 import { ChapterReviewSchema } from "./chapter-review.js";
 import { DramaRequestSchema } from "./audio-drama.js";
 import { StoryEditionSchema, StoryPublishResultSchema } from "./story-publication.js";
@@ -445,6 +446,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       reason: z.string().min(1).optional(),
     })
     .strict(),
+  /** An edition published or refused, by name (SPEC-057 R-72). */
+  z.object({ ...base, type: z.literal("drama.edition"), requestId: UlidSchema, edition: DramaEditionSchema.optional(), refused: z.string().min(1).optional() }).strict(),
+  z.object({ ...base, type: z.literal("drama.editions"), requestId: UlidSchema, editions: z.array(DramaEditionSchema) }).strict(),
   /** `read-drama-source` answered: the text, or why it is not kept. */
   z
     .object({

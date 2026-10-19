@@ -7,6 +7,8 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { ProductionCastScreen } from "../src/screens/production-cast.js";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
+import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
+import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
 import { changedFields, draftRows } from "../src/lib/episode-script.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -63,6 +65,7 @@ async function mount(state: ClientState, path: string) {
       <Routes>
         <Route path="/w/:worldId/p/:prodId/cast" element={<ProductionCastScreen />} />
         <Route path="/w/:worldId/p/:prodId/script/:episode" element={<EpisodeScriptScreen />} />
+        <Route path="/w/:worldId/p/:prodId/home" element={<DramaEpisodesScreen />} />
       </Routes>
     </MemoryRouter>);
   });
@@ -220,5 +223,52 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     const read = sent.find((message) => message.kind === "read-audio-studio") as { chapterFile: string } | undefined;
     assert.equal(read?.chapterFile, "episode-001", "one arrangement an episode, on the same studio");
     assert.equal(container.querySelector("textarea[data-words]"), null, "the score is not drawn under it");
+  });
+});
+
+describe("the show page and Publish (230p, 230q)", () => {
+  const withTakes = (blocks: EpisodeScriptBlock[], kept: string[]) => {
+    const state = drama(blocks);
+    const production = state.world!.productions.find((p) => p.meta.id === "low-water-drama")!;
+    production.episodeTakes = [{ version: 1, episode: 1, lines: Object.fromEntries(blocks.filter((block) => kept.includes(block.id)).map((block) => [block.id, { kept: {
+      artifactId: "ar_01ARZ3NDEKTSV4RRFFQ69G5FAV", file: "artifacts/a.wav", textHash: dramaLineHash(block as never),
+      // Made in the role's voice now, so it is current (R-60).
+      voice: state.world!.sheets.find((sheet) => sheet.id === (block as { speaker?: string }).speaker)?.voice ?? { provider: "elevenlabs", model: "m", voiceId: "v" },
+      estimatedMicroUsd: 0, madeAt: "2026-10-18T12:00:00.000Z" } }])) }] as never;
+    return state;
+  };
+
+  it("shows each episode's state, and the episodes not planned as one row", async () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two.");
+    const { container } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id]), "home");
+    const row = container.querySelector('[data-episode="1"]')!;
+    assert.match(row.textContent!, /✓ Script.*● Cast 1 missing.*● Performed 1 of 2.*○ Mixed/);
+    assert.match(container.textContent!, /Episodes 2–6 · not planned/);
+  });
+
+  it("publishes only ready episodes, and says why one is held back", async () => {
+    const a = line("maren-kest", "One.");
+    const ready = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");
+    await act(async () => props([...ready.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
+    const sent = ready.sent.find((message) => message.kind === "publish-drama-edition") as { episodes: number[]; delivery: string; name: string } | undefined;
+    assert.deepEqual([sent?.episodes, sent?.delivery, sent?.name], [[1], "podcast", "Pilot"]);
+    await act(async () => root?.unmount()); root = null; dom.document.body.innerHTML = "";
+    const held = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], []), "home");
+    await act(async () => props([...held.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    assert.match(dom.document.body.textContent!, /Episode 1.*not performed/);
+    assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
+  });
+
+  it("keeps gaps in the episodes not planned, and Cancel waits for a publish in flight (codex on PR 1880)", async () => {
+    const a = line("maren-kest", "One.");
+    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);
+    const production = state.world!.productions.find((p) => p.meta.id === "low-water-drama")!;
+    production.episodeScripts = [...production.episodeScripts!, { file: "episode-003.json", hash: "sha256:three", script: { version: 1, episode: 3, title: "", blocks: [line("bray", "Three.")] } }] as never;
+    const { container } = await mount(state, "home");
+    assert.match(container.textContent!, /Episodes 2, 4–6 · not planned/);
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
+    assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Cancel") as HTMLButtonElement).disabled, true);
   });
 });

@@ -17,6 +17,8 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { wav } from "../audio/helpers.js";
+import { DramaEditionService } from "../../src/publications/drama.js";
+import { tempDir } from "../tmp.js";
 
 /** An audio drama's episode in Audio Studio (SPEC-057 R-67, R-68): one arrangement, on the chapter's studio. */
 const CLOCK = "2026-10-18T12:00:00.000Z";
@@ -88,6 +90,26 @@ describe("an episode in Audio Studio (SPEC-057 R-67, R-68)", () => {
   });
 });
 
+describe("an audio drama's edition (SPEC-057 R-71..R-76)", () => {
+  it("publishes the ready episodes as copies — audio, transcript, credits, script — unchanged by later edits", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb.", direction: "breathless" };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    const edition = await editions.publish(store, id, { name: "Pilot", delivery: "podcast", episodes: [1] });
+    assert.deepEqual(edition.files.map((file) => file.name).sort(), ["credits.txt", "episode-001-script.txt", "episode-001.wav", "transcript.txt"]);
+    assert.ok(edition.episodes[0]!.seconds >= 1);
+    const transcript = await editions.serve(edition.id, "transcript.txt");
+    assert.equal(await readFile(transcript!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n", "words, never directions");
+    const before = await readFile((await editions.serve(edition.id, "episode-001.wav"))!.path);
+    // Edited afterwards: the published edition is as it was.
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "Changed", blocks: [...entry.script.blocks, { id: ulid(), kind: "dialogue", speaker: "bray", words: "New." }], baseHash: entry.hash });
+    assert.deepEqual(await readFile((await editions.serve(edition.id, "episode-001.wav"))!.path), before);
+    assert.equal((await editions.list(store.worldId, id)).length, 1);
+    await assert.rejects(editions.publish(store, id, { name: "Again", delivery: "archive", episodes: [1] }), /not ready: 1 line not performed/, "the new line has no take");
+  });
+});
+
 describe("codex round 1 on PR 1879", () => {
   it("fences the first episode mix, imports to an episode, and never reads another episode's mix", async () => {
     const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
@@ -103,5 +125,49 @@ describe("codex round 1 on PR 1879", () => {
     const record = JSON.parse(await readFile(path, "utf8"));
     await writeFile(path, JSON.stringify({ ...record, episode: 2 }));
     await assert.rejects(openAudioStudio(store, id, "episode-001"), /unreadable/);
+  });
+});
+
+describe("codex round 1 on PR 1880", () => {
+  it("leaves a line omitted on purpose out of the transcript, and skips a damaged receipt", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Not this." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, a, b]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const passage = opened.state.passages.find((candidate) => candidate.key === b.id)!;
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Leave out", commands: [{ kind: "omit-passage", id: passage.id, label: "Not this.", acknowledged: true }] } as never);
+    const root = await tempDir("drama-editions");
+    const editions = new DramaEditionService(root);
+    const edition = await editions.publish(store, id, { name: "Cut", delivery: "archive", episodes: [1] });
+    assert.equal(await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8"), "Episode 1\n\nMAREN KEST: Climb.\n");
+    await mkdir(join(root, "broken"));
+    await writeFile(join(root, "broken", "edition.json"), "{");
+    assert.equal((await editions.list(store.worldId, id)).length, 1, "the damaged receipt is skipped");
+  });
+});
+
+describe("codex round 2 on PR 1880", () => {
+  it("writes only the sounds the mix plays, and credits one imported onto the timeline", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
+    let cue = "";
+    const { store, id } = await episode((bell) => {
+      const sound: EpisodeScriptBlock = { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell };
+      cue = sound.id;
+      return [{ id: ulid(), kind: "heading", place: "The quay" }, sound, a];
+    });
+    const opened = await openAudioStudio(store, id, "episode-001");
+    const removed = await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "No bell", commands: [{ kind: "remove-clip", id: `sound:${cue}` }] } as never);
+    assert.equal(removed, null);
+    await writeFile(join(store.dir, ".staging/sound/gull.wav"), second(0.7)); // not the bell's bytes, which would file as the bell
+    const failures = await importAudioStudioMedia(store, [join(store.dir, ".staging/sound/gull.wav")],
+      { productionId: id, chapterFile: "episode-001", base: (await openAudioStudio(store, id, "episode-001")).base, destination: { trackId: null, at: 0 } }, { abandoned: () => false });
+    assert.deepEqual(failures, []);
+    const editions = new DramaEditionService(await tempDir("drama-editions"));
+    const edition = await editions.publish(store, id, { name: "Gulls", delivery: "archive", episodes: [1] });
+    const transcript = await readFile((await editions.serve(edition.id, "transcript.txt"))!.path, "utf8");
+    assert.doesNotMatch(transcript, /The bell/, "a cue taken out of the mix is not in the transcript");
+    const credits = await readFile((await editions.serve(edition.id, "credits.txt"))!.path, "utf8");
+    assert.match(credits, /gull\.wav — recorded or uploaded/);
+    assert.doesNotMatch(credits, /Bell/, "a sound not heard is not credited");
   });
 });

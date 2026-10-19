@@ -276,3 +276,59 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-cmp__reason { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; font-size: 12px; color: var(--muted-foreground); }
 .fy-ad-cmp__reason textarea { font: inherit; font-size: 13px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); }
 .fy-ad-cmp__fail { color: var(--warning); font-size: 13px; }
+
+/* The show page (design turn 230p) and Publish (230q). */
+.fy-ad-show { display: flex; flex-direction: column; gap: 24px; }
+.fy-ad-show__hero { padding: 28px 28px 22px; border-radius: 16px; background: var(--secondary); }
+.fy-ad-show__hero h1 { margin: 0; font-size: 40px; font-weight: 700; line-height: 1.1; }
+.fy-ad-show__hero p { margin: 6px 0 0; color: var(--muted-foreground); font-size: 14px; }
+.fy-ad-show__acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.fy-ad-show__problem { color: var(--warning); }
+.fy-ad-show h2 { font-size: 18px; margin: 0 0 12px; }
+.fy-ad-show__faces { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 4px; }
+.fy-ad-show__face { display: flex; flex-direction: column; gap: 2px; width: 104px; background: none; border: 0; padding: 0; text-align: left; color: inherit; cursor: pointer; font: inherit; }
+.fy-ad-show__portrait { position: relative; width: 104px; height: 104px; border-radius: 10px; background: var(--secondary); display: grid; place-items: center; overflow: hidden; color: var(--muted-foreground); }
+.fy-ad-show__lock { position: absolute; left: 6px; bottom: 6px; color: var(--background); }
+.fy-ad-show__face b { font-size: 13px; }
+.fy-ad-show__face small { font-size: 11.5px; color: var(--muted-foreground); }
+.fy-ad-show__warn { color: var(--warning) !important; }
+.fy-ad-show__ok { color: var(--foreground); }
+.fy-ad-show__off { color: var(--muted-foreground); }
+.fy-ad-show__listhead { display: flex; align-items: baseline; justify-content: space-between; }
+.fy-ad-show__listhead small { color: var(--muted-foreground); font-size: 12px; }
+.fy-ad-show__episodes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fy-ad-show__row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); }
+.fy-ad-show__row--open { border-style: dashed; color: var(--muted-foreground); }
+.fy-ad-show__play, .fy-ad-show__num { width: 56px; height: 56px; border-radius: 10px; display: grid; place-items: center; font-size: 20px; font-weight: 600; }
+.fy-ad-show__play { background: var(--foreground); color: var(--background); border: 0; cursor: pointer; }
+.fy-ad-show__num { border: 1px solid var(--border); }
+.fy-ad-show__open { display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.fy-ad-show__open small { color: var(--muted-foreground); font-weight: 400; }
+.fy-ad-show__scenes { display: flex; gap: 3px; max-width: 420px; }
+.fy-ad-show__scenes i { height: 4px; border-radius: 2px; background: var(--border); min-width: 6px; }
+.fy-ad-show__scenes i.fy-ad-show__scene--done { background: var(--foreground); }
+.fy-ad-show__status { display: flex; gap: 12px; font-size: 12.5px; flex-wrap: wrap; justify-content: flex-end; }
+.fy-ad-show__edition { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.fy-ad-show__edition small { color: var(--muted-foreground); }
+.fy-ad-show__edition span { display: flex; gap: 10px; flex-wrap: wrap; }
+.fy-ad-pub { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
+.fy-ad-pub__row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.fy-ad-pub__row label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
+.fy-ad-pub__row input { font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: inherit; }
+.fy-ad-pub__delivery { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.fy-ad-pub__delivery button { border: 0; background: transparent; padding: 8px 12px; font: inherit; color: var(--muted-foreground); cursor: pointer; }
+.fy-ad-pub__delivery button[aria-checked="true"] { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+.fy-ad-pub__episodes { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; }
+.fy-ad-pub__episodes li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.fy-ad-pub__episodes li:last-child { border-bottom: 0; }
+.fy-ad-pub__episodes label { display: flex; gap: 8px; align-items: center; }
+.fy-ad-pub__episodes small { color: var(--muted-foreground); }
+.fy-ad-pub__held { background: var(--secondary); }
+.fy-ad-pub__outputs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+.fy-ad-pub__outputs span { border-radius: 999px; padding: 3px 10px; background: var(--foreground); color: var(--background); font-size: 12px; }
+.fy-ad-pub__frozen { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 0; }
+.fy-ad-pub__frozen dt { color: var(--muted-foreground); }
+.fy-ad-pub__frozen dd { margin: 0; }
+.fy-ad-pub__fail { color: var(--warning); }
+.fy-ad-pub__foot { display: flex; align-items: center; gap: 8px; }
+.fy-ad-pub__foot .gap { flex: 1; }

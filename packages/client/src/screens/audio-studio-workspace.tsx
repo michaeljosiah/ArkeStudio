@@ -17,6 +17,8 @@ export function AudioStudioWorkspace(props: {
   connection: string; stamp: unknown; rows: readonly TimingRowLike[]; timing: ChapterTiming;
   passage: string | null; onPassage: (key: string) => void; conversation: ReactNode | ((context: string) => ReactNode); propose: ReactNode;
   onBack: () => void; onExport: () => void; exportDisabled: boolean;
+  /** Why the last export was refused, said where the studio says its problems. */
+  exportProblem?: string | null;
 }) {
   const studio = useAudioStudio(props), player = useAudioStudioPlayer(props), { snapshot } = studio;
   const waveform = useAudioStudioWaveforms(studio.source);
@@ -97,7 +99,7 @@ export function AudioStudioWorkspace(props: {
     audioClock={{ seconds: audioSeconds(plan?.samples ?? 0), passages: plan?.passages.map(entry => ({ key: entry.key, at: audioSeconds(entry.at), seconds: audioSeconds(entry.samples), made: entry.samples > 0 })) ?? [] }}
     playing={player.playing} pending={player.pending} reviewing={review !== null} canPlay={!!plan?.samples && !busy}
     onPlay={play} onStop={player.stop} onBack={props.onBack} onExport={props.onExport} exportDisabled={props.exportDisabled || disabled || !!plan?.issues.length}
-    problem={studio.problem ?? player.problem ?? (snapshot ? player.issues.join(" · ") || null : "Opening Audio Studio…")}
+    problem={props.exportProblem ?? studio.problem ?? player.problem ?? (snapshot ? player.issues.join(" · ") || null : "Opening Audio Studio…")}
     library={snapshot ? <AudioStudioLibrary snapshot={snapshot} selected={selected} disabled={disabled} replacing={replacing} onAdd={add} onImport={() => importMedia()} onCancelReplace={() => setReplacing(false)} onEdit={edit} /> : <p className="fy-audio-studio__propose">{studio.problem === null ? "Loading Library…" : "Library unavailable"}</p>}
     showInspector inspector={shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}
     proposal={reviewCard} propose={<>{props.propose}{snapshot?.proposals?.filter(entry => entry.status === "pending").map(entry => {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DRAMA_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaTakeState,
+  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaTakeState,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
@@ -143,9 +143,7 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
   const script = episodeAudioScript(entry.hash, entry.script.blocks);
   const name = (slug: string) => bundle.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
   // A role's voice now, as Hear and Cast read it (codex on PR 1879): a recast puts its old takes out.
-  const cast = production.audioDrama?.cast ?? {};
-  const voice = (block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>) => block.kind === "narration"
-    ? cast[DRAMA_NARRATOR]?.voice : cast[block.speaker]?.voice ?? bundle.sheets.find((sheet) => sheet.id === block.speaker)?.voice;
+  const voice = (block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>) => dramaRoleVoice(production.audioDrama?.cast, bundle.sheets, block);
   const voices = Object.fromEntries(entry.script.blocks.flatMap((block) => block.kind === "dialogue" || block.kind === "narration" ? [[block.id, voice(block) ?? null]] : []));
   const baseWith = (held: StudioRecord) => digest({ script: entry.hash, takes: takes ?? null, voices, record: { ...held, audioStudioProposals: undefined } });
   const soundFile = (artifactId: string) => {
