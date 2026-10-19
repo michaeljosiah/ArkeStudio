@@ -745,6 +745,7 @@ describe("spend states a failed ledger read (SPEC-032 R-13)", () => {
     assert.equal(html.includes("ledger could not be read"), false);
     assert.equal(html.includes("not evaluated"), false);
     assert.ok(html.includes("Alert at"));
+    assert.ok(html.includes("Hear asks above $0.50"), "Hear's one-press limit is said where it can be seen (issue 1888)");
   });
 
   it("entries appended after a failed seed keep their figure, under the caveat", () => {

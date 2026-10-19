@@ -85,6 +85,8 @@ it("counts the reading against how many files the world's last open read", async
   assert.ok(reading.every((progress) => progress.total === total));
   assert.equal(reading.at(-1)!.done, total, "an unchanged world ends on its own total");
   assert.deepEqual(heard.at(-1), { phase: "checking" }, "and the checks after the scan are said after it");
+  // Said as the last record is read (issue 1888), not after the history and media that follow it.
+  assert.deepEqual(heard[heard.indexOf(reading.at(-1)!) + 1], { phase: "checking" });
 });
 
 it("tells a window that connects mid-open where it has got, and says nothing once it is over", async () => {

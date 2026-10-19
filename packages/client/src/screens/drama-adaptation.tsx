@@ -109,7 +109,8 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
                 <g key={episode.episode} className="fy-ad-map__episode">
                   {episode.planned ? (
                     <text x={MAP.right + MAP.block + 8} y={at.y + 14}><tspan className="fy-ad-map__ep">Episode {episode.episode}{episode.title ? ` · ${episode.title}` : ""}</tspan>
-                      <tspan x={MAP.right + MAP.block + 8} dy="13" className="fy-ad-map__meta">{Math.round(episode.seconds / 60)} min · {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}</tspan></text>
+                      {/* Under a minute in seconds (issue 1888): a 24 s pilot read "0 min". */}
+                      <tspan x={MAP.right + MAP.block + 8} dy="13" className="fy-ad-map__meta">{episode.seconds < 60 ? `${Math.max(1, Math.round(episode.seconds))} s` : `${Math.round(episode.seconds / 60)} min`} · {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}</tspan></text>
                   ) : (
                     <>
                       <rect x={MAP.right} y={at.y} width={MAP.block} height={at.h} rx="2" className="fy-ad-map__block fy-ad-map__block--open" />

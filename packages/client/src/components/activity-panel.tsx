@@ -906,6 +906,8 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
       <div className="fy-notecard" style={{ background: "var(--background)" }}>
         <span className={`fy-dot fy-dot--${spendStatus?.alerted ? "warn" : "sketch"}`} />
         {alertNote}
+        {/* Said where it can be seen (issue 1888): the limit lived only inside this Set. */}
+        <span className="fy-mono"> · Hear asks above {formatMicroUsd(spendStatus?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD)}</span>
         <button type="button" className="fy-spendalert__toggle" aria-expanded={editing} onClick={() => setEditing((open) => !open)}>
           {editing ? "Close" : "Set"}
         </button>

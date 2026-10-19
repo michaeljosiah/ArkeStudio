@@ -190,6 +190,7 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     assert.match(brief, /"A narrator where needed", then "In the room"/);
     assert.match(brief, /propose one plan in fields\.audioDrama/);
     assert.match(brief, /Do not propose verdicts or an episode outline here/);
+    assert.match(brief, /its last sentence is not a question/, "the plan reply ends on the plan, its choices under it (issue 1888)");
     assert.doesNotMatch(brief, /propose whether the screen keeps, cuts/, "a screen's verdicts are not asked of a drama");
     const original = (await service.start(`cv_${ulid()}` as ConversationId, { kind: "audio-drama" })).draft;
     const originalBrief = await productionSetupBrief(store.getBundle(), original, read, 400_000);
