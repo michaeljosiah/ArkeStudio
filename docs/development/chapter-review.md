@@ -68,9 +68,9 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
   - it drops tags whose words occur in more places than they were tagged at, since it cannot
     tell which occurrence was meant (the skill asks for a quotation that occurs once);
   - it counts overlapping tags of one kind once;
-  - it reads every 450 words that begin a paragraph, plus one every 150 words inside a
-    paragraph longer than 450 words, so a chapter written with single line breaks is read
-    to its end;
+  - it reads the 450 words that begin at each tell. Any crowded 450 words in the chapter
+    hold their own first tell, so this finds every one wherever it falls, including in a
+    chapter written with single line breaks, which splits as one paragraph;
   - it merges crowded stretches into passages that span their tells;
   - it builds the report's strip of consecutive 450-word blocks.
 

@@ -34,7 +34,7 @@ The check follows from that:
 |---|---|
 | Instance | One device, tagged by the model with its kind and an exact quotation. Different kinds may overlap; the same kind overlapping is one instance. |
 | Verification | The coordinator drops any quotation that is not in the saved chapter, exactly as `verifiedReviewAnswer` does today. |
-| Stretch | About 450 words, starting at a paragraph, sliding one paragraph at a time. A crowded run cannot hide by straddling two stretches. |
+| Stretch | The 450 words that begin at each tell. Any crowded 450 words hold their own first tell, so the stretch starting there finds them wherever they fall; windows sampled at paragraphs or fixed steps can miss a run between two starts (codex on PR 1956). |
 | Crowded | 8 or more tells in a stretch, or 4 or more of one kind. |
 | Passage | Overlapping crowded stretches merge into one passage. Its note reports its densest 450 words. |
 | Below the line | Nothing is marked, anywhere. A single tell is never a note. |

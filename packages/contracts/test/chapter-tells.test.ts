@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { verifiedTells, tellStretches, crowded, readTells, tellsPerThousand, tellsByKind, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
+import { verifiedTells, tellStretches, crowded, readTells, tellsPerThousand, tellsByKind, TELL_KINDS, TELL_LINE, TELL_KIND_LINE, type TellDraft } from "../src/chapter-tells.js";
 import { ChapterReviewSchema, ReviewAnswerSchema, chapterReviewSummary } from "../src/chapter-review.js";
 
 // Paragraphs of numbered words, each closed so none is inside another ("w10" is in "w100";
@@ -53,16 +53,17 @@ it("records whether a tell sits inside spoken words", () => {
   assert.deepEqual(tells.map((t) => t.inDialogue), [true, false]);
 });
 
-it("starts a stretch at every paragraph and stops at the first that reaches the end", () => {
+it("starts a stretch at each tell, running to the chapter's end at most", () => {
   const body = chapter(20, 50);
-  const stretches = tellStretches(body, []);
-  assert.equal(stretches.length, 12, "starts at paragraphs 0..11; paragraph 11 + 450 words reaches word 1,000");
+  const { tells } = verifiedTells(body, [{ kind: "pivot", quote: word(10) }, { kind: "metaphor", quote: word(60) }, { kind: "three", quote: `${word(60)} ${word(61)}` }, { kind: "list", quote: word(900) }]);
+  const stretches = tellStretches(body, tells);
+  assert.deepEqual(stretches.map((s) => s.start), [body.indexOf(word(10)), body.indexOf(word(60)), body.indexOf(word(900))], "two tells beginning in one word share its stretch");
   assert.equal(stretches[0]!.words, 450);
-  assert.equal(stretches[1]!.start, body.indexOf(word(50)));
-  assert.equal(stretches.at(-1)!.end, body.length);
-  const short = tellStretches(chapter(3, 40), []);
-  assert.equal(short.length, 1);
-  assert.equal(short[0]!.words, 120, "a chapter under 450 words is one stretch of all of it");
+  assert.equal(stretches[0]!.count, 3, "a tell belongs to the stretch it begins in");
+  assert.deepEqual([stretches[2]!.words, stretches[2]!.end], [100, body.length]);
+  const short = chapter(3, 40);
+  assert.equal(tellStretches(short, verifiedTells(short, [{ kind: "pivot", quote: word(0) }]).tells)[0]!.words, 120, "a chapter under 450 words is one stretch of all of it");
+  assert.deepEqual(tellStretches(body, []), []);
   assert.deepEqual(tellStretches("", []), []);
 });
 
@@ -73,9 +74,39 @@ it("reads the tail of a paragraph longer than a stretch", () => {
   const reading = readTells(body, drafts);
   assert.equal(reading.passages.length, 1, "eight tells in words 880..950 are found");
   assert.equal(reading.passages[0]!.densest.count, 8);
-  const stretches = tellStretches(body, reading.tells);
-  assert.deepEqual(stretches.map((s) => body.slice(s.start).split(" ", 1)[0]), [word(0), word(150), word(300), word(450), word(600)],
-    "a start every 150 words inside it, up to the first that reaches the end");
+});
+
+it("finds a run that falls between any two sampled starts", () => {
+  // Codex on PR 1956: one tell at word 140 and seven at 500..580 fit in 450 words that neither a
+  // window from word 0 nor one from word 150 holds.
+  const body = Array.from({ length: 1000 }, (_, w) => word(w)).join(" ");
+  const kinds = ["three", "list", "metaphor", "notxy", "pivot", "shorthand", "three", "list"] as const;
+  const at = [140, 500, 510, 520, 540, 560, 570, 580];
+  const reading = readTells(body, at.map((n, i) => ({ kind: kinds[i]!, quote: word(n) })));
+  assert.equal(reading.passages.length, 1);
+  assert.equal(reading.passages[0]!.densest.count, 8);
+  assert.equal(reading.passages[0]!.start, body.indexOf(word(140)));
+});
+
+it("finds exactly the densest 450 words that checking every word would", () => {
+  // Every word as a start is the definition; starting only at tells must agree with it.
+  let seed = 1952;
+  const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const body = chapter(30, 70);
+  const total = 30 * 70;
+  for (let trial = 0; trial < 60; trial++) {
+    const n = 4 + Math.floor(next() * 30);
+    const drafts: TellDraft[] = [...new Set(Array.from({ length: n }, () => Math.floor(next() * total)))]
+      .map((w) => ({ kind: TELL_KINDS[Math.floor(next() * TELL_KINDS.length)]!, quote: word(w) }));
+    const { tells } = verifiedTells(body, drafts);
+    const offsets = [...body.matchAll(/\S+/g)].map((m) => m.index);
+    let densest = 0;
+    for (let from = 0; from < offsets.length; from++) {
+      const end = offsets[Math.min(offsets.length - 1, from + 449)]! + word(Math.min(offsets.length - 1, from + 449)).length;
+      densest = Math.max(densest, tells.filter((t) => t.start >= offsets[from]! && t.start < end).length);
+    }
+    assert.equal(Math.max(0, ...tellStretches(body, tells).map((s) => s.count)), densest, `trial ${trial}`);
+  }
 });
 
 it("is crowded at the line, or at the kind line for one kind", () => {

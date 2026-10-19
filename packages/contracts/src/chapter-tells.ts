@@ -172,30 +172,23 @@ function stretchOf(words: ReadonlyArray<{ start: number; end: number }>, from: n
 }
 
 /**
- * Every 450 words that begin a paragraph, up to the first that reaches the chapter's end.
- * Sliding by paragraph means a crowded run cannot hide by straddling two fixed blocks; starting
- * each at a paragraph keeps what the margin marks a passage a reader would recognise. A
- * paragraph longer than a stretch also starts one every third of a stretch inside it: otherwise
- * its tail is never read, and a chapter written with single line breaks is one paragraph.
+ * The 450 words that begin at each tell. Any 450 words holding a crowded run also hold its first
+ * tell, and the stretch that begins there holds everything they did, so this finds every crowded
+ * 450 words in the chapter: the promise the screens make ("8 in any 450 words"). Windows sampled
+ * at paragraphs, or every so many words, miss a run that falls between two of them (codex on PR
+ * 1956: one tell at word 140 and seven at 500 to 580 fit in 450 words that neither window holds).
  */
 export function tellStretches(body: string, tells: readonly PlacedTell[], size = TELL_STRETCH_WORDS): TellStretch[] {
   const words = wordsOf(body);
-  if (words.length === 0) return [];
-  const starts: number[] = [];
+  if (words.length === 0 || tells.length === 0) return [];
+  const starts = new Set<number>();
   let w = 0;
-  for (const paragraph of paragraphSpans(body)) {
-    while (w < words.length && words[w]!.start < paragraph.start) w++;
-    let end = w;
-    while (end < words.length && words[end]!.start < paragraph.end) end++;
-    const step = Math.max(1, Math.floor(size / 3));
-    for (let at = w; at < end; at += end - w > size ? step : end - w) starts.push(at);
+  for (const tell of [...tells].sort((a, b) => a.start - b.start)) {
+    // The word the tell begins in, so a quotation opening on a quotation mark counts from its word.
+    while (w + 1 < words.length && words[w + 1]!.start <= tell.start) w++;
+    starts.add(w);
   }
-  const stretches: TellStretch[] = [];
-  for (const from of starts) {
-    stretches.push(stretchOf(words, from, size, tells));
-    if (from + size >= words.length) break;
-  }
-  return stretches;
+  return [...starts].map((from) => stretchOf(words, from, size, tells));
 }
 
 export function crowded(stretch: Pick<TellStretch, "count" | "byKind">, line = TELL_LINE, kindLine = TELL_KIND_LINE): boolean {
