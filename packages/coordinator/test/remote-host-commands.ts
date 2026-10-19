@@ -81,6 +81,7 @@ export function hostOnlyCommandFixtures(sourcePath: string) {
       "open-exports-folder": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "pick-manuscript": {"worldId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","productionId":"pilot","requestId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},
       "download-update": {},
+      "install-sample-world": {},
       "install-update-and-restart": {},
       "install-update-on-close": {},
       "generate-diagnostics": {},
