@@ -393,6 +393,52 @@ describe("chapter autosave recovery (#954)", () => {
 });
 
 describe("the chapter, opened (turn 126)", () => {
+  it("keeps loaded outline notes out of manuscript progress while counting a replacement draft", async () => {
+    const state = structuredClone(inkbound());
+    const chapter = state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!;
+    chapter.status = "outlined";
+    chapter.words = 0;
+    const m = await mount(state);
+    await answerOpen(m);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/);
+    await toView(m, "Chapter");
+    assert.match(text(m), /0 of 3,000 words/);
+    assert.equal(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"), false);
+    await toView(m, "Manuscript");
+    await typeProse(m, ` ${BODY} \n`);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^0\/ 3,000$/, "whitespace-only changes remain outline notes");
+    await typeProse(m, "The bell stopped. <br>");
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^4\/ 3,000$/, "a real unsaved replacement counts before autosave");
+    await toView(m, "Chapter");
+    assert.match(text(m), /4 of 3,000 words/);
+    assert.ok(q(m, ".fy-chov__steps")!.textContent!.includes("Cast the lines"));
+    await typeProse(m, BODY);
+    assert.match(text(m), /0 of 3,000 words/, "reverting to the loaded outline clears manuscript readiness");
+    await toView(m, "Manuscript");
+    await typeProse(m, "The bell stopped. <br>");
+    const read = [...m.container.querySelectorAll("button")].find(b => b.textContent === "Read the chapter")!;
+    await act(async () => read.click());
+    const save = m.sent.findLast(message => message.kind === "save-chapter")!;
+    await answerSave(save, "saved", `sha256:${"b".repeat(64)}`);
+    assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^4\/ 3,000$/, "save acknowledgement precedes the summary refresh without resetting progress");
+    await toView(m, "Chapter");
+    assert.match(text(m), /drafted/);
+    assert.match(text(m), /4 of 3,000 words/);
+    await answerOpen(m, BODY, `sha256:${"c".repeat(64)}`);
+    assert.match(text(m), /0 of 3,000 words/, "an authoritative reopened outline clears the local promotion");
+  });
+
+  it("counts planned and drafted prose after loading", async () => {
+    for (const status of ["planned", "drafted"] as const) {
+      const state = structuredClone(inkbound());
+      state.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.status = status;
+      const m = await mount(state);
+      await answerOpen(m);
+      assert.match(q(m, '[data-testid="chapter-goal"]')?.textContent ?? "", /^12\/ 3,000$/);
+      await leave(m);
+    }
+  });
+
   it("asks for the body on open, never reads it off the summary, and then shows it", async () => {
     const m = await mount(inkbound());
     const ask = m.sent.find((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
