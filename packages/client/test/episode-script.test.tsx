@@ -278,6 +278,19 @@ describe("issue 1883: the selection and the Hear dialog", () => {
     for (const label of ["Source", "Cast", "Done"]) assert.ok(bar.includes(label), `${label} is on the selection bar`);
   });
 
+  it("waits above the one-press limit the author set (issue 1882)", async () => {
+    const state = withScript([a]);
+    state.app.spend = { settings: { thresholdMicroUsd: 0, periodDays: 7, onePressMicroUsd: 1_000 }, rollingMicroUsd: 0, alerted: false, ledgerUnavailable: false };
+    const m = await mount(state);
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /^Hear 1 line/.test(button.textContent ?? ""))!;
+    assert.ok(hear.querySelector(".fy-ad-hear__dot"), "a press over the limit asks first");
+  });
+
   it("titles the dialog with the lines the button named, and Choose a voice stays in the episode", async () => {
     const m = await mount(withScript([a, b]));
     await click(m.container.querySelector(`[data-block="${a.id}"]`)!);

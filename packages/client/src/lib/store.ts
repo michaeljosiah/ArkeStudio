@@ -4012,8 +4012,8 @@ export function setModelEnabled(modelId: string, enabled: boolean): void {
   send({ kind: "set-model-enabled", modelId, enabled });
 }
 
-export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number): void {
-  send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays });
+export function setSpendThreshold(thresholdMicroUsd: number, periodDays: number, onePressMicroUsd?: number): void {
+  send({ kind: "set-spend-threshold", thresholdMicroUsd, periodDays, ...(onePressMicroUsd !== undefined ? { onePressMicroUsd } : {}) });
 }
 
 export function detectRuntimes(): void {

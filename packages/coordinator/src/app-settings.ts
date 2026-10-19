@@ -206,9 +206,10 @@ export class AppSettingsFile {
     });
   }
 
-  async setSpend(thresholdMicroUsd: number, periodDays: number): Promise<AppSettings> {
+  async setSpend(thresholdMicroUsd: number, periodDays: number, onePressMicroUsd?: number): Promise<AppSettings> {
     return this.mutate((current) => {
-      const settings: AppSettings = { ...current, spend: { thresholdMicroUsd, periodDays } };
+      const onePress = onePressMicroUsd ?? current.spend.onePressMicroUsd;
+      const settings: AppSettings = { ...current, spend: { thresholdMicroUsd, periodDays, ...(onePress !== undefined ? { onePressMicroUsd: onePress } : {}) } };
       return { settings, value: settings };
     });
   }

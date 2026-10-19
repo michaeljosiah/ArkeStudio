@@ -9,6 +9,7 @@ import {
   computeNeedsYou,
   computeRunning,
   formatMicroUsd,
+  HEAR_ONE_PRESS_LIMIT_MICRO_USD,
   jobActions,
   jobOrigin,
   spendSummary,
@@ -814,7 +815,9 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   const [editing, setEditing] = useState(false);
   const [threshold, setThreshold] = useState<string | null>(null);
   const [period, setPeriod] = useState<string | null>(null);
+  const [onePress, setOnePress] = useState<string | null>(null);
   const spendStatus = state.app.spend;
+  const onePressValue = onePress ?? String((spendStatus?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD) / 1_000_000);
   const thresholdValue = threshold ?? String((spendStatus?.settings.thresholdMicroUsd ?? 0) / 1_000_000);
   const periodValue = period ?? String(spendStatus?.settings.periodDays ?? 7);
   // Spend obeys the panel's scope like every other collection here (issue 305 §8). The ledger
@@ -914,15 +917,20 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
           <span className="fy-spendalert__label">over</span>
           <Input aria-label="Alert window in days" style={{ maxWidth: 62 }} value={periodValue} onChange={(e) => setPeriod(e.target.value)} />
           <span className="fy-spendalert__label">days</span>
+          {/* Hear's one press (SPEC-057 §1.4, issue 1882): made at once up to this, asked above it. */}
+          <span className="fy-spendalert__label">Hear without asking up to $</span>
+          <Input aria-label="Hear without asking up to, in dollars" style={{ maxWidth: 72 }} value={onePressValue} onChange={(e) => setOnePress(e.target.value)} />
           <Button
             size="sm"
             onClick={() => {
               const usdValue = Number.parseFloat(thresholdValue);
               const days = Number.parseInt(periodValue, 10);
-              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
-                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
+              const press = Number.parseFloat(onePressValue);
+              if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1 && Number.isFinite(press) && press >= 0 && press <= 100) {
+                setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365), Math.round(press * 1_000_000));
                 setThreshold(null);
                 setPeriod(null);
+                setOnePress(null);
                 setEditing(false);
               }
             }}

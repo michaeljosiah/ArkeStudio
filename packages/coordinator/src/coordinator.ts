@@ -9855,7 +9855,7 @@ export class Coordinator {
       }
       case "set-spend-threshold": {
         if (!this.appSettings) return;
-        const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays);
+        const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays, msg.onePressMicroUsd);
         const spend = evaluateSpend(await this.spendLedgerRead(), settings.spend, new Date());
         // A new threshold is a new crossing: the latch follows the figure this evaluation
         // actually measured, so lowering the threshold onto existing spend still alerts.

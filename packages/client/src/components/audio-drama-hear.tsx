@@ -4,7 +4,7 @@ import {
   HEAR_ONE_PRESS_LIMIT_MICRO_USD, dramaTakeState, formatMicroUsd,
   type DramaRequest, type EpisodeScriptBlock, type EpisodeTakes, type MissingVoiceChoice,
 } from "@arke-studio/contracts";
-import { decideDramaTake, hearDramaLines, subscribeDramaHeard, type DramaHeard } from "../lib/store.js";
+import { decideDramaTake, hearDramaLines, subscribeDramaHeard, useStore, type DramaHeard } from "../lib/store.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { EditorDialog } from "./editor-dialog.js";
@@ -73,7 +73,9 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
   const quoted = quote?.disposition === "quoted" ? quote : null;
   const missing = quoted?.missing ?? [];
   const price = quoted?.quote?.estimatedMicroUsd ?? 0;
-  const waits = missing.length > 0 || price > HEAR_ONE_PRESS_LIMIT_MICRO_USD;
+  // The one-press limit is the author's setting (SPEC-057 §1.4, issue 1882), $0.50 until changed.
+  const onePress = useStore().state?.app.spend?.settings.onePressMicroUsd ?? HEAR_ONE_PRESS_LIMIT_MICRO_USD;
+  const waits = missing.length > 0 || price > onePress;
   const spoken = script.filter((block): block is Spoken => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"));
   // A line the author left out is not played either (codex on PR 1871): only what the quote sends or plays.
   const included = quoted?.quote ? new Set(quoted.quote.requests.map((request) => request.block)) : null;
