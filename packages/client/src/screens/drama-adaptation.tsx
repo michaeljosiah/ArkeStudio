@@ -63,7 +63,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
         <header className="fy-ad-map__head">
           <div>
             <h1>Adaptation</h1>
-            <p>{map.story?.meta.title} · {map.chapters.length} chapters · {words.toLocaleString()} words → {map.episodes.length} episodes</p>
+            <p>{map.story?.meta.title} · {map.chapters.length} chapter{map.chapters.length === 1 ? "" : "s"} · {words.toLocaleString()} words → {map.episodes.length} episode{map.episodes.length === 1 ? "" : "s"}</p>
           </div>
           <span className="gap" />
           <span className="fy-ad-map__chip">Read {map.counts.read} of {map.chapters.length}</span>

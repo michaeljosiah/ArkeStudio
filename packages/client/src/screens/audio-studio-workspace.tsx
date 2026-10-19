@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { audioSamples, audioSeconds, resolveAudioArrangement, type AudioArrangementCommand, type ChapterTiming } from "@arke-studio/contracts";
+import { audioSamples, audioSeconds, resolveAudioArrangement, reviewCoverage, type AudioArrangementCommand, type ChapterTiming } from "@arke-studio/contracts";
 import { Button, Input } from "../components/ui.js";
 import { useAudioStudio, useAudioStudioPlayer } from "../lib/audio-studio.js";
 import { useAudioStudioWaveforms } from "../lib/audio-studio-waveform.js";
 import { audioStudioAddition, audioStudioReview } from "../lib/audio-studio-edit.js";
-import { importEditorMedia, subscribeQueueResults } from "../lib/store.js";
+import { importEditorMedia, recordAudioHeard, subscribeQueueResults } from "../lib/store.js";
+import { AudioStudioReviewStrip, heardClock, type ReviewPin } from "./audio-studio-review-strip.js";
 import { ChapterAudioStudio } from "./chapter-audio-studio.js";
 import { AudioStudioTimeline } from "./audio-studio-timeline.js";
 import { AudioStudioInspector } from "./audio-studio-inspector.js";
@@ -21,6 +22,17 @@ export function AudioStudioWorkspace(props: {
   exportProblem?: string | null;
   /** An episode's studio (issue 1883): Back to its script, and an episode's mix. */
   backLabel?: string; unit?: "Chapter" | "Episode";
+  /**
+   * An episode's one Review (230o, issue 1882): its scenes, its script's notes, and how each note
+   * was decided. Given, the studio records what of the mix is heard and draws the review strip.
+   */
+  review?: {
+    version: number;
+    scenes: ReadonlyArray<{ key: string; n: number; title: string; firstLine: string }>;
+    notes: ReadonlyArray<{ key: string; block: string | undefined; says: string; evidence: string }>;
+    decided: Readonly<Record<string, string>>;
+    onDecide: (key: string, decision: "intentional" | "dismissed") => void;
+  };
 }) {
   const studio = useAudioStudio(props), player = useAudioStudioPlayer(props), { snapshot } = studio;
   const waveform = useAudioStudioWaveforms(studio.source);
@@ -82,6 +94,75 @@ export function AudioStudioWorkspace(props: {
     player.play(snapshot.base, { solo, window: { from: start, to: end }, loop });
   };
   const position = player.at ?? at;
+  // What of the saved mix plays whole is heard (230o, issue 1882): recorded when the listen stops,
+  // seeks or jumps, on the base it was heard on. A play run to its end is heard to its end.
+  const heardSpan = useRef<{ base: string; from: number; last: number; to: number } | null>(null);
+  const closeHeard = () => {
+    const span = heardSpan.current;
+    heardSpan.current = null;
+    if (!span || !props.review) return;
+    const last = span.last >= span.to - audioSamples(0.5) ? span.to : span.last;
+    if (last - span.from >= audioSamples(0.5)) recordAudioHeard(props.worldId, props.productionId, props.chapterFile, span.base, [[audioSeconds(span.from), audioSeconds(last)]]);
+  };
+  useEffect(() => {
+    if (!props.review) return;
+    const listen = player.listening, now = player.at, span = heardSpan.current;
+    if (!listen || now === null) { closeHeard(); return; }
+    if (span && span.base === listen.base && now >= span.last && now - span.last <= audioSamples(1.5)) { span.last = now; return; }
+    closeHeard();
+    heardSpan.current = { base: listen.base, from: now, last: now, to: Math.min(listen.to, plan?.samples ?? listen.to) };
+  }, [player.at, player.listening]);
+  useEffect(() => () => closeHeard(), []);
+  // The review strip's own state: the window the timeline shows, and the note open in the Inspector.
+  const [view, setView] = useState<readonly [number, number] | null>(null);
+  const [openNote, setOpenNote] = useState<string | null>(null);
+  const heard = snapshot?.heard;
+  const lineAt = (key: string | undefined) => key === undefined ? undefined : plan?.passages.find((entry) => entry.key === key && entry.samples > 0)?.at;
+  const audioNotes = (heard?.notes ?? []).filter((note) => props.review?.decided[note.key] === undefined);
+  const pins: Array<ReviewPin & { audio?: (typeof audioNotes)[number]; script?: NonNullable<typeof props.review>["notes"][number] }> = props.review && plan ? [
+    ...audioNotes.map((note) => ({ key: note.key, n: 0, at: note.from, title: `${note.observed} · heard ${heardClock(note.from)}–${heardClock(note.to)}`, audio: note })),
+    ...props.review.notes.filter((note) => props.review!.decided[note.key] === undefined).flatMap((note) => {
+      const samples = lineAt(note.block);
+      return samples === undefined ? [] : [{ key: note.key, n: 0, at: audioSeconds(samples), title: `${note.says} · ${note.evidence}`, script: note }];
+    }),
+  ].sort((a, b) => a.at - b.at).map((pin, index) => ({ ...pin, n: index + 1 })) : [];
+  const scenes = props.review && plan ? props.review.scenes.flatMap((scene) => {
+    const from = lineAt(scene.firstLine);
+    return from === undefined ? [] : [{ ...scene, from }];
+  }).map((scene, index, all) => {
+    const from = audioSeconds(scene.from), to = audioSeconds(all[index + 1]?.from ?? plan.samples);
+    return { key: scene.key, n: scene.n, title: scene.title, from, to, on: position >= scene.from && position < (all[index + 1]?.from ?? plan.samples + 1) };
+  }) : [];
+  const opened = pins.find((pin) => pin.key === openNote) ?? null;
+  const openPin = (key: string) => {
+    const pin = pins.find((entry) => entry.key === key);
+    if (!pin) return;
+    setOpenNote(key); player.stop(); setAt(audioSamples(pin.at));
+    const block = pin.audio?.block ?? pin.script?.block;
+    const passage = plan?.passages.find((entry) => entry.key === block);
+    const clip = snapshot?.state.clips.find((entry) => entry.passageId === passage?.id && entry.role === "speech");
+    if (clip) select(clip.id);
+  };
+  const decideNote = (key: string, decision: "intentional" | "dismissed") => { props.review?.onDecide(key, decision); setOpenNote(null); };
+  const noteSection = opened && (
+    <section className="fy-audio-note" aria-label="Review note">
+      <header><b>Review · note {opened.n} · {opened.audio ? "heard" : opened.script!.evidence}</b></header>
+      {opened.audio ? <>
+        <h4>“{opened.audio.quote.replace(/^[^:]{1,80}:\s*/u, "")}”</h4>
+        <dl><dt>Heard</dt><dd>{heardClock(opened.audio.from)}–{heardClock(opened.audio.to)}</dd><dt>Observed</dt><dd>{opened.audio.observed}</dd><dt>Kind</dt><dd>Intelligibility</dd></dl>
+      </> : <p>{opened.script!.says}</p>}
+      <div className="fy-audio-inspector__actions">
+        {opened.audio?.fix && <Button size="sm" variant="primary" disabled={disabled} onClick={() => propose(opened.audio!.fix!.label, opened.audio!.fix!.commands)}>Fix</Button>}
+        <Button size="sm" onClick={() => decideNote(opened.key, "intentional")}>Intentional</Button>
+        <Button size="sm" variant="ghost" onClick={() => decideNote(opened.key, "dismissed")}>Dismiss</Button>
+      </div>
+    </section>
+  );
+  const strip = props.review && plan && (
+    <AudioStudioReviewStrip seconds={audioSeconds(plan.samples)} coverage={reviewCoverage(props.review.version, heard?.spans ?? [], heard?.seconds ?? audioSeconds(plan.samples))}
+      scenes={scenes} heard={heard?.spans ?? []} pins={pins} view={view} open={openNote}
+      onSeek={(seconds) => { player.stop(); setAt(audioSamples(seconds)); }} onOpen={openPin} onHearRest={(from) => play(from)} hearDisabled={busy || !plan.samples || review !== null} />
+  );
   const reviewCard = review && <section className="fy-tm__proposal fy-audio-review" aria-label="Review audio changes"><header><b>{review.edit.kind === "commands" ? review.edit.label : "Review audio"}</b><span>Current → Suggested</span></header>
     <p><Button disabled={!suggested} onClick={() => { player.stop(); setSuggested(false); }}>Show Current</Button> <Button disabled={suggested} onClick={() => { player.stop(); setSuggested(true); }}>Show Suggested</Button></p>
     <p>Duration: {audioSeconds(review.current.samples).toFixed(3)} s → {audioSeconds(review.suggested.samples).toFixed(3)} s. Fixed cues keep their absolute positions.</p>
@@ -104,17 +185,25 @@ export function AudioStudioWorkspace(props: {
     onPlay={play} onStop={player.stop} onBack={props.onBack} onExport={props.onExport} exportDisabled={props.exportDisabled || disabled || !!plan?.issues.length}
     problem={props.exportProblem ?? studio.problem ?? player.problem ?? (snapshot ? player.issues.join(" · ") || null : "Opening Audio Studio…")}
     library={snapshot ? <AudioStudioLibrary snapshot={snapshot} selected={selected} disabled={disabled} replacing={replacing} onAdd={add} onImport={() => importMedia()} onCancelReplace={() => setReplacing(false)} onEdit={edit} /> : <p className="fy-audio-studio__propose">{studio.problem === null ? "Loading Library…" : "Library unavailable"}</p>}
-    showInspector inspector={shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} unit={props.unit ?? "Chapter"} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}
+    showInspector inspector={<>{noteSection}{shownSnapshot && <AudioStudioInspector snapshot={shownSnapshot} selected={selected} trackId={track} disabled={disabled} unit={props.unit ?? "Chapter"} onEdit={edit} onReplace={() => { setReplacing(true); studio.setProblem(null); }} />}</>}
     proposal={reviewCard} propose={<>{props.propose}{snapshot?.proposals?.filter(entry => entry.status === "pending").map(entry => {
       const version = entry.versions.at(-1)!;
       return <section key={entry.id} className="fy-audio-studio__propose"><b>{version.summary}</b><p>Version {version.number} · {version.base === snapshot.base ? "Ready to compare" : "Arrangement changed; ask Arke to revise"}</p>
         <Button disabled={disabled || version.base !== snapshot.base} onClick={() => { try { setSuggested(false); setReview({ ...audioStudioReview(snapshot, { kind: "commands", label: version.summary, commands: version.commands }), proposal: { id: entry.id, version: version.number } }); } catch (error) { studio.setProblem(error instanceof Error ? error.message : String(error)); } }}>Review suggestion</Button>
         <Button disabled={disabled} onClick={() => studio.decide(entry.id, version.number, "keep")}>Keep Current</Button></section>;
-    })}</>} conversation={typeof props.conversation === "function" ? props.conversation(`Audio Studio for chapter ${props.chapterId}. Selected passage: ${props.passage ?? "none"}; clip: ${selected ?? "none"}; track: ${track ?? "none"}. Arrangement revision ${snapshot?.revision ?? "unread"}, base ${snapshot?.base ?? "unread"}. Read get_chapter section audio-studio before proposing changes with production-audio-studio-propose.`) : props.conversation}
-    timeline={snapshot && plan && <><AudioStudioRepairs snapshot={snapshot} plan={plan} disabled={disabled} onSelect={select} onReview={propose} />
+    })}</>} conversation={typeof props.conversation === "function" ? props.conversation(props.unit === "Episode"
+      // An episode is read and suggested by its stem (issue 1882), never as a chapter.
+      ? `Audio Studio for ${props.chapterId}. Selected passage: ${props.passage ?? "none"}; clip: ${selected ?? "none"}; track: ${track ?? "none"}. Arrangement revision ${snapshot?.revision ?? "unread"}, base ${snapshot?.base ?? "unread"}. Read get_chapter with chapterId ${props.chapterId} and section audio-studio before proposing changes with production-audio-studio-propose and that chapterId.`
+      : `Audio Studio for chapter ${props.chapterId}. Selected passage: ${props.passage ?? "none"}; clip: ${selected ?? "none"}; track: ${track ?? "none"}. Arrangement revision ${snapshot?.revision ?? "unread"}, base ${snapshot?.base ?? "unread"}. Read get_chapter section audio-studio before proposing changes with production-audio-studio-propose.`) : props.conversation}
+    timeline={snapshot && plan && <>{strip}<AudioStudioRepairs snapshot={snapshot} plan={plan} disabled={disabled} onSelect={select} onReview={propose} />
       <div className="fy-audio-loop"><label><input type="checkbox" checked={loop} onChange={event => { setLoop(event.target.checked); if (!to) setTo(audioSeconds(plan.samples)); }} />Loop audition</label><label>From (s)<Input aria-label="Loop from seconds" type="number" min={0} step={.001} value={from} onChange={event => setFrom(event.target.valueAsNumber || 0)} /></label><label>To (s)<Input aria-label="Loop to seconds" type="number" min={0} step={.001} value={to} onChange={event => setTo(event.target.valueAsNumber || 0)} /></label>{solo.length > 0 && <Button size="sm" onClick={() => { player.stop(); setSolo([]); }}>Clear solo audition</Button>}</div>
       <AudioStudioTimeline waveform={waveform} state={shownSnapshot!.state} plan={plan} selected={selected} selectedTrack={track} onSelect={select} onTrack={id => { setTrack(id); setSelected(null); }} at={position} onSeek={samples => { player.stop(); setAt(samples); }} disabled={disabled}
         undo={snapshot.undo} redo={snapshot.redo} onHistory={kind => { player.stop(); studio.edit({ kind }); }} onEdit={edit} solo={solo} onSolo={id => { player.stop(); setSolo(held => held.includes(id) ? held.filter(value => value !== id) : [...held, id]); }}
-        onDrop={(id, trackId, samples) => { const asset = snapshot.library.find(entry => entry.artifactId === id); if (asset) add(asset.file, false, { trackId, at: samples }); }} onFiles={(files, trackId, samples) => importMedia(files, { trackId, at: samples })} />
+        onDrop={(id, trackId, samples) => { const asset = snapshot.library.find(entry => entry.artifactId === id); if (asset) add(asset.file, false, { trackId, at: samples }); }} onFiles={(files, trackId, samples) => importMedia(files, { trackId, at: samples })}
+        {...(props.review ? {
+          regions: scenes.map((scene) => ({ key: scene.key, label: `${scene.n} · ${scene.title}`, at: audioSamples(scene.from), samples: audioSamples(scene.to - scene.from), on: scene.on })),
+          marks: audioNotes.map((note) => ({ key: note.key, title: `${note.observed} · heard ${heardClock(note.from)}–${heardClock(note.to)}`, at: audioSamples(note.from), samples: audioSamples(note.to - note.from) })),
+          onView: (from: number, to: number) => setView([audioSeconds(from), audioSeconds(to)]),
+        } : {})} />
     </>} />;
 }

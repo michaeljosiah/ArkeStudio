@@ -135,6 +135,20 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.throws(() => applyProductionSetupUpdate(planned, { expectedRevision: 3, fields: { audioDrama: { episodes: 0, minutes: 25, keptFromListener: [] } } }));
   });
 
+  it("holds the narrator question's two samples while it is asked, and lets them go with the kind or the story (230c, issue 1882)", () => {
+    const samples = {
+      narrated: [{ speaker: "Narrator", words: "Far off, the harbour bell struck once." }, { speaker: "Maren", words: "The log said two hours." }],
+      inTheRoom: [{ speaker: "Sound", words: "One stroke of the harbour bell.", cue: true as const }, { speaker: "Maren", words: "The log said two hours." }],
+    };
+    const drama = applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "audio-drama" } });
+    const asked = applyProductionSetupUpdate(drama, { expectedRevision: 2, fields: { narratorSamples: samples } });
+    assert.deepEqual(asked.narratorSamples, samples);
+    assert.deepEqual(applyProductionSetupUpdate(asked, { expectedRevision: 3, fields: { title: "Low Water" } }).narratorSamples, samples, "other edits keep them");
+    assert.equal(applyProductionSetupUpdate(asked, { expectedRevision: 3, fields: { narratorSamples: null } }).narratorSamples, undefined);
+    assert.equal(applyProductionSetupUpdate(asked, { expectedRevision: 3, fields: { kind: "film" } }).narratorSamples, undefined, "a film asks no narrator question");
+    assert.throws(() => applyProductionSetupUpdate(drama, { expectedRevision: 2, fields: { narratorSamples: { narrated: [samples.narrated[0]!], inTheRoom: samples.inTheRoom } } }), "two lines at least, each way");
+  });
+
   it("an audio drama's pilot names chapters its story has, and an original names none (SPEC-057 R-7)", () => {
     const plan = (chapters: number[]) => ({ episodes: 6, minutes: 25, keptFromListener: [], pilot: { title: "The tide turns", chapters } });
     const adapting = { ...draft(), kind: "audio-drama" as const, scenes: [], source: { productionId: "juju" } };

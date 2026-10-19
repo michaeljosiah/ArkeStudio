@@ -2371,6 +2371,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(120),
       delivery: DramaDeliverySchema,
       episodes: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+      /** Each separable track as its own file too (issue 1882); off unless asked for. */
+      stems: z.boolean().optional(),
     })
     .strict(),
   z.object({ kind: z.literal("list-drama-editions"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema }).strict(),
@@ -3792,6 +3794,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("read-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /**
+   * Spans of an episode's saved mix that just played whole, in seconds, on the base they were
+   * heard on (design turn 230o, issue 1882). The person's own listening; a stale base records nothing.
+   */
+  z.object({ kind: z.literal("record-audio-heard"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), base: z.string().regex(/^[a-f0-9]{64}$/),
+    spans: z.array(z.tuple([z.number().min(0), z.number().min(0)])).min(1).max(50) }).strict(),
+  /** What of an episode's mix has been heard, for the script's Review (issue 1882): answered as `audio-studio.heard`. */
+  z.object({ kind: z.literal("read-audio-heard"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("decide-audio-studio-proposal"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, id: z.string().min(1).max(160), version: z.number().int().min(1), decision: z.enum(["keep", "apply"]) }).strict(),
   z.object({ kind: z.literal("edit-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema }).strict(),
   z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000), expectedHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), waveform: z.boolean().optional() }).strict(),

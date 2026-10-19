@@ -60,7 +60,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool(
     "get_chapter",
     "Read one chapter's complete prose in bounded chunks.",
-    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem" }, section: { type: "string", enum: ["plan", "ending", "beats", "audio-studio"], description: "Optional audio-studio arrangement with exact sample clock, base, source pins and pending/decided proposals; plan only, the last three paragraphs (at most 6000 characters), or the beats named when its audiobook was grouped by beats. Omit for the full chapter." } },
+    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem; with section audio-studio, an audio drama's episode as episode-NNN" }, section: { type: "string", enum: ["plan", "ending", "beats", "audio-studio"], description: "Optional audio-studio arrangement with exact sample clock, base, source pins and pending/decided proposals; plan only, the last three paragraphs (at most 6000 characters), or the beats named when its audiobook was grouped by beats. Omit for the full chapter." } },
     ["productionId", "chapterId"],
   ),
   tool("list_scenes", "Read the complete scene identity and summary index; use get_scene for each full record.", PRODUCTION, ["productionId"]),

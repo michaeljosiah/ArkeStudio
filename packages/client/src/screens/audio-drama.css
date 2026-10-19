@@ -189,6 +189,8 @@ button.fy-ad-chip { cursor: pointer; }
 }
 .fy-ad-cast__row--head { cursor: default; padding: 10px 12px; color: var(--muted-foreground); font-size: 12px; }
 .fy-ad-cast__row:not(.fy-ad-cast__row--head):hover, .fy-ad-cast__group--open > .fy-ad-cast__row { background: var(--secondary); }
+/* A crowd's voices, opened under its row (230k): each a role, set in from the table's edge. */
+.fy-ad-cast__members { padding-left: 18px; border-left: 2px solid var(--border); margin-left: 8px; }
 .fy-ad-cast__row:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
 .fy-ad-cast__role, .fy-ad-cast__voice, .fy-ad-cast__sound { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fy-ad-cast__role b, .fy-ad-cast__voice b { font-weight: 600; font-size: 14px; }
@@ -284,10 +286,11 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-map__side { border-left: 1px solid var(--border); padding-left: 20px; font-size: 13px; }
 /* The map keeps a scale its labels can be read at (issue 1883): with Chat open its column fell to a
    third of the 760 viewBox and the labels to 3 px. Without room for both, the panel goes under the
-   map, and the map scrolls sideways rather than drawing smaller than 560 wide. */
+   map, and the map scrolls sideways rather than drawing smaller than 560 wide. Room for both is
+   the map's 560, the gap and the panel's 320 (230m, issue 1882): at 1360 with the rail open, beside. */
 .fy-ad-map { container: ad-map / inline-size; }
 .fy-ad-map__svg { min-width: 560px; }
-@container ad-map (max-width: 1040px) {
+@container ad-map (max-width: 899px) {
   .fy-ad-map__body { grid-template-columns: minmax(0, 1fr); overflow-x: auto; }
   .fy-ad-map__side { border-left: 0; border-top: 1px solid var(--border); padding: 16px 0 0; }
 }
@@ -354,10 +357,18 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-show__scenes { display: flex; gap: 3px; max-width: 420px; }
 .fy-ad-show__scenes i { height: 4px; border-radius: 2px; background: var(--border); min-width: 6px; }
 .fy-ad-show__scenes i.fy-ad-show__scene--done { background: var(--foreground); }
-.fy-ad-show__status { display: flex; gap: 12px; font-size: 12.5px; flex-wrap: wrap; justify-content: flex-end; }
+.fy-ad-show__scenes i.fy-ad-show__scene--work { background: linear-gradient(90deg, var(--foreground) 50%, var(--border) 50%); }
+.fy-ad-show__activity { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.fy-ad-show__activity i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--foreground); animation: fy-ad-spin 900ms linear infinite; }
+@keyframes fy-ad-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-ad-show__activity i { animation: none; } }
+.fy-ad-show__status { display: flex; gap: 12px; align-items: center; font-size: 12.5px; flex-wrap: wrap; justify-content: flex-end; }
 .fy-ad-show__edition { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .fy-ad-show__edition small { color: var(--muted-foreground); }
 .fy-ad-show__edition span { display: flex; gap: 10px; flex-wrap: wrap; }
+.fy-ad-show__stems { flex-basis: 100%; }
+.fy-ad-show__stems summary { cursor: pointer; color: var(--muted-foreground); }
+.fy-ad-show__stems a { display: inline-block; margin: 4px 10px 0 0; }
 .fy-ad-pub { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
 .fy-ad-pub__row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .fy-ad-pub__row label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
@@ -372,7 +383,13 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-pub__episodes small { color: var(--muted-foreground); }
 .fy-ad-pub__held { background: var(--secondary); }
 .fy-ad-pub__outputs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+/* Delivery is named as Edition is (230q). */
+.fy-ad-pub__field { display: flex; flex-direction: column; gap: 4px; }
 .fy-ad-pub__outputs span { border-radius: 999px; padding: 3px 10px; background: var(--foreground); color: var(--background); font-size: 12px; }
+/* Stems are asked for (230q): an outlined chip until pressed, then filled like what is included. */
+.fy-ad-pub__stems { border-radius: 999px; padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font: inherit; font-size: 12px; cursor: pointer; }
+.fy-ad-pub__stems[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.fy-ad-pub__stems:disabled { color: var(--muted-foreground); cursor: default; }
 .fy-ad-pub__frozen { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 0; }
 .fy-ad-pub__frozen dt { color: var(--muted-foreground); }
 .fy-ad-pub__frozen dd { margin: 0; }

@@ -4,13 +4,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { initialAudioArrangement, newAudioClip, ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { emitForTest, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { ProductionCastScreen } from "../src/screens/production-cast.js";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
 import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
-import { changedFields, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
+import { changedFields, crowdSpeaker, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -133,6 +134,24 @@ describe("the drama's Cast (230k)", () => {
   });
 });
 
+describe("issue 1882: a crowd in Cast (230k)", () => {
+  it("is one row of its voices, each line named, opening to each voice as a role", async () => {
+    const { container } = await mount(drama([line("bray", "Climb."), line("crowd", "Rope!"), line("crowd-2", "Haul!"), line("crowd-3", "Now!"), line("crowd", "Again!")]), "cast");
+    assert.match(container.textContent!, /This production · 2 roles/, "the crowd counts as one");
+    const crowd = container.querySelector('[data-role="crowd-group"] > [role="row"]')!;
+    assert.match(crowd.textContent!, /Crowd3 speakers · each line named/);
+    assert.match(crowd.querySelector(".fy-ad-cast__lines")!.textContent!, /^4$/);
+    assert.equal(container.querySelector('[data-role="crowd-2"]'), null, "its voices wait under it");
+    await act(async () => props(crowd).onClick!({}));
+    assert.deepEqual([...container.querySelectorAll('[data-role="crowd-group"] .fy-ad-cast__members > [data-role] .fy-ad-cast__role b')].map((name) => name.textContent), ["Crowd", "Crowd 2", "Crowd 3"]);
+  });
+
+  it("offers another voice in the crowd in the score, a speaker of its own", () => {
+    assert.equal(crowdSpeaker(["bray"]), "crowd");
+    assert.equal(crowdSpeaker(["crowd", "crowd-2"]), "crowd-3");
+  });
+});
+
 describe("Review in the score (230j)", () => {
   it("says what it rests on and how much was heard, and lists passed checks closed", async () => {
     const { container } = await mount(drama([
@@ -148,6 +167,28 @@ describe("Review in the score (230j)", () => {
     const closed = [...container.querySelectorAll(".fy-ad-review__note--closed .fy-ad-review__kind")].map((kind) => kind.textContent);
     assert.ok(closed.includes("Intelligibility · audio · not heard"));
     assert.ok(closed.includes("Pacing · script v3 · checked"));
+  });
+
+  it("says what of the mix was heard, with the heard audio's notes beside the script's (issue 1882)", async () => {
+    const bray = line("bray", "Climb.");
+    const { container, sent } = await mount(drama([{ id: ulid(), kind: "heading", place: "The quay" }, bray]), "script/1");
+    const toggle = [...container.querySelectorAll("button")].find((button) => button.textContent === "Review")!;
+    await act(async () => props(toggle).onClick!({}));
+    const asked = sent.findLast((message) => message.kind === "read-audio-heard") as { requestId: string; chapterFile: string };
+    assert.equal(asked.chapterFile, "episode-001");
+    await act(async () => __applyEventForTest({ type: "audio-studio.heard", at: new Date().toISOString(), requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      chapterId: "episode-001", heard: { base: "a".repeat(64), seconds: 150, spans: [[0, 88]], notes: [{ key: "d".repeat(32), check: "intelligibility", block: bray.id, quote: "Bray: Climb.",
+        from: 57.8, to: 59.4, observed: "Bray 4 dB under Ambience" }] } }));
+    assert.equal(container.querySelector('[data-testid="review-coverage"]')?.textContent, "heard 0:00–1:28 of 2:30");
+    const kinds = [...container.querySelectorAll(".fy-ad-review__note:not(.fy-ad-review__note--closed) .fy-ad-review__kind")].map((kind) => kind.textContent);
+    assert.ok(kinds.includes("2 Intelligibility · heard 0:57.8–0:59.4"), JSON.stringify(kinds));
+    const closed = [...container.querySelectorAll(".fy-ad-review__note--closed .fy-ad-review__kind")].map((kind) => kind.textContent);
+    assert.ok(closed.includes("Intelligibility · audio · heard"));
+    assert.ok([...container.querySelectorAll("button")].some((button) => button.textContent === "Review audio in Audio Studio"), "230j's way to the audio");
+    // Asked again and not sent (codex on PR 1945): the last answer is no longer said.
+    __setBridgeForTest(null);
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001" }));
+    assert.equal(container.querySelector('[data-testid="review-coverage"]')?.textContent, "Script v3 · no audio heard yet");
   });
 
   it("decides a note Intentional, kept in the production, and leaves it closed", async () => {
@@ -305,6 +346,75 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     assert.ok(container.querySelector(".fy-ad-ep__bar nav[aria-label='Episode views'] [aria-current='page']")?.textContent === "Audio Studio");
     assert.ok(container.querySelector("section[aria-label='Episode script']"));
   });
+
+  it("has Arke beside the arrangement, and reads again when Arke's suggestion lands (issue 1882)", async () => {
+    const { container, sent } = await mount(drama([line("bray", "Climb.")]), "script/1?view=audio-studio");
+    assert.match(container.querySelector("#cut-arke-panel")!.textContent!, /Discuss the arrangement with Arke/);
+    const reads = () => sent.filter((message) => message.kind === "read-audio-studio").length;
+    const before = reads();
+    // The coordinator's signal for an episode carries no chapter record, only that its studio changed.
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001" }));
+    assert.equal(reads(), before + 1, "the studio reads again, so Current/Suggested has the suggestion");
+  });
+});
+
+describe("issue 1882: the episode's review strip and what was heard (230o)", () => {
+  const studioOf = (line: EpisodeScriptBlock, heard?: object) => {
+    const source = { file: "artifacts/take.wav", label: "Take", hash: `sha256:${"b".repeat(64)}`, samples: 96_000, rate: 48_000, channels: 2 as const };
+    const clip = { ...newAudioClip("voice", "voice:bray", source, 96_000), role: "speech" as const, passageId: "p1", placement: { kind: "sequence" as const, offset: 0 } };
+    const arrangement = initialAudioArrangement({ manuscriptHash: "script", passages: [{ id: "p1", key: line.id, textHash: dramaLineHash(line as never) }],
+      tracks: [{ id: "voice:bray", name: "Bray", gainDb: 0, muted: false }], clips: [clip], omissions: [], master: { targetLufs: -18, ceilingDb: -1.5 } }, "{}");
+    return { base: "a".repeat(64), revision: 1, undo: null, redo: null, state: arrangement.current, script: { hash: "script", passages: [{ key: line.id, textHash: dramaLineHash(line as never) }] },
+      passages: [{ key: line.id, text: "Bray: Climb." }], library: [], ...(heard ? { heard } : {}) };
+  };
+  const open = async (line: EpisodeScriptBlock, heard?: object) => {
+    const m = await mount(drama([{ id: ulid(), kind: "heading", place: "The quay" } as EpisodeScriptBlock, line]), "script/1?view=audio-studio");
+    const read = m.sent.find((message) => message.kind === "read-audio-studio") as { requestId: string };
+    await act(async () => __applyEventForTest({ type: "audio-studio.state", at: new Date().toISOString(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001",
+      requestId: read.requestId, source: null, studio: studioOf(line, heard) as never }));
+    return m;
+  };
+
+  it("draws the whole episode: its scene, what was heard, the note pinned where it was heard, and Hear the rest", async () => {
+    const line = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Climb." } as EpisodeScriptBlock;
+    const note = { key: "c".repeat(32), check: "intelligibility", block: line.id, quote: "Bray: Climb.", from: 0, to: 1, observed: "Bray 4 dB under Ambience",
+      fix: { label: "Duck Ambience 10 dB more under Bray", commands: [{ kind: "set-clip", id: "voice", changes: { duckDb: 10 } }] } };
+    const { container, sent } = await open(line, { base: "a".repeat(64), seconds: 2, spans: [[0, 1]], notes: [note] });
+    const strip = container.querySelector("[role='region'][aria-label='Review']")!;
+    assert.equal(strip.querySelector("[data-testid='strip-coverage']")?.textContent, "heard 0:00–0:01 of 0:02");
+    assert.equal(strip.querySelector(".fy-review-strip__scene")?.getAttribute("title"), "1 · The quay");
+    assert.equal(strip.querySelectorAll(".fy-review-strip__heard i").length, 1, "what was heard is solid over the hatching");
+    assert.ok([...strip.querySelectorAll("button")].some((button) => button.textContent === "Hear the rest"));
+    assert.ok(container.querySelector(".fy-audio-timeline__region"), "the scene is a region on the ruler too");
+    await act(async () => props(strip.querySelector("button[aria-label^='Note 1']")!).onClick!({}));
+    const section = container.querySelector("[aria-label='Review note']")!;
+    assert.match(section.textContent!, /Review · note 1 · heard.*“Climb\.”.*Heard0:00\.0–0:01\.0.*ObservedBray 4 dB under Ambience.*KindIntelligibility/);
+    await act(async () => props([...section.querySelectorAll("button")].find((button) => button.textContent === "Fix")!).onClick!({}));
+    assert.match(container.querySelector("[aria-label='Review audio changes']")?.textContent ?? "", /Duck Ambience 10 dB more under Bray/, "Fix is Current and Suggested");
+    await act(async () => props([...section.querySelectorAll("button")].find((button) => button.textContent === "Dismiss")!).onClick!({}));
+    assert.deepEqual(sent.filter((message) => message.kind === "decide-drama-note").map((message) => (message as { key: string; decision: string }).decision), ["dismissed"]);
+  });
+
+  it("records what of the saved mix played whole, on the base it was heard on", async () => {
+    const element = { src: "", currentTime: 0, duration: 2, loop: false, playbackRate: 1, play: async () => {}, pause: () => {}, load: () => {}, removeAttribute: () => {},
+      addEventListener: () => {}, removeEventListener: () => {} };
+    setAudioFactoryForTest(() => element as never);
+    try {
+      const line = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Climb." } as EpisodeScriptBlock;
+      const { container, sent } = await open(line);
+      assert.equal(container.querySelector("[data-testid='strip-coverage']")?.textContent, "Script v3 · no audio heard yet");
+      await act(async () => props(container.querySelector("[aria-label='Play']")!).onClick!({}));
+      const preview = sent.find((message) => message.kind === "preview-audio-studio") as { requestId: string };
+      await act(async () => __applyEventForTest({ type: "audiobook.mix", at: new Date().toISOString(), worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001",
+        requestId: preview.requestId, mix: { file: ".cache/audio-studio/mix/x.wav", seconds: 2, from: 0 } }));
+      await act(async () => { emitForTest("play"); });
+      for (const at of [0.25, 0.75, 1.25, 1.75]) await act(async () => { element.currentTime = at; emitForTest("timeupdate"); });
+      await act(async () => { emitForTest("pause"); });
+      const heard = sent.filter((message) => message.kind === "record-audio-heard") as Array<{ base: string; spans: Array<[number, number]>; chapterFile: string }>;
+      assert.equal(heard.length, 1);
+      assert.deepEqual([heard[0]!.base, heard[0]!.chapterFile, heard[0]!.spans], ["a".repeat(64), "episode-001", [[0, 2]]], "played to its end, it is heard to its end");
+    } finally { setAudioFactoryForTest(null); }
+  });
 });
 
 describe("the show page and Publish (230p, 230q)", () => {
@@ -339,6 +449,50 @@ describe("the show page and Publish (230p, 230q)", () => {
     await act(async () => props([...held.container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
     assert.match(dom.document.body.textContent!, /Episode 1.*not performed/);
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
+  });
+
+  it("shows a press performing in the background on its row, as Activity reports it (230p, issue 1882)", async () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b, { id: ulid(), kind: "heading", place: "Tower" }, c], []);
+    const job = (block: string, status: string, createdAt: string, updatedAt: string) => ({ ...structuredClone(state.app.jobs[0]!), id: `jb_${ulid()}`, productionId: "low-water-drama",
+      target: { kind: "voice-preview", id: "drama/elevenlabs/eleven_v3/breeze-a" }, capability: "voice-tts", params: { block },
+      landing: { dir: ".staging/drama/low-water-drama/episode-001" }, status, createdAt, updatedAt });
+    // An old take made long ago is another press; this one has made Maren's line and is making Bray's.
+    state.app.jobs = [job(c.id, "succeeded", "2026-10-19T08:00:00.000Z", "2026-10-19T08:00:05.000Z"),
+      job(a.id, "succeeded", "2026-10-19T09:00:00.000Z", "2026-10-19T09:00:05.000Z"), job(b.id, "running", "2026-10-19T09:00:06.000Z", "2026-10-19T09:00:06.000Z")] as never;
+    const { container } = await mount(state, "home");
+    const row = container.querySelector('[data-episode="1"]')!;
+    assert.match(row.querySelector("[role='status']")?.textContent ?? "", /Performing 1 of 3 lines/);
+    assert.equal(row.querySelector(".fy-ad-show__ends"), null, "in place of Ends on");
+    assert.match(row.textContent!, /● Performed 1 of 3/);
+    const scenes = [...row.querySelectorAll(".fy-ad-show__scenes i")].map((scene) => scene.className);
+    assert.deepEqual(scenes, ["fy-ad-show__scene--work", ""], "the scene with the line being made is at work");
+    state.app.jobs = (state.app.jobs as Array<{ status: string }>).map((entry) => ({ ...entry, status: "succeeded" })) as never;
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    assert.equal(container.querySelector('[data-episode="1"] [role="status"]'), null, "nothing going, nothing shown");
+    // Parked for a person, or another world's (codex on PR 1945): neither is this episode performing.
+    state.app.jobs = [job(b.id, "needs-reconciliation", "2026-10-19T10:00:00.000Z", "2026-10-19T10:00:00.000Z"),
+      { ...job(b.id, "running", "2026-10-19T10:00:00.000Z", "2026-10-19T10:00:00.000Z"), worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ" }] as never;
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    assert.equal(container.querySelector('[data-episode="1"] [role="status"]'), null, "a parked job, or another world's, is not a press going");
+  });
+
+  it("names what an edition delivers, and asks for stems only when there are lanes to separate (issue 1882)", async () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two.");
+    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id, b.id]), "home");
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    const outputs = dom.document.body.querySelector(".fy-ad-pub__outputs")!;
+    assert.match(outputs.textContent!, /✓ Episode audio · MP3.*✓ Production script · PDF.*Stems · 2/);
+    const archive = [...dom.document.body.querySelectorAll("[role='radio']")].find((button) => button.textContent === "Archive · WAV")!;
+    await act(async () => props(archive).onClick!({}));
+    assert.match(outputs.textContent!, /Episode audio · WAV/);
+    assert.match(dom.document.body.querySelector(".fy-ad-pub__frozen")!.textContent!, /Voices.*·/, "the kept takes' voices, by engine (codex on PR 1945)");
+    const stems = dom.document.body.querySelector(".fy-ad-pub__stems")!;
+    assert.equal(stems.getAttribute("aria-pressed"), "false", "off unless asked for");
+    await act(async () => props(stems).onClick!({}));
+    await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
+    const asked = sent.find((message) => message.kind === "publish-drama-edition") as { delivery: string; stems?: boolean } | undefined;
+    assert.deepEqual([asked?.delivery, asked?.stems], ["archive", true]);
   });
 
   it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {

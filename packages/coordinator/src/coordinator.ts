@@ -365,7 +365,7 @@ import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { audioWaveform } from "./audio/waveform.js";
-import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, savedEpisodeMixProblems } from "./productions/audio-studio.js";
+import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -488,6 +488,7 @@ import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
+import { studioEpisode } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
@@ -3900,7 +3901,7 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
-        const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.wav|episode-\d{3}-script\.txt|transcript\.txt|credits\.txt)$/.exec(urlPath);
+        const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.(?:wav|mp3)|episode-\d{3}-script\.(?:txt|pdf)|episode-\d{3}-stem-\d{2}(?:-[a-z0-9-]{1,40})?\.wav|transcript\.txt|credits\.txt)$/.exec(urlPath);
         if (drama) return this.dramaEditions.serve(drama[1]!, drama[2]!);
         const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
@@ -10718,7 +10719,7 @@ export class Coordinator {
           return;
         }
         try {
-          const edition = await this.dramaEditions.publish(store, msg.productionId, { name: msg.name, delivery: msg.delivery, episodes: msg.episodes });
+          const edition = await this.dramaEditions.publish(store, msg.productionId, { name: msg.name, delivery: msg.delivery, episodes: msg.episodes, ...(msg.stems ? { stems: true } : {}) });
           this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, edition });
         } catch (err) {
           this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, refused: describeCoordinatorError(err) });
@@ -16214,6 +16215,23 @@ export class Coordinator {
         } catch (error) { this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(error) }); }
         return;
       }
+      case "record-audio-heard":
+      case "read-audio-heard": {
+        // An episode's listening (design turn 230o, issue 1882): recorded on the base it was heard
+        // on, and read back for the script's Review. Best effort: a refused record changes nothing.
+        const store = this.opts.provider.openStore?.();
+        const chapter = this.studioSubject(store, msg.worldId, msg.productionId, msg.chapterFile);
+        if (msg.kind === "read-audio-heard") {
+          const heard = store && chapter ? await readAudioHeard(store, msg.productionId, chapter.id).catch(() => null) : null;
+          this.emit({ at: this.nowIso(), type: "audio-studio.heard", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter?.id ?? "unavailable", heard });
+          return;
+        }
+        if (!store || !chapter) return;
+        const recorded = await recordAudioHeard(store, msg.productionId, chapter.id, { base: msg.base, spans: msg.spans }, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}).catch(() => false);
+        // Its open studio and script read again, so the strip and the Review say what was heard.
+        if (recorded && this.opts.provider.openStore?.() === store) this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        return;
+      }
       case "read-audio-studio":
       case "decide-audio-studio-proposal":
       case "edit-audio-studio":
@@ -21213,7 +21231,14 @@ export class Coordinator {
       effectDependencies: this.effectDependencies,
       audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
       audioStudioChanged: async (productionId, chapterId) => {
-        const chapter = store.getBundle().productions.find(entry => entry.meta.id === productionId)?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
+        const production = store.getBundle().productions.find(entry => entry.meta.id === productionId);
+        // An episode keeps no audiobook record (issue 1882): the signal alone tells its open studio
+        // to read again, so Arke's suggestion appears beside Current.
+        if (studioEpisode(production, chapterId)) {
+          if (this.opts.provider.openStore?.() === store) this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: store.worldId, productionId, chapterId });
+          return;
+        }
+        const chapter = production?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
         if (!chapter) return;
         const record = await readAudiobook(store, productionId, chapter.file);
         if (this.opts.provider.openStore?.() !== store || !record || record === "unreadable") return;

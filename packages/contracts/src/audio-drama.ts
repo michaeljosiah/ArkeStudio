@@ -578,8 +578,10 @@ export interface DramaReviewInput {
   cast?: AudioDramaRecord["cast"];
   /** The pinned chapters as they are now. */
   chapters?: ReadonlyArray<{ story: string; chapter: string; version: number; hash?: string | undefined }>;
-  /** Intervals of this episode's audio actually heard, in seconds. None yet. */
+  /** Intervals of this episode's audio actually heard, in seconds, on its mix as it is now. */
   heard?: ReadonlyArray<readonly [number, number]>;
+  /** That mix's length, which heard coverage is counted against (issue 1882); else the script's estimate. */
+  heardOf?: number;
 }
 
 const LONG_SPEECH_WORDS = 70;
@@ -702,8 +704,10 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   }
   if (withheld.length === 0 && hidden.length === 0 && raw.length === mystery) checked.push({ check: "mystery", says: "Nothing is kept from the listener here." });
 
-  // Intelligibility needs ears: with nothing heard it waits, and is never counted as passed.
+  // Intelligibility needs ears: with nothing heard it waits, and is never counted as passed. Its
+  // notes are the heard audio's own, made where the audio was measured, not here.
   if ((input.heard ?? []).length === 0) checked.push({ check: "intelligibility", says: "Needs heard audio." });
+  else checked.push({ check: "intelligibility", says: "Checked on what was heard; its notes rest on their heard intervals." });
 
   const at = (note: Omit<DramaReviewNote, "key" | "evidence">) => note.blocks.length === 0 ? Number.MAX_SAFE_INTEGER : index.get(note.blocks[0]!) ?? Number.MAX_SAFE_INTEGER;
   const notes = raw
@@ -712,7 +716,7 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
     .map(({ note }) => ({ ...note, evidence,
       // Scoped to the episode (codex on PR 1873): two episodes' like notes are decided apart.
       key: noteKey(`e${episode}:${note.check}`, note.blocks, note.says, note.blocks.map((id) => JSON.stringify(blocks[index.get(id) ?? -1] ?? null)).join("\n")) }));
-  return { coverage: reviewCoverage(input.version, input.heard ?? [], estimateScriptSeconds(blocks)), notes, checked };
+  return { coverage: reviewCoverage(input.version, input.heard ?? [], input.heardOf ?? estimateScriptSeconds(blocks)), notes, checked };
 }
 
 // ---------------------------------------------------------------------------

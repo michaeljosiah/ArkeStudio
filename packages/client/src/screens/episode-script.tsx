@@ -7,11 +7,11 @@ import {
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
-  renderAudiobookMix, subscribeAudiobookMix,
+  renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords, decideDramaNote,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, changedFields, directionText, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
+  blockLine, changedFields, crowdSpeaker, directionText, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
@@ -22,12 +22,13 @@ import { useMediaQuery } from "../lib/media-query.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { HearBar, TakeCell } from "../components/audio-drama-hear.js";
 import { AddSoundDialog } from "../components/audio-drama-sound.js";
-import { ReviewColumn } from "../components/audio-drama-review.js";
-import { pilotChapters } from "../components/audio-drama-plan-card.js";
+import { ReviewColumn, useDramaScriptReview } from "../components/audio-drama-review.js";
+import { pilotAsk } from "../components/audio-drama-plan-card.js";
 import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
+import { ProductionConversation } from "../components/conversation.js";
 import type { TimingRowLike } from "./chapter-timing.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -44,6 +45,7 @@ const ASKS: ReadonlyArray<[string, string]> = [
 ];
 /** The speaker list's way to a new unnamed speaker: never a key, since no slug starts with "@". */
 const NEW_UNNAMED = "@unnamed";
+const NEW_CROWD = "@crowd";
 const INSERTS: Array<[EpisodeScriptBlock["kind"], string]> = [
   ["dialogue", "Line"], ["narration", "Narration"], ["sound", "Sound"], ["ambience", "Ambience"],
   ["music", "Music"], ["silence", "Silence"], ["note", "Note"], ["heading", "Scene"],
@@ -402,10 +404,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
               {chatSurface && (
                 <Button variant="primary" onClick={() => {
                   const pilot = plan?.pilot;
-                  // Said as the author would say it (issue 1883): Arke's guidance names the action.
-                  chat!.setValue(chatSurface.key, "draft", pilot && episode === 1
-                    ? `Draft the pilot scene, “${pilot.title}”${pilot.chapters.length ? `, from ${pilotChapters(pilot.chapters)},` : ""} as episode 1's script.`
-                    : `Draft episode ${episode}'s script.`);
+                  chat!.setValue(chatSurface.key, "draft", pilot && episode === 1 ? pilotAsk(pilot) : `Draft episode ${episode}'s script.`);
                   chat!.open(chatSurface);
                 }}>{plan?.pilot && episode === 1 ? "Draft the pilot with Arke" : "Draft with Arke"}</Button>
               )}
@@ -452,13 +451,15 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                   <>
                     <div className="fy-ad-score__who">
                       {block.kind === "dialogue" && (on
-                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => change(block.id, {
-                            speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker([...blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : []),
-                              ...world.sheets.map((sheet) => sheet.id), ...Object.keys(production.audioDrama?.cast ?? {})]) : event.target.value,
-                          })}>
+                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => {
+                            const taken = [...blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : []), ...world.sheets.map((sheet) => sheet.id), ...Object.keys(production.audioDrama?.cast ?? {})];
+                            change(block.id, { speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker(taken) : event.target.value === NEW_CROWD ? crowdSpeaker(taken) : event.target.value });
+                          }}>
                             {cast.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}
                             {others.map((key) => <option key={key} value={key}>{name(key)}</option>)}
                             {!others.includes("crowd") && !cast.some((sheet) => sheet.id === "crowd") && <option value="crowd">Crowd</option>}
+                            {/* A crowd's lines are each named (230k): another voice in it is a speaker of its own. */}
+                            {others.includes("crowd") && <option value={NEW_CROWD}>Another in the crowd</option>}
                             <option value={NEW_UNNAMED}>Someone unnamed</option>
                           </select>
                         : <b className="fy-ad-score__speaker">{name(block.speaker)}</b>)}
@@ -593,6 +594,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         {side === "review" && asSheet("Review", (
           // The saved script it names as evidence, never an unsaved draft (codex on PR 1873).
           <ReviewColumn world={world} production={production} episode={episode} version={stored?.script.version ?? 1} blocks={stored?.script.blocks ?? []} onClose={() => setSide(null)}
+            onStudio={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/script/${episode}?view=audio-studio`)}
             onPick={(id) => { setSide(phone ? null : side); setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
         ))}
       </div>
@@ -719,6 +721,23 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const [passage, setPassage] = useState<string | null>(null);
   const phone = useMediaQuery("(max-width: 599px)");
   const episodes = Math.max(production.audioDrama?.plan.episodes ?? 1, episode);
+  // Arke's suggestion staged for this episode (issue 1882) is signalled by its studio's record key:
+  // the studio reads again, and Current/Suggested has it to compare.
+  const signalled = useAudiobookRecords()[`${world.meta.worldId}/${production.meta.id}/${stem}`]?.seq ?? 0;
+  // The one Review (230o, issue 1882): the saved script's notes and scenes, decided as the script's are.
+  const version = stored?.script.version ?? 1, saved = stored?.script.blocks ?? [];
+  const scripted = useDramaScriptReview(world, production, episode, version, saved);
+  const review = {
+    version,
+    scenes: saved.flatMap((block, i) => {
+      if (block.kind !== "heading") return [];
+      const line = saved.slice(i + 1).find((next) => next.kind === "heading" || next.kind === "dialogue" || next.kind === "narration");
+      return line && line.kind !== "heading" ? [{ key: block.id, title: block.place, firstLine: line.id }] : [];
+    }).map((scene, index) => ({ ...scene, n: saved.filter((block) => block.kind === "heading").findIndex((block) => block.id === scene.key) + 1 || index + 1 })),
+    notes: scripted.notes.map((note) => ({ key: note.key, block: note.blocks.find((id) => saved.some((block) => block.id === id && (block.kind === "dialogue" || block.kind === "narration"))), says: note.says, evidence: note.evidence })),
+    decided: production.audioDrama?.review ?? {},
+    onDecide: (key: string, decision: "intentional" | "dismissed") => decideDramaNote(world.meta.worldId, production.meta.id, key, decision),
+  };
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? speakerLabel(slug);
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
@@ -762,9 +781,15 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       <div className="fy-ad-ep__studio">
     <AudioStudioWorkspace worldId={world.meta.worldId} productionId={production.meta.id} chapterId={stem} chapterFile={stem} slug={world.meta.slug}
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
-      connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
-      passage={passage} onPassage={setPassage} conversation={null} propose={null}
-      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode"
+      connection={connection} stamp={`${stored.hash}:${signalled}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
+      passage={passage} onPassage={setPassage}
+      // Arke beside the episode's arrangement (issue 1882), as beside a chapter's: a production
+      // conversation whose asks name the episode, since a chapter subject would name none here.
+      propose={<div className="fy-audio-studio__propose"><p>Discuss the arrangement with Arke. Review proposed changes before applying them.</p></div>}
+      conversation={(context) => <ProductionConversation worldId={world.meta.worldId} productionId={production.meta.id} entry={{ kind: "production", productionId: production.meta.id }}
+        dock={{ title: "Arke", subject: `Episode ${episode}`, conversationFirst: true, subjectPrefix: `${context} About episode ${episode}:`, about: `episode ${episode}` }}
+        placeholder={`Ask about episode ${episode}`} emptyLine={`No conversation about episode ${episode} yet.`} />}
+      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode" review={review}
       onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />
       </div>
