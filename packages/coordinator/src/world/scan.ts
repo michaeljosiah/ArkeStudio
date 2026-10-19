@@ -31,10 +31,6 @@ import {
   AudioDramaRecordSchema,
   EpisodeScriptSchema,
   EpisodeTakesSchema,
-  DramaMixRecordSchema,
-  episodeAudioScript,
-  resolveAudioArrangement,
-  validateAudioArrangement,
   episodeScriptFile,
   episodeTakesFile,
   type EpisodeScript,
@@ -993,28 +989,7 @@ export async function scanWorld(dir: string, opts: { supports?: number; signal?:
       }
       if (takes) episodeTakes.push(takes);
     }
-    // Each edited episode mix, with what it cannot resolve (issue 1882): the show page said Mixed
-    // from the script and takes alone, while Publish rendered the saved arrangement and refused.
-    // Read softly: Audio Studio is where an unreadable arrangement is refused and repaired.
-    const dramaMixes: Array<{ episode: number; issues: string[] }> = [];
-    for (const file of (await listDir(join(pdir, "drama-mix"))).filter((f) => f.endsWith(".json")).sort()) {
-      const raw = await readFile(join(pdir, "drama-mix", file), "utf8").catch(() => null);
-      let parsed: ReturnType<typeof DramaMixRecordSchema.safeParse> | null = null;
-      try { parsed = raw === null ? null : DramaMixRecordSchema.safeParse(JSON.parse(raw)); } catch { parsed = null; }
-      const episode = Number(/^episode-(\d{3})\.json$/.exec(file)?.[1] ?? 0);
-      if (episode < 1 || episode > 200) continue;
-      if (!parsed?.success || parsed.data.episode !== episode) { dramaMixes.push({ episode, issues: ["The episode's arrangement is unreadable; open it in Audio Studio."] }); continue; }
-      const arrangement = parsed.data.arrangement;
-      const script = episodeScripts.find((entry) => entry.script.episode === episode);
-      if (!arrangement || !script) continue;
-      let issues: string[];
-      try {
-        issues = resolveAudioArrangement(validateAudioArrangement(arrangement.current), episodeAudioScript(script.hash, script.script.blocks)).issues.map((issue) => issue.message.slice(0, 300));
-      } catch (error) { issues = [error instanceof Error ? error.message.slice(0, 300) : "The arrangement cannot be resolved."]; }
-      dramaMixes.push({ episode, issues: issues.slice(0, 20) });
-    }
     productions.push({
-      ...(dramaMixes.length > 0 ? { dramaMixes } : {}),
       ...(episodeScripts.length > 0 ? { episodeScripts } : {}),
       ...(episodeTakes.length > 0 ? { episodeTakes } : {}),
       rehearsals, rehearsalHashes, feedback,

@@ -221,6 +221,41 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
     redo: opened.saved?.redo.at(-1)?.label ?? null, state: opened.state, script: { hash: opened.script.hash, passages: [...opened.script.passages] }, passages: opened.passages, library, proposals: opened.proposals,
     unavailable: [...new Map([...opened.unplaced, ...await audioStudioSourceProblems(store, productionId, opened.state, true)])].map(([file, message]) => ({ file, message })) };
 }
+/**
+ * What each saved episode arrangement would be refused for (issue 1882): the show page said Mixed
+ * from the script and takes alone while Publish rendered the saved arrangement and refused. Checked
+ * as Publish checks it (codex on PR 1884), catalogue, rights and bytes included, so it is asked for
+ * when the page opens rather than on every scan. An episode never arranged by hand is derived from
+ * its kept takes, which the page's readiness already reads.
+ */
+export async function savedEpisodeMixProblems(store: WorldStore, productionId: string): Promise<Array<{ episode: number; issues: string[] }>> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production || !productionShape(production.meta).isAudioDrama) return [];
+  const mixes: Array<{ episode: number; issues: string[] }> = [];
+  for (const { script } of [...production.episodeScripts ?? []].sort((a, b) => a.script.episode - b.script.episode)) {
+    store.closingSignal.throwIfAborted();
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/drama-mix/${episodeScriptFile(script.episode)}`))), "utf8").catch(() => null);
+    if (raw === null) continue;
+    let parsed: ReturnType<typeof DramaMixRecordSchema.safeParse> | null = null;
+    try { parsed = DramaMixRecordSchema.safeParse(JSON.parse(raw)); } catch { parsed = null; }
+    if (!parsed?.success || parsed.data.episode !== script.episode) {
+      mixes.push({ episode: script.episode, issues: ["The episode's arrangement is unreadable; restore it before opening Audio Studio"] });
+      continue;
+    }
+    // Only a hand-made arrangement is opened here: opening without one derives it, decoding every take.
+    if (!parsed.data.arrangement) continue;
+    let issues: string[];
+    try {
+      const opened = await openAudioStudio(store, productionId, episodeScriptFile(script.episode).replace(/\.json$/, ""));
+      issues = [...opened.resolved.issues.map((issue) => issue.message), ...(await audioStudioSourceProblems(store, productionId, opened.state, true)).values()];
+    } catch (error) {
+      store.closingSignal.throwIfAborted();
+      issues = [error instanceof Error ? error.message : "The arrangement cannot be resolved."];
+    }
+    mixes.push({ episode: script.episode, issues: issues.slice(0, 20).map((issue) => issue.slice(0, 300)) });
+  }
+  return mixes;
+}
 
 async function validateEditSources(store: WorldStore, productionId: string, script: AudioScript, edit: AudioArrangementEdit, options: Options): Promise<Map<string, AudioSource>> {
   const sources = new Map<string, AudioSource>();

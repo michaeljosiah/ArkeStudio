@@ -178,11 +178,6 @@ export const ProductionBundleSchema = valueSchema(z
     /** Each episode's takes (SPEC-057 R-29): the kept take and any waiting, by script block. */
     episodeTakes: z.array(EpisodeTakesSchema).optional(),
     /**
-     * Each episode whose Audio Studio arrangement was edited and saved, with what its mix cannot yet
-     * resolve (issue 1882): the show page's Mixed reads this, as Publish's final render would.
-     */
-    dramaMixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20) }).strict()).optional(),
-    /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.
      */

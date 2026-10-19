@@ -11,7 +11,7 @@ import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
 import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
 import { changedFields, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -300,9 +300,12 @@ describe("the show page and Publish (230p, 230q)", () => {
 
   it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {
     const a = line("maren-kest", "One.");
-    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]);
-    state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.dramaMixes = [{ episode: 1, issues: ["Passage “One.” changed; bind it again"] }];
-    const { container } = await mount(state, "home");
+    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");
+    assert.equal(container.querySelector('[data-episode="1"] button[aria-label="Play episode 1"]') !== null, true, "ready until the mix is checked");
+    // The coordinator checks the saved arrangement as Publish would, sources read live (codex on PR 1884).
+    const listing = sent.findLast((message) => message.kind === "list-drama-editions") as { requestId: string } | undefined;
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "drama.editions", requestId: listing!.requestId, editions: [],
+      mixes: [{ episode: 1, issues: ["Passage “One.” changed; bind it again"] }] }));
     const row = container.querySelector('[data-episode="1"]')!;
     assert.match(row.textContent!, /● Mix 1 to fix/);
     assert.equal(row.querySelector("button[aria-label='Play episode 1']"), null, "an episode whose mix cannot resolve is not offered to play");

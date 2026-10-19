@@ -24,7 +24,8 @@ type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
 
 /** One episode's state at a glance (230p): its script, its cast, what is performed, whether it can be mixed. */
-function episodeState(world: WorldBundle, production: ProductionBundle, episode: number) {
+type MixProblems = Array<{ episode: number; issues: string[] }>;
+function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems) {
   const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
   const blocks = entry?.script.blocks ?? [];
   const takes = production.episodeTakes?.find((candidate) => candidate.episode === episode);
@@ -49,7 +50,7 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   const last = lines.at(-1);
   const endsOn = last ? { who: last.kind === "dialogue" ? name(last.speaker) : "Narrator", words: last.words.length > 70 ? `${last.words.slice(0, 69).trimEnd()}…` : last.words } : null;
   // A saved arrangement's own problems hold the episode back too (issue 1882), as Publish's render would.
-  const mixIssues = production.dramaMixes?.find((mix) => mix.episode === episode)?.issues ?? [];
+  const mixIssues = mixes.find((mix) => mix.episode === episode)?.issues ?? [];
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
     voiceless: voiceless.size, draft, scenes, mixIssues, endsOn,
@@ -77,7 +78,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const plan = production.audioDrama?.plan ?? null;
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) ?? null : null;
   const count = Math.max(plan?.episodes ?? 0, ...(production.episodeScripts ?? []).map((entry) => entry.script.episode));
-  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1) }));
+  // Checked by the coordinator as Publish checks it, sources read live, so asked for with the editions.
+  const [mixes, setMixes] = useState<MixProblems>([]);
+  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1, mixes) }));
   const planned = states.filter((state) => state.planned);
   const unplanned = states.filter((state) => !state.planned);
   const next = planned.find((state) => state.readiness.ready) ?? null;
@@ -94,8 +97,14 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   useDockHost(dock, null);
   // On a phone the next episode is under the thumb, with Chat beside it (230u, R-80).
   const phone = useMediaQuery("(max-width: 599px)");
-  useEffect(() => subscribeDramaEditions((answer) => { if (answer.requestId === listing.current) setEditions(answer.editions); }), []);
-  useEffect(() => { listing.current = listDramaEditions(world.meta.worldId, production.meta.id); }, [world.meta.worldId, production.meta.id, publishing]);
+  useEffect(() => subscribeDramaEditions((answer) => {
+    if (answer.requestId !== listing.current) return;
+    setEditions(answer.editions);
+    if (answer.mixes) setMixes(answer.mixes);
+  }), []);
+  // Asked again when what a mix is checked against changes here: a script, a take, a voice, a file.
+  const mixKey = JSON.stringify([production.episodeScripts?.map((entry) => entry.hash), production.episodeTakes, production.audioDrama?.cast, world.artifacts.length]);
+  useEffect(() => { listing.current = listDramaEditions(world.meta.worldId, production.meta.id); }, [world.meta.worldId, production.meta.id, publishing, mixKey]);
   // The episode heard as its studio arrangement mixes it (R-67).
   useEffect(() => subscribeAudiobookMix((answer) => {
     if (answer.requestId !== playing) return;

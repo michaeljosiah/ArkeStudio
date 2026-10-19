@@ -448,7 +448,12 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   /** An edition published or refused, by name (SPEC-057 R-72). */
   z.object({ ...base, type: z.literal("drama.edition"), requestId: UlidSchema, edition: DramaEditionSchema.optional(), refused: z.string().min(1).optional() }).strict(),
-  z.object({ ...base, type: z.literal("drama.editions"), requestId: UlidSchema, editions: z.array(DramaEditionSchema) }).strict(),
+  /**
+   * The production's editions, and what each saved episode arrangement would be refused for
+   * (issue 1882): the show page's Mixed agrees with Publish, which checks the same sources live.
+   */
+  z.object({ ...base, type: z.literal("drama.editions"), requestId: UlidSchema, editions: z.array(DramaEditionSchema),
+    mixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20) }).strict()).optional() }).strict(),
   /** `read-drama-source` answered: the text, or why it is not kept. */
   z
     .object({

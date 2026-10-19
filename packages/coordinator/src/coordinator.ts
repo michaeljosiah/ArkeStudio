@@ -364,7 +364,7 @@ import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { audioWaveform } from "./audio/waveform.js";
-import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
+import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, savedEpisodeMixProblems } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -10675,7 +10675,10 @@ export class Coordinator {
           return;
         }
         if (msg.kind === "list-drama-editions") {
-          this.emit({ at: new Date().toISOString(), type: "drama.editions", requestId: msg.requestId, editions: await this.dramaEditions.list(msg.worldId, msg.productionId) });
+          const editions = await this.dramaEditions.list(msg.worldId, msg.productionId);
+          // A listing still answers when a mix cannot be checked: the page falls back to the script.
+          const mixes = await savedEpisodeMixProblems(store, msg.productionId).catch(() => null);
+          this.emit({ at: new Date().toISOString(), type: "drama.editions", requestId: msg.requestId, editions, ...(mixes ? { mixes } : {}) });
           return;
         }
         try {

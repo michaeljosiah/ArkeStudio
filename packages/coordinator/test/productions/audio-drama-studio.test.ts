@@ -7,7 +7,7 @@ import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
 import { hearDramaLines, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
-import { audioStudioSnapshot, editAudioStudio, openAudioStudio } from "../../src/productions/audio-studio.js";
+import { audioStudioSnapshot, editAudioStudio, openAudioStudio, savedEpisodeMixProblems } from "../../src/productions/audio-studio.js";
 import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
 import { DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -208,17 +208,30 @@ describe("issue 1883: the episode's studio", () => {
 });
 
 describe("issue 1882: Mixed reads the saved arrangement", () => {
-  it("carries an edited episode's mix and what it cannot resolve on the bundle", async () => {
+  it("names what an edited episode's mix cannot resolve, as Publish would", async () => {
     const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." };
     const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
-    const mixes = () => store.getBundle().productions.find((p) => p.meta.id === id)!.dramaMixes;
-    assert.equal(mixes(), undefined, "an episode never edited in Audio Studio has no saved mix");
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [], "an episode never edited in Audio Studio has no saved mix");
     const opened = await openAudioStudio(store, id, "episode-001");
     await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
-    assert.deepEqual(mixes(), [{ episode: 1, issues: [] }]);
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [{ episode: 1, issues: [] }]);
     // The line is rewritten and taken out: the saved arrangement still holds a passage the script no longer has.
     const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
     await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash, blocks: entry.script.blocks.filter((block) => block.id !== line.id) });
-    assert.ok((mixes()?.[0]?.issues.length ?? 0) > 0, JSON.stringify(mixes()));
+    const mixes = await savedEpisodeMixProblems(store, id);
+    assert.ok((mixes[0]?.issues.length ?? 0) > 0, JSON.stringify(mixes));
+  });
+
+  it("checks a saved mix's sources live, as Publish does (codex on PR 1884)", async () => {
+    const { store, id } = await episode((bell) => [{ id: ulid(), kind: "heading", place: "The quay" },
+      { id: ulid(), kind: "sound", heard: "The bell.", soundArtifact: bell }, { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Climb." }]);
+    const opened = await openAudioStudio(store, id, "episode-001");
+    await editAudioStudio(store, id, "episode-001", opened.base, { kind: "commands", label: "Add a lane", commands: [{ kind: "add-track", track: { id: "extra", name: "Extra", gainDb: 0, muted: false } }] } as never);
+    assert.deepEqual(await savedEpisodeMixProblems(store, id), [{ episode: 1, issues: [] }]);
+    // The bell's file goes from disk: the arrangement still resolves, but its source cannot be played.
+    const bell = opened.state.clips.find((clip) => clip.id.startsWith("sound:"))!.source!.file;
+    await rm(join(store.dir, bell));
+    const [mix] = await savedEpisodeMixProblems(store, id);
+    assert.match(mix?.issues.join(" ") ?? "", /unavailable on this machine/);
   });
 });
