@@ -15,6 +15,11 @@ export function pilotChapters(chapters: readonly number[]): string {
   return chapters.length === 1 ? `chapter ${chapters[0]}` : `chapters ${chapters.slice(0, -1).join(", ")} and ${chapters.at(-1)}`;
 }
 
+/** The pilot asked for as the author would ask it (issue 1883): Arke's guidance names the action. */
+export function pilotAsk(pilot: { title: string; chapters: readonly number[] }): string {
+  return `Draft the pilot scene, “${pilot.title}”${pilot.chapters.length ? `, from ${pilotChapters(pilot.chapters)},` : ""} as episode 1's script.`;
+}
+
 /**
  * An audio drama's plan in setup (design turn 230c, SPEC-057 R-7): one thing to accept or change,
  * never a list of steps. Arke proposes it after reading the story; Change edits the numbers and the

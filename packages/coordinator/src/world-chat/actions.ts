@@ -297,6 +297,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  audioStudioSubjectFence,
   chapterFence,
   spineFence,
   timelineFence,
@@ -615,7 +616,8 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`,
+          fence: section === "audio-studio" ? audioStudioSubjectFence(production, canonical) : chapterFence(production, canonical) };
       }
       return { target: targetId, fence: chaptersFence(production) };
     }

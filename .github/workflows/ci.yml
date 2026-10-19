@@ -108,7 +108,11 @@ jobs:
   production-acceptance:
     name: ${{ matrix.os }} · Production Chat film
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # Measured on green main runs, 2026-10-19: Windows took 13m58s and 14m05s, nearly all of it the
+    # two effect benchmarks, and Ubuntu about 10m30s. Fifteen left Windows one slow step from a
+    # timeout, and a 1m40s FFmpeg install was that step: it cancelled a run in the audio benchmark
+    # with every test passed. Twenty-five keeps a cancelled job meaning something is stuck.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -131,9 +135,34 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
+      # The community feed answers 503 for hours at a time (2026-10-19: refused at 08:19 and 16:59,
+      # fine at 11:13), and `choco` still exits 0 having installed nothing. So whether FFmpeg is on
+      # the PATH is the test: try the feed three times, then take gyan.dev's release build directly.
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --yes --no-progress
+        run: |
+          # A failed attempt is the loop's to judge, not a reason to stop the step.
+          $PSNativeCommandUseErrorActionPreference = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            choco install ffmpeg --yes --no-progress
+            if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { break }
+            Write-Host "FFmpeg is not on the PATH after attempt $attempt"
+            if ($attempt -lt 3) { Start-Sleep -Seconds (20 * $attempt) }
+          }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            $zip = Join-Path $env:RUNNER_TEMP "ffmpeg-release-essentials.zip"
+            Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile $zip -MaximumRetryCount 3 -RetryIntervalSec 15
+            Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP "ffmpeg")
+            $bin = (Get-ChildItem (Join-Path $env:RUNNER_TEMP "ffmpeg") -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+            Add-Content $env:GITHUB_PATH $bin
+          }
+          exit 0
+      # A missing FFmpeg used to surface as `spawn ffmpeg ENOENT` inside the film test, which on
+      # Windows then held the runner to the test's four-minute timeout. Stop here and say so.
+      - name: Check FFmpeg
+        run: |
+          ffmpeg -version
+          ffprobe -version
       # The ordinary shards cover the same authorities with the injected encoder. This job
       # additionally decodes provider fixtures and makes the native twelve-second review cut.
       - name: Make a film from Production Chat

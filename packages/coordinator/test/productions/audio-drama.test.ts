@@ -3,14 +3,14 @@ import { describe, it } from "node:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, productionShape, ulid, type ConversationId } from "@arke-studio/contracts";
-import { ProductionSetupService, assertSourceReadForPlan } from "../../src/productions/setup.js";
+import { ProductionSetupService, assertSourceReadForPlan, fenceAdaptableSource } from "../../src/productions/setup.js";
 import { createProduction, createProductionFromPlan, planProductionCreation, validateProductionMetadataChanges } from "../../src/productions/ops.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
 import { chapterFence } from "../../src/world-chat/target-reads.js";
 import { setupSourceDigest } from "../../src/productions/setup-plan.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { WorldStore } from "../../src/world/store.js";
-import { AUDIO_DRAMA_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, NARRATOR_SAMPLES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { projectWorkspace, wordSourceRead } from "../../src/world-chat/project.js";
@@ -65,6 +65,15 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     // A retried start is answered by the setup it began, even when its seed would now be refused.
     const retried = await service.start(id, { kind: "audio-drama", source: { productionId: "saltlight" } });
     assert.deepEqual(retried.draft.source, { productionId: "the-ledger-of-nights" });
+  });
+
+  it("raises the world before the narrator question's samples are written to the draft (issue 1882)", async () => {
+    const store = await open();
+    const update = { expectedRevision: 1, fields: { narratorSamples: { narrated: [{ speaker: "Narrator", words: "One." }, { speaker: "Maren", words: "Two." }],
+      inTheRoom: [{ speaker: "Sound", words: "A bell.", cue: true as const }, { speaker: "Maren", words: "Two." }] } } };
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion < NARRATOR_SAMPLES_SCHEMA_VERSION);
+    await fenceAdaptableSource(store, update);
+    assert.ok((await readWorldMeta(store.dir)).schemaVersion >= NARRATOR_SAMPLES_SCHEMA_VERSION);
   });
 
   it("refuses a plan for a story until every active chapter of it has been read whole (R-5)", async () => {
@@ -187,7 +196,8 @@ describe("an audio drama is a story kind with its own plan (SPEC-057)", () => {
     const brief = await productionSetupBrief(store.getBundle(), drama, read, 400_000);
     assert.match(brief, /This production is an audio drama/);
     assert.match(brief, /exactly one question: whether a narrator guides the listener/);
-    assert.match(brief, /"A narrator where needed", then "In the room"/);
+    assert.match(brief, /"narrated" is "A narrator where needed"; "inTheRoom" is "In the room"/);
+    assert.match(brief, /Put them in fields\.narratorSamples, which the page draws as two cards side by side/, "the samples are cards, not reply prose (issue 1882)");
     assert.match(brief, /propose one plan in fields\.audioDrama/);
     assert.match(brief, /Do not propose verdicts or an episode outline here/);
     assert.match(brief, /its last sentence is not a question/, "the plan reply ends on the plan, its choices under it (issue 1888)");

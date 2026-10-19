@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
-  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
+  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
 import { Button, IconButton, cx } from "../components/ui.js";
-import { Chat, ChevronLeft, Lock, Play } from "../components/icons.js";
+import { Chat, ChevronLeft, ChevronRight, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -23,25 +23,55 @@ import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAu
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
 
+/**
+ * What a Hear press is doing to this episode now (230p, issue 1882), as Activity reports it. A
+ * press makes its lines one after another, each a voice job landing in the episode's staging
+ * folder, so the press is the run of those jobs back from the one still going, each begun within
+ * a minute of the one before it ending. Its lines made so far count before the world's snapshot
+ * does, which refreshes only once the press is over. None while nothing is going.
+ */
+export function episodeActivity(jobs: readonly JobSummary[], worldId: string, productionId: string, episode: number): { live: Set<string>; made: Set<string> } | null {
+  const dir = `.staging/drama/${productionId}/${episodeScriptFile(episode).replace(/\.json$/, "")}`;
+  // This world's own (codex on PR 1945): another world may hold the same slug and episode.
+  const mine = jobs.filter((job) => job.worldId === worldId && job.target.kind === "voice-preview" && job.landing?.dir === dir).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Only what is being made counts as going (codex on PR 1945): a job parked for reconciliation
+  // waits on a person, and may wait indefinitely while nothing is performed.
+  const going = (job: JobSummary) => job.status === "queued" || job.status === "submitting" || job.status === "running";
+  const block = (job: JobSummary) => typeof job.params["block"] === "string" ? job.params["block"] : "";
+  const newest = mine.findIndex(going);
+  if (newest < 0) return null;
+  const live = new Set(mine.filter(going).map(block)), made = new Set<string>();
+  for (let at = newest + 1; at < mine.length; at++) {
+    const job = mine[at]!, after = mine[at - 1]!;
+    if (Date.parse(after.createdAt) - Date.parse(job.updatedAt) > 60_000) break;
+    if (job.status === "succeeded") made.add(block(job));
+  }
+  return { live, made };
+}
+
 /** One episode's state at a glance (230p): its script, its cast, what is performed, whether it can be mixed. */
-type MixProblems = Array<{ episode: number; issues: string[] }>;
-function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems) {
+type MixProblems = Array<{ episode: number; issues: string[]; lanes?: number }>;
+function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems, jobs: readonly JobSummary[] = []) {
   const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
   const blocks = entry?.script.blocks ?? [];
   const takes = production.episodeTakes?.find((candidate) => candidate.episode === episode);
   const lines = blocks.filter(spoken);
   const cast = production.audioDrama?.cast ?? {};
   const voiceless = new Set(lines.flatMap((line) => line.kind === "dialogue" && !cast[line.speaker]?.voice && !world.sheets.find((sheet) => sheet.id === line.speaker)?.voice ? [line.speaker] : []));
-  const performed = lines.filter((line) => { const kept = takes?.lines[line.id]?.kept; return kept && kept.textHash === dramaLineHash(line); }).length;
+  const current = (line: Spoken) => { const kept = takes?.lines[line.id]?.kept; return kept !== undefined && kept.textHash === dramaLineHash(line); };
+  const activity = episodeActivity(jobs, world.meta.worldId, production.meta.id, episode);
+  // While a press runs, its lines made so far count as performed; the snapshot catches up after.
+  const performed = lines.filter((line) => current(line) || activity?.made.has(line.id) === true).length;
   const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
   const draft = world.proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path));
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
-  const scenes: Array<{ seconds: number; done: boolean }> = [];
+  const scenes: Array<{ seconds: number; done: boolean; working: boolean }> = [];
   let scene: EpisodeScriptBlock[] = [];
   const close = () => {
     if (scene.length === 0) return;
     const sceneLines = scene.filter(spoken);
-    scenes.push({ seconds: Math.max(1, estimateScriptSeconds(scene)), done: sceneLines.length > 0 && sceneLines.every((line) => takes?.lines[line.id]?.kept?.textHash === dramaLineHash(line)) });
+    scenes.push({ seconds: Math.max(1, estimateScriptSeconds(scene)), done: sceneLines.length > 0 && sceneLines.every((line) => takes?.lines[line.id]?.kept?.textHash === dramaLineHash(line)),
+      working: sceneLines.some((line) => activity?.live.has(line.id) === true) });
   };
   for (const block of blocks) { if (block.kind === "heading") { close(); scene = []; } else scene.push(block); }
   close();
@@ -50,10 +80,15 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   const last = lines.at(-1);
   const endsOn = last ? { who: last.kind === "dialogue" ? name(last.speaker) : "Narrator", words: last.words.length > 70 ? `${last.words.slice(0, 69).trimEnd()}…` : last.words } : null;
   // A saved arrangement's own problems hold the episode back too (issue 1882), as Publish's render would.
-  const mixIssues = mixes.find((mix) => mix.episode === episode)?.issues ?? [];
+  const mix = mixes.find((candidate) => candidate.episode === episode);
+  const mixIssues = mix?.issues ?? [];
+  // The lanes its stems would be (issue 1882): the saved arrangement's own, else the lanes the
+  // studio derives — one per voice, and one each for placed sounds, ambience and music.
+  const lanes = mix?.lanes ?? new Set(blocks.flatMap((block) => block.kind === "dialogue" ? [block.speaker] : block.kind === "narration" ? ["@narrator"]
+    : (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact ? [`@${block.kind}`] : [])).size;
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn,
+    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn, lanes, performing: activity !== null,
     readiness: readiness.ready && mixIssues.length > 0
       ? { ...readiness, ready: false, reasons: [`the saved mix has ${mixIssues.length} problem${mixIssues.length === 1 ? "" : "s"} to fix in Audio Studio`] }
       : readiness,
@@ -80,7 +115,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const count = Math.max(plan?.episodes ?? 0, ...(production.episodeScripts ?? []).map((entry) => entry.script.episode));
   // Checked by the coordinator as Publish checks it, sources read live, so asked for with the editions.
   const [mixes, setMixes] = useState<MixProblems>([]);
-  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1, mixes) }));
+  const jobs = useStore().state?.app.jobs ?? [];
+  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1, mixes, jobs) }));
   const planned = states.filter((state) => state.planned);
   const unplanned = states.filter((state) => !state.planned);
   const next = planned.find((state) => state.readiness.ready) ?? null;
@@ -198,10 +234,14 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                 : <span className="fy-ad-show__num">{state.n}</span>}
               <button type="button" className="fy-ad-show__open" onClick={() => navigate(`${base}/script/${state.n}`)}>
                 <b>Episode {state.n}{state.title ? ` · ${state.title}` : ""} <small>≈ {Math.max(1, Math.round(state.seconds / 60))} min</small></b>
+                {/* Work in the background shows on its own row, as Activity reports it (230p): under the
+                    title where Ends on is, the scenes beneath both. */}
+                {state.performing
+                  ? <small className="fy-ad-show__activity" role="status"><i aria-hidden />Performing {state.performed} of {state.lines} lines</small>
+                  : state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
                 <span className="fy-ad-show__scenes" aria-hidden>
-                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done")} style={{ flexGrow: scene.seconds }} />)}
+                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done", !scene.done && scene.working && "fy-ad-show__scene--work")} style={{ flexGrow: scene.seconds }} />)}
                 </span>
-                {state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
               </button>
               <span className="fy-ad-show__status">
                 <span className={cx(state.draft ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.draft ? "● Script draft" : "✓ Script"}</span>
@@ -211,6 +251,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                   title={state.mixIssues.length > 0 ? state.mixIssues.join("\n") : undefined}>
                   {state.readiness.ready ? "✓ Mixed" : state.mixIssues.length > 0 ? `● Mix ${state.mixIssues.length} to fix` : "○ Mixed"}
                 </span>
+                <ChevronRight size={14} aria-hidden />
               </span>
             </li>
           ))}
@@ -245,7 +286,14 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           {editions.map((edition) => (
             <div key={edition.id} className="fy-ad-show__edition">
               <b>{edition.name}</b> <small>{DRAMA_DELIVERY_LABEL[edition.delivery]} · {edition.episodes.length} episode{edition.episodes.length === 1 ? "" : "s"}</small>
-              <span>{edition.files.map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
+              <span>{edition.files.filter((file) => !stemNames(edition).has(file.name)).map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
+              {/* A season's stems are many files: kept under one line, each by its lane (issue 1882). */}
+              {stemNames(edition).size > 0 && (
+                <details className="fy-ad-show__stems">
+                  <summary>Stems · {stemNames(edition).size}</summary>
+                  {[...stemNames(edition)].map(([file, label]) => <a key={file} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file)} download={`${edition.name} - ${file}`}>{label}</a>)}
+                </details>
+              )}
             </div>
           ))}
         </section>
@@ -265,6 +313,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   );
 }
 
+/** An edition's stem files, each labelled by its episode and lane. */
+const stemNames = (edition: DramaEdition) => new Map(edition.episodes.flatMap((episode) => (episode.stems ?? []).map((stem) => [stem.file, `Episode ${episode.episode} · ${stem.track}`] as const)));
+
 /**
  * Publish an edition (230q, R-71..R-76): which episodes, ready or with the reason they are held
  * back; how it is delivered; what goes in it; what it freezes.
@@ -276,6 +327,9 @@ function PublishDialog({ world, production, states, onClose }: {
   const [name, setName] = useState(ready.length === 1 ? "Pilot" : "Season 1");
   const [delivery, setDelivery] = useState<DramaDelivery>("podcast");
   const [chosen, setChosen] = useState<number[]>(ready.map((state) => state.n));
+  // Off unless asked for (230q): a stem is a whole episode's worth of WAV per lane.
+  const [stems, setStems] = useState(false);
+  const stemCount = states.filter((state) => chosen.includes(state.n) && state.lanes > 1).reduce((sum, state) => sum + state.lanes, 0);
   const [pressed, setPressed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // A dropped connection loses the answer (codex on PR 1880): the dialog is let go and says where to look.
@@ -291,22 +345,40 @@ function PublishDialog({ world, production, states, onClose }: {
     if (answer.refused) setFailure(answer.refused); else onClose();
   }), [pressed]);
   const seconds = states.filter((state) => chosen.includes(state.n)).reduce((sum, state) => sum + state.seconds, 0);
+  // The voices the chosen episodes' kept takes are in, by engine: "Wren, Bram · elevenlabs eleven_v3".
+  // The takes', never the roles' (codex on PR 1945): a stand-in kept is published in its own voice.
+  const voices = (() => {
+    const engines = new Map<string, Set<string>>();
+    for (const state of states.filter((candidate) => chosen.includes(candidate.n))) {
+      const takes = production.episodeTakes?.find((candidate) => candidate.episode === state.n);
+      for (const block of state.entry?.script.blocks ?? []) {
+        if (block.kind !== "dialogue" && block.kind !== "narration") continue;
+        const voice = takes?.lines[block.id]?.kept?.voice;
+        if (!voice) continue;
+        const engine = `${voice.provider}${voice.model ? ` ${voice.model}` : ""}`;
+        engines.set(engine, (engines.get(engine) ?? new Set()).add((voice as { label?: string }).label ?? voice.voiceId));
+      }
+    }
+    return [...engines].map(([engine, labels]) => `${[...labels].join(", ")} · ${engine}`).join("; ");
+  })();
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) : undefined;
   const publish = () => {
     setFailure(null);
-    const requestId = publishDramaEdition(world.meta.worldId, production.meta.id, { name: name.trim() || "Edition", delivery, episodes: chosen });
+    const requestId = publishDramaEdition(world.meta.worldId, production.meta.id, { name: name.trim() || "Edition", delivery, episodes: chosen, ...(stems && stemCount > 0 ? { stems: true } : {}) });
     if (requestId === null) setFailure("The studio is disconnected."); else setPressed(requestId);
   };
   return (
     // Never closed mid-publish (codex on PR 1880): Cancel would not stop it, and its answer would be lost.
-    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={() => { if (pressed === null) onClose(); }} width={640}>
+    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={() => { if (pressed === null) onClose(); }} width={680}>
       <div className="fy-ad-pub">
         <div className="fy-ad-pub__row">
           <label>Edition<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
-          <div role="radiogroup" aria-label="Delivery" className="fy-ad-pub__delivery">
-            {(["podcast", "archive"] as const).map((value) => (
-              <button key={value} type="button" role="radio" aria-checked={delivery === value} onClick={() => setDelivery(value)}>{DRAMA_DELIVERY_LABEL[value]}</button>
-            ))}
+          <div className="fy-ad-pub__field"><span id="fy-ad-pub-delivery">Delivery</span>
+            <div role="radiogroup" aria-labelledby="fy-ad-pub-delivery" className="fy-ad-pub__delivery">
+              {(["podcast", "archive"] as const).map((value) => (
+                <button key={value} type="button" role="radio" aria-checked={delivery === value} onClick={() => setDelivery(value)}>{DRAMA_DELIVERY_LABEL[value]}</button>
+              ))}
+            </div>
           </div>
         </div>
         <ul className="fy-ad-pub__episodes">
@@ -323,11 +395,16 @@ function PublishDialog({ world, production, states, onClose }: {
           ))}
         </ul>
         <p className="fy-ad-pub__outputs">
-          {["Episode audio", "Listener transcript", "Credits", "Production script"].map((output) => <span key={output}>✓ {output}</span>)}
+          {[`Episode audio · ${delivery === "podcast" ? "MP3" : "WAV"}`, "Listener transcript", "Credits", "Production script · PDF"].map((output) => <span key={output}>✓ {output}</span>)}
+          <button type="button" className="fy-ad-pub__stems" aria-pressed={stems && stemCount > 0} disabled={stemCount === 0} onClick={() => setStems(!stems)}
+            title={stemCount === 0 ? "Stems need two or more lanes" : undefined}>{stems && stemCount > 0 ? "✓ " : ""}Stems · {stemCount}</button>
         </p>
         <dl className="fy-ad-pub__frozen">
           {source && <><dt>Novel</dt><dd>{source.meta.title}{source.story?.version ? ` v${source.story.version}` : ""}</dd></>}
           <dt>Scripts</dt><dd>{states.filter((state) => chosen.includes(state.n)).map((state) => `Episode ${state.n} v${state.entry?.script.version ?? 1}`).join(", ") || "—"}</dd>
+          {/* What it freezes besides (230q): the voices its lines are in, and the mix's format. */}
+          {voices && <><dt>Voices</dt><dd>{voices}</dd></>}
+          <dt>Mix</dt><dd>48 kHz stereo</dd>
         </dl>
         {failure && <p className="fy-ad-pub__fail" role="alert">{failure}</p>}
         <footer className="fy-ad-pub__foot">

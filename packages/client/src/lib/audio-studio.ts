@@ -59,7 +59,9 @@ export function useAudioStudioPlayer(input: { worldId: string; productionId: str
   const { worldId, productionId, chapterId, chapterFile, slug, title, connection } = input;
   const key = `audio-studio:${worldId}/${productionId}/${chapterId}`;
   const [pending, setPending] = useState(false), [problem, setProblem] = useState<string | null>(null), [issues, setIssues] = useState<string[]>([]), [offset, setOffset] = useState(0);
-  const request = useRef<{ id: string; loop: boolean; answered?: boolean } | null>(null);
+  // A play of the saved mix whole, from the playhead on, is a listen (issue 1882): its base and end
+  // are kept so what plays can be recorded as heard. A solo, a loop or Suggested never is.
+  const request = useRef<{ id: string; loop: boolean; answered?: boolean; heard?: { base: string; to: number } } | null>(null);
   const playback = usePlayback();
   const stop = useCallback(() => {
     if (request.current) stopAudioStudioPreview(worldId, request.current.id);
@@ -81,10 +83,13 @@ export function useAudioStudioPlayer(input: { worldId: string; productionId: str
     const { loop, ...requestOptions } = options;
     const id = previewAudioStudio(worldId, productionId, chapterFile, base, requestOptions);
     if (!id) { setProblem("Reconnect to audition this chapter"); releaseRead(key); return; }
-    request.current = { id, loop: loop === true }; setPending(true); setProblem(null); setIssues([]);
+    const whole = !requestOptions.edit && !(requestOptions.solo?.length) && loop !== true;
+    request.current = { id, loop: loop === true, ...(whole ? { heard: { base, to: requestOptions.window?.to ?? Number.MAX_SAFE_INTEGER } } : {}) };
+    setPending(true); setProblem(null); setIssues([]);
   }, [worldId, productionId, chapterFile, key, stop]);
   const mine = playback.clip?.id === key;
   useEffect(() => { if (mine && playback.status === "ended") stop(); }, [mine, playback.status, stop]);
   const playing = mine && ["playing", "loading", "paused", "blocked"].includes(playback.status);
-  return { play, stop, pending, playing, issues, problem: problem ?? (mine ? playback.error : null), at: mine && playback.status !== "ended" ? Math.round((offset + playback.currentTime) * 48000) : null };
+  const listening = mine && playback.status === "playing" ? request.current?.heard ?? null : null;
+  return { play, stop, pending, playing, listening, issues, problem: problem ?? (mine ? playback.error : null), at: mine && playback.status !== "ended" ? Math.round((offset + playback.currentTime) * 48000) : null };
 }

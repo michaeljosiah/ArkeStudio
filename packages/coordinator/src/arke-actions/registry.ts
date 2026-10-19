@@ -624,6 +624,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-audiobook-sound": action("production", "command", "voice", "authored-change", ["chapters", "artifacts"]),
   "render-audiobook-mix": readOnly(QUERY),
   "read-audio-studio": readOnly(QUERY),
+  "read-audio-heard": readOnly(QUERY),
+  "record-audio-heard": humanOnly("Only the person's own listening records what of a mix was heard."),
   "read-audio-studio-source": readOnly(QUERY),
   "preview-audio-studio": readOnly(QUERY),
   "stop-audio-studio-preview": readOnly(QUERY),

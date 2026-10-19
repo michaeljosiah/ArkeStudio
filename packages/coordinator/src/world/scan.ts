@@ -194,7 +194,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
 // 95: an audio drama's adaptation — chapter verdicts and kept reasons (SPEC-057 R-61, issue 1862).
 // 96: an audio drama episode's Audio Studio arrangement — drama-mix (SPEC-057 R-67, issue 1863).
-export const SUPPORTED_SCHEMA_VERSION = 96;
+// 97: setup's narrator samples on the draft (SPEC-057 R-6, issue 1882).
+// 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
+export const SUPPORTED_SCHEMA_VERSION = 98;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -396,11 +398,13 @@ async function read(path: string, signal?: AbortSignal): Promise<string> {
 const scanIo = { exists, listDir, read };
 
 /**
- * How many record files a scan has in flight at once (issue 1841).
+ * How many record files one of the scan's loops has in flight at once (issue 1841).
  *
  * Read one at a time, a large world's scan sat about 70% idle waiting on the disk: na-love-or-juju's
  * 3,898 artifact sidecars took 2.6 s in turn and 0.71 s sixteen at once. Sixteen is the figure
- * that was measured, and few enough open files at once that no platform minds.
+ * that was measured, and few enough open files at once that no platform minds. The one loop
+ * inside another is a sheet's takes, read while the references walk is on that sheet, so that
+ * walk can briefly hold two windows: thirty-two, still few.
  */
 const SCAN_READ_AHEAD = 16;
 
@@ -647,17 +651,15 @@ export async function scanWorld(
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
   // One sheet's directory is one load: its records and listings are read ahead together, and
-  // settled below in the order this walk has always taken them.
+  // settled below in the order this walk has always taken them. Its takes are listed here and
+  // read below, ahead of their own loop (codex on PR 1887): read inside this load, a sheet with
+  // hundreds of takes held the open's count still until the last of them, then jumped past them.
   const readReferenceDir = async (sheetId: string) => {
     const kit = await attemptIfPresent(`references/${sheetId}/kit.json`);
     const prop = await attemptIfPresent(`references/${sheetId}/prop.json`);
     const candidates = await listDir(join(dir, "references", sheetId, "candidates"));
-    const takes: Array<{ takeDir: string; found: ReadAttempt }> = [];
-    for (const takeDir of await listDir(join(dir, "references", sheetId, "takes"))) {
-      const found = await attemptIfPresent(`references/${sheetId}/takes/${takeDir}/take.json`);
-      if (found) takes.push({ takeDir, found });
-    }
-    return { kit, prop, candidates, takes };
+    const takeDirs = await listDir(join(dir, "references", sheetId, "takes"));
+    return { kit, prop, candidates, takeDirs };
   };
   for await (const [sheetId, found] of readAhead(await listDir(join(dir, "references")), readReferenceDir)) {
     if (found.kit) {
@@ -679,7 +681,9 @@ export async function scanWorld(
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
       .sort();
     const sheetTakes = [];
-    for (const { takeDir, found: takeFound } of found.takes) {
+    const readTake = (takeDir: string) => attemptIfPresent(`references/${sheetId}/takes/${takeDir}/take.json`);
+    for await (const [takeDir, takeFound] of readAhead(found.takeDirs, readTake)) {
+      if (takeFound === null) continue;
       const take = settle(`references/${sheetId}/takes/${takeDir}/take.json`, takeFound, (raw) =>
         TakeSchema.parse(JSON.parse(raw)),
       );
