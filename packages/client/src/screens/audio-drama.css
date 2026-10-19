@@ -337,6 +337,7 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-show__num { border: 1px solid var(--border); }
 .fy-ad-show__open { display: flex; flex-direction: column; gap: 6px; background: none; border: 0; padding: 0; text-align: left; color: inherit; font: inherit; cursor: pointer; min-width: 0; }
 .fy-ad-show__open small { color: var(--muted-foreground); font-weight: 400; }
+.fy-ad-show__ends { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .fy-ad-show__scenes { display: flex; gap: 3px; max-width: 420px; }
 .fy-ad-show__scenes i { height: 4px; border-radius: 2px; background: var(--border); min-width: 6px; }
 .fy-ad-show__scenes i.fy-ad-show__scene--done { background: var(--foreground); }
@@ -439,8 +440,13 @@ button.fy-ad-chip { cursor: pointer; }
   /* Add a sound's search takes the row, as the generation sheets' does. */
   .fy-ad-sound .fy-refpicker__searchwrap { width: 100%; min-width: 0; height: 44px; }
   .fy-ad-sound .fy-refpicker__search { min-width: 0; }
-  .fy-ad-show { padding-bottom: var(--held-bar-height, 0px); }
-  .fy-ad-show__hero { padding: 22px 18px 18px; }
+  /* Full-bleed (230u, issue 1882): the hero meets the screen's edges and top; the rest keeps a gutter. */
+  .fy-prodmain.fy-ad-show { padding: 0 0 var(--held-bar-height, 0px); gap: 20px; }
+  .fy-ad-show > :not(.fy-ad-show__hero, .fy-ad-show__dock) { padding-inline: 16px; }
+  .fy-ad-show__hero { padding: 8px 18px 20px; border-radius: 0; }
+  .fy-ad-show__ptop { display: flex; align-items: center; gap: 4px; margin: 0 -8px 18px; }
+  .fy-ad-show__ptop .ui-iconbtn { width: 44px; height: 44px; }
+  .fy-ad-show__ptop button:not(.ui-iconbtn) { min-height: 44px; padding: 0 10px; border: 0; background: none; color: inherit; font: 500 14px var(--font-sans); cursor: pointer; }
   .fy-ad-show__hero h1 { font-size: 32px; }
   .fy-ad-show__row { grid-template-columns: 48px minmax(0, 1fr); gap: 12px; }
   .fy-ad-show__play, .fy-ad-show__num { width: 48px; height: 48px; }

@@ -7,7 +7,7 @@ import {
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
 import { Button, IconButton, cx } from "../components/ui.js";
-import { Chat, Lock, Play } from "../components/icons.js";
+import { Chat, ChevronLeft, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -45,11 +45,14 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   for (const block of blocks) { if (block.kind === "heading") { close(); scene = []; } else scene.push(block); }
   close();
   const readiness = episodeReadiness(blocks, takes, name, (line) => dramaRoleVoice(production.audioDrama?.cast, world.sheets, line));
+  // What the listener is left with (issue 1882): the last line said, by who says it.
+  const last = lines.at(-1);
+  const endsOn = last ? { who: last.kind === "dialogue" ? name(last.speaker) : "Narrator", words: last.words.length > 70 ? `${last.words.slice(0, 69).trimEnd()}…` : last.words } : null;
   // A saved arrangement's own problems hold the episode back too (issue 1882), as Publish's render would.
   const mixIssues = production.dramaMixes?.find((mix) => mix.episode === episode)?.issues ?? [];
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, mixIssues,
+    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn,
     readiness: readiness.ready && mixIssues.length > 0
       ? { ...readiness, ready: false, reasons: [`the saved mix has ${mixIssues.length} problem${mixIssues.length === 1 ? "" : "s"} to fix in Audio Studio`] }
       : readiness,
@@ -115,6 +118,16 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   return (
     <div className="fy-prodmain fy-ad-show" data-screen="production-dashboard">
       <header className="fy-ad-show__hero">
+        {/* On a phone the hero is the page's top (230u): back to the world's productions, and the drama's pages. */}
+        {phone && (
+          <nav className="fy-ad-show__ptop" aria-label="Production pages">
+            <IconButton label="Back" onClick={() => navigate(`/w/${world.meta.worldId}/productions`)}><ChevronLeft size={20} /></IconButton>
+            <span className="gap" />
+            <button type="button" onClick={() => navigate(`${base}/cast`)}>Cast</button>
+            {production.audioDrama?.source && <button type="button" onClick={() => navigate(`${base}/adaptation`)}>Adaptation</button>}
+            <button type="button" onClick={() => navigate(`${base}/artifacts`)}>Artifacts</button>
+          </nav>
+        )}
         <h1>{production.meta.title}</h1>
         {/* The count once, in the plan line, where a plan says it (issue 1883). */}
         <p>Audio drama{plan ? "" : ` · ${count} episode${count === 1 ? "" : "s"}`}{source ? ` · from ${source.meta.title}` : ""}</p>
@@ -179,6 +192,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                 <span className="fy-ad-show__scenes" aria-hidden>
                   {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done")} style={{ flexGrow: scene.seconds }} />)}
                 </span>
+                {state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
               </button>
               <span className="fy-ad-show__status">
                 <span className={cx(state.draft ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.draft ? "● Script draft" : "✓ Script"}</span>

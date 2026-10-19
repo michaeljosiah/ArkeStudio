@@ -385,7 +385,10 @@ export function ProductionLayout() {
   const dramaStudio = new URLSearchParams(location.search).get("view") === "audio-studio";
   const dramaDeep = phone && dramaEpisode >= 1 && dramaEpisode <= 200 && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama
     && (!dramaStudio || (production.episodeScripts ?? []).some((entry) => entry.script.episode === dramaEpisode));
-  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  // An audio drama's show page on a phone (230u): its hero is the top of the screen, full-bleed,
+  // carrying the way back and the drama's pages (issue 1882), as the audiobook's show page does.
+  const dramaHome = phone && /^\/w\/[^/]+\/p\/[^/]+\/?$/.test(location.pathname) && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama;
+  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || dramaHome || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
   const wantsFold = compact && chapterRoute && !audioStudioRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
   // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design
   // turn 196o): a drawer would put the production's pages a press away while the canvas is the
