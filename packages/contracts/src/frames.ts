@@ -2371,6 +2371,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(120),
       delivery: DramaDeliverySchema,
       episodes: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+      /** Each separable track as its own file too (issue 1882); off unless asked for. */
+      stems: z.boolean().optional(),
     })
     .strict(),
   z.object({ kind: z.literal("list-drama-editions"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema }).strict(),

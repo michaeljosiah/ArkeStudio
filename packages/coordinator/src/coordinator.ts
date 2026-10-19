@@ -3900,7 +3900,7 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
-        const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.wav|episode-\d{3}-script\.txt|transcript\.txt|credits\.txt)$/.exec(urlPath);
+        const drama = /^\/drama-edition-media\/([a-f0-9-]+)\/(episode-\d{3}\.(?:wav|mp3)|episode-\d{3}-script\.(?:txt|pdf)|episode-\d{3}-stem-\d{2}(?:-[a-z0-9-]{1,40})?\.wav|transcript\.txt|credits\.txt)$/.exec(urlPath);
         if (drama) return this.dramaEditions.serve(drama[1]!, drama[2]!);
         const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
@@ -10718,7 +10718,7 @@ export class Coordinator {
           return;
         }
         try {
-          const edition = await this.dramaEditions.publish(store, msg.productionId, { name: msg.name, delivery: msg.delivery, episodes: msg.episodes });
+          const edition = await this.dramaEditions.publish(store, msg.productionId, { name: msg.name, delivery: msg.delivery, episodes: msg.episodes, ...(msg.stems ? { stems: true } : {}) });
           this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, edition });
         } catch (err) {
           this.emit({ at: new Date().toISOString(), type: "drama.edition", requestId: msg.requestId, refused: describeCoordinatorError(err) });

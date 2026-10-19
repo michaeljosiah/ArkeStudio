@@ -341,6 +341,23 @@ describe("the show page and Publish (230p, 230q)", () => {
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
   });
 
+  it("names what an edition delivers, and asks for stems only when there are lanes to separate (issue 1882)", async () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two.");
+    const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id, b.id]), "home");
+    await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Publish…")!).onClick!({}));
+    const outputs = dom.document.body.querySelector(".fy-ad-pub__outputs")!;
+    assert.match(outputs.textContent!, /✓ Episode audio · MP3.*✓ Production script · PDF.*Stems · 2/);
+    const archive = [...dom.document.body.querySelectorAll("[role='radio']")].find((button) => button.textContent === "Archive · WAV")!;
+    await act(async () => props(archive).onClick!({}));
+    assert.match(outputs.textContent!, /Episode audio · WAV/);
+    const stems = dom.document.body.querySelector(".fy-ad-pub__stems")!;
+    assert.equal(stems.getAttribute("aria-pressed"), "false", "off unless asked for");
+    await act(async () => props(stems).onClick!({}));
+    await act(async () => props([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition")!).onClick!({}));
+    const asked = sent.find((message) => message.kind === "publish-drama-edition") as { delivery: string; stems?: boolean } | undefined;
+    assert.deepEqual([asked?.delivery, asked?.stems], ["archive", true]);
+  });
+
   it("reads a saved mix's problems: not Mixed, not played, held back from Publish (issue 1882)", async () => {
     const a = line("maren-kest", "One.");
     const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a], [a.id]), "home");

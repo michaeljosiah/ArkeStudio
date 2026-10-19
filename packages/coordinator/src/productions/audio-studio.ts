@@ -228,10 +228,10 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
  * when the page opens rather than on every scan. An episode never arranged by hand is derived from
  * its kept takes, which the page's readiness already reads.
  */
-export async function savedEpisodeMixProblems(store: WorldStore, productionId: string): Promise<Array<{ episode: number; issues: string[] }>> {
+export async function savedEpisodeMixProblems(store: WorldStore, productionId: string): Promise<Array<{ episode: number; issues: string[]; lanes?: number }>> {
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production || !productionShape(production.meta).isAudioDrama) return [];
-  const mixes: Array<{ episode: number; issues: string[] }> = [];
+  const mixes: Array<{ episode: number; issues: string[]; lanes?: number }> = [];
   for (const { script } of [...production.episodeScripts ?? []].sort((a, b) => a.script.episode - b.script.episode)) {
     store.closingSignal.throwIfAborted();
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/drama-mix/${episodeScriptFile(script.episode)}`))), "utf8").catch(() => null);
@@ -245,14 +245,17 @@ export async function savedEpisodeMixProblems(store: WorldStore, productionId: s
     // Only a hand-made arrangement is opened here: opening without one derives it, decoding every take.
     if (!parsed.data.arrangement) continue;
     let issues: string[];
+    let lanes: number | undefined;
     try {
       const opened = await openAudioStudio(store, productionId, episodeScriptFile(script.episode).replace(/\.json$/, ""));
       issues = [...opened.resolved.issues.map((issue) => issue.message), ...(await audioStudioSourceProblems(store, productionId, opened.state, true)).values()];
+      // The lanes Publish would deliver as stems: each track with a clip the mix plays.
+      lanes = new Set(opened.resolved.clips.filter((entry) => !entry.muted && entry.clip.source).map((entry) => entry.clip.trackId)).size;
     } catch (error) {
       store.closingSignal.throwIfAborted();
       issues = [error instanceof Error ? error.message : "The arrangement cannot be resolved."];
     }
-    mixes.push({ episode: script.episode, issues: issues.slice(0, 20).map((issue) => issue.slice(0, 300)) });
+    mixes.push({ episode: script.episode, issues: issues.slice(0, 20).map((issue) => issue.slice(0, 300)), ...(lanes !== undefined ? { lanes } : {}) });
   }
   return mixes;
 }

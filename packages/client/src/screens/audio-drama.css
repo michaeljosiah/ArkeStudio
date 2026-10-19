@@ -358,6 +358,9 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-show__edition { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .fy-ad-show__edition small { color: var(--muted-foreground); }
 .fy-ad-show__edition span { display: flex; gap: 10px; flex-wrap: wrap; }
+.fy-ad-show__stems { flex-basis: 100%; }
+.fy-ad-show__stems summary { cursor: pointer; color: var(--muted-foreground); }
+.fy-ad-show__stems a { display: inline-block; margin: 4px 10px 0 0; }
 .fy-ad-pub { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
 .fy-ad-pub__row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .fy-ad-pub__row label { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
@@ -373,6 +376,10 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-pub__held { background: var(--secondary); }
 .fy-ad-pub__outputs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
 .fy-ad-pub__outputs span { border-radius: 999px; padding: 3px 10px; background: var(--foreground); color: var(--background); font-size: 12px; }
+/* Stems are asked for (230q): an outlined chip until pressed, then filled like what is included. */
+.fy-ad-pub__stems { border-radius: 999px; padding: 3px 10px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font: inherit; font-size: 12px; cursor: pointer; }
+.fy-ad-pub__stems[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.fy-ad-pub__stems:disabled { color: var(--muted-foreground); cursor: default; }
 .fy-ad-pub__frozen { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 0; }
 .fy-ad-pub__frozen dt { color: var(--muted-foreground); }
 .fy-ad-pub__frozen dd { margin: 0; }

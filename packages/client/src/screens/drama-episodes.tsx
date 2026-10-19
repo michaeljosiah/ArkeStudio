@@ -24,7 +24,7 @@ type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
 
 /** One episode's state at a glance (230p): its script, its cast, what is performed, whether it can be mixed. */
-type MixProblems = Array<{ episode: number; issues: string[] }>;
+type MixProblems = Array<{ episode: number; issues: string[]; lanes?: number }>;
 function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems) {
   const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
   const blocks = entry?.script.blocks ?? [];
@@ -50,10 +50,15 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
   const last = lines.at(-1);
   const endsOn = last ? { who: last.kind === "dialogue" ? name(last.speaker) : "Narrator", words: last.words.length > 70 ? `${last.words.slice(0, 69).trimEnd()}…` : last.words } : null;
   // A saved arrangement's own problems hold the episode back too (issue 1882), as Publish's render would.
-  const mixIssues = mixes.find((mix) => mix.episode === episode)?.issues ?? [];
+  const mix = mixes.find((candidate) => candidate.episode === episode);
+  const mixIssues = mix?.issues ?? [];
+  // The lanes its stems would be (issue 1882): the saved arrangement's own, else the lanes the
+  // studio derives — one per voice, and one each for placed sounds, ambience and music.
+  const lanes = mix?.lanes ?? new Set(blocks.flatMap((block) => block.kind === "dialogue" ? [block.speaker] : block.kind === "narration" ? ["@narrator"]
+    : (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact ? [`@${block.kind}`] : [])).size;
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn,
+    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn, lanes,
     readiness: readiness.ready && mixIssues.length > 0
       ? { ...readiness, ready: false, reasons: [`the saved mix has ${mixIssues.length} problem${mixIssues.length === 1 ? "" : "s"} to fix in Audio Studio`] }
       : readiness,
@@ -245,7 +250,14 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           {editions.map((edition) => (
             <div key={edition.id} className="fy-ad-show__edition">
               <b>{edition.name}</b> <small>{DRAMA_DELIVERY_LABEL[edition.delivery]} · {edition.episodes.length} episode{edition.episodes.length === 1 ? "" : "s"}</small>
-              <span>{edition.files.map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
+              <span>{edition.files.filter((file) => !stemNames(edition).has(file.name)).map((file) => <a key={file.name} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file.name)} download={`${edition.name} - ${file.name}`}>{file.name}</a>)}</span>
+              {/* A season's stems are many files: kept under one line, each by its lane (issue 1882). */}
+              {stemNames(edition).size > 0 && (
+                <details className="fy-ad-show__stems">
+                  <summary>Stems · {stemNames(edition).size}</summary>
+                  {[...stemNames(edition)].map(([file, label]) => <a key={file} className="fy-linkbtn" href={dramaEditionMediaUrl(edition.id, file)} download={`${edition.name} - ${file}`}>{label}</a>)}
+                </details>
+              )}
             </div>
           ))}
         </section>
@@ -265,6 +277,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   );
 }
 
+/** An edition's stem files, each labelled by its episode and lane. */
+const stemNames = (edition: DramaEdition) => new Map(edition.episodes.flatMap((episode) => (episode.stems ?? []).map((stem) => [stem.file, `Episode ${episode.episode} · ${stem.track}`] as const)));
+
 /**
  * Publish an edition (230q, R-71..R-76): which episodes, ready or with the reason they are held
  * back; how it is delivered; what goes in it; what it freezes.
@@ -276,6 +291,9 @@ function PublishDialog({ world, production, states, onClose }: {
   const [name, setName] = useState(ready.length === 1 ? "Pilot" : "Season 1");
   const [delivery, setDelivery] = useState<DramaDelivery>("podcast");
   const [chosen, setChosen] = useState<number[]>(ready.map((state) => state.n));
+  // Off unless asked for (230q): a stem is a whole episode's worth of WAV per lane.
+  const [stems, setStems] = useState(false);
+  const stemCount = states.filter((state) => chosen.includes(state.n) && state.lanes > 1).reduce((sum, state) => sum + state.lanes, 0);
   const [pressed, setPressed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // A dropped connection loses the answer (codex on PR 1880): the dialog is let go and says where to look.
@@ -294,7 +312,7 @@ function PublishDialog({ world, production, states, onClose }: {
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) : undefined;
   const publish = () => {
     setFailure(null);
-    const requestId = publishDramaEdition(world.meta.worldId, production.meta.id, { name: name.trim() || "Edition", delivery, episodes: chosen });
+    const requestId = publishDramaEdition(world.meta.worldId, production.meta.id, { name: name.trim() || "Edition", delivery, episodes: chosen, ...(stems && stemCount > 0 ? { stems: true } : {}) });
     if (requestId === null) setFailure("The studio is disconnected."); else setPressed(requestId);
   };
   return (
@@ -323,7 +341,9 @@ function PublishDialog({ world, production, states, onClose }: {
           ))}
         </ul>
         <p className="fy-ad-pub__outputs">
-          {["Episode audio", "Listener transcript", "Credits", "Production script"].map((output) => <span key={output}>✓ {output}</span>)}
+          {[`Episode audio · ${delivery === "podcast" ? "MP3" : "WAV"}`, "Listener transcript", "Credits", "Production script · PDF"].map((output) => <span key={output}>✓ {output}</span>)}
+          <button type="button" className="fy-ad-pub__stems" aria-pressed={stems && stemCount > 0} disabled={stemCount === 0} onClick={() => setStems(!stems)}
+            title={stemCount === 0 ? "Stems need two or more lanes" : undefined}>{stems && stemCount > 0 ? "✓ " : ""}Stems · {stemCount}</button>
         </p>
         <dl className="fy-ad-pub__frozen">
           {source && <><dt>Novel</dt><dd>{source.meta.title}{source.story?.version ? ` v${source.story.version}` : ""}</dd></>}

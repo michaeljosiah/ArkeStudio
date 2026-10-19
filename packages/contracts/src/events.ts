@@ -478,7 +478,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * (issue 1882): the show page's Mixed agrees with Publish, which checks the same sources live.
    */
   z.object({ ...base, type: z.literal("drama.editions"), requestId: UlidSchema, editions: z.array(DramaEditionSchema),
-    mixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20) }).strict()).optional() }).strict(),
+    mixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20),
+      /** The lanes the saved arrangement plays, so Publish counts its stems (issue 1882). */
+      lanes: z.number().int().min(0).max(128).optional() }).strict()).optional() }).strict(),
   /** `read-drama-source` answered: the text, or why it is not kept. */
   z
     .object({

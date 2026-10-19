@@ -1114,7 +1114,7 @@ export function subscribeDramaEditions(listener: (answer: DramaEditionAnswer) =>
   dramaEditionListeners.add(listener);
   return () => dramaEditionListeners.delete(listener);
 }
-export function publishDramaEdition(worldId: string, productionId: string, input: { name: string; delivery: "podcast" | "archive"; episodes: number[] }): string | null {
+export function publishDramaEdition(worldId: string, productionId: string, input: { name: string; delivery: "podcast" | "archive"; episodes: number[]; stems?: boolean }): string | null {
   const requestId = ulid();
   return send({ kind: "publish-drama-edition", requestId, worldId, productionId, ...input }) ? requestId : null;
 }

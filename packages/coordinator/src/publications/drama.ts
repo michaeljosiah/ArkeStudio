@@ -1,17 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import {
-  DramaEditionSchema, dramaCredits, dramaRoleName, dramaRoleVoice, episodeReadiness, episodeScriptFile, episodeScriptText, listenerTranscript, productionShape,
+  DramaEditionSchema, dramaCredits, dramaRoleName, dramaRoleVoice, episodeReadiness, episodeScriptFile, episodeScriptText, heardAsLabel, listenerTranscript, productionShape,
   type DramaDelivery, type DramaEdition, type EpisodeScriptBlock,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import { audioStudioSourceProblems, openAudioStudio } from "../productions/audio-studio.js";
 import { renderAudioStudioMix } from "../productions/audio-studio-mix.js";
+import { writeScriptPdf, type ScriptRun } from "../productions/script-pdf.js";
 
 /**
  * An audio drama's editions (SPEC-057 R-71..R-76, design turn 230q): each published into app
@@ -30,11 +31,15 @@ export class DramaEditionService {
   stop(): void { this.stopping.abort(); }
 
   /** The episodes asked for, refused by name where one is not ready (R-72). */
-  async publish(store: WorldStore, productionId: string, input: { name: string; delivery: DramaDelivery; episodes: readonly number[] }): Promise<DramaEdition> {
+  async publish(store: WorldStore, productionId: string, input: { name: string; delivery: DramaDelivery; episodes: readonly number[]; stems?: boolean }): Promise<DramaEdition> {
     const bundle = store.getBundle();
     const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
     if (!production || !productionShape(production.meta).isAudioDrama) throw new Error("That production is not an audio drama.");
     if (input.episodes.length === 0) throw new Error("Choose an episode to publish.");
+    // A podcast is MP3 (issue 1882), made by the host's encoder; refused by name without it, as a
+    // story's audiobook is, rather than quietly delivered as WAV.
+    const ffmpeg = this.options.ffmpeg;
+    if (input.delivery === "podcast" && !ffmpeg) throw new Error("Podcast delivery needs the host's audio tools to make MP3. Publish as Archive · WAV.");
     const name = (slug: string) => bundle.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
     const chosen = [...new Set(input.episodes)].sort((a, b) => a - b).map((episode) => {
       const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
@@ -58,6 +63,9 @@ export class DramaEditionService {
     const frozen = await inputs();
     const id = randomUUID();
     const dir = join(this.root, id);
+    // Stems render apart from Audio Studio's cache (issue 1882), as a story's audiobook does: a
+    // season's lanes would otherwise fill the budget the studio's own auditions need.
+    const work = join(this.root, `${id}.work`);
     await mkdir(dir, { recursive: true });
     // A world closing stops the render and the copies with it (codex on PR 1880).
     const signal = AbortSignal.any([store.closingSignal, this.stopping.signal]);
@@ -87,12 +95,36 @@ export class DramaEditionService {
             if (artifact) heardSounds.add(artifact.id);
           }
         }
-        // Streamed under the signal (codex on PR 1880): a closing world never waits on a long copy.
-        const audio = `${stem}.wav`;
-        await pipeline(createReadStream(join(store.dir, mix.file), { signal }), createWriteStream(join(dir, audio)), { signal });
+        const audio = `${stem}.${input.delivery === "podcast" ? "mp3" : "wav"}`;
+        if (input.delivery === "podcast") {
+          await ffmpeg!.run(["-y", "-v", "error", "-i", join(store.dir, mix.file), "-vn", "-ac", "2", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "192k",
+            "-id3v2_version", "3", "-metadata", `title=${entry.script.title || `Episode ${episode}`}`, "-metadata", `album=${production.meta.title}`, "-metadata", `track=${episode}`,
+            join(dir, audio)], () => {}, signal);
+        } else {
+          // Streamed under the signal (codex on PR 1880): a closing world never waits on a long copy.
+          await pipeline(createReadStream(join(store.dir, mix.file), { signal }), createWriteStream(join(dir, audio)), { signal });
+        }
         files.push(await describe(dir, audio));
         await keep(`${stem}-script.txt`, episodeScriptText(entry.script.title, episode, entry.script.blocks, name));
-        episodes.push({ episode, title: entry.script.title, seconds: mix.seconds, scriptVersion: entry.script.version, scriptHash: entry.hash, file: audio });
+        // The production script as PDF too (R-11, issue 1882); the text keeps what WinAnsi cannot print.
+        await keep(`${stem}-script.pdf`, writeScriptPdf(episodeScriptRuns(production.meta.title, entry.script.title, episode, entry.script.blocks, name), { title: `${production.meta.title} · Episode ${episode}` }));
+        // A stem per track the mix plays (issue 1882), and only where there are two: one is the mix.
+        const stems: Array<{ track: string; file: string }> = [];
+        const lanes = opened.state.tracks.filter((track) => mix.plan.clips.some((entry) => entry.clip.trackId === track.id && !entry.muted && entry.clip.source));
+        if (input.stems && lanes.length > 1) {
+          await mkdir(work, { recursive: true });
+          for (const [index, track] of lanes.entries()) {
+            signal.throwIfAborted();
+            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { final: true, signal, unavailable, cacheRoot: work, stem: { trackId: track.id, gainDb: mix.gainDb },
+              ...(ffmpeg ? { ffmpeg } : {}) });
+            const slug = track.name.normalize("NFKD").replace(/[^\x20-\x7e]/gu, "").toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "").slice(0, 40).replace(/-+$/u, "");
+            const file = `${stem}-stem-${String(index + 1).padStart(2, "0")}${slug ? `-${slug}` : ""}.wav`;
+            await rename(join(work, rendered.file), join(dir, file));
+            files.push(await describe(dir, file));
+            stems.push({ track: track.name.slice(0, 160), file });
+          }
+        }
+        episodes.push({ episode, title: entry.script.title, seconds: mix.seconds, scriptVersion: entry.script.version, scriptHash: entry.hash, file: audio, ...(stems.length > 0 ? { stems } : {}) });
       }
       const last = chosen.at(-1)!.episode;
       const cast = production.audioDrama?.cast;
@@ -132,6 +164,7 @@ export class DramaEditionService {
           ...(story ? { source: { productionId: story.meta.id, title: story.meta.title, ...(story.story?.version ? { version: story.story.version } : {}) } } : {}),
           voices: [...roles.values()].map((role) => `${role.role}: ${role.voice}`),
           sounds: [...sounds.values()].map((sound) => `${sound.name} (${sound.made})`),
+          ...(input.delivery === "podcast" ? { encoder: (await ffmpeg!.identity?.(signal) ?? "injected-runner").slice(0, 400) } : {}),
         },
       });
       await writeFile(join(dir, "edition.json"), `${JSON.stringify(edition, null, 2)}\n`);
@@ -139,6 +172,8 @@ export class DramaEditionService {
     } catch (error) {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
       throw error;
+    } finally {
+      await rm(work, { recursive: true, force: true }).catch(() => {});
     }
   }
 
@@ -168,8 +203,48 @@ export class DramaEditionService {
       if (!described || described.sha256 !== file.sha256) return null;
       this.verified.set(identity, file.sha256);
     }
-    return { path: join(this.root, id, file.name), contentType: file.name.endsWith(".wav") ? "audio/wav" : "text/plain; charset=utf-8", downloadName: `${edition.name} - ${file.name}` };
+    return { path: join(this.root, id, file.name), contentType: CONTENT_TYPES[file.name.split(".").pop()!] ?? "text/plain; charset=utf-8", downloadName: `${edition.name} - ${file.name}` };
   }
+}
+
+const CONTENT_TYPES: Record<string, string> = { wav: "audio/wav", mp3: "audio/mpeg", pdf: "application/pdf" };
+
+/**
+ * The production script, laid out as the score reads (R-11, design turn 230q): each scene's
+ * heading, each line under its speaker with its direction and channel, cues and silences in grey,
+ * and a bed's end where it stops. The same order as the text copy, which `episodeScriptText` writes.
+ */
+export function episodeScriptRuns(production: string, title: string, episode: number, blocks: readonly EpisodeScriptBlock[], name: (slug: string) => string): ScriptRun[] {
+  const runs: ScriptRun[] = [{ style: "title", text: `Episode ${episode}${title ? ` · ${title}` : ""}` }, { style: "meta", text: `${production} · Production script` }];
+  const stops = new Map<string, string[]>();
+  for (const block of blocks) {
+    if ((block.kind === "ambience" || block.kind === "music") && block.until) stops.set(block.until, [...(stops.get(block.until) ?? []), `${block.kind === "music" ? "Music" : "Ambience"} ends: ${block.heard}`]);
+  }
+  let scene = 0;
+  for (const block of blocks) {
+    for (const end of stops.get(block.id) ?? []) runs.push({ style: "context", text: end });
+    switch (block.kind) {
+      case "heading":
+        scene++;
+        runs.push({ style: "heading", text: `${scene}. ${block.place.toUpperCase()}${block.time ? ` — ${block.time}` : ""}${block.heardAs ? ` · ${heardAsLabel(block.heardAs)}` : ""}` });
+        break;
+      case "dialogue": case "narration":
+        runs.push({ style: "id", text: `${block.kind === "dialogue" ? name(block.speaker).toUpperCase() : "NARRATOR"}${block.kind === "dialogue" && block.channel ? ` (${block.channel})` : ""}` });
+        if (block.direction) runs.push({ style: "note", text: `(${block.direction})` });
+        runs.push({ style: "line", text: `${block.words}${block.kind === "dialogue" && block.cut ? " —" : ""}` });
+        break;
+      case "sound": case "ambience": case "music":
+        runs.push({ style: "context", text: `${block.kind === "sound" ? "Sound" : block.kind === "music" ? "Music" : "Ambience"}: ${block.heard}` });
+        break;
+      case "silence":
+        runs.push({ style: "context", text: `Silence ${block.seconds} s${block.note ? ` · ${block.note}` : ""}` });
+        break;
+      case "note":
+        runs.push({ style: "note", text: `[${block.text}]` });
+        break;
+    }
+  }
+  return runs;
 }
 
 /** Hashed as a stream (codex on PR 1880): an hour of stereo WAV is never one buffer. */
