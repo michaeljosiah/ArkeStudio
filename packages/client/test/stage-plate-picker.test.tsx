@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import type { ClientMessage, WorldBundle } from "@arke-studio/contracts";
 import { PlateChip, type PlateCandidate } from "../src/screens/scene-workspace/stage-plate.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -126,4 +126,19 @@ it("Generate is the location's own picture flow and ends with the new view chose
   assert.equal(selected(), "The Vigil · new", "the new view is the pick");
   await press("Use plate");
   assert.deepEqual(picked[0]?.source, { source: "world-file", path: "references/the-vigil/takes/tk_01J8G0000000000000000000G1/view.png", hash: "sha256:ddddeeeeffff0000" });
+});
+
+it("a refused generation ends the wait and says why (codex on PR 1902)", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest(capture(sent));
+  __connectionStatusForTest("open");
+  await mount();
+  await press("Generate");
+  const dialog = [...dom.document.querySelectorAll<HTMLElement>("dialog")].find((element) => (element as unknown as { open: boolean }).open)!;
+  await act(async () => [...dialog.querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Generate")!.click());
+  const request = sent.find((message) => message.kind === "generate-location-view");
+  assert.match(picker()!.textContent ?? "", /generating/);
+  await act(async () => __applyEventForTest({ type: "queue.enqueue-result", at: "2026-10-19T12:00:00Z", requestId: request?.kind === "generate-location-view" ? request.requestId : "", command: "generate-location-view", disposition: "rejected", requestedCount: 1, acceptedJobIds: [], failures: [{ index: 0, reason: "Out of image credit." }] } as never));
+  assert.doesNotMatch(picker()!.textContent ?? "", /generating/);
+  assert.match(picker()!.textContent ?? "", /Out of image credit\./);
 });

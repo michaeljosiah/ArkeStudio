@@ -248,7 +248,7 @@
    count and Generate and Upload beside them, Show all pictures for the rest, then Cancel and Use
    plate. Tiles take the production's aspect, as the frames do. */
 .fy-plate-picker__scrim { position: fixed; inset: 0; z-index: 59; }
-.fy-plate-picker { position: fixed; z-index: 60; width: 520px; max-width: calc(100vw - 24px); max-height: calc(100vh - 120px); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-md); font: var(--type-ui); }
+.fy-plate-picker { position: fixed; z-index: 60; width: 520px; max-width: calc(100vw - 24px); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-md); font: var(--type-ui); }
 .fy-plate-picker__head { display: flex; align-items: center; gap: 8px; }
 .fy-plate-picker__head > b { font-weight: var(--weight-semibold); }
 .fy-plate-picker__search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 30px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--muted-foreground); }

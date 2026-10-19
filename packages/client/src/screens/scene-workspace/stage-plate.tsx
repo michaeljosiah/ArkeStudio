@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { artifactDisplayName, linkNameResolver, orderedLocationViews, productionAspect, scenePlatePath, stagePlateHorizon, type ScenePlate, type Shot, type SizeTier, type WorldBundle } from "@arke-studio/contracts";
+import { artifactDisplayName, linkNameResolver, orderedLocationViews, productionAspect, scenePlatePath, stagedReferenceKey, stagePlateHorizon, type ScenePlate, type Shot, type SizeTier, type WorldBundle } from "@arke-studio/contracts";
 import { productionShelf } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
-import { generateLocationView, uploadArtifacts } from "../../lib/store.js";
+import { clearStagedReference, generateLocationView, pickStagedReference, subscribeQueueResults, uploadArtifacts, useStore } from "../../lib/store.js";
+import { resolveModel, worldModel } from "../../components/dispatch-bar.js";
 import { BodyLayer } from "../../components/body-layer.js";
 import { GenerationDialog } from "../../components/generation-dialog.js";
 import { Plus, Search, Upload } from "../../components/icons.js";
@@ -74,7 +75,7 @@ export function plateCandidates(world: WorldBundle, productionId: string): Plate
   const taken = new Map<string, number>();
   for (const candidate of [...views, ...shelf]) taken.set(candidate.label, (taken.get(candidate.label) ?? 0) + 1);
   const named = shelf.map(({ own, ...candidate }) => (candidate.location !== null && (taken.get(candidate.label) ?? 0) > 1 ? { ...candidate, label: `${candidate.location} · ${own}` } : candidate));
-  return [...views, ...named].slice(0, 60);
+  return [...views, ...named];
 }
 
 /** A plate's tile key, so the picker opens on the plate already chosen. */
@@ -148,7 +149,9 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
   // Off by default (231f), unless the plate already chosen is one of the other pictures.
   const [showAll, setShowAll] = useState(() => candidates.some((candidate) => candidate.key === current && candidate.location === null));
   const [chosen, setChosen] = useState<string | null>(current);
-  const [awaiting, setAwaiting] = useState<{ kind: "upload" | "generate"; known: ReadonlySet<string> } | null>(null);
+  const [awaiting, setAwaiting] = useState<{ kind: "upload" | "generate"; requestId: string; known: ReadonlySet<string> } | null>(null);
+  const { state } = useStore();
+  const search = useRef<HTMLInputElement | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [angle, setAngle] = useState("");
@@ -167,6 +170,21 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
     setAwaiting(null);
     setNote(null);
   }, [candidates, awaiting]);
+  // A chooser closed with nothing in it, or an import or generation refused, ends the wait with
+  // what was said, rather than leaving "importing…" standing over a picker that cannot go on (codex
+  // on PR 1902). Generate and Upload stay open meanwhile, so a wait that never lands can be asked again.
+  useEffect(() => subscribeQueueResults((result) => {
+    if (awaiting === null || result.requestId !== awaiting.requestId) return;
+    if (result.disposition !== "rejected" && result.requestedCount > 0) return;
+    setAwaiting(null);
+    setNote(result.failures[0]?.reason ?? null);
+  }), [awaiting]);
+  // The picker takes the keys while it is open, and gives them back to its trigger when it goes.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    search.current?.focus();
+    return () => { if (opener && typeof opener.focus === "function") opener.focus(); };
+  }, []);
   const words = query.trim().toLowerCase();
   const matches = (candidate: PlateCandidate) => words === "" || candidate.label.toLowerCase().includes(words);
   const places = candidates.filter((candidate) => candidate.location !== null && matches(candidate));
@@ -181,9 +199,16 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
     </button>
   );
   const width = typeof window === "undefined" || typeof window.innerWidth !== "number" ? 1360 : window.innerWidth;
+  const height = typeof window === "undefined" || typeof window.innerHeight !== "number" ? 850 : window.innerHeight;
+  // Under the trigger with what room is left below, or above it when more is above (codex on PR
+  // 1902): from Replace low in the inspector the foot with Cancel and Use plate fell off the window.
+  const below = height - anchor.bottom - 18, above = anchor.top - 18;
+  const vertical = below >= 320 || below >= above
+    ? { top: Math.round(anchor.bottom + 6), maxHeight: Math.max(160, Math.round(below)) }
+    : { bottom: Math.round(height - anchor.top + 6), maxHeight: Math.round(above) };
   // Drawn on the body, out of the page's reach: the tiles take the production's aspect from here.
   const meta = world.productions.find((candidate) => candidate.meta.id === productionId)?.meta;
-  const position = { top: Math.round(anchor.bottom + 6), left: Math.round(Math.max(12, Math.min(anchor.left, width - 532))), ...(meta === undefined ? {} : { "--shot-aspect": productionAspect(meta).replace(":", " / ") }) } as CSSProperties;
+  const position = { ...vertical, left: Math.round(Math.max(12, Math.min(anchor.left, width - 532))), ...(meta === undefined ? {} : { "--shot-aspect": productionAspect(meta).replace(":", " / ") }) } as CSSProperties;
   return (
     <BodyLayer>
       <div className="fy-plate-picker__scrim" onClick={onCancel} />
@@ -193,21 +218,21 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
           <b>Plate</b>
           <span className="fy-plate-picker__search">
             <Search size={13} />
-            <input type="search" aria-label="Search locations" placeholder="Search locations" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input ref={search} type="search" aria-label="Search locations" placeholder="Search locations" value={query} onChange={(event) => setQuery(event.target.value)} />
           </span>
         </div>
         <Eyebrow title="Locations" meta={String(places.length)} />
         <div className="fy-plate-picker__tiles" role="listbox" aria-label="Locations">
           {places.map(tile)}
           <div className="fy-plate-picker__makes">
-            <button ref={generateButton} type="button" disabled={location === undefined || awaiting !== null}
+            <button ref={generateButton} type="button" disabled={location === undefined}
               title={location === undefined ? "Give the scene a location first" : `A picture of ${location.name}`} onClick={() => setGenerating(true)}>
               <Plus size={14} />Generate
             </button>
-            <button type="button" disabled={awaiting !== null} onClick={() => {
+            <button type="button" onClick={() => {
               const result = uploadArtifacts(world.meta.worldId, undefined, productionId);
               if (result.requestId === null) { setNote(result.reason ?? "The picture could not be imported."); return; }
-              setAwaiting({ kind: "upload", known: known() });
+              setAwaiting({ kind: "upload", requestId: result.requestId, known: known() });
               setNote("importing…");
             }}>
               <Upload size={14} />Upload
@@ -246,6 +271,12 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
                 <input type="text" value={angleName} maxLength={80} onChange={(event) => setAngleName(event.target.value)} />
               </label>
             }
+            reference={world.stagedReferences[stagedReferenceKey("location-view", location.id)] ?? null}
+            referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("location-view", location.id), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("location-view", location.id)] ?? ""]?.worldName }}
+            referenceHint="Optional. A photograph or a plate of the place to work from. The establishing view goes first, so this rides only where the model has room for a second image."
+            onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("location-view", location.id))}
+            worldReferences={{ world, model: resolveModel(state, "image", choice.modelId, worldModel(state, "image")).model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("location-view", location.id), file) }}
+            onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("location-view", location.id))}
             workflow="location-view"
             referenceImages={establishing ? 0 : 1}
             count={count}
@@ -263,7 +294,7 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
               }, { ...(choice.modelId ? { modelId: choice.modelId } : {}), ...(choice.tier ? { tier: choice.tier } : {}) });
               setGenerating(false);
               if (requestId === null) { setNote("The studio is disconnected. Reconnect and try again."); return; }
-              setAwaiting({ kind: "generate", known: known() });
+              setAwaiting({ kind: "generate", requestId, known: known() });
               setNote("generating…");
             }}
           />
