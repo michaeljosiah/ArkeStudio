@@ -15,6 +15,7 @@ import { SecretRegistry } from "./redact.js";
 import { registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
+import { UNDERSONG_RELEASE } from "./world/undersong-release.js";
 import { harnessTrace } from "./harness/trace.js";
 import { assembleHarness, describeClaudeAvailability, describeCodexAvailability, lazyCodexImageRunner } from "./harness/v2-launch.js";
 import { createNodeMediaHost } from "./media/node-media-host.js";
@@ -176,7 +177,7 @@ const { coordinator, server } = createStudioHost({
   appRoot: devRoot,
   // What the packaged build reads out of its resources, dev reads out of the repo — so
   // Settings · Sample world is a working surface here and not a dead one (SPEC-016 R-6).
-  sampleWorldPath: join(fixturesRoot, "worlds", "the-undersong"),
+  sampleWorldDownload: UNDERSONG_RELEASE,
   setup: nodeSetupDeps(),
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),

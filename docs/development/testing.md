@@ -391,7 +391,7 @@ Desktop composition changes still require the desktop checks below.
 
 Client `test/fixture-state.ts` provides fixture state; navigation samples are in `src/screens/registry.ts`. Read an adjacent screen test for DOM/store setup. Coordinator tests commonly copy world fixtures into temporary directories and inject providers or clocks. Reuse `test/queue/fake-provider.ts` for suitable queue scenarios and adjacent domain helpers rather than calling paid providers in ordinary regression tests.
 
-Close stores, sockets, watchers, timers and supervisors in test cleanup before deleting temporary files. A leaked watcher can leave the runner alive after assertions finish. Fixture data under [fixtures](../../fixtures) also supplies the development/sample world: edit it intentionally and check its consumers, not as disposable test output.
+Close stores, sockets, watchers, timers and supervisors in test cleanup before deleting temporary files. A leaked watcher can leave the runner alive after assertions finish. Fixture data under [fixtures](../../fixtures) supplies tests and development seeding only; it is not the downloadable story or an installer resource. Edit it intentionally and keep its size budget. Story-download tests use small in-memory ZIPs and never fetch the full release; see [story releases](story-releases.md) for release validation.
 
 ## Boundary-specific checks
 

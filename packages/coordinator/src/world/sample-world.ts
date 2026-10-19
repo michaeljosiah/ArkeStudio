@@ -7,11 +7,10 @@ import { readWorldMeta, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 
 /**
- * Installing the sample world (SPEC-016 R-6): The Undersong, copied out of the application's
- * own resources into the user's library.
+ * Installing a verified story folder (SPEC-016 R-6) into the user's library.
  *
  * A world is plain files, so installing one is a copy — there is no import format, no
- * migration and nothing to unpack. Only its identity is rewritten. Everything else, including
+ * migration here; the download service has already unpacked and verified it. Only its identity is rewritten. Everything else, including
  * its change history and the proposal waiting at its gate, is the document as authored: a user
  * who installs it gets the world, not a re-enactment of someone making it.
  */
@@ -28,7 +27,7 @@ export class SampleWorldUnavailable extends Error {
 }
 
 export interface InstallSampleWorldOptions {
-  /** The world folder shipped with the application, or wherever this build keeps it. */
+  /** A verified extracted story folder, or a local fixture in tests. */
   sourceDir: string;
   /** The app root. `worlds/` receives the copy; a sibling holds it while it is assembled. */
   appRoot: string;

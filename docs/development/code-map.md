@@ -1,5 +1,11 @@
 # Code map
 
+On-demand story delivery: coordinator `world/undersong-release.ts` pins the public archive;
+`world/story-download.ts` verifies and extracts it, then `world/sample-world.ts` installs an
+independent copy. Desktop/dev composition supplies the descriptor. Client `screens/shell.tsx`
+shows size, completion and progress in Settings. `scripts/package-story-world.mts` assembles
+release media separately from the small test fixture. See [story releases](story-releases.md).
+
 Audio Studio (approved turn 226): client
 `screens/chapter-audio-studio.tsx` composes the Cut layout, shared `EditorPanelTabs`,
 `EditorSheetSlot` and `useCutLayout` around the chapter script. `audio-studio-workspace.tsx`
