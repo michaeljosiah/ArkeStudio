@@ -9,13 +9,14 @@ it("measures saved chapter bodies instead of declared counts, without changing f
   const dir = await makeTempWorld();
   const chapterDir = join(dir, "productions/the-ledger-of-nights/chapters");
   const examples = [
-    { id: "neap", file: "01-neap.md", declared: "words: 3120\n", body: "The tide held.\n\nNobody moved.", words: 5 },
-    { id: "the-same-ink", file: "02-the-same-ink.md", declared: "", body: "Ink on paper.", words: 3 },
-    { id: "nothing-wrong-with-it", file: "03-nothing-wrong-with-it.md", declared: "words: 3520\n", body: " \n\t", words: 0 },
+    { id: "neap", file: "01-neap.md", status: "draft", declared: "words: 3120\n", body: "The tide held.\n\nNobody moved.", words: 5 },
+    { id: "the-same-ink", file: "02-the-same-ink.md", status: "planned", declared: "", body: "Ink on paper.", words: 3 },
+    { id: "nothing-wrong-with-it", file: "03-nothing-wrong-with-it.md", status: "draft", declared: "words: 3520\n", body: " \n\t", words: 0 },
+    { id: "her-own-hand", file: "04-her-own-hand.md", status: "outlined", declared: "words: 9000\n", body: "Outline notes, still awaiting a chapter draft.", words: 0 },
   ];
   const originals = new Map<string, string>();
   for (const [index, example] of examples.entries()) {
-    const text = `---\nid: ${example.id}\ntitle: Count ${index + 1}\nnumber: ${index + 1}\nversion: 1\nstatus: draft\n${example.declared}---\n\n${example.body}\n`;
+    const text = `---\nid: ${example.id}\ntitle: Count ${index + 1}\nnumber: ${index + 1}\nversion: 1\nstatus: ${example.status}\n${example.declared}---\n\n${example.body}\n`;
     originals.set(example.file, text);
     await writeFile(join(chapterDir, example.file), text);
   }
