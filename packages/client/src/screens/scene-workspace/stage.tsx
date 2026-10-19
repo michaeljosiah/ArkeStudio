@@ -1123,11 +1123,13 @@ export function SceneStage({
     stop();
     setAt(Math.max(0, Math.min(clock, time)));
   };
-  // Shortcuts belong to this Stage, leaving text entry and native button activation alone.
+  // Shortcuts belong to this Stage, leaving text entry and native button activation alone. The
+  // head is the page's line in the workspace (231a), its Shot · Stage switch among it, so a key
+  // pressed there is the page's and never scrubs the playhead.
   const timelineKey = (event: ReactKeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (frozen || working === null || event.altKey || event.ctrlKey || event.metaKey ||
-      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .fy-swstage__head')) return;
     if (event.key === " " && target.closest('button, summary, [role="button"]')) return;
     if (event.key === " ") { if (!event.repeat) toggle(); }
     else if (event.key === "ArrowLeft") seekTime(at - 1 / STAGE_FRAME_RATE);

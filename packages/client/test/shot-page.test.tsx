@@ -393,6 +393,17 @@ describe("the shot page (design turn 145)", () => {
     await click(byText(q(mounted, ".fy-sw__tabs")!, "Stage"));
     assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /^v3 · 2 keys · /);
     assert.ok(q(mounted, '.fy-swstage__head [aria-label="Full screen"]'), "full screen from the glyph at the head's end");
+    // An arrow on the head's view switch is the page's: it never scrubs the Stage (codex on PR 1899).
+    const arrow = async (target: HTMLElement) => {
+      const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "key", { value: "ArrowRight" });
+      await act(async () => target.dispatchEvent(event));
+    };
+    const playhead = () => q(mounted, '[aria-label="Stage playhead"]')?.getAttribute("aria-valuenow");
+    await arrow(byText(q(mounted, ".fy-swstage__head .fy-sw__tabs")!, "Stage"));
+    assert.equal(playhead(), "0");
+    await arrow(q(mounted, '[aria-label="Stage playhead"]')!);
+    assert.notEqual(playhead(), "0", "while the Stage's own controls still step a frame");
     // 144a ends the instruction bar with the disclosure; hand-staged, it has nothing to open on.
     const disclosure = q(mounted, ".fy-swstage__construction .fy-swstage__inspection")!;
     assert.equal(disclosure.querySelector("summary")?.textContent, "AI inspection and assumptions");
