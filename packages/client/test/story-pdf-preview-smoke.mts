@@ -84,7 +84,11 @@ try {
   await new Promise((resolve, reject) => { socket!.addEventListener("open", resolve, { once: true }); socket!.addEventListener("error", reject, { once: true }); });
   let sequence = 0; const pending = new Map<number, { resolve: (value: any) => void; reject: (error: unknown) => void }>();
   socket.addEventListener("message", ({ data }) => { const message = JSON.parse(String(data)), request = pending.get(message.id); if (request) { pending.delete(message.id); message.error ? request.reject(message.error) : request.resolve(message.result); } else if (message.method === "Runtime.exceptionThrown" || (message.method === "Log.entryAdded" && message.params.entry.level === "error")) errors.push(message); else if (message.method === "Network.requestWillBeSent" && /pdf\.worker.*\.mjs$/.test(message.params.request.url)) workerRequests.push(message.params.request.url); });
-  const cdp = (method: string, params = {}): Promise<any> => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket!.send(JSON.stringify({ id, method, params })); });
+  const cdp = (method: string, params = {}): Promise<any> => new Promise((resolve, reject) => {
+    const id = ++sequence, timeout = setTimeout(() => { pending.delete(id); reject(new Error("Timed out: " + method)); }, 15_000);
+    pending.set(id, { resolve: value => { clearTimeout(timeout); resolve(value); }, reject: error => { clearTimeout(timeout); reject(error); } });
+    socket!.send(JSON.stringify({ id, method, params }));
+  });
   const evaluate = async (expression: string) => { const value = await cdp("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }); if (value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value; };
   await cdp("Page.enable"); await cdp("Runtime.enable"); await cdp("Log.enable"); await cdp("Network.enable");
   const records: unknown[] = [];
@@ -102,7 +106,10 @@ try {
     const geometry = await evaluate(`(()=>{const e=document.querySelector('.fy-pdf-preview'),r=e.getBoundingClientRect(),p=document.querySelector('.fy-pdf-text span'),pr=p?.getBoundingClientRect()??{width:0,height:0},c=document.querySelector('canvas');const range=document.createRange();range.selectNodeContents(document.querySelector('.fy-pdf-text'));getSelection().removeAllRanges();getSelection().addRange(range);return{left:r.left,right:r.right,overflow:document.documentElement.scrollWidth>innerWidth+1,textWidth:pr.width,textHeight:pr.height,selected:getSelection().toString(),canvasWidth:c.width,canvasHeight:c.height,native:!!document.querySelector('iframe,object,embed'),save:[...document.querySelectorAll('a')].some(a=>a.textContent.includes('Save'))};})()`);
     assert.ok(geometry.left >= 0 && geometry.right <= width + 1); assert.equal(geometry.overflow, false); assert.ok(geometry.textWidth > 0 && geometry.textHeight > 0); assert.match(geometry.selected, /₦2,600/); assert.equal(geometry.native, false); assert.equal(geometry.save, false);
     await evaluate("getSelection().removeAllRanges()");
-    const capture = await cdp("Page.captureScreenshot", { format: "png" }); await writeFile(join(directory, `preview-${width}.png`), Buffer.from(capture.data, "base64"));
+    // Hidden Electron windows have no compositor surface for Page.captureScreenshot.
+    // Inspect their actual PDF canvas; Chrome captures the full responsive controls too.
+    const pixels = electron ? await evaluate("document.querySelector('canvas').toDataURL('image/png').split(',')[1]") : (await cdp("Page.captureScreenshot", { format: "png" })).data;
+    await writeFile(join(directory, `preview-${width}.png`), Buffer.from(pixels, "base64"));
     if (width === 1100) {
       await evaluate(`(async()=>{const chapters=document.querySelector('.fy-pdf-chapters select'),zoom=document.querySelector('.fy-pdf-toolbar select');for(let i=0;i<12;i++){chapters.value=String(i%2?${result.chapters[0]!.physicalPage}:${result.chapters[1]!.physicalPage});chapters.dispatchEvent(new Event('change',{bubbles:true}));zoom.value=String(i%2?1:2);zoom.dispatchEvent(new Event('change',{bubbles:true}));await new Promise(requestAnimationFrame);}chapters.value='${result.chapters[1]!.physicalPage}';chapters.dispatchEvent(new Event('change',{bubbles:true}));zoom.value='1.5';zoom.dispatchEvent(new Event('change',{bubbles:true}));})()`);
       await until(() => evaluate(`document.querySelector('.fy-pdf-status')?.textContent==='File page ${result.chapters[1]!.physicalPage} of ${result.pageCount}' && document.querySelector('.fy-pdf-text')?.textContent.includes('the room was hers.')`));

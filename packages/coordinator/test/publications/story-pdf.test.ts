@@ -50,6 +50,22 @@ test("contents wraps repeated long titles with separate final destinations", asy
   assert.deepEqual(result.chapters.map(chapter => chapter.pageNumber), Array.from({ length: 45 }, (_, i) => i + 1));
 });
 
+test("emphasis boundaries do not strand closing punctuation on a new line", async () => {
+  const document = manuscript(Array.from({ length: 60 }, (_, i) => "Word ".repeat(i + 1) + "“*A phrase ends in—*” and the sentence continues.").join("\n\n"));
+  const result = await renderStoryPdf(document, input(document, { settings: { ...DEFAULT_STORY_PDF_SETTINGS, contents: false } }));
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(result.bytes), disableFontFace: true, useSystemFonts: false }).promise;
+  try {
+    for (let number = 2; number <= parsed.numPages; number++) {
+      const rows = new Map<number, string>();
+      for (const item of (await (await parsed.getPage(number)).getTextContent()).items) {
+        if ("str" in item) rows.set(item.transform[5], (rows.get(item.transform[5]) ?? "") + item.str);
+      }
+      assert.ok([...rows.values()].every(row => !row.trimStart().startsWith("”")), "a closing quote stays with its preceding token across an italic boundary");
+    }
+  } finally { await parsed.destroy(); }
+});
+
 test("unsupported text, invalid settings, empty chapters and cancellation refuse", async () => {
   for (const body of ["The glyph \u{10FFFF} is unsupported.", "Unsupported script العربية."]) {
     const document = manuscript(body);

@@ -124,12 +124,20 @@ class Typesetter {
     const lines: Line[] = []; let current: Piece[] = []; let used = 0;
     const currentIndent = () => lines.length === 0 ? indent : 0;
     const flush = () => { while (current.length && /^\s+$/u.test(current.at(-1)!.text)) used -= current.pop()!.width; lines.push({ pieces: current, width: used, indent: currentIndent() }); current = []; used = 0; };
+    // An emphasis or fallback-font boundary is not a word boundary. Keep the
+    // whole token together, including closing punctuation in a different face.
+    const groups: Piece[][] = [];
     for (const piece of this.pieces(runs, size, context)) {
-      if (/^\s+$/u.test(piece.text)) { if (current.length) { current.push(piece); used += piece.width; } continue; }
-      if (used + piece.width > width - currentIndent() + 0.01 && current.length) flush();
-      if (piece.width <= width - currentIndent() + 0.01) { current.push(piece); used += piece.width; continue; }
+      if (/^\s+$/u.test(piece.text) || !groups.length || /^\s+$/u.test(groups.at(-1)![0]!.text)) groups.push([piece]);
+      else groups.at(-1)!.push(piece);
+    }
+    for (const group of groups) {
+      const groupWidth = group.reduce((sum, piece) => sum + piece.width, 0);
+      if (/^\s+$/u.test(group[0]!.text)) { if (current.length) { current.push(...group); used += groupWidth; } continue; }
+      if (used + groupWidth > width - currentIndent() + 0.01 && current.length) flush();
+      if (groupWidth <= width - currentIndent() + 0.01) { current.push(...group); used += groupWidth; continue; }
       // No inserted hyphen or replacement glyph: split only at grapheme boundaries.
-      for (const { segment } of segmenter.segment(piece.text)) {
+      for (const piece of group) for (const { segment } of segmenter.segment(piece.text)) {
         const part = { text: segment, face: piece.face, width: this.width(segment, piece.face, size) };
         if (part.width > width - currentIndent()) throw new Error(`${context}: a character is wider than the PDF text frame.`);
         if (used + part.width > width - currentIndent() + 0.01 && current.length) flush();

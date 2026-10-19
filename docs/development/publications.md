@@ -64,7 +64,7 @@ breaks; metadata supplies the title page and optional subtitle/edition label. Un
 or layout refuses rather than silently dropping words. The old Word/EPUB export is unchanged.
 
 `publications/story-pdf.ts` plans pages explicitly, renders with PDFKit/fontkit and independently
-parses the bytes with PDF.js. Bundled DejaVu faces and their hashes travel in compiler identity;
+parses the bytes with PDF.js. Bundled DejaVu faces, Noto Emoji fallback and their hashes travel in compiler identity;
 the system font collection is not used. Validation checks source-to-plan paragraph fidelity,
 parsed text, navigation, embedded fonts, page bounds and reading structure. The private
 `pdf-validation.json` receipt stays beside the edition, outside the PDF. PDF captures use story
