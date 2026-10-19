@@ -10,7 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   ADAPTATION_KINDS, AUDIO_DRAMA_KIND, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
-  type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
+  type NarratorSamples as NarratorSamplesValue, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listHarnessModels, openWorldChat, send, sendWorldChat, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
@@ -216,6 +216,11 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
+            {/* The narrator question, answered by example (230c, R-6): the same moment both ways, side by side. */}
+            {audioDrama && draft?.narratorSamples && !draft.audioDrama?.narrator && !locked && (
+              <NarratorSamples samples={draft.narratorSamples} disabled={!!pending || running || !!unavailable}
+                onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
+            )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
             {planProposed && (
               <div className="fy-production-setup__choices" role="group" aria-label="The plan">
@@ -327,6 +332,31 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   );
 }
 
+
+/**
+ * The two samples Arke wrote for the narrator question (230c, issue 1882), as cards to choose
+ * between. A card is the answer: pressing it says so in the conversation, in the author's words.
+ */
+function NarratorSamples({ samples, disabled, onChoose }: { samples: NarratorSamplesValue; disabled: boolean; onChoose: (text: string) => void }) {
+  const cards = [
+    { key: "narrated", title: "A narrator where needed", lines: samples.narrated, answer: "A narrator, only where the ear needs one." },
+    { key: "in-the-room", title: "In the room", lines: samples.inTheRoom, answer: "In the room: no narrator." },
+  ] as const;
+  return (
+    <div className="fy-setup-samples" role="group" aria-label="Does a narrator guide the listener?">
+      {cards.map(card => (
+        <button key={card.key} type="button" className="fy-setup-sample" disabled={disabled} onClick={() => onChoose(card.answer)}>
+          <span className="fy-setup-sample__head">{card.title}</span>
+          {card.lines.map((line, i) => (
+            <span key={i} className={line.cue ? "fy-setup-sample__line fy-setup-sample__line--cue" : "fy-setup-sample__line"}>
+              <small>{line.speaker}</small><span>{line.words}</span>
+            </span>
+          ))}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Where a created production opens: its home, or for an audio drama with a pilot the pilot's

@@ -509,6 +509,8 @@ export const DRAMA_CAST_SCHEMA_VERSION = 94;
 export const DRAMA_ADAPTATION_SCHEMA_VERSION = 95;
 /** An audio drama episode's arrangement in Audio Studio (SPEC-057 R-67): `drama-mix/`, unknown before it. */
 export const DRAMA_MIX_SCHEMA_VERSION = 96;
+/** The narrator question's samples on the strict setup draft (230c, issue 1882): unreadable before it. */
+export const NARRATOR_SAMPLES_SCHEMA_VERSION = 97;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**

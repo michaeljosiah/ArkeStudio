@@ -300,6 +300,27 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     assert.equal(m.sent.filter((message) => message.kind === "world-chat-send").length, 1, "never asked twice");
   });
 
+  it("asks the narrator question by example: two samples side by side, each card the answer (230c, issue 1882)", async () => {
+    const samples = {
+      narrated: [{ speaker: "Narrator", words: "Far off, the harbour bell struck once." }, { speaker: "Maren", words: "The log said two hours." }],
+      inTheRoom: [{ speaker: "Sound", words: "One stroke of the harbour bell, far off.", cue: true }, { speaker: "Bray", words: "That's Sereth." }],
+    };
+    const asking = ProductionSetupStateSchema.parse({ ...dramaSetup(3), draft: { ...dramaSetup(3).draft, narratorSamples: samples } });
+    const m = await mount(inSetup(asking), `/w/${FIXTURE_WORLD_ID}/productions/setup/${SETUP}`);
+    await answer(m.setup()[0]!, asking);
+    const cards = m.container.querySelector("[aria-label='Does a narrator guide the listener?']")!;
+    assert.deepEqual([...cards.querySelectorAll(".fy-setup-sample__head")].map(head => head.textContent), ["A narrator where needed", "In the room"]);
+    assert.match(cards.textContent!, /NarratorFar off, the harbour bell struck once\..*SoundOne stroke of the harbour bell/);
+    assert.ok(cards.querySelector(".fy-setup-sample__line--cue"), "a cue reads as a sound, not a speaker");
+    await act(async () => cards.querySelectorAll("button")[0]!.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    const sent = m.setup().at(-1)!;
+    assert.deepEqual(sent.action.operation === "send" && sent.action.text, "A narrator, only where the ear needs one.");
+    // Answered, the plan carries a narrator and the cards give way to it.
+    const answered = ProductionSetupStateSchema.parse({ ...asking, draft: { ...asking.draft, revision: 4, audioDrama: { episodes: 6, minutes: 25, narrator: "narrated", keptFromListener: [] } } });
+    await answer(sent, answered);
+    assert.equal(m.container.querySelector("[aria-label='Does a narrator guide the listener?']"), null);
+  });
+
   it("leaving the kind drops the plan and restores a frame", async () => {
     const m = await mount(inSetup(dramaSetup(2)), `/w/${FIXTURE_WORLD_ID}/productions/setup/${SETUP}`);
     await answer(m.setup()[0]!, dramaSetup(2));
