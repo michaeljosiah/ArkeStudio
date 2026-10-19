@@ -264,7 +264,10 @@ it("preserves unsaved Stage edits until the person decides them before hydrating
   assert.match(host.textContent!, /Keep or discard your current Stage edits/);
   await press(host.querySelector<HTMLElement>('[aria-label="Discard"]')!);
   assert.equal(sent.some(message => message.kind === "stage-review-discard"), false, "discarding manual edits does not discard the new retained authority");
-  assert.match(host.textContent!, /Reviewed in chat/);
+  // The review's account is Arke's notes, behind the draft bar's disclosure (231c), never the bar's own words.
+  assert.doesNotMatch(host.querySelector('[data-testid="stage-draft"]')!.textContent!, /Reviewed in chat/);
+  await press(host.querySelector<HTMLElement>(".fy-swstage__notesbtn")!);
+  assert.match(host.querySelector('[data-testid="stage-notes"]')!.textContent!, /Reviewed in chat/);
   await press([...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Keep")!);
   assert.equal(keptId, review.id);
 });

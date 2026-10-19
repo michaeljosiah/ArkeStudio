@@ -398,6 +398,27 @@
    scope, then the state on the right, and a figure's label carries its cast colour. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction { margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__construction > .fy-swstage__scope { font-size: inherit; opacity: 1; }
+/* The draft bar (231b) takes the line's place at its height while a draft waits: who made it, then
+   chips counted from the draft's own diff, added in the success colour and changed in the warning
+   one, then Arke's notes, Discard and Keep. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__draft { flex: none; display: flex; align-items: center; gap: 8px; min-height: 50px; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--foreground); border-radius: 12px; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__who { flex: none; font: var(--weight-semibold) var(--text-sm)/1.4 var(--font-sans); white-space: nowrap; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__sum { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; white-space: nowrap; font: var(--type-label); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b { font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b[data-changed="true"] { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; border: 0; background: transparent; color: var(--muted-foreground); font: var(--type-label); white-space: nowrap; cursor: pointer; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn:hover, :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn[aria-expanded="true"] { color: var(--foreground); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn > svg { flex: none; transition: transform var(--dur-fast) var(--ease-standard); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notesbtn[aria-expanded="true"] > svg { transform: rotate(90deg); }
+/* Arke's notes (231c) over the viewport's top-left, as the build's log stands, the view switch beside them. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes { position: absolute; top: 12px; left: 12px; z-index: 7; width: min(420px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-md); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes > p { margin: 0; font: var(--weight-regular) var(--text-xs)/1.45 var(--font-sans); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__notes > p[data-warn="true"] { color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__viewport[data-notes="true"] .fy-swstage__modes { left: min(444px, calc(100% - 180px)); }
+/* The stage list marks a draft's new lines + and its changed lines ~, beside each line's state. */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__glyph { flex: none; width: 10px; text-align: center; font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--success); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__glyph[data-mark="changed"] { color: var(--warning); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__meta { flex: 0 1 auto; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__head > .fy-swstage__gap { flex: 1; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__label[data-cast="true"] { box-shadow: inset 3px 0 0 var(--fy-cast); padding-left: 9px; }

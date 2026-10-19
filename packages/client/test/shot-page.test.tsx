@@ -404,11 +404,9 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(playhead(), "0");
     await arrow(q(mounted, '[aria-label="Stage playhead"]')!);
     assert.notEqual(playhead(), "0", "while the Stage's own controls still step a frame");
-    // 144a ends the instruction bar with the disclosure; hand-staged, it has nothing to open on.
-    const disclosure = q(mounted, ".fy-swstage__construction .fy-swstage__inspection")!;
-    assert.equal(disclosure.querySelector("summary")?.textContent, "AI inspection and assumptions");
-    assert.equal(disclosure.getAttribute("aria-disabled"), "true", "shut until a build has something to say");
-    assert.equal(disclosure.querySelector("p"), null);
+    // 231a's line is the plate, the field, the choice and the builds: 144a's disclosure is gone, and
+    // a build's account is Arke's notes on the draft bar while it waits (231c).
+    assert.equal(q(mounted, ".fy-swstage__inspection"), null);
     await click(byText(q(mounted, ".fy-sw__tabs")!, "Shot"));
     await click(q(mounted, ".fy-sw__back")!);
     const band = q(mounted, '.fy-swrow__band[data-shot-id="sh_12"]');
@@ -416,24 +414,17 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(band?.dataset.selected, "true", "with the shot selected");
   });
 
-  it("the Stage's disclosure opens on what a build said, once there is one (issue 1114)", async () => {
+  it("a kept build's account is not drawn on the line: Arke's notes go with the draft (231c)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     sceneOf(state).shots[0]!.staging = {
       version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 2], l: [0, 1, 0] }],
       authorship: { model: "claude-opus-5", sourceVersion: 2, assumptions: ["The rail is waist height."], assessment: "Two keys, a slow push toward the rail.", inspectedFrames: 3 },
     };
     const mounted = await mountState(state, `${SHOT_PATH}?view=stage`);
-    const disclosure = q(mounted, ".fy-swstage__inspection")!;
-    assert.equal(disclosure.getAttribute("aria-disabled"), null);
-    assert.equal(disclosure.querySelector("p")?.textContent, "Two keys, a slow push toward the rail.");
-    assert.equal(disclosure.querySelector("li")?.textContent, "The rail is waist height.");
-    assert.match(disclosure.querySelector("small")?.textContent ?? "", /claude-opus-5 · 3 views inspected/);
-    await act(async () => { disclosure.setAttribute("open", ""); });
-    // A hand edit strips the build's provenance (the kept record arrives without it); the
-    // element's own open state must not outlive it.
-    await act(async () => { __setStateForTest(((state) => { sceneOf(state).shots[0]!.staging = { version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 2], l: [0, 1, 0] }] }; return state; })(structuredClone(FIXTURE_STATE) as ClientState)); });
-    assert.equal(disclosure.getAttribute("aria-disabled"), "true", "nothing built stands behind the staging now");
-    assert.equal(disclosure.hasAttribute("open"), false, "and the disclosure shut with it");
+    assert.ok(q(mounted, ".fy-swstage__construction"), "nothing waits, so the line stands");
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
+    assert.equal(q(mounted, ".fy-swstage__notesbtn"), null);
+    assert.doesNotMatch(q(mounted, '[data-testid="workspace-stage"]')?.textContent ?? "", /a slow push toward the rail|waist height/);
   });
 
   it("Camera is the nine 145b draws: eight selects and the grade line, no intent field (issue 1114)", async () => {
