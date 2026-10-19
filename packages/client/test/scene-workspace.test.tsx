@@ -187,11 +187,11 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mount();
     await openStage(mounted);
-    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 12/);
+    assert.match(q(mounted, ".fy-swstage__head > strong")?.textContent ?? "", /Shot 12/);
     assert.match(q(mounted, '[data-testid="workspace-stage"]')?.textContent ?? "", /Nothing staged yet\./);
     // Stepping to the next shot on the filmstrip is the same selection Arke shares.
     await click(q(mounted, '[aria-label="Next shot"]')!);
-    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, ".fy-swstage__head > strong")?.textContent ?? "", /Shot 13/);
     await click(q(mounted, '[data-global-chat-trigger]')!);
     assert.match(dom.document.querySelector('.fy-global-chat[open] .fy-arke__name')?.textContent ?? "", /Shot 13/);
     await click(dom.document.querySelector('.fy-global-chat [aria-label="Close Chat"]') as HTMLElement);
@@ -411,7 +411,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     const stage = q(mounted, '[data-testid="workspace-stage"]');
     assert.ok(stage, "the awaiting host action opens the shot's Stage without another gesture");
-    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, ".fy-swstage__head > strong")?.textContent ?? "", /Shot 13/);
     assert.equal(
       all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")?.getAttribute("aria-checked"),
       "true",
@@ -765,8 +765,8 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await openStage(mounted);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    // The staging's words sit on the page's view row (turn 145), beside the full-screen glyph.
-    assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /v2 · 3 keys · orbit/);
+    // The staging's words sit on the Stage's head, the page's one line (turn 231a), beside the full-screen glyph.
+    assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /v2 · 3 keys · orbit/);
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
     assert.match(stage.textContent ?? "", /not filed/);
     // The camera's numbers are on the camera's form (turn 144): the value in its box, the unit beside it.
@@ -1015,10 +1015,12 @@ describe("scene detail owns the workspace", () => {
     await click(row.querySelector(".fy-swrow__chevron") as HTMLElement);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
-    assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /v1 · 2 keys · static/);
+    assert.match(q(mounted, ".fy-swstage__head > strong")?.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /v1 · 2 keys · locked off/);
     assert.match(stage.textContent ?? "", /filed/);
 
+    // The Stage's workspace has no footer (231a): the way back to the scene is on the Shot view.
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Shot")!);
     await click(q(mounted, ".fy-sw__back")!);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     const block = q(mounted, '[data-testid="flow-node-k:sh_13"]')!;

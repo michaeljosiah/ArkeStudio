@@ -230,6 +230,8 @@
 /* The camera in words (issue 1820): the line saying where the words put the camera is data, in mono. */
 /* A figure that spins between marks (issue 1821) says so on its list line, in the warning colour. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__warnstate { color: var(--warning); }
+/* A list line's state in the warning colour over the line's grey (a turn too fast, the camera's warnings). */
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__item > .fy-swstage__warnstate:last-child { color: var(--warning); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__quietmono { font: var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono); color: var(--muted-foreground); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__mark[data-kind="plate"] { box-sizing: border-box; border: 1.5px dashed var(--neutral-400); }
 /* The location plate (issue 1818, design turn 229): the blockout line opens with it, a thumbnail

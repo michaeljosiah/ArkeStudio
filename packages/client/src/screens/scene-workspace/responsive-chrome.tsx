@@ -34,7 +34,11 @@ export function useSceneDock() {
   return [open, setOpen] as const;
 }
 
-export function SceneDock({ open, onOpen, onClose, stage = false, children }: { open: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
+/**
+ * `away` puts the dock and its rail out of the page while the conversation stays mounted and
+ * registered, so Chat in the title bar still opens it (the Stage's workspace, turn 231a).
+ */
+export function SceneDock({ open, away = false, onOpen, onClose, stage = false, children }: { open: boolean; away?: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
   const global = useGlobalChat();
   const compact = useMediaQuery("(max-width: 1099px)");
   const phone = useMediaQuery("(max-width: 599px)");
@@ -80,8 +84,8 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
   // A phone's rail floats over the page, and nothing floats over Stage's picture (issue 1355). Its way
   // into the conversation is the Conversation press in the page's head instead (design 196q).
   return <>
-    {compact ? phone && stage || half && open ? null : rail : open ? null : rail}
-    <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
+    {away ? null : compact ? phone && stage || half && open ? null : rail : open ? null : rail}
+    <div ref={inlineHost} className="fy-scene-dock-inline" hidden={away || compact || !open} />
     <PageSheet open={compact && open && !global} keepMounted modeless={half} onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}
   </>;

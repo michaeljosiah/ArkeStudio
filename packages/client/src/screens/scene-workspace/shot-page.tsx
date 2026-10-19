@@ -191,6 +191,13 @@ function ShotWorkspace({
   const [renameOpen, setRenameOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  // The Stage is its own workspace in the page (turn 231a): its head is the page's one line, and
+  // the title block, filmstrip, footer and dock step away while it is open. Round 92 measured the
+  // viewport they left at 668 × 180 in a 1360 × 900 window. Chat still opens from the title bar and
+  // narrows the page, so the viewport gives way and the inspector keeps its width. Leaving the
+  // Stage draws them again as they were, the dock's own open state untouched. Phone and Fold keep
+  // their layouts (turns 168 and 202).
+  const workspace = view === "stage" && !phone && !fold;
   const [primarySlot, setPrimarySlot] = useState<HTMLDivElement | null>(null);
   const [generating, setGenerating] = useState(false);
   const [openMember, setOpenMember] = useState<string | null>(null);
@@ -346,10 +353,28 @@ function ShotWorkspace({
     return named === undefined ? target : `shot ${named.number}`;
   };
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
+  const viewSwitch = (
+    <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
+      {(["shot", "stage"] as const).map((candidate) => (
+        <button
+          key={candidate}
+          type="button"
+          role="radio"
+          aria-checked={view === candidate}
+          className="fy-sw__tab"
+          data-on={view === candidate ? "true" : undefined}
+          onClick={() => setView(candidate)}
+        >
+          {candidate === "shot" ? "Shot" : "Stage"}
+        </button>
+      ))}
+    </div>
+  );
+  const refusal = generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>;
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
+      <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-workspace={workspace && !fullscreen ? "stage" : undefined} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
           {phone && <SceneBackRow context={`Scene ${scene.number} · ${scene.title}`} title={`Shot ${shot.number} · ${shot.title}`} onBack={() => navigate(`${scenePath}?shot=${shot.id}`)}
             {...(view === "stage" ? { beside: <button type="button" className="fy-scene-back__press" aria-haspopup="dialog" onClick={() => setDock(true)}>Conversation</button> } : {})}>
@@ -368,7 +393,7 @@ function ShotWorkspace({
               <b>Stage</b>
             </div>
           ) : null}
-          <header className="fy-sw__head">
+          {workspace ? refusal : <header className="fy-sw__head">
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
               {episode === undefined ? "" : ` \u00a0/\u00a0 Episode ${episode.order} \u00a0/\u00a0 ${episode.title}`}
@@ -443,7 +468,7 @@ function ShotWorkspace({
                 </details>
               </div>
             </div>
-            {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
+            {refusal}
             <Filmstrip
               shots={shots}
               playsAsBeats={playsAsBeats}
@@ -455,24 +480,10 @@ function ShotWorkspace({
               next={next}
               onOpen={goTo}
             />
-          </header>
+          </header>}
 
-          <div className="fy-sw__toolbar">
-            <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["shot", "stage"] as const).map((candidate) => (
-                <button
-                  key={candidate}
-                  type="button"
-                  role="radio"
-                  aria-checked={view === candidate}
-                  className="fy-sw__tab"
-                  data-on={view === candidate ? "true" : undefined}
-                  onClick={() => setView(candidate)}
-                >
-                  {candidate === "shot" ? "Shot" : "Stage"}
-                </button>
-              ))}
-            </div>
+          {workspace ? null : <div className="fy-sw__toolbar">
+            {viewSwitch}
             <span className="fy-sw__spacer" />
             {view === "shot" ? (
               <span className="fy-shot__state" data-tone={stateWord.tone} role="status">
@@ -486,7 +497,7 @@ function ShotWorkspace({
                 </button>
               </>
             )}
-          </div>
+          </div>}
 
           {view === "shot" ? (
             <div className="fy-shot__body">
@@ -574,7 +585,8 @@ function ShotWorkspace({
             </div>
           ) : (
             <SceneStage
-              head={false}
+              head={workspace}
+              {...(workspace && !fullscreen ? { views: viewSwitch, onFullscreen: () => setFull(true) } : {})}
               fullscreen={fullscreen ? { leave: () => setFull(false) } : null}
               scene={pageScene}
               production={production}
@@ -592,15 +604,15 @@ function ShotWorkspace({
               {...(playblastRequest ? { playblastRequest } : {})}
             />
           )}
-          <footer className="fy-sw__footer">
+          {workspace ? null : <footer className="fy-sw__footer">
             <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
               <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Connected · v${scene.version}`}
             </span>
             <button type="button" className="fy-sw__back" onClick={() => navigate(`${scenePath}?shot=${shot.id}`)}>Back to scene <span aria-hidden="true">→</span></button>
-          </footer>
+          </footer>}
         </main>
 
-        <SceneDock open={dock} onOpen={() => setDock(true)} onClose={() => setDock(false)} stage={view === "stage"}>
+        <SceneDock open={dock} away={workspace} onOpen={() => setDock(true)} onClose={() => setDock(false)} stage={view === "stage"}>
           <ProductionConversation
             worldId={world.meta.worldId}
             productionId={production.meta.id}

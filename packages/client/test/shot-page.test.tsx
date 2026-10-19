@@ -189,13 +189,15 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(q(mounted, '.fy-shot__field[data-own]'), null, "no field carries the override dot");
   });
 
-  it("the filmstrip and the arrow keys step between shots and keep the view", async () => {
+  it("the Stage's head and the filmstrip both step between shots and keep the view", async () => {
     const mounted = await mountState(FIXTURE_STATE, `${SHOT_PATH}?view=stage`);
     assert.equal(q(mounted, '.fy-sw__tab[data-on="true"]')?.textContent, "Stage");
     assert.ok(q(mounted, '[data-testid="workspace-stage"]'), "the Stage is the page's second view");
-    await click(q(mounted, '.fy-shot__step[aria-label="Next shot"]')!);
-    assert.match(q(mounted, "h1")?.textContent ?? "", /^Shot 13/);
+    await click(q(mounted, '.fy-swstage__step[aria-label="Next shot"]')!);
+    assert.equal(q(mounted, ".fy-swstage__head > strong")?.textContent, "Shot 13");
     assert.equal(q(mounted, '.fy-sw__tab[data-on="true"]')?.textContent, "Stage", "stepping keeps the view");
+    assert.match(where, /view=stage/);
+    await click(byText(q(mounted, ".fy-sw__tabs")!, "Shot"));
     assert.equal((q(mounted, '.fy-shot__step[aria-label="Next shot"]') as HTMLButtonElement).disabled, true, "the last shot has no next");
     const strip = q(mounted, ".fy-shot__strip")!;
     const left = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
@@ -365,13 +367,43 @@ describe("the shot page (design turn 145)", () => {
     }
   });
 
-  it("the Stage view carries the staging's words on the view row, and Back to scene lands on the scene with the shot selected", async () => {
+  it("the Stage is its own workspace in the page, and leaving it brings the head, filmstrip, footer and dock back (231a)", async () => {
+    const mounted = await mountState();
+    assert.ok(q(mounted, ".fy-shot__strip") && q(mounted, ".fy-sw__footer"), "the shot view has its filmstrip and footer");
+    assert.equal(q(mounted, ".fy-scene-dock-inline")?.hasAttribute("hidden"), false, "and its dock open");
+    await click(byText(q(mounted, ".fy-sw__tabs")!, "Stage"));
+    assert.equal(q(mounted, '[data-testid="shot-page"]')?.dataset.workspace, "stage");
+    for (const away of [".fy-sw__head", ".fy-shot__strip", ".fy-sw__toolbar", ".fy-sw__footer", ".fy-sw__rail"]) assert.equal(q(mounted, away), null, `${away} steps away`);
+    assert.equal(q(mounted, ".fy-scene-dock-inline")?.hasAttribute("hidden"), true, "the dock steps away, its conversation still mounted");
+    const head = q(mounted, ".fy-swstage__head")!;
+    assert.deepEqual([...head.children].map((child) => child.className || child.tagName), [
+      "fy-swstage__step", "STRONG", "fy-swstage__step", "fy-swstage__meta", "fy-sw__tabs", "fy-swstage__scope", "fy-swstage__gap", "fy-swstage__version", "fy-swstage__exit",
+    ].filter((name) => name !== "fy-swstage__scope" || head.querySelector(".fy-swstage__scope")), "one line: the shot and its arrows, title and length, Shot · Stage, the scope, the version, Full screen");
+    assert.ok(head.querySelector('[aria-label="Full screen"]'));
+    await click(byText(head, "Shot"));
+    assert.equal(q(mounted, '[data-testid="shot-page"]')?.getAttribute("data-workspace"), null);
+    assert.ok(q(mounted, ".fy-sw__head") && q(mounted, ".fy-shot__strip") && q(mounted, ".fy-sw__footer"), "leaving the Stage draws them again");
+    assert.equal(q(mounted, ".fy-scene-dock-inline")?.hasAttribute("hidden"), false, "with the dock as it was");
+  });
+
+  it("the Stage view carries the staging's words on its head, and Back to scene lands on the scene with the shot selected", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     sceneOf(state).shots[0]!.staging = { version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 2], l: [0, 1, 0] }] };
     const mounted = await mountState(state);
     await click(byText(q(mounted, ".fy-sw__tabs")!, "Stage"));
-    assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /^v3 · 2 keys · /);
-    assert.ok(q(mounted, '.fy-sw__full[aria-label="Full screen"]'), "full screen from the glyph on the view row");
+    assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /^v3 · 2 keys · /);
+    assert.ok(q(mounted, '.fy-swstage__head [aria-label="Full screen"]'), "full screen from the glyph at the head's end");
+    // An arrow on the head's view switch is the page's: it never scrubs the Stage (codex on PR 1899).
+    const arrow = async (target: HTMLElement) => {
+      const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "key", { value: "ArrowRight" });
+      await act(async () => target.dispatchEvent(event));
+    };
+    const playhead = () => q(mounted, '[aria-label="Stage playhead"]')?.getAttribute("aria-valuenow");
+    await arrow(byText(q(mounted, ".fy-swstage__head .fy-sw__tabs")!, "Stage"));
+    assert.equal(playhead(), "0");
+    await arrow(q(mounted, '[aria-label="Stage playhead"]')!);
+    assert.notEqual(playhead(), "0", "while the Stage's own controls still step a frame");
     // 144a ends the instruction bar with the disclosure; hand-staged, it has nothing to open on.
     const disclosure = q(mounted, ".fy-swstage__construction .fy-swstage__inspection")!;
     assert.equal(disclosure.querySelector("summary")?.textContent, "AI inspection and assumptions");
@@ -533,8 +565,8 @@ describe("the shot page (design turn 145)", () => {
     assert.match(q(removed, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren at the rail, listening/);
     await click(byText(q(removed, ".fy-sw__tabs")!, "Stage"));
     assert.ok(q(removed, '[data-testid="workspace-stage"]'), "the Stage opens");
-    assert.match(q(removed, "h1")?.textContent ?? "", /^Shot 12/, "on the same shot (codex round 3)");
-    assert.equal(q(removed, ".fy-shot__staging")?.textContent, "Not staged", "reading shot 12's staging, not the first remaining shot's");
+    assert.equal(q(removed, ".fy-swstage__head > strong")?.textContent, "Shot 12", "on the same shot (codex round 3)");
+    assert.equal(q(removed, ".fy-swstage__version")?.textContent, "not staged", "reading shot 12's staging, not the first remaining shot's");
   });
 
   it("a write sent before a step of the filmstrip is still the one in flight on the next shot (codex round 3)", async () => {
