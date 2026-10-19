@@ -1187,9 +1187,10 @@ function worldOpenFailureKind(err: unknown): string {
 /**
  * Roster agents whose sessions call no tools — a prompt and a JSON answer (issue 1247). A local
  * model that states it cannot call tools is still a fit default for these, where it would fail
- * every other agent's first turn.
+ * every other agent's first turn. The prose reviewer reads the chapter from its prompt and
+ * returns tags (issue 1952).
  */
-const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer"]);
+const PROMPT_ONLY_AGENTS: ReadonlySet<string> = new Set(["conversation-summarizer", "conversation-namer", "chapter-prose-reviewer"]);
 
 export class Coordinator {
   private readonly engine: ReturnType<typeof createEngine>;

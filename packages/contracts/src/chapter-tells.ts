@@ -89,8 +89,10 @@ export const ReviewTellsSchema = z.object({
   tells: z.array(PlacedTellSchema).max(TELL_ANSWER_MAX),
   passages: z.array(TellPassageSchema).max(200),
   strip: z.array(TellStripBarSchema).max(200),
-  /** Tags whose quotation is not in the saved chapter, or repeats it more often than it occurs. */
+  /** Tags whose quotation is not in the saved chapter. */
   unplaced: z.number().int().nonnegative(),
+  /** Copies of a tag beyond the places its quotation occurs: the same tell listed twice. */
+  repeated: z.number().int().nonnegative(),
   /** Tags whose words occur in more places than they were tagged at, so which one is meant is unknown. */
   ambiguous: z.number().int().nonnegative(),
   /** Same-kind tags that overlapped another and were counted once. */
@@ -105,15 +107,16 @@ const emptyByKind = (): TellsByKind => ({ three: 0, list: 0, metaphor: 0, notxy:
  * as review citations are. Words the chapter holds more than once are placed only when the
  * reviewer tagged every occurrence: "He stopped." twice, tagged once, could be the sequential
  * action or the pivot, and a guess could move the tell into another stretch and make or hide a
- * crowded passage. The skill asks for a quotation that occurs once, so an ambiguous tag is the
+ * crowded passage. The skill asks for a quotation that occurs once, lengthened forward so it
+ * still begins where the device does (its start is what is counted), so an ambiguous tag is the
  * reviewer's miss, dropped and counted rather than anchored to words it may not mean (the review
  * notes' rule, turn 227r). Overlapping tags of one kind are one device; different kinds both
  * count, as the source counted one sentence as Not X but Y and as Metaphor.
  */
-export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tells: PlacedTell[]; unplaced: number; ambiguous: number; merged: number } {
+export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tells: PlacedTell[]; unplaced: number; repeated: number; ambiguous: number; merged: number } {
   const dialogue = dialogueOf(body);
   const groups = new Map<string, TellDraft[]>();
-  let unplaced = 0, ambiguous = 0;
+  let unplaced = 0, repeated = 0, ambiguous = 0;
   for (const draft of drafts) {
     // Blank quotation marks would otherwise be "found" at the chapter's first space.
     if (draft.quote.trim() === "") { unplaced++; continue; }
@@ -128,7 +131,7 @@ export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tel
     if (at.length === 0) { unplaced += tags.length; continue; }
     if (tags.length < at.length) { ambiguous += tags.length; continue; }
     // Every occurrence tagged; tags beyond them repeat one already placed.
-    unplaced += tags.length - at.length;
+    repeated += tags.length - at.length;
     for (const start of at) placed.push({ kind, quote, start, end: start + quote.length, inDialogue: dialogue(start) });
   }
   placed.sort((a, b) => a.start - b.start || a.end - b.end);
@@ -146,7 +149,7 @@ export function verifiedTells(body: string, drafts: readonly TellDraft[]): { tel
     }
     tells.push({ ...tell });
   }
-  return { tells, unplaced, ambiguous, merged };
+  return { tells, unplaced, repeated, ambiguous, merged };
 }
 
 /** Whether an offset sits inside spoken words, by the cast's own quote rule. Splits the chapter once. */
@@ -232,11 +235,11 @@ export function tellStrip(body: string, tells: readonly PlacedTell[], passages: 
 
 /** The whole reading for one chapter, pinned in its review with the line it used. */
 export function readTells(body: string, drafts: readonly TellDraft[], line = TELL_LINE, kindLine = TELL_KIND_LINE): ReviewTells {
-  const { tells, unplaced, ambiguous, merged } = verifiedTells(body, drafts);
+  const { tells, unplaced, repeated, ambiguous, merged } = verifiedTells(body, drafts);
   const passages = crowdedPassages(tellStretches(body, tells), tells, line, kindLine);
   return {
     version: 1, line, kindLine, stretchWords: TELL_STRETCH_WORDS, words: wordsOf(body).length,
-    tells, passages, strip: tellStrip(body, tells, passages), unplaced, ambiguous, merged,
+    tells, passages, strip: tellStrip(body, tells, passages), unplaced, repeated, ambiguous, merged,
   };
 }
 

@@ -66,7 +66,9 @@ kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
 - **The app counts.** `readTells` in contracts `chapter-tells.ts` does every number:
   - it drops quotations that are not in the saved chapter;
   - it drops tags whose words occur in more places than they were tagged at, since it cannot
-    tell which occurrence was meant (the skill asks for a quotation that occurs once);
+    tell which occurrence was meant. The skill asks for a quotation that occurs once,
+    lengthened with the words after it so it still begins where the device begins;
+  - it counts a tag listed twice for one place once;
   - it counts overlapping tags of one kind once;
   - it reads the 450 words that begin at each tell. Any crowded 450 words in the chapter
     hold their own first tell, so this finds every one wherever it falls, including in a

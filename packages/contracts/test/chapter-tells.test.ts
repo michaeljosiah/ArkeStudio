@@ -19,9 +19,10 @@ it("places only exact quotations, at every occurrence when every occurrence is t
     { kind: "metaphor", quote: "an invented figure" },
     { kind: "pivot", quote: "  " },
   ];
-  const { tells, unplaced, ambiguous } = verifiedTells(body, drafts);
+  const { tells, unplaced, repeated, ambiguous } = verifiedTells(body, drafts);
   assert.deepEqual(tells.map((t) => t.start), [0, body.lastIndexOf("He stopped.")]);
-  assert.equal(unplaced, 4, "a third repeat, a paraphrase, an invention and blank space are dropped");
+  assert.equal(unplaced, 3, "a paraphrase, an invention and blank space are not in the chapter");
+  assert.equal(repeated, 1, "a third tag for a line that occurs twice repeats one already placed");
   assert.equal(ambiguous, 0);
 });
 

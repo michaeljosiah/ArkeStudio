@@ -852,6 +852,8 @@ describe("the local default when nobody chose and nothing cloud is paid for (iss
       const sessionInput = (test.coordinator as unknown as { sessionInput(input: { agent?: string }): Promise<{ agents?: Record<string, { model?: string }> }> }).sessionInput;
       const summary = await sessionInput({ agent: "conversation-summarizer" });
       assert.equal(summary.agents?.["conversation-summarizer"]?.model, "ollama/chatty:7b", "the summarizer calls no tools, so a tool-less local model fits it");
+      const tells = await sessionInput({ agent: "chapter-prose-reviewer" });
+      assert.equal(tells.agents?.["chapter-prose-reviewer"]?.model, "ollama/chatty:7b", "nor does the AI tells reviewer, which reads the chapter from its prompt");
       assert.equal(summary.agents?.["world-builder"]?.model, undefined, "and is not handed to an agent that needs tools");
       await assert.rejects(Promise.resolve(sessionInput({ agent: "world-builder" })), /None of the local models/);
     } finally { await test.close(); }

@@ -25,7 +25,7 @@ async function render(value: ChapterReview) {
 it("shows the chapter's tells, the strip against the line and each crowded passage", async () => {
   const kinds = ["metaphor", "metaphor", "metaphor", "metaphor", "metaphor", "pivot", "pivot", "pivot", "notxy", "three"] as const;
   const crowded: TellDraft[] = kinds.map((kind, i) => ({ kind, quote: `w${300 + i * 10}x` }));
-  const container = await render(review([prose], [...crowded, { kind: "list", quote: "w900x" }, { kind: "pivot", quote: "not in the chapter" }]));
+  const container = await render(review([prose], [...crowded, { kind: "list", quote: "w900x" }, { kind: "list", quote: "w900x" }, { kind: "pivot", quote: "not in the chapter" }]));
   const text = container.textContent ?? "";
   assert.match(text, /11 tells/); assert.match(text, /1,000 words/); assert.match(text, /11 per 1,000 words/);
   assert.match(container.querySelector('[role="img"]')?.getAttribute("aria-label") ?? "", /start to end: 10, 0, 1\. The line is 8\./);
@@ -33,7 +33,7 @@ it("shows the chapter's tells, the strip against the line and each crowded passa
   assert.match(text, /10 in 450 words · Metaphor 5 · Pivot sentence 3 · Rule of three 1 · Not X but Y 1/);
   assert.match(container.querySelector(".fy-tells__passage q")?.textContent ?? "", /^w300x w301x/);
   assert.match(text, /Not an AI detector/); assert.match(text, /The line is provisional/);
-  assert.match(text, /Not counted: 1 not in the chapter\./);
+  assert.match(text, /Not counted: 1 not in the chapter, 1 repeated\./);
 });
 
 it("says none crowded when the tells are spread out", async () => {

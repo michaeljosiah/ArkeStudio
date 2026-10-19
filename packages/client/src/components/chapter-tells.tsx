@@ -93,8 +93,8 @@ export function ChapterTellsReport({ review }: { review: ChapterReview }) {
   );
 }
 
-function uncounted({ unplaced, ambiguous }: Pick<ReviewTells, "unplaced" | "ambiguous">): string {
-  const parts = [unplaced > 0 ? `${unplaced} not in the chapter` : "", ambiguous > 0 ? `${ambiguous} matching more than one place` : ""].filter(Boolean);
+function uncounted({ unplaced, repeated, ambiguous }: Pick<ReviewTells, "unplaced" | "repeated" | "ambiguous">): string {
+  const parts = [unplaced > 0 ? `${unplaced} not in the chapter` : "", repeated > 0 ? `${repeated} repeated` : "", ambiguous > 0 ? `${ambiguous} matching more than one place` : ""].filter(Boolean);
   return parts.length ? ` Not counted: ${parts.join(", ")}.` : "";
 }
 
