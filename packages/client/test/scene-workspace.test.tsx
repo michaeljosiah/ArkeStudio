@@ -280,6 +280,20 @@ describe("scene detail owns the workspace", () => {
       orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys };
     });
     assert.deepEqual(own, { value: "camera", choices: [["Nothing", false], ["This shot", false], ["The scene · no blocking yet", true]], preserve: "camera" }, "only the shot's own marks: it starts from this shot");
+    // Only what the build can keep is offered (codex on PR 1905).
+    const lightsOnly = await opened((scene) => {
+      scene.blocking = { version: 1, cast: [], sets: [], lights: [{ name: "lamp", kind: "point", colour: "#ffb867", strength: 4, x: 0, y: 2, z: 0 }] };
+    });
+    assert.deepEqual(lightsOnly, { value: "none", choices: [["Nothing", false], ["This shot · no marks yet", true], ["The scene · no blocking yet", true]], preserve: "none" }, "a block of only lights keeps no blocking");
+    const override = await opened((scene) => {
+      scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+      orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 2, z: 0 }], sets: [], keys };
+    });
+    assert.deepEqual(override, { value: "camera", choices: [["Nothing", false], ["This shot", false], ["The scene · shot has own marks", true]], preserve: "camera" }, "a shot with its own marks cannot keep the scene's");
+    const oneKey = await opened((scene) => {
+      orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = { version: 1, cast: [], sets: [], keys: [keys[0]!] };
+    });
+    assert.deepEqual(oneKey.choices[1], ["This shot · no marks yet", true], "a camera of one key is not one the build can keep");
   });
 
   it("Quick layout over a shot's own marks keeps them, and writes no first shared block over them (codex on PR 1903)", async () => {

@@ -978,12 +978,18 @@ export function SceneStage({
   // camera; The scene keeps the scene's shared blocking. The wire keeps its preserve values (none,
   // camera, blocking). A choice with nothing to keep is drawn but cannot be chosen, and the default
   // is the most there is to keep.
+  // Each is offered only where the build can keep it (codex on PR 1905): This shot needs a camera
+  // of two keys or more, which the build holds to; The scene needs a shared block with figures or
+  // sets in it (a block holding only a plate or lights keeps nothing, yet refused every figure the
+  // build added), and one this shot inherits: the build protects the shot's effective blocking, so
+  // on a shot with its own marks "blocking" would keep those, not the scene's.
+  const sharedMarks = scene.blocking !== undefined && (scene.blocking.cast.length > 0 || scene.blocking.sets.length > 0);
   const startFromChoices = [
     { value: "none" as const, label: "Nothing", missing: undefined },
-    { value: "camera" as const, label: "This shot", missing: persisted === null ? "no marks yet" : undefined },
-    { value: "blocking" as const, label: "The scene", missing: scene.blocking === undefined ? "no blocking yet" : undefined },
+    { value: "camera" as const, label: "This shot", missing: (persisted?.keys.length ?? 0) >= 2 ? undefined : "no marks yet" },
+    { value: "blocking" as const, label: "The scene", missing: !sharedMarks ? "no blocking yet" : persistedScope === "shot" ? "shot has own marks" : undefined },
   ];
-  const startFromDefault = scene.blocking !== undefined ? "blocking" : persisted !== null ? "camera" : "none";
+  const startFromDefault = startFromChoices[2]!.missing === undefined ? "blocking" : startFromChoices[1]!.missing === undefined ? "camera" : "none";
   const startFrom = startFromChoices.find((choice) => choice.value === preserve && choice.missing === undefined)?.value ?? startFromDefault;
   const construct = (request?: typeof constructionRequest) => {
     if (!shot || moved || frozen) return;
@@ -1769,7 +1775,6 @@ export function SceneStage({
           {working === null ? (
             <div className="fy-swstage__empty">
               <span>Nothing staged yet.</span>
-              <Button variant="primary" size="sm" disabled={locked} onClick={stage}>Quick layout</Button>
             </div>
           ) : null}
           {constructing && buildLog !== null ? (
