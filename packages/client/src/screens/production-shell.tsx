@@ -154,7 +154,8 @@ function ProductionSwitcher({
         aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
         aria-haspopup={phone ? "dialog" : "menu"}
         aria-expanded={at !== null}
-        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
+        // The whole title on hover wherever the card cuts it short (issue 1883).
+        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : production?.meta.title}
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>

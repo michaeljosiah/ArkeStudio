@@ -107,6 +107,18 @@ export function AddSoundDialog({ open, onClose, world, production, cue, onPlace 
   );
 }
 
+/**
+ * A made sound's name from the script's words (issue 1883): the whole phrase where it is short,
+ * else cut at a word and never on "of" or "the" — five words cut "one deep stroke" from its bell.
+ */
+export function soundName(heard: string): string {
+  const words = heard.trim().replace(/[.!?;:,]+$/u, "").split(/\s+/u).filter(Boolean);
+  const kept: string[] = [];
+  for (const word of words) { if ([...kept, word].join(" ").length > 60) break; kept.push(word); }
+  while (kept.length > 1 && /^(of|the|a|an|and|or|to|in|on|at|with|from|by|for)$/iu.test(kept.at(-1)!)) kept.pop();
+  return kept.join(" ").replace(/[,;:]$/u, "");
+}
+
 /** The prompt Arke would send (R-44): the script's words, asked close and dry — distance is the mix's. */
 export function defaultPrompt(cue: Pick<ScriptCue, "kind" | "heard">): string {
   return cue.kind === "music" ? `${cue.heard.trim()} Instrumental.` : `${cue.heard.trim()} Close and dry, no reverb, no music.`;
@@ -123,7 +135,7 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
   const [automatic, setAutomatic] = useState(cue.kind !== "music");
   const [seconds, setSeconds] = useState(cue.kind === "music" ? 60 : 5);
   const [loop, setLoop] = useState(false);
-  const [name, setName] = useState(() => cue.heard.split(/\s+/).slice(0, 5).join(" ").replace(/[.,;:]$/, "") || CUE_LABEL[cue.kind]);
+  const [name, setName] = useState(() => soundName(cue.heard) || CUE_LABEL[cue.kind]);
   const [quote, setQuote] = useState<DramaSound | null>(null);
   const [making, setMaking] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -160,7 +172,8 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
       ) : (
         <div className="fy-ad-gen__row">
           <span>Length</span>
-          <label><input type="radio" checked={automatic} onChange={() => setAutomatic(true)} /> Automatic</label>
+          {/* The length Automatic sends, said beside it (issue 1883), not as a contrary note below. */}
+          <label><input type="radio" checked={automatic} onChange={() => setAutomatic(true)} /> Automatic{automatic && priced?.requests[0]?.durationSec ? ` · ${priced.requests[0].durationSec} s` : ""}</label>
           <label><input type="radio" checked={!automatic} onChange={() => setAutomatic(false)} /> Set</label>
           {!automatic && <input aria-label="Seconds" type="number" min={cue.kind === "music" ? 3 : 0.5} max={cue.kind === "music" ? 300 : 30} step={0.5}
             value={seconds} onChange={(event) => setSeconds(Number(event.target.value))} />}
@@ -168,10 +181,10 @@ function GeneratePanel({ world, production, cue, onBack, onMade }: {
       )}
       {cue.kind === "sound" && <label className="fy-ad-gen__check"><input type="checkbox" checked={loop} onChange={(event) => setLoop(event.target.checked)} /> Loop seamlessly</label>}
       <label>Save as<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
-      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec ? ` · ${request.durationSec} s` : ""}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
+      {priced && <small className="fy-ad-gen__note">{priced.requests.map((request) => `${request.engine}${request.durationSec && !(automatic && cue.kind !== "ambience") ? ` · ${request.durationSec} s` : ""}${request.loop ? " · loop" : ""}`).join("; ")}</small>}
       {failure && <p role="alert" className="fy-ad-gen__fail">{failure}</p>}
+      {/* One way back, in the head (issue 1883). */}
       <footer>
-        <Button variant="ghost" onClick={onBack}>Back</Button>
         {partial && <Button variant="secondary" onClick={() => onMade(partial)}>Place it</Button>}
         <Button variant="primary" disabled={!priced || making !== null} onClick={() => {
           setFailure(null);

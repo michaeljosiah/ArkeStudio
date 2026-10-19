@@ -16,6 +16,7 @@ import {
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
+import { useDockHost } from "../components/player.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { Button, IconButton, cx } from "../components/ui.js";
@@ -102,6 +103,9 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [castRole, setCastRole] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
   const focusNext = useRef<{ id: string; at: number } | null>(null);
+  // The player sits in the page's flow above its foot (issue 1883), never floating over it.
+  const dock = useRef<HTMLDivElement>(null);
+  useDockHost(dock, null);
 
   // Another window's save, or Arke's accepted proposal, arrives in the bundle: adopted while this
   // copy holds nothing unsaved, never over the author's own typing.
@@ -437,7 +441,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                           {(on || block.direction) && (
                             // How, in parentheses above the words, never part of them (R-13).
                             <span className="fy-ad-score__dirwrap">(<input className="fy-ad-score__direction" aria-label="Direction" placeholder="direction" value={block.direction ?? ""} maxLength={240}
-                              onChange={(event) => change(block.id, { direction: event.target.value || undefined } as Partial<EpisodeScriptBlock>)} />)</span>
+                              // The parentheses are the score's own (issue 1883): typed ones read "((quietly))".
+                              onChange={(event) => change(block.id, { direction: event.target.value.replace(/^\s*\(+/u, "").replace(/\)+\s*$/u, "") || undefined } as Partial<EpisodeScriptBlock>)} />)</span>
                           )}
                           <span className="fy-ad-score__line">
                             <textarea data-words={block.id} aria-label={block.kind === "dialogue" ? `${name(block.speaker)}'s line` : "Narration"}
@@ -552,6 +557,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             onPick={(id) => { setSide(phone ? null : side); setSelected(id); document.querySelector(`[data-block="${id}"]`)?.scrollIntoView?.({ block: "center" }); }} />
         ))}
       </div>
+      <div ref={dock} className="fy-ad-ep__dock" />
       <footer className="fy-ad-ep__foot">
         <span role="status">
           {failure ? <>Not saved · {failure} <button type="button" className="fy-linkbtn" onClick={() => {

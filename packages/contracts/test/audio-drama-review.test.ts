@@ -170,3 +170,12 @@ describe("codex round 2 on PR 1873", () => {
     assert.ok(review.notes.some((note) => note.says === "The narrator and Maren Kest speak in the same voice here."));
   });
 });
+
+describe("issue 1883: a fact inside the review's sentence", () => {
+  it("lowers a word that opens a sentence, never a name", async () => {
+    const { midSentence } = await import("../src/audio-drama.js");
+    assert.equal(midSentence("The cost of the ledger"), "the cost of the ledger");
+    assert.equal(midSentence("Ilo is alive"), "Ilo is alive");
+    assert.equal(midSentence("I was there"), "I was there");
+  });
+});

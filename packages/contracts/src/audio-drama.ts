@@ -427,6 +427,16 @@ export function estimateScriptSeconds(blocks: readonly EpisodeScriptBlock[]): nu
 // Cast (SPEC-057 R-55..R-60, design turn 230k): who speaks, in what voice, and how they sound here.
 // ---------------------------------------------------------------------------
 
+/**
+ * A fact as it reads inside a sentence (issue 1883): "tells the listener the cost…", not "The
+ * cost…". Only a word that opens a sentence is lowered; a name ("Ilo is alive") keeps its capital.
+ */
+const OPENERS = new Set(["the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "its", "it", "there", "what", "who", "why", "how", "where", "when", "someone", "something", "nobody", "no", "one", "every", "each", "all", "some", "she", "he", "they", "we", "you", "i"]);
+export function midSentence(fact: string): string {
+  const first = /^\p{Lu}[\p{Ll}'’]*/u.exec(fact)?.[0];
+  return first && first !== "I" && OPENERS.has(first.toLowerCase()) ? first.toLowerCase() + fact.slice(first.length) : fact;
+}
+
 /** The role key the narrator is kept under in `cast`. */
 export const DRAMA_NARRATOR = "@narrator";
 /** A role's key: a sheet id, a name no sheet carries, or the narrator — which no slug can be (codex on PR 1873). */
@@ -671,7 +681,7 @@ export function reviewDramaScript(input: DramaReviewInput): DramaReview {
   for (const kept of withheld) {
     const leaks = blocks.filter((block) => spoken(block) && tells(block.words, kept.fact));
     for (const block of leaks) add("mystery", [block.id], `This may tell the listener “${kept.fact}” before episode ${kept.revealEpisode}.`);
-    if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${kept.fact.replace(/\.$/, "")}.` });
+    if (leaks.length === 0) checked.push({ check: "mystery", says: `Nothing here tells the listener ${midSentence(kept.fact.replace(/\.$/, ""))}.` });
   }
   const shared = sharedFirsts(Object.values(input.names));
   for (const [speaker, role] of hidden) {

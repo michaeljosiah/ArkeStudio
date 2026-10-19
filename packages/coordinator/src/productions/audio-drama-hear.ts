@@ -151,7 +151,8 @@ export async function hearDramaLines(
       const played = performanceNote(block.direction, model);
       if (played.mode === "tag") { text = `${played.tag} ${block.words}`; direction = { sent: "tag", text: played.tag }; }
       else if (played.mode === "instruction") { instructions = block.direction; direction = { sent: "instruction", text: block.direction }; }
-      else direction = { sent: "not sent", reason: played.reason };
+      // In the author's words (issue 1883): "no phrase" is the cadence table's, not a reason.
+      else direction = { sent: "not sent", reason: played.reason === "no phrase" ? "this voice takes no direction" : played.reason };
     }
     // The role's note rides as an instruction, ahead of the line's own, where the reader takes
     // one; a reader that takes tags keeps them for the line's direction, and says so.

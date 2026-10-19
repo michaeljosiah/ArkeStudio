@@ -9,6 +9,7 @@ import { Portrait, characterPortraitPath } from "../components/portrait.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { Chat, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
+import { useDockHost } from "../components/player.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { EditorDialog } from "../components/editor-dialog.js";
 import { NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
@@ -79,6 +80,9 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const listing = useRef<string | null>(null);
   const chat = useGlobalChat();
   const surface = chat?.forPage() ?? null;
+  // The player sits at the page's foot (issue 1883), never over the last row.
+  const dock = useRef<HTMLDivElement>(null);
+  useDockHost(dock, null);
   // On a phone the next episode is under the thumb, with Chat beside it (230u, R-80).
   const phone = useMediaQuery("(max-width: 599px)");
   useEffect(() => subscribeDramaEditions((answer) => { if (answer.requestId === listing.current) setEditions(answer.editions); }), []);
@@ -223,6 +227,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
           <IconButton label="Chat" disabled={!surface} onClick={() => surface && chat!.open(surface)}><Chat size={18} /></IconButton>
         </HeldBar>
       )}
+      <div ref={dock} className="fy-ad-show__dock" />
       {publishing && <PublishDialog world={world} production={production} states={planned} onClose={() => setPublishing(false)} />}
     </div>
   );

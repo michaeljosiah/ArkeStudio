@@ -142,3 +142,11 @@ describe("issue 1883: the Add a sound picker", () => {
     assert.equal(save.blocks[0]!.kind === "sound" && save.blocks[0]!.soundArtifact, "ar_bell");
   });
 });
+
+describe("issue 1883: a made sound's name", () => {
+  it("keeps the phrase whole where it fits, and never ends on a small word", async () => {
+    const { soundName } = await import("../src/components/audio-drama-sound.js");
+    assert.equal(soundName("Far off, one deep stroke of the harbour bell."), "Far off, one deep stroke of the harbour bell");
+    assert.equal(soundName("A long low groan of timber as the hull settles against the quay wall at the turn of the tide."), "A long low groan of timber as the hull settles against");
+  });
+});

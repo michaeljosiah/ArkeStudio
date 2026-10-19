@@ -101,7 +101,10 @@
   .fy-production-app .fy-prodrail__switchmark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; flex: none; background: var(--primary); color: var(--primary-foreground); }
   .fy-production-app .fy-prodrail__switchname { font: 600 var(--text-md)/1.25 var(--font-sans); }
   .fy-production-app .fy-prodrail__switchsub { font: var(--type-meta); }
-  .fy-production-app .fy-prodrail__switchname { overflow-wrap: anywhere; }
+  /* Two lines at most at a laptop's narrowest (issue 1883): the name and its line each cut with an
+     ellipsis, where they wrapped to four. The card's title carries the whole name. */
+  .fy-production-app .fy-prodrail__switchcopy { min-width: 0; }
+  .fy-production-app :is(.fy-prodrail__switchname, .fy-prodrail__switchsub) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-production-app .fy-prodrail__scene, .fy-production-app .fy-prodrail__episode-toggle { min-height: 44px; }
   .fy-production-app .fy-prodrail__new-scene, .fy-production-app .fy-prodrail__new-episode, .fy-production-app .fy-prodrail__foot { min-height: 44px; }
   .fy-production-app .fy-prodrail__section-divider { margin: 8px 4px; }
