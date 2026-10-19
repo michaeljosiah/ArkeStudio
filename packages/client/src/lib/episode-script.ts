@@ -1,4 +1,4 @@
-import { EpisodeScriptSchema, episodeScriptProblems, ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
+import { EpisodeScriptSchema, dramaSpeakerLabel, episodeScriptProblems, ulid, type EpisodeScriptBlock, type ScriptHeading } from "@arke-studio/contracts";
 
 /**
  * Why a draft cannot be saved yet, or null (codex on PR 1870): an emptied scene place or cue would
@@ -69,15 +69,8 @@ export function bedMarks(blocks: readonly EpisodeScriptBlock[]): Array<BedMark[]
   return marks;
 }
 
-/**
- * A speaker no sheet carries (R-55), named from its key: "crowd" is Crowd, "someone-2" Someone 2,
- * "a-dockhand" A dockhand. The score offered only the world's characters (issue 1883), so a line
- * for an unnamed speaker or a crowd could not be written.
- */
-export function speakerLabel(key: string): string {
-  const words = key.replace(/-(\d+)$/u, " $1").split("-").join(" ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+/** A speaker no sheet carries, named from its key: in contracts so Hear's planner says the same (issue 1888). */
+export const speakerLabel = dramaSpeakerLabel;
 
 /**
  * A direction as typed, without the parentheses the score draws round it (issue 1883): typed ones

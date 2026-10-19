@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
+  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, dramaSpeakerLabel, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
   type DramaChapterDecision, type DramaVerdict, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
@@ -282,7 +282,7 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === scene.episode);
   const takes = production.episodeTakes?.find((entry) => entry.episode === scene.episode);
   const keptTakes = scene.blocks.filter((block) => takes?.lines[block.id]?.kept).length;
-  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
   useEffect(() => subscribeEpisodeScriptSaveResults((result) => {
     if (result.requestId !== saving) return;
     setSaving(null);

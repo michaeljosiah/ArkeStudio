@@ -439,6 +439,16 @@ export function midSentence(fact: string): string {
 
 /** The role key the narrator is kept under in `cast`. */
 export const DRAMA_NARRATOR = "@narrator";
+
+/**
+ * A speaker no sheet carries (R-55), named from its key: "crowd" is Crowd, "someone-2" Someone 2,
+ * "a-dockhand" A dockhand. Shared so Hear's planner and every page say the same name (issue 1888):
+ * the Hear dialog read "crowd has no voice" and the show page "Ends on crowd".
+ */
+export function dramaSpeakerLabel(key: string): string {
+  const words = key.replace(/-(\d+)$/u, " $1").split("-").join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 /** A role's key: a sheet id, a name no sheet carries, or the narrator — which no slug can be (codex on PR 1873). */
 export const DramaRoleKeySchema = z.union([SlugSchema, z.literal(DRAMA_NARRATOR)]);
 

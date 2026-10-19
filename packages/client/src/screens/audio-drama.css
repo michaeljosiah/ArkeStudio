@@ -68,7 +68,8 @@
 .fy-ad-score__words textarea, .fy-ad-score__words input { border: 0; background: none; color: inherit; font: inherit; padding: 2px 0; resize: none; width: 100%; field-sizing: content; min-height: 0; }
 .fy-ad-score__words textarea:focus, .fy-ad-score__words input:focus { outline: none; }
 .fy-ad-score__dirwrap { display: inline-flex; align-items: baseline; font-size: 13px; color: var(--muted-foreground); }
-.fy-ad-score__words .fy-ad-score__direction { width: auto; min-width: 6ch; font-size: 13px; color: var(--muted-foreground); }
+/* As wide as what it says (issue 1888): an auto-width input left "(softly      )". */
+.fy-ad-score__words .fy-ad-score__direction { width: auto; field-sizing: content; min-width: 6ch; max-width: 100%; font-size: 13px; color: var(--muted-foreground); }
 /* Only the spoken words are set large (R-13). */
 .fy-ad-score__line { display: flex; align-items: baseline; gap: 6px; }
 .fy-ad-score__words .fy-ad-score__line textarea { font: 400 var(--text-lg)/1.45 var(--font-sans); width: auto; min-width: 4ch; max-width: 100%; flex: 0 1 auto; }

@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
+import { dramaSpeakerLabel } from "@arke-studio/contracts";
 import { bedMarks, directionText, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
 import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -321,6 +322,17 @@ describe("issue 1883: a direction's parentheses are the score's", () => {
     assert.equal(directionText("quiet (but"), "quiet (but", "typing toward a closer");
     assert.equal(directionText("quiet "), "quiet ", "a space before the next word stays");
     assert.equal(directionText("("), undefined);
+  });
+});
+
+describe("issue 1888: a direction saved with its own parentheses", () => {
+  it("is shown without them, and a crowd is named, not keyed", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren", words: "Same ink.", direction: "(quietly, to herself)" };
+    const crowd: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "crowd", words: "Slack water!" };
+    const m = await mount(withScript([{ id: ulid(), kind: "heading", place: "The archive" }, line, crowd]));
+    const direction = m.container.querySelector<HTMLInputElement>(`[data-block="${line.id}"] input[aria-label="Direction"]`)!;
+    assert.equal(direction.value, "quietly, to herself", "the score draws the parentheses once");
+    assert.equal(dramaSpeakerLabel("crowd"), "Crowd");
   });
 });
 
