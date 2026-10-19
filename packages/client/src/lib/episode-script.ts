@@ -97,11 +97,26 @@ export function directionText(typed: string): string | undefined {
  * speaker — or the new line would speak as them, in their voice.
  */
 export function unnamedSpeaker(taken: Iterable<string>): string {
+  return nextSpeakerKey("someone", taken);
+}
+
+/**
+ * Another voice in the crowd (230k, issue 1882): crowd, then crowd-2 and so on, each its own
+ * speaker with its own voice, so every crowd line stays named. Cast shows them as one row.
+ */
+export function crowdSpeaker(taken: Iterable<string>): string {
+  return nextSpeakerKey("crowd", taken);
+}
+
+/** The crowd a speaker key belongs to: `crowd` and `crowd-N`. */
+export const isCrowdSpeaker = (key: string): boolean => /^crowd(?:-\d+)?$/u.test(key);
+
+function nextSpeakerKey(stem: string, taken: Iterable<string>): string {
   const used = new Set(taken);
-  if (!used.has("someone")) return "someone";
+  if (!used.has(stem)) return stem;
   let n = 2;
-  while (used.has(`someone-${n}`)) n += 1;
-  return `someone-${n}`;
+  while (used.has(`${stem}-${n}`)) n += 1;
+  return `${stem}-${n}`;
 }
 
 /** A speaker's voice colour, 1–6, in the order they first speak (the audiobook's tones). */

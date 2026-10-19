@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   DRAMA_NARRATOR, DramaRoleSchema, narrationQuotes,
@@ -9,7 +9,7 @@ import { Button, IconButton, cx } from "../components/ui.js";
 import { Lock, X } from "../components/icons.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SentList, useHearQuote } from "../components/audio-drama-hear.js";
-import { dramaBlocks, dramaCastRoles, quotableNames, takesOutOfDate, type DramaCastRole } from "../lib/audio-drama-cast.js";
+import { dramaBlocks, dramaCastRoles, dramaCastRows, quotableNames, takesOutOfDate, type DramaCastRole } from "../lib/audio-drama-cast.js";
 import { setDramaRole } from "../lib/store.js";
 
 /**
@@ -20,14 +20,16 @@ import { setDramaRole } from "../lib/store.js";
  */
 export function DramaCastScreen({ world, production }: { world: WorldBundle; production: ProductionBundle }) {
   const roles = dramaCastRoles(world, production);
+  const rows = dramaCastRows(roles);
   const [open, setOpen] = useState<string | null>(null);
+  const [crowdOpen, setCrowdOpen] = useState(false);
   const silent = roles.filter((role) => role.voice === null && role.key !== DRAMA_NARRATOR).length;
   return (
     <Screen id="drama-cast">
       <div className="fy-ad-cast">
         <header className="fy-ad-cast__head">
           <h1>Cast</h1>
-          <p>This production · {roles.length} role{roles.length === 1 ? "" : "s"}{silent > 0 ? ` · ${silent} without a voice` : ""}</p>
+          <p>This production · {rows.length} role{rows.length === 1 ? "" : "s"}{silent > 0 ? ` · ${silent} without a voice` : ""}</p>
         </header>
         {roles.length === 0 ? <EmptyState title="No one speaks yet." /> : (
           <div role="table" aria-label="Cast" className="fy-ad-cast__table">
@@ -35,9 +37,16 @@ export function DramaCastScreen({ world, production }: { world: WorldBundle; pro
               <span role="columnheader">Role</span><span role="columnheader">Voice</span>
               <span role="columnheader">How they sound</span><span role="columnheader">Lines</span>
             </div>
-            {roles.map((role) => (
-              <CastRow key={role.key} world={world} production={production} role={role} open={open === role.key}
-                onOpen={() => setOpen(open === role.key ? null : role.key)} />
+            {rows.map((row) => row.kind === "role" ? (
+              <CastRow key={row.role.key} world={world} production={production} role={row.role} open={open === row.role.key}
+                onOpen={() => setOpen(open === row.role.key ? null : row.role.key)} />
+            ) : (
+              <CrowdRow key="crowd" members={row.members} open={crowdOpen} onOpen={() => setCrowdOpen(!crowdOpen)}>
+                {row.members.map((role) => (
+                  <CastRow key={role.key} world={world} production={production} role={role} open={open === role.key}
+                    onOpen={() => setOpen(open === role.key ? null : role.key)} />
+                ))}
+              </CrowdRow>
             ))}
           </div>
         )}
@@ -81,6 +90,32 @@ function CastRow({ world, production, role, open, onOpen }: {
         <span role="cell" className="fy-ad-cast__lines">{role.lines}</span>
       </div>
       {open && <CastDetail world={world} production={production} role={role} />}
+    </div>
+  );
+}
+
+/**
+ * A crowd as one row (230k, issue 1882): how many speak, how many voices they are, how they sound
+ * and their lines together. Opened, each voice in it is a role of its own, every line named.
+ */
+function CrowdRow({ members, open, onOpen, children }: { members: readonly DramaCastRole[]; open: boolean; onOpen: () => void; children: ReactNode }) {
+  const voices = new Set(members.flatMap((member) => member.voice ? [`${member.voice.provider}/${member.voice.voiceId}`] : []));
+  const providers = [...new Set(members.flatMap((member) => member.voice ? [member.voice.provider] : []))];
+  const silent = members.filter((member) => member.voice === null).length;
+  const sound = members.find((member) => member.key === "crowd")?.sound ?? members.find((member) => member.sound)?.sound;
+  return (
+    <div role="rowgroup" className={cx("fy-ad-cast__group", "fy-ad-cast__crowd", open && "fy-ad-cast__group--open")} data-role="crowd-group">
+      <div role="row" className="fy-ad-cast__row" aria-expanded={open} tabIndex={0} onClick={onOpen}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }}>
+        <span role="cell" className="fy-ad-cast__role"><b>Crowd</b><small>{members.length} speakers · each line named</small></span>
+        <span role="cell" className="fy-ad-cast__voice">
+          <b className={cx(voices.size === 0 && "fy-ad-cast__none")}>{voices.size === 0 ? "No voice" : `${voices.size} voice${voices.size === 1 ? "" : "s"}`}</b>
+          <small>{silent > 0 ? `${silent} without a voice` : providers.join(", ")}</small>
+        </span>
+        <span role="cell" className="fy-ad-cast__sound">{sound ?? "—"}</span>
+        <span role="cell" className="fy-ad-cast__lines">{members.reduce((sum, member) => sum + member.lines, 0)}</span>
+      </div>
+      {open && <div className="fy-ad-cast__members">{children}</div>}
     </div>
   );
 }

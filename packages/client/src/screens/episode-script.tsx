@@ -11,7 +11,7 @@ import {
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, changedFields, directionText, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
+  blockLine, changedFields, crowdSpeaker, directionText, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
@@ -45,6 +45,7 @@ const ASKS: ReadonlyArray<[string, string]> = [
 ];
 /** The speaker list's way to a new unnamed speaker: never a key, since no slug starts with "@". */
 const NEW_UNNAMED = "@unnamed";
+const NEW_CROWD = "@crowd";
 const INSERTS: Array<[EpisodeScriptBlock["kind"], string]> = [
   ["dialogue", "Line"], ["narration", "Narration"], ["sound", "Sound"], ["ambience", "Ambience"],
   ["music", "Music"], ["silence", "Silence"], ["note", "Note"], ["heading", "Scene"],
@@ -450,13 +451,15 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                   <>
                     <div className="fy-ad-score__who">
                       {block.kind === "dialogue" && (on
-                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => change(block.id, {
-                            speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker([...blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : []),
-                              ...world.sheets.map((sheet) => sheet.id), ...Object.keys(production.audioDrama?.cast ?? {})]) : event.target.value,
-                          })}>
+                        ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => {
+                            const taken = [...blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : []), ...world.sheets.map((sheet) => sheet.id), ...Object.keys(production.audioDrama?.cast ?? {})];
+                            change(block.id, { speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker(taken) : event.target.value === NEW_CROWD ? crowdSpeaker(taken) : event.target.value });
+                          }}>
                             {cast.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}
                             {others.map((key) => <option key={key} value={key}>{name(key)}</option>)}
                             {!others.includes("crowd") && !cast.some((sheet) => sheet.id === "crowd") && <option value="crowd">Crowd</option>}
+                            {/* A crowd's lines are each named (230k): another voice in it is a speaker of its own. */}
+                            {others.includes("crowd") && <option value={NEW_CROWD}>Another in the crowd</option>}
                             <option value={NEW_UNNAMED}>Someone unnamed</option>
                           </select>
                         : <b className="fy-ad-score__speaker">{name(block.speaker)}</b>)}

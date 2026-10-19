@@ -11,7 +11,7 @@ import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
 import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
-import { changedFields, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
+import { changedFields, crowdSpeaker, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -131,6 +131,24 @@ describe("the drama's Cast (230k)", () => {
   it("shows a hidden role by its public label, locked until its episode", async () => {
     const { container } = await mount(drama([line("bray", "Climb.")], { cast: { bray: { publicLabel: "The counter", revealEpisode: 4 } } }), "cast");
     assert.match(rowText(container, "bray"), /The counter\s*Bray until episode 4/);
+  });
+});
+
+describe("issue 1882: a crowd in Cast (230k)", () => {
+  it("is one row of its voices, each line named, opening to each voice as a role", async () => {
+    const { container } = await mount(drama([line("bray", "Climb."), line("crowd", "Rope!"), line("crowd-2", "Haul!"), line("crowd-3", "Now!"), line("crowd", "Again!")]), "cast");
+    assert.match(container.textContent!, /This production · 2 roles/, "the crowd counts as one");
+    const crowd = container.querySelector('[data-role="crowd-group"] > [role="row"]')!;
+    assert.match(crowd.textContent!, /Crowd3 speakers · each line named/);
+    assert.match(crowd.querySelector(".fy-ad-cast__lines")!.textContent!, /^4$/);
+    assert.equal(container.querySelector('[data-role="crowd-2"]'), null, "its voices wait under it");
+    await act(async () => props(crowd).onClick!({}));
+    assert.deepEqual([...container.querySelectorAll('[data-role="crowd-group"] .fy-ad-cast__members > [data-role] .fy-ad-cast__role b')].map((name) => name.textContent), ["Crowd", "Crowd 2", "Crowd 3"]);
+  });
+
+  it("offers another voice in the crowd in the score, a speaker of its own", () => {
+    assert.equal(crowdSpeaker(["bray"]), "crowd");
+    assert.equal(crowdSpeaker(["crowd", "crowd-2"]), "crowd-3");
   });
 });
 
