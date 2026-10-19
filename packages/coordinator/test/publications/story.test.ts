@@ -91,6 +91,30 @@ describe("private story publication", () => {
     assert.deepEqual(preview.files.map(file => file.format), ["epub", "pdf"]);
     assert.equal((await h.service.create(h.store, h.productionId, preview.id)).status, "ready");
   });
+  it("allows only one concurrent retry to render a captured PDF edition", async () => {
+    const h = await setup();
+    const settings: StoryPublicationSettings = { ...h.settings, outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS } };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    const captured = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, edition => {
+      if (edition.phase === "Formatting pages") h.service.cancel(edition.id);
+    });
+    assert.equal(captured.status, "cancelled");
+    const phases: string[] = [];
+    const attempts = await Promise.allSettled([
+      h.service.retry(captured.id, edition => phases.push(edition.phase)),
+      h.service.retry(captured.id, edition => phases.push(edition.phase)),
+    ]);
+    const successful = attempts.filter(result => result.status === "fulfilled");
+    const refused = attempts.filter(result => result.status === "rejected");
+    assert.equal(successful.length, 1, "one retry owns rendering and the edition receipt");
+    assert.equal(refused.length, 1);
+    assert.match(String(refused[0]!.reason), /already being prepared/);
+    const preview = successful[0]!.value;
+    assert.equal(preview.status, "preview", preview.error);
+    assert.equal(phases.filter(phase => phase === "Checking PDF").length, 1, "exactly one PDF renderer completed");
+    assert.equal((await h.service.create(h.store, h.productionId, captured.id)).status, "ready");
+    assert.deepEqual((await h.service.retry(captured.id, () => {})).files, preview.files, "the winning file remains immutable");
+  });
   it("cannot start a new preparation or a loading retry after shutdown begins", async () => {
     const h = await setup();
     const review = await h.service.review(h.store, h.productionId, h.settings);

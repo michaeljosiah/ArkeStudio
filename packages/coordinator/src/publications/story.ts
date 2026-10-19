@@ -263,16 +263,20 @@ export class StoryPublicationService {
   async retry(id: string, notify: (edition: StoryEdition) => void): Promise<StoryEdition> {
     if (this.stopping) throw new Error("Publishing is stopping. Reopen Arke before retrying an edition.");
     if (this.active.has(id)) throw new Error("This edition is already being prepared.");
-    const saved = await this.load(id);
-    if (this.stopping) throw new Error("Publishing is stopping. Reopen Arke before retrying an edition.");
-    if (saved.edition.status === "ready") { await this.verify(saved.edition); return saved.edition; }
-    if (saved.edition.status === "preview") { await this.verify(saved.edition); return saved.edition; }
-    if (!saved.inputHash) throw new Error("Capture did not finish. Recheck the source and prepare a new preview.");
+    // Reserve before reading: concurrent commands can otherwise load the same failed receipt
+    // and start two renderers, overwriting both the cancellation handle and the edition files.
     const controller = new AbortController(); this.active.set(id, controller);
-    try { return await this.render(saved, controller.signal, notify); }
-    catch (error) {
-      saved.edition = { ...saved.edition, status: controller.signal.aborted ? "cancelled" : "failed", phase: "Preparation stopped", error: errorText(error) };
-      await this.write(saved); notify(saved.edition); return saved.edition;
+    try {
+      const saved = await this.load(id);
+      if (this.stopping) throw new Error("Publishing is stopping. Reopen Arke before retrying an edition.");
+      if (saved.edition.status === "ready") { await this.verify(saved.edition); return saved.edition; }
+      if (saved.edition.status === "preview") { await this.verify(saved.edition); return saved.edition; }
+      if (!saved.inputHash) throw new Error("Capture did not finish. Recheck the source and prepare a new preview.");
+      try { return await this.render(saved, controller.signal, notify); }
+      catch (error) {
+        saved.edition = { ...saved.edition, status: controller.signal.aborted ? "cancelled" : "failed", phase: "Preparation stopped", error: errorText(error) };
+        await this.write(saved); notify(saved.edition); return saved.edition;
+      }
     } finally { this.active.delete(id); }
   }
   private async render(saved: z.infer<typeof Stored>, signal: AbortSignal, notify: (edition: StoryEdition) => void): Promise<StoryEdition> {
