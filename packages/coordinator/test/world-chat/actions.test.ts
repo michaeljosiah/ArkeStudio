@@ -2667,7 +2667,7 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.equal((await w.gate.listOpen()).length, openBefore + 1);
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
-  }), new RegExp(`final receipt from a complete target read: ${draws[0]!.id} is a search or draw`), "the refusal names the receipt the retry must drop");
+  }), new RegExp(`final receipt from a complete target read: ${draws[0]!.id} is a search or draw.*This change needs list_chapters, get_chapter`), "the refusal names the receipt the retry must drop, and the reads that would do");
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
   }), /requires the complete current story read/);

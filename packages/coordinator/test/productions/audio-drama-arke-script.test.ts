@@ -121,6 +121,8 @@ describe("issue 1883: a new drama's pilot", () => {
     const record = productionRecord(store.getBundle(), id) as { unwrittenEpisodes?: { episodes: number[]; baseHash: null }; episodes?: unknown };
     assert.deepEqual(record.unwrittenEpisodes?.episodes, [1, 2, 3, 4, 5, 6]);
     assert.equal(record.unwrittenEpisodes?.baseHash, null);
+    // The read to cite (issue 1888): Arke cited get_production, a context read, and was refused.
+    assert.match((record.unwrittenEpisodes as { howToWrite?: string } | undefined)?.howToWrite ?? "", /get_production_metadata receipt/);
     assert.equal(record.episodes, undefined, "an empty scene-episode list read as no episodes to write");
     await saveEpisodeScript(store, id, { episode: 1, title: "", blocks: [{ id: ulid(), kind: "heading", place: "The quay" }], baseHash: null });
     assert.deepEqual((productionRecord(store.getBundle(), id) as { unwrittenEpisodes: { episodes: number[] } }).unwrittenEpisodes.episodes, [2, 3, 4, 5, 6]);

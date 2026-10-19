@@ -59,6 +59,6 @@ function unwritten(production: ProductionBundle): { episodes: number[]; baseHash
   return {
     episodes: Array.from({ length: planned }, (_, i) => i + 1).filter((n) => !written.has(n)),
     baseHash: null,
-    howToWrite: "Each of these has no script yet. Write one whole with production-episode-script, its baseHash null.",
+    howToWrite: "Each of these has no script yet. Write one with production-episode-script, its baseHash null, citing your get_production_metadata receipt. Draft a scene at a time.",
   };
 }
