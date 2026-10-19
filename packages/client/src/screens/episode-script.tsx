@@ -265,6 +265,14 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
       <IconButton label="More" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><More size={16} /></IconButton>
       {menuOpen && (
         <div role="menu" className="fy-ad-ep__menu" onClick={() => setMenuOpen(false)}>
+          {/* The episode's title on a phone (codex on PR 1881): the head names the scene in view. */}
+          {phone && (
+            <label className="fy-ad-ep__menutitle" onClick={(event) => event.stopPropagation()}>
+              <span>Title</span>
+              <input aria-label="Episode title" value={title} placeholder="Title" maxLength={160}
+                onChange={(event) => { setTitle(event.target.value); setDirty(true); }} />
+            </label>
+          )}
           {phone && <button type="button" role="menuitem" disabled={!stored} onClick={() => navigate(`${base}/script/${episode}?view=audio-studio`)}>Audio Studio</button>}
           {phone && <button type="button" role="menuitem" onClick={() => toggle("review")}>Review</button>}
           <button type="button" role="menuitem" onClick={download}>Download script</button>
@@ -342,7 +350,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
           onDiscard={() => discardProposal(world.meta.worldId, drafted.proposal.id)} />
       )}
       <div className={cx("fy-ad-ep__body", side !== null && "fy-ad-ep__body--source")}>
-        {draft ? <DraftScore rows={draft} name={name} episode={episode} /> : (
+        {/* Arke's draft scrolls as the score does, and the scene in view follows it (codex on PR 1881). */}
+        {draft ? <DraftScore rows={draft} name={name} episode={episode} onScroll={followScroll} /> : (
         <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`} onScroll={followScroll}>
           {blocks.length === 0 && (
             <div className="fy-ad-score__empty">
@@ -577,13 +586,15 @@ function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
 }
 
 /** The draft read in place: added in grey, removed struck, a rewrite as the old struck over the new. */
-function DraftScore({ rows, name, episode }: { rows: ReturnType<typeof draftRows>; name: (slug: string) => string; episode: number }) {
+function DraftScore({ rows, name, episode, onScroll }: {
+  rows: ReturnType<typeof draftRows>; name: (slug: string) => string; episode: number; onScroll?: (event: UIEvent<HTMLDivElement>) => void;
+}) {
   const line = (block: EpisodeScriptBlock, how: string) => {
     const { who, text } = blockLine(block, name);
     return <div className={cx("fy-ad-draft__row", `fy-ad-draft__row--${how}`)} data-draft={how}><span className="fy-ad-draft__who">{who}</span><span className="fy-ad-draft__text">{text}</span></div>;
   };
   return (
-    <div className="fy-ad-score fy-ad-score--draft" role="list" aria-label={`Episode ${episode} draft`}>
+    <div className="fy-ad-score fy-ad-score--draft" role="list" aria-label={`Episode ${episode} draft`} onScroll={onScroll}>
       {rows.map((row) => (
         <div key={`${row.state}:${row.block.id}`} role="listitem" data-block={row.block.id}>
           {row.state === "changed" ? <>{line(row.was, "removed")}{line(row.block, "added")}

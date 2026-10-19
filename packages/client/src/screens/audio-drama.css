@@ -372,6 +372,8 @@ button.fy-ad-chip { cursor: pointer; }
   .fy-ad-ep__ptitle b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-ad-ep__ptitle small { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-ad-ep__menu button { height: 44px; }
+  .fy-ad-ep__menutitle { display: grid; gap: 4px; padding: 6px 10px 10px; font-size: 12px; color: var(--muted-foreground); }
+  .fy-ad-ep__menutitle input { min-height: 44px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 500 15px var(--font-sans); }
   .fy-ad-ep__chips { display: flex; gap: 6px; overflow-x: auto; padding: 6px 12px; border-bottom: 1px solid var(--border); scrollbar-width: none; }
   .fy-ad-ep__chips button { flex: none; min-width: 44px; height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); color: inherit; font: 600 13px var(--font-sans); cursor: pointer; }
   .fy-ad-ep__chips button[aria-current="true"] { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
