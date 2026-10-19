@@ -363,6 +363,8 @@ describe("scene detail owns the workspace", () => {
     assert.ok(lines.includes("desk lamp"),"the build's lamp is on the Stage it is reviewed on, not only in what Keep writes");
     assert.match(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/\+light · desk lamp/,"the bar counts the build's lamp");
     assert.doesNotMatch(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/A warm desk lamp/,"and says nothing in the model's words");
+    await click(all(mounted,"button").find(button=>button.textContent?.trim()==="Add light")!);
+    assert.equal(q(mounted,".fy-swstage__who")?.textContent,"Arke’s blockout · edited","a light the person adds to Arke's draft is their edit (codex on PR 1904)");
     await click(q(mounted,".fy-swstage__notesbtn")!);
     assert.ok(q(mounted,'[data-testid="stage-notes"]'));
     await click(q(mounted,'[data-testid="stage-draft"] [aria-label="Discard"]')!);

@@ -1406,19 +1406,32 @@ export function SceneStage({
   // version, and a draft is pinned to the version it was made on, so its Keep would be refused.
   const sceneEditReason = moved ? "Keep the move first" : undefined;
   const sceneLights = scene.blocking?.lights ?? [];
+  // While a draft waits, a light added, changed or removed, and the atmosphere, join the draft
+  // (design turn 231b, rule 8): Keep writes them with its blocking in one command and Discard drops
+  // them, and on Arke's draft they are the person's edit too (codex on PR 1904). Without a draft
+  // they are the scene's own and land at once, as before.
   const writeLight = (index: number, next: StageLight | null) => {
-    const lights = next === null ? sceneLights.filter((_, at) => at !== index) : sceneLights.map((light, at) => (at === index ? next : light));
-    writeScene({ lights: lights.length === 0 ? null : lights });
+    const base = moved ? shownLights : sceneLights;
+    const lights = next === null ? base.filter((_, at) => at !== index) : base.map((light, at) => (at === index ? next : light));
+    if (moved) { setDraftLook((look) => ({ ...look, lights })); markEdited(); }
+    else writeScene({ lights: lights.length === 0 ? null : lights });
+  };
+  const writeAtmosphere = (atmosphere: SceneAtmosphere) => {
+    if (moved) { setDraftLook((look) => ({ ...look, atmosphere })); markEdited(); }
+    else writeScene({ atmosphere });
   };
   const addLight = () => {
     if (working === null) return;
-    const taken = new Set(sceneLights.map((light) => light.name));
+    const base = moved ? shownLights : sceneLights;
+    const taken = new Set(base.map((light) => light.name));
     let name = "light";
     for (let n = 2; taken.has(name); n++) name = `light ${n}`;
     const figure = working.cast[0];
-    writeScene({ lights: [...sceneLights, stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 })] });
+    const light = stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 });
+    if (moved) { setDraftLook((look) => ({ ...look, lights: [...base, light] })); markEdited(); }
+    else writeScene({ lights: [...base, light] });
     setSelection(null); viewport.current?.select(null); setPlateSelected(false);
-    setLightSelected(sceneLights.length);
+    setLightSelected(base.length);
   };
   const pickPlate = (candidate: PlateCandidate) => {
     if (shot === null) return;
@@ -1946,8 +1959,8 @@ export function SceneStage({
                     <span>{light.kind} · {light.strength}</span>
                   </button>
                 ))}
-                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || boardOn || sceneLights.length >= 24}
-                  title={sceneEditReason ?? (sceneLights.length >= 24 ? "24 lights at most" : undefined)} onClick={addLight}><Plus size={12} />Add light</button>
+                <button type="button" className="fy-swstage__add" disabled={frozen || locked || boardOn || shownLights.length >= 24}
+                  title={shownLights.length >= 24 ? "24 lights at most" : undefined} onClick={addLight}><Plus size={12} />Add light</button>
               </div>
 
               {boardOn && board !== null ? (
@@ -1988,11 +2001,11 @@ export function SceneStage({
                   <LightForm
                     light={shownLights[lightSelected]!}
                     sets={working.sets}
-                    disabled={frozen || locked || moved}
+                    disabled={frozen || locked}
                     onChange={(next) => writeLight(lightSelected, next)}
                     onRemove={() => { const index = lightSelected; setLightSelected(null); writeLight(index, null); }}
                   />
-                  <AtmosphereRows atmosphere={shownAtmosphere} disabled={frozen || locked || moved} onChange={(atmosphere) => writeScene({ atmosphere })} />
+                  <AtmosphereRows atmosphere={shownAtmosphere} disabled={frozen || locked} onChange={writeAtmosphere} />
                 </>
               ) : null}
               {plateSelected && scene.blocking?.plate !== undefined ? (

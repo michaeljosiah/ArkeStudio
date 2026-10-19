@@ -791,8 +791,7 @@ it("brings a Lamp's light with it, held with the draft until Keep (229e rule 7, 
   assert.equal(held?.querySelector("span:last-child")?.textContent, "point · 8", "the held light is listed beside the scene's");
   assert.equal(held?.querySelector(".fy-swstage__glyph")?.textContent, "+", "and marked new in the draft (231b)");
   const addLight = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Add light")!;
-  assert.equal(addLight.disabled, true);
-  assert.equal(addLight.title, "Keep the move first", "a shut Add light says why");
+  assert.equal(addLight.disabled, false, "Add light stays open while a draft waits (231b rule 8)");
   await click(q(".fy-swstage__keep"));
   const kept = sent.at(-1);
   const lights = kept?.kind === "edit-stage" ? kept.blocking?.lights : undefined;
@@ -800,6 +799,34 @@ it("brings a Lamp's light with it, held with the draft until Keep (229e rule 7, 
   assert.deepEqual(lights?.at(-1) && [lights.at(-1)!.name, lights.at(-1)!.y], ["lamp", 1.45], "in the lamp's shade");
   const sets = kept?.kind === "edit-stage" ? (kept.staging?.sets ?? kept.blocking?.sets) : undefined;
   assert.equal(sets?.some((set) => set.kit?.kind === "lamp"), true, "and the lamp with it");
+});
+
+it("a light added while a draft waits joins it: Discard leaves none behind, Keep writes it with the blocking in one command (231b rule 8, issue 1894)", async () => {
+  const { q, sent, scene } = await mount();
+  const lights = () => Number(/lights · (\d+)/.exec(q('[data-testid="workspace-stage"]').textContent ?? "")?.[1] ?? 0);
+  const before = lights();
+  const addLight = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Add light")!;
+  await addBox(q);
+  assert.equal(addLight().disabled, false, "Add light stays open while a draft waits");
+  await click(addLight());
+  assert.equal(sent.length, 0, "the light joins the draft rather than landing on the scene");
+  assert.equal(lights(), before + 1);
+  assert.match(q('[data-testid="stage-draft"]').textContent ?? "", /\+light · light/, "and is counted in its chips");
+  await click(q('[aria-label="Discard"]'));
+  assert.equal(sent.length, 0);
+  assert.equal(lights(), before, "Discard leaves no light behind");
+  assert.equal(q('[data-testid="stage-draft"]'), null);
+
+  await addBox(q);
+  await click(addLight());
+  await click(q(".fy-swstage__keep"));
+  assert.equal(sent.length, 1, "one Stage command, so one version");
+  const kept = sent[0]!;
+  assert.equal(kept.kind, "edit-stage");
+  if (kept.kind !== "edit-stage") return;
+  assert.equal(kept.blocking?.lights?.length, (scene.blocking?.lights?.length ?? 0) + 1);
+  assert.equal(kept.blocking?.lights?.at(-1)?.name, "light", "the light is written");
+  assert.equal((kept.staging?.sets ?? kept.blocking?.sets)?.some((set) => set.name === "set 1"), true, "with the blocking it joined");
 });
 
 it("gives a plain set a material and a room its surfaces, kept with the set", async () => {
