@@ -299,7 +299,7 @@ export function SceneStage({
   // Who made the waiting draft, for the draft bar (design turn 231b), and Arke's own account of a
   // build (231c), held apart from the bar's summary so no sentence in the bar is the model's. Both
   // go with the draft.
-  const [draftFrom, setDraftFrom] = useState<{ who: "arke"; notes: ArkeNotes } | { who: "quick" } | null>(null);
+  const [draftFrom, setDraftFrom] = useState<{ who: "arke"; notes: ArkeNotes; edited?: boolean } | { who: "quick" } | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
@@ -569,6 +569,7 @@ export function SceneStage({
     cameraDirty.current = true;
     const {authorship: _authorship, ...edited} = change(current);
     setDraft(edited);
+    markEdited();
   };
   const patchBlocking = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
     const { working: current, frozen: editingFrozen, board: watching } = latest.current;
@@ -576,7 +577,11 @@ export function SceneStage({
     blockingDirty.current = true;
     const {authorship: _authorship, ...edited} = change(current);
     setDraft(edited);
+    markEdited();
   };
+  // A hand edit on Arke's draft makes it Arke's and the person's: the bar says so, and the notes,
+  // still the model's account of what it built, stay behind their disclosure (codex on PR 1901).
+  const markEdited = () => setDraftFrom((from) => (from?.who === "arke" && from.edited !== true ? { ...from, edited: true } : from));
   const patchKey = (which: number, change: Partial<StagingKey>) => {
     const moves = !("frame" in change) && ["p", "l", "anchor", "track", "anchorSpace"].some((field) => field in change);
     patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...(moves ? withoutWords(key) : key), ...change } : key)) }));
@@ -1373,6 +1378,7 @@ export function SceneStage({
       ...(cameraTouched ? { keys, ...(current.objectMotions === undefined ? {} : { objectMotions: motions }) } : {}),
     };
     setDraft(edited);
+    markEdited();
   };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
   /**
@@ -1561,9 +1567,17 @@ export function SceneStage({
     }
     const keptSets = currentBlocking.sets;
     const kit: number[] = [], shapes: number[] = [], changed: number[] = [];
+    // A set is the kept one of its name, else the kept one in its place whose name the draft no
+    // longer holds: renaming a set is a change to it, not one added and one taken away (codex on
+    // PR 1901).
+    const names = new Set(working.sets.map((set) => set.name));
+    const matched = new Set<number>();
     working.sets.forEach((set, position) => {
-      const before = keptSets.find((candidate) => candidate.name === set.name);
+      const named = keptSets.findIndex((candidate) => candidate.name === set.name);
+      const index = named >= 0 ? named : keptSets[position] !== undefined && !names.has(keptSets[position]!.name) ? position : -1;
+      const before = index < 0 ? undefined : keptSets[index];
       if (before !== undefined) {
+        matched.add(index);
         if (stable(before) !== stable(set)) { changed.push(position); marks.sets.set(position, "~"); }
         return;
       }
@@ -1577,9 +1591,8 @@ export function SceneStage({
     if (kit.length > 0) chips.push({ mark: "+", count: kit.length, label: kit.length === 1 ? STAGE_KIT_LABELS[only(kit).kit!.kind].toLowerCase() : "kit" });
     if (shapes.length > 0) chips.push({ mark: "+", count: shapes.length, label: shapes.length === 1 ? only(shapes).name : "sets" });
     if (changed.length > 0) chips.push({ mark: "~", count: changed.length, label: changed.length === 1 ? only(changed).name : "sets" });
-    const gone = keptSets.filter((set) => !working.sets.some((candidate) => candidate.name === set.name));
+    const gone = keptSets.filter((_, index) => !matched.has(index));
     if (gone.length > 0) chips.push({ mark: "−", count: gone.length, label: gone.length === 1 ? gone[0]!.name : "sets" });
-    if (stable(working.objectMotions) !== stable(resolvedPersisted?.objectMotions)) chips.push({ mark: "~", count: 1, label: "set motion" });
     if (draftLook?.lights !== undefined) {
       const keptLights = scene.blocking?.lights ?? [];
       const added: number[] = [], relit: number[] = [];
@@ -1595,6 +1608,7 @@ export function SceneStage({
       if (dark.length > 0) chips.push({ mark: "−", count: dark.length, label: dark.length === 1 ? `light · ${dark[0]!.name}` : "lights" });
     }
     chips.push(...cast, ...camera);
+    if (stable(working.objectMotions) !== stable(resolvedPersisted?.objectMotions)) chips.push({ mark: "~", count: 1, label: "set motion" });
     if (draftLook?.atmosphere !== undefined && stable(draftLook.atmosphere) !== stable(scene.blocking?.atmosphere)) {
       chips.push({ mark: scene.blocking?.atmosphere === undefined ? "+" : "~", count: 1, label: "atmosphere" });
     }
@@ -1661,7 +1675,7 @@ export function SceneStage({
             <span className="fy-swstage__version">
               {boardOn
                 ? `v${scene.version} · ${boardLines.length === 0 ? "180° clear" : `${boardLines.length} line ${boardLines.length === 1 ? "crossing" : "crossings"}`}`
-                : constructing ? `building · v${persisted?.version ?? 1}` : waiting ? `draft · v${(persisted?.version ?? 0) + 1} · ${keys.length} keys` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec) === "static" ? "locked off" : stagingMotionWord(working,durationSec)}`}
+                : constructing ? `building · v${persisted?.version ?? 1}` : waiting ? `draft · v${(persisted?.version ?? 0) + (cameraChanged || overrideChanged ? 1 : 0)} · ${keys.length} keys` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec) === "static" ? "locked off" : stagingMotionWord(working,durationSec)}`}
             </span>
           )}
           {fullscreen === null ? (onFullscreen === undefined ? null : (
@@ -1680,8 +1694,8 @@ export function SceneStage({
           what it changed as chips counted from its own diff, Arke's notes, Discard and Keep. */}
       {waiting ? (
         <div className="fy-swstage__draft" data-testid="stage-draft">
-          <span className="fy-swstage__who">{draftFrom?.who === "arke" ? "Arke’s blockout" : draftFrom?.who === "quick" ? "Quick layout" : "Changes"}</span>
-          <span className="fy-swstage__sum" aria-label="What the draft changes">
+          <span className="fy-swstage__who">{draftFrom?.who === "arke" ? (draftFrom.edited ? "Arke’s blockout · edited" : "Arke’s blockout") : draftFrom?.who === "quick" ? "Quick layout" : "Changes"}</span>
+          <span className="fy-swstage__sum" aria-label="What the draft changes" title={draftDiff.chips.map((chip) => `${chip.mark}${chip.count > 1 ? chip.count : ""} ${chip.label}`).join("\n")}>
             {draftDiff.chips.map((chip, position) => (
               <span key={position} className="fy-swstage__chip"><b data-changed={chip.mark === "+" ? undefined : "true"}>{chip.mark}{chip.count > 1 ? chip.count : ""}</b>{chip.label}</span>
             ))}

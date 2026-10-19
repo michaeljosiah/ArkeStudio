@@ -403,7 +403,7 @@
    one, then Arke's notes, Discard and Keep. */
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__draft { flex: none; display: flex; align-items: center; gap: 8px; min-height: 50px; box-sizing: border-box; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--foreground); border-radius: 12px; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__who { flex: none; font: var(--weight-semibold) var(--text-sm)/1.4 var(--font-sans); white-space: nowrap; }
-:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__sum { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__sum { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 24px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; white-space: nowrap; font: var(--type-label); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b { font: var(--weight-semibold) var(--text-2xs)/1 var(--font-mono); color: var(--success); }
 :where([data-screen="scene-detail"], [data-screen="shot"]) .fy-swstage__chip > b[data-changed="true"] { color: var(--warning); }

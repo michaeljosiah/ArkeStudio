@@ -485,6 +485,16 @@ async function leaveField(input: HTMLInputElement, value: string) {
   await act(async () => props.onBlur({ currentTarget: input }));
 }
 
+it("a renamed set is a change to it in the draft bar, not one added and one removed (codex on PR 1901)", async () => {
+  const { q } = await mount((shot) => { shot.staging = { ...shot.staging!, sets: [{ name: "rail", x: 0, z: -2, w: 4, h: 1, d: 0.2 }] }; });
+  await click(stageItem(q, "rail"));
+  await leaveField(q('[aria-label="Set 1 name"]') as HTMLInputElement, "railing");
+  const bar = q('[data-testid="stage-draft"]').textContent ?? "";
+  assert.match(bar, /~railing/);
+  assert.doesNotMatch(bar, /\+railing|−rail/);
+  assert.match(q(".fy-swstage__panel").textContent ?? "", /draft · 1 change/);
+});
+
 it("a group's references follow it: cleared, its track and the camera's anchor go; removing the selected set clears the selection", async () => {
   const { q, sent, shot, scene } = await mount((candidate) => {
     movingShot(candidate);
