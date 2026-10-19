@@ -125,9 +125,10 @@
 .fy-audio-waveform path { fill: none; stroke: currentColor; stroke-width: .55; vector-effect: non-scaling-stroke; }
 /* The review strip above an episode's timeline (230o, issue 1882): the whole episode at once —
    scenes, what has been heard solid and what has not hatched, notes pinned, the window in view. */
-.fy-review-strip { display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--border); font:var(--type-ui); }
+.fy-review-strip { display:flex; align-items:center; gap:8px 10px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--border); font:var(--type-ui); }
 .fy-review-strip > small { color:var(--muted-foreground); font:var(--type-meta); white-space:nowrap; }
-.fy-review-strip__overview { position:relative; flex:1; min-width:120px; height:30px; }
+/* In a narrow centre the whole-episode bar takes its own line rather than cutting Hear the rest off (230o). */
+.fy-review-strip__overview { position:relative; flex:1 1 240px; min-width:120px; height:30px; }
 .fy-review-strip__bar { position:absolute; inset:0 0 auto 0; height:16px; cursor:pointer; }
 .fy-review-strip__scene { position:absolute; top:0; height:16px; display:grid; place-items:center; background:color-mix(in srgb, var(--foreground) 9%, transparent); border-left:1px solid var(--background); font:var(--type-meta); color:var(--muted-foreground); overflow:hidden; box-sizing:border-box; }
 .fy-review-strip__scene--on { background:color-mix(in srgb, var(--foreground) 20%, transparent); color:var(--foreground); }

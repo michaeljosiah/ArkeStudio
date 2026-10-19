@@ -7,7 +7,7 @@ import {
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
 import { Button, IconButton, cx } from "../components/ui.js";
-import { Chat, ChevronLeft, Lock, Play } from "../components/icons.js";
+import { Chat, ChevronLeft, ChevronRight, Lock, Play } from "../components/icons.js";
 import { HeldBar } from "../components/held-bar.js";
 import { useDockHost } from "../components/player.js";
 import { useMediaQuery } from "../lib/media-query.js";
@@ -231,13 +231,14 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                 : <span className="fy-ad-show__num">{state.n}</span>}
               <button type="button" className="fy-ad-show__open" onClick={() => navigate(`${base}/script/${state.n}`)}>
                 <b>Episode {state.n}{state.title ? ` · ${state.title}` : ""} <small>≈ {Math.max(1, Math.round(state.seconds / 60))} min</small></b>
-                <span className="fy-ad-show__scenes" aria-hidden>
-                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done", !scene.done && scene.working && "fy-ad-show__scene--work")} style={{ flexGrow: scene.seconds }} />)}
-                </span>
-                {/* Work in the background shows on its own row, as Activity reports it (230p). */}
+                {/* Work in the background shows on its own row, as Activity reports it (230p): under the
+                    title where Ends on is, the scenes beneath both. */}
                 {state.performing
                   ? <small className="fy-ad-show__activity" role="status"><i aria-hidden />Performing {state.performed} of {state.lines} lines</small>
                   : state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
+                <span className="fy-ad-show__scenes" aria-hidden>
+                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done", !scene.done && scene.working && "fy-ad-show__scene--work")} style={{ flexGrow: scene.seconds }} />)}
+                </span>
               </button>
               <span className="fy-ad-show__status">
                 <span className={cx(state.draft ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.draft ? "● Script draft" : "✓ Script"}</span>
@@ -247,6 +248,7 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
                   title={state.mixIssues.length > 0 ? state.mixIssues.join("\n") : undefined}>
                   {state.readiness.ready ? "✓ Mixed" : state.mixIssues.length > 0 ? `● Mix ${state.mixIssues.length} to fix` : "○ Mixed"}
                 </span>
+                <ChevronRight size={14} aria-hidden />
               </span>
             </li>
           ))}
@@ -340,6 +342,20 @@ function PublishDialog({ world, production, states, onClose }: {
     if (answer.refused) setFailure(answer.refused); else onClose();
   }), [pressed]);
   const seconds = states.filter((state) => chosen.includes(state.n)).reduce((sum, state) => sum + state.seconds, 0);
+  // The voices the chosen episodes' lines are in, by engine: "Wren, Bram · elevenlabs eleven_v3".
+  const voices = (() => {
+    const engines = new Map<string, Set<string>>();
+    for (const state of states.filter((candidate) => chosen.includes(candidate.n))) {
+      for (const block of state.entry?.script.blocks ?? []) {
+        if (block.kind !== "dialogue" && block.kind !== "narration") continue;
+        const voice = dramaRoleVoice(production.audioDrama?.cast, world.sheets, block);
+        if (!voice) continue;
+        const engine = `${voice.provider}${voice.model ? ` ${voice.model}` : ""}`;
+        engines.set(engine, (engines.get(engine) ?? new Set()).add((voice as { label?: string }).label ?? voice.voiceId));
+      }
+    }
+    return [...engines].map(([engine, labels]) => `${[...labels].join(", ")} · ${engine}`).join("; ");
+  })();
   const source = production.audioDrama?.source ? world.productions.find((p) => p.meta.id === production.audioDrama!.source!.productionId) : undefined;
   const publish = () => {
     setFailure(null);
@@ -348,14 +364,16 @@ function PublishDialog({ world, production, states, onClose }: {
   };
   return (
     // Never closed mid-publish (codex on PR 1880): Cancel would not stop it, and its answer would be lost.
-    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={() => { if (pressed === null) onClose(); }} width={640}>
+    <EditorDialog open title="Publish an edition" subtitle={production.meta.title} onClose={() => { if (pressed === null) onClose(); }} width={680}>
       <div className="fy-ad-pub">
         <div className="fy-ad-pub__row">
           <label>Edition<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
-          <div role="radiogroup" aria-label="Delivery" className="fy-ad-pub__delivery">
-            {(["podcast", "archive"] as const).map((value) => (
-              <button key={value} type="button" role="radio" aria-checked={delivery === value} onClick={() => setDelivery(value)}>{DRAMA_DELIVERY_LABEL[value]}</button>
-            ))}
+          <div className="fy-ad-pub__field"><span id="fy-ad-pub-delivery">Delivery</span>
+            <div role="radiogroup" aria-labelledby="fy-ad-pub-delivery" className="fy-ad-pub__delivery">
+              {(["podcast", "archive"] as const).map((value) => (
+                <button key={value} type="button" role="radio" aria-checked={delivery === value} onClick={() => setDelivery(value)}>{DRAMA_DELIVERY_LABEL[value]}</button>
+              ))}
+            </div>
           </div>
         </div>
         <ul className="fy-ad-pub__episodes">
@@ -379,6 +397,9 @@ function PublishDialog({ world, production, states, onClose }: {
         <dl className="fy-ad-pub__frozen">
           {source && <><dt>Novel</dt><dd>{source.meta.title}{source.story?.version ? ` v${source.story.version}` : ""}</dd></>}
           <dt>Scripts</dt><dd>{states.filter((state) => chosen.includes(state.n)).map((state) => `Episode ${state.n} v${state.entry?.script.version ?? 1}`).join(", ") || "—"}</dd>
+          {/* What it freezes besides (230q): the voices its lines are in, and the mix's format. */}
+          {voices && <><dt>Voices</dt><dd>{voices}</dd></>}
+          <dt>Mix</dt><dd>48 kHz stereo</dd>
         </dl>
         {failure && <p className="fy-ad-pub__fail" role="alert">{failure}</p>}
         <footer className="fy-ad-pub__foot">
