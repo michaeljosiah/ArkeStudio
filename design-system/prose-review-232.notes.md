@@ -1,6 +1,7 @@
 # AI tells in the chapter review · turn 232
 
-Status: **revision 2, drawn 19 October 2026 for the owner's review.** Nothing is built.
+Status: **revision 2, approved by the owner on 19 October 2026.** Implementation is tracked in
+#1952. Nothing is built yet.
 
 - Issues: #1744 (prose findings) and #1782 (evidence-based chapter review).
 - Extends turn 227's review notes (227r) and the chapter review now shipped.
