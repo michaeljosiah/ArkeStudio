@@ -351,6 +351,27 @@ describe("the show page and Publish (230p, 230q)", () => {
     assert.equal(([...dom.document.body.querySelectorAll("button")].find((button) => button.textContent === "Publish edition") as HTMLButtonElement | undefined)?.disabled, true);
   });
 
+  it("shows a press performing in the background on its row, as Activity reports it (230p, issue 1882)", async () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const state = withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b, { id: ulid(), kind: "heading", place: "Tower" }, c], []);
+    const job = (block: string, status: string, createdAt: string, updatedAt: string) => ({ ...structuredClone(state.app.jobs[0]!), id: `jb_${ulid()}`, productionId: "low-water-drama",
+      target: { kind: "voice-preview", id: "drama/elevenlabs/eleven_v3/breeze-a" }, capability: "voice-tts", params: { block },
+      landing: { dir: ".staging/drama/low-water-drama/episode-001" }, status, createdAt, updatedAt });
+    // An old take made long ago is another press; this one has made Maren's line and is making Bray's.
+    state.app.jobs = [job(c.id, "succeeded", "2026-10-19T08:00:00.000Z", "2026-10-19T08:00:05.000Z"),
+      job(a.id, "succeeded", "2026-10-19T09:00:00.000Z", "2026-10-19T09:00:05.000Z"), job(b.id, "running", "2026-10-19T09:00:06.000Z", "2026-10-19T09:00:06.000Z")] as never;
+    const { container } = await mount(state, "home");
+    const row = container.querySelector('[data-episode="1"]')!;
+    assert.match(row.querySelector("[role='status']")?.textContent ?? "", /Performing 1 of 3 lines/);
+    assert.equal(row.querySelector(".fy-ad-show__ends"), null, "in place of Ends on");
+    assert.match(row.textContent!, /● Performed 1 of 3/);
+    const scenes = [...row.querySelectorAll(".fy-ad-show__scenes i")].map((scene) => scene.className);
+    assert.deepEqual(scenes, ["fy-ad-show__scene--work", ""], "the scene with the line being made is at work");
+    state.app.jobs = (state.app.jobs as Array<{ status: string }>).map((entry) => ({ ...entry, status: "succeeded" })) as never;
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    assert.equal(container.querySelector('[data-episode="1"] [role="status"]'), null, "nothing going, nothing shown");
+  });
+
   it("names what an edition delivers, and asks for stems only when there are lanes to separate (issue 1882)", async () => {
     const a = line("maren-kest", "One."), b = line("bray", "Two.");
     const { container, sent } = await mount(withTakes([{ id: ulid(), kind: "heading", place: "Quay" }, a, b], [a.id, b.id]), "home");

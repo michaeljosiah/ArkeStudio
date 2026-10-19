@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   DRAMA_DELIVERY_LABEL, DRAMA_NARRATOR, dramaLineHash, dramaRoleVoice, dramaSpeakerLabel, episodeReadiness, episodeScriptFile, estimateScriptSeconds, formatSeconds,
-  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
+  type DramaDelivery, type DramaEdition, type EpisodeScriptBlock, type JobSummary, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Portrait, characterPortraitPath } from "../components/portrait.js";
@@ -23,25 +23,52 @@ import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAu
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
 
+/**
+ * What a Hear press is doing to this episode now (230p, issue 1882), as Activity reports it. A
+ * press makes its lines one after another, each a voice job landing in the episode's staging
+ * folder, so the press is the run of those jobs back from the one still going, each begun within
+ * a minute of the one before it ending. Its lines made so far count before the world's snapshot
+ * does, which refreshes only once the press is over. None while nothing is going.
+ */
+export function episodeActivity(jobs: readonly JobSummary[], productionId: string, episode: number): { live: Set<string>; made: Set<string> } | null {
+  const dir = `.staging/drama/${productionId}/${episodeScriptFile(episode).replace(/\.json$/, "")}`;
+  const mine = jobs.filter((job) => job.target.kind === "voice-preview" && job.landing?.dir === dir).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const going = (job: JobSummary) => job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled";
+  const block = (job: JobSummary) => typeof job.params["block"] === "string" ? job.params["block"] : "";
+  const newest = mine.findIndex(going);
+  if (newest < 0) return null;
+  const live = new Set(mine.filter(going).map(block)), made = new Set<string>();
+  for (let at = newest + 1; at < mine.length; at++) {
+    const job = mine[at]!, after = mine[at - 1]!;
+    if (Date.parse(after.createdAt) - Date.parse(job.updatedAt) > 60_000) break;
+    if (job.status === "succeeded") made.add(block(job));
+  }
+  return { live, made };
+}
+
 /** One episode's state at a glance (230p): its script, its cast, what is performed, whether it can be mixed. */
 type MixProblems = Array<{ episode: number; issues: string[]; lanes?: number }>;
-function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems) {
+function episodeState(world: WorldBundle, production: ProductionBundle, episode: number, mixes: MixProblems, jobs: readonly JobSummary[] = []) {
   const entry = production.episodeScripts?.find((candidate) => candidate.script.episode === episode);
   const blocks = entry?.script.blocks ?? [];
   const takes = production.episodeTakes?.find((candidate) => candidate.episode === episode);
   const lines = blocks.filter(spoken);
   const cast = production.audioDrama?.cast ?? {};
   const voiceless = new Set(lines.flatMap((line) => line.kind === "dialogue" && !cast[line.speaker]?.voice && !world.sheets.find((sheet) => sheet.id === line.speaker)?.voice ? [line.speaker] : []));
-  const performed = lines.filter((line) => { const kept = takes?.lines[line.id]?.kept; return kept && kept.textHash === dramaLineHash(line); }).length;
+  const current = (line: Spoken) => { const kept = takes?.lines[line.id]?.kept; return kept !== undefined && kept.textHash === dramaLineHash(line); };
+  const activity = episodeActivity(jobs, production.meta.id, episode);
+  // While a press runs, its lines made so far count as performed; the snapshot catches up after.
+  const performed = lines.filter((line) => current(line) || activity?.made.has(line.id) === true).length;
   const path = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
   const draft = world.proposals.some((staged) => staged.proposal.targets.some((target) => target.path === path));
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
-  const scenes: Array<{ seconds: number; done: boolean }> = [];
+  const scenes: Array<{ seconds: number; done: boolean; working: boolean }> = [];
   let scene: EpisodeScriptBlock[] = [];
   const close = () => {
     if (scene.length === 0) return;
     const sceneLines = scene.filter(spoken);
-    scenes.push({ seconds: Math.max(1, estimateScriptSeconds(scene)), done: sceneLines.length > 0 && sceneLines.every((line) => takes?.lines[line.id]?.kept?.textHash === dramaLineHash(line)) });
+    scenes.push({ seconds: Math.max(1, estimateScriptSeconds(scene)), done: sceneLines.length > 0 && sceneLines.every((line) => takes?.lines[line.id]?.kept?.textHash === dramaLineHash(line)),
+      working: sceneLines.some((line) => activity?.live.has(line.id) === true) });
   };
   for (const block of blocks) { if (block.kind === "heading") { close(); scene = []; } else scene.push(block); }
   close();
@@ -58,7 +85,7 @@ function episodeState(world: WorldBundle, production: ProductionBundle, episode:
     : (block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact ? [`@${block.kind}`] : [])).size;
   return {
     entry, planned: blocks.length > 0, title: entry?.script.title ?? "", seconds: estimateScriptSeconds(blocks), lines: lines.length, performed,
-    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn, lanes,
+    voiceless: voiceless.size, draft, scenes, mixIssues, endsOn, lanes, performing: activity !== null,
     readiness: readiness.ready && mixIssues.length > 0
       ? { ...readiness, ready: false, reasons: [`the saved mix has ${mixIssues.length} problem${mixIssues.length === 1 ? "" : "s"} to fix in Audio Studio`] }
       : readiness,
@@ -85,7 +112,8 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
   const count = Math.max(plan?.episodes ?? 0, ...(production.episodeScripts ?? []).map((entry) => entry.script.episode));
   // Checked by the coordinator as Publish checks it, sources read live, so asked for with the editions.
   const [mixes, setMixes] = useState<MixProblems>([]);
-  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1, mixes) }));
+  const jobs = useStore().state?.app.jobs ?? [];
+  const states = Array.from({ length: count }, (_, i) => ({ n: i + 1, ...episodeState(world, production, i + 1, mixes, jobs) }));
   const planned = states.filter((state) => state.planned);
   const unplanned = states.filter((state) => !state.planned);
   const next = planned.find((state) => state.readiness.ready) ?? null;
@@ -204,9 +232,12 @@ function DramaEpisodes({ world, production }: { world: WorldBundle; production: 
               <button type="button" className="fy-ad-show__open" onClick={() => navigate(`${base}/script/${state.n}`)}>
                 <b>Episode {state.n}{state.title ? ` · ${state.title}` : ""} <small>≈ {Math.max(1, Math.round(state.seconds / 60))} min</small></b>
                 <span className="fy-ad-show__scenes" aria-hidden>
-                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done")} style={{ flexGrow: scene.seconds }} />)}
+                  {state.scenes.map((scene, i) => <i key={i} className={cx(scene.done && "fy-ad-show__scene--done", !scene.done && scene.working && "fy-ad-show__scene--work")} style={{ flexGrow: scene.seconds }} />)}
                 </span>
-                {state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
+                {/* Work in the background shows on its own row, as Activity reports it (230p). */}
+                {state.performing
+                  ? <small className="fy-ad-show__activity" role="status"><i aria-hidden />Performing {state.performed} of {state.lines} lines</small>
+                  : state.endsOn && <small className="fy-ad-show__ends">Ends on {state.endsOn.who}: “{state.endsOn.words}”</small>}
               </button>
               <span className="fy-ad-show__status">
                 <span className={cx(state.draft ? "fy-ad-show__warn" : "fy-ad-show__ok")}>{state.draft ? "● Script draft" : "✓ Script"}</span>

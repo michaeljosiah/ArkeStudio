@@ -354,6 +354,11 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-show__scenes { display: flex; gap: 3px; max-width: 420px; }
 .fy-ad-show__scenes i { height: 4px; border-radius: 2px; background: var(--border); min-width: 6px; }
 .fy-ad-show__scenes i.fy-ad-show__scene--done { background: var(--foreground); }
+.fy-ad-show__scenes i.fy-ad-show__scene--work { background: linear-gradient(90deg, var(--foreground) 50%, var(--border) 50%); }
+.fy-ad-show__activity { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.fy-ad-show__activity i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--foreground); animation: fy-ad-spin 900ms linear infinite; }
+@keyframes fy-ad-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fy-ad-show__activity i { animation: none; } }
 .fy-ad-show__status { display: flex; gap: 12px; font-size: 12.5px; flex-wrap: wrap; justify-content: flex-end; }
 .fy-ad-show__edition { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .fy-ad-show__edition small { color: var(--muted-foreground); }
