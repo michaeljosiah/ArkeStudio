@@ -16472,6 +16472,7 @@ export class Coordinator {
               // the door no longer shows.
               if (!chapter) return { outcome: "refused", made: 0, flagged: 0, reason: "that chapter is no longer in this production" };
               if (chapter.retired === true) return { outcome: "refused", made: 0, flagged: 0, reason: "retired since the book was priced" };
+              if (chapter.status === "outlined") return { outcome: "refused", made: 0, flagged: 0, reason: "outlined since the book was priced" };
               const chapterKey = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
               // A chapter its own run was reading when the book began is left to that run and
               // counted, as a refused chapter is; it does not end the book (codex on PR 1187).

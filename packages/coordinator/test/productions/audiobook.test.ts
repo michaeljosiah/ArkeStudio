@@ -1487,7 +1487,7 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await readBook(send, { confirmationToken: priced.confirmationToken });
       const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
       assert.equal(finished?.outcome, "read", finished?.reason);
-      assert.equal(finished?.chaptersRefused, 3);
+      assert.equal(finished?.chaptersRefused, 2, "the outline is planned, not refused for lacking a cast");
       assert.equal(events.filter((e) => e.type === "audiobook.priced").length, 0, "no chapter asked again");
       assert.equal(finished?.flagged, 1, "the cloud line has no provider behind the queue here, and is flagged as the chapter's own press would flag it");
     }));
@@ -1497,13 +1497,14 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
       await send({ kind: "set-audiobook-reading", worldId: WORLD_ID, productionId: LEDGER, reading: "cast" });
       const door = await openDoor(send, events);
       assert.equal(audiobookRowLabel(door.rows[0]!), "cast moved · cast again");
-      assert.ok(door.rows.slice(1).every((row) => audiobookRowLabel(row) === "not cast · cast the lines first"), "the other chapters have no cast at all");
+      assert.ok(door.rows.slice(1, 3).every((row) => audiobookRowLabel(row) === "not cast · cast the lines first"), "the other manuscript chapters have no cast at all");
+      assert.equal(audiobookRowLabel(door.rows[3]!), "planned", "outline notes do not require casting for a book read");
       // Maren's ElevenLabs voice is assigned but no catalogue lists it: the narrator stands in, and the row says so.
       assert.deepEqual(door.voices.map((v) => [v.name, v.state]), [["George", "narrator"], ["Maren Kest", "voice unavailable"]]);
       await readBook(send);
       const finished = events.find((e): e is BookFinished => e.type === "audiobook.book-finished");
       assert.equal(finished?.outcome, "read");
-      assert.equal(finished?.chaptersRefused, 4);
+      assert.equal(finished?.chaptersRefused, 3);
       assert.equal(finished?.chaptersRead, 0);
     }));
 
@@ -1728,6 +1729,28 @@ describe("the door and the book (turn 146, SPEC-047 R-15..R-17, R-29)", () => {
         assert.ok(!existsSync(recordPath(worldDir, "02-the-same-ink")), "nothing written for it");
       },
     );
+  });
+
+  it("a chapter changed to outlined while a book reads is skipped before its first request", async () => {
+    let outline: (() => Promise<void>) | null = null;
+    let changed = false;
+    await withHarness({ before: twoChapters, synthesize: async () => {
+      if (!changed && outline !== null) { changed = true; await outline(); }
+      return wav();
+    } }, async ({ worldDir, store, events, send }) => {
+      outline = async () => {
+        const path = `productions/${LEDGER}/chapters/02-the-same-ink.md`;
+        const file = join(worldDir, path);
+        await writeFile(file, (await readFile(file, "utf8")).replace(/^status:.*$/m, "status: outlined"));
+        await store.reconcileExternalEdit(path);
+      };
+      await readBook(send);
+      assert.ok(changed);
+      const finished = events.find((event): event is BookFinished => event.type === "audiobook.book-finished");
+      assert.deepEqual([finished?.chaptersRead, finished?.chaptersRefused], [1, 1]);
+      assert.equal(events.some(event => event.type === "audiobook.started" && event.chapterId === "the-same-ink"), false);
+      assert.equal(existsSync(recordPath(worldDir, "02-the-same-ink")), false);
+    });
   });
 
   it("a new narrator re-checks every standing direction, as a reading switch does (R-13; codex on PR 1187)", () =>
