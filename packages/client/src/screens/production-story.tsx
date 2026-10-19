@@ -753,9 +753,9 @@ export function ChapterTreeScreen() {
             {/* One register per row (issue 1010, U1): the two arrows were already glyphs, and
                 Retire beside them repeated the word once per chapter. */}
             {phone && <button type="button" className="fy-chapter-card__more" aria-label={`Actions for ${c.title}`} onClick={() => setMenu({ file: c.file })}><More size={18} /></button>}
-            <IconButton label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}><ChevronUp /></IconButton>
-            <IconButton label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}><ChevronDown /></IconButton>
-            <IconButton label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}><Archive /></IconButton>
+            <IconButton className="fy-tip--end" label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}><ChevronUp /></IconButton>
+            <IconButton className="fy-tip--end" label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}><ChevronDown /></IconButton>
+            <IconButton className="fy-tip--end" label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}><Archive /></IconButton>
             </div>
             );
           })}
