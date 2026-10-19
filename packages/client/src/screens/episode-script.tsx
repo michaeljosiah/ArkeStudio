@@ -11,7 +11,7 @@ import {
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, changedFields, draftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
+  blockLine, changedFields, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
@@ -71,6 +71,7 @@ export function EpisodeScriptScreen() {
 
 function EpisodeScript({ world, production, episode }: { world: WorldBundle; production: ProductionBundle; episode: number }) {
   const navigate = useNavigate();
+  const { connection } = useStore();
   const base = `/w/${world.meta.worldId}/p/${production.meta.id}`;
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode) ?? null;
   const plan = production.audioDrama?.plan;
@@ -262,6 +263,19 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const scriptPath = `productions/${production.meta.id}/scripts/${episodeScriptFile(episode)}`;
   const drafted = world.proposals.find((staged) => staged.proposal.kind === "episode-script" && staged.episodeScripts?.[scriptPath] !== undefined);
   const draft = drafted ? draftRows(blocks, drafted.episodeScripts![scriptPath]!.blocks) : null;
+  // The changes of the draft left out (issue 1882), by row; a new draft starts with all taken.
+  const [declined, setDeclined] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => { setDeclined(new Set()); }, [drafted?.proposal.id, drafted?.proposal.draftRevision]);
+  const keepChosen = (): boolean => {
+    if (!drafted || !draft) return false;
+    // Written as the author's own save, fenced on the script it was drafted against; the rest of
+    // the draft is let go, so a later Keep cannot write what was left out.
+    edit(keepDraftRows(draft, declined));
+    const draftTitle = drafted.episodeScripts![scriptPath]!.title;
+    if (draftTitle !== title) setTitle(draftTitle);
+    discardProposal(world.meta.worldId, drafted.proposal.id);
+    return connection === "open";
+  };
 
   // Arke drafts in the chat beside the page; its script arrives here as a draft (R-9).
   const chat = useGlobalChat();
@@ -372,14 +386,15 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
         </header>
       )}
       {drafted && draft && (
-        <DraftBar rows={draft} busy={dirty || saving !== null || conflict} proposalId={drafted.proposal.id}
+        <DraftBar rows={draft} busy={dirty || saving !== null || conflict} proposalId={drafted.proposal.id} declined={declined}
           title={drafted.episodeScripts![scriptPath]!.title !== title ? drafted.episodeScripts![scriptPath]!.title : null}
-          onKeep={() => acceptProposal(world.meta.worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}
+          onKeep={() => declined.size > 0 ? keepChosen() : acceptProposal(world.meta.worldId, drafted.proposal.id, undefined, drafted.proposal.draftRevision)}
           onDiscard={() => discardProposal(world.meta.worldId, drafted.proposal.id)} />
       )}
       <div className={cx("fy-ad-ep__body", side !== null && "fy-ad-ep__body--source")}>
         {/* Arke's draft scrolls as the score does, and the scene in view follows it (codex on PR 1881). */}
-        {draft ? <DraftScore rows={draft} name={name} episode={episode} onScroll={followScroll} /> : (
+        {draft ? <DraftScore rows={draft} name={name} episode={episode} onScroll={followScroll} declined={declined}
+          onToggle={(key) => setDeclined((held) => { const next = new Set(held); if (next.has(key)) next.delete(key); else next.add(key); return next; })} /> : (
         <div className="fy-ad-score" role="list" aria-label={`Episode ${episode} script`} onScroll={followScroll}>
           {blocks.length === 0 && (
             <div className="fy-ad-score__empty">
@@ -628,9 +643,13 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
  * Arke's draft, waiting (R-9, R-54): what it changes, counted, and Keep or Discard — whole. Keep
  * waits while the score holds unsaved or conflicting work, and a refused Keep says why (codex on PR 1874).
  */
-function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
+function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard, declined }: {
   rows: ReturnType<typeof draftRows>; busy: boolean; proposalId: string; title: string | null; onKeep: () => boolean; onDiscard: () => void;
+  /** The changes left out: Keep writes the rest (issue 1882). */
+  declined: ReadonlySet<string>;
 }) {
+  const choosable = rows.filter(draftRowChoosable).length;
+  const taking = rows.filter((row) => draftRowChoosable(row) && !declined.has(draftRowKey(row))).length;
   const notice = useGateNotices()[proposalId];
   const [unsent, setUnsent] = useState(false);
   const count = (state: string) => rows.filter((row) => row.state === state).length;
@@ -642,14 +661,17 @@ function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard }: {
       {(unsent || notice) && <span className="fy-ad-draftbar__why" role="alert">{unsent ? "The studio is disconnected." : notice!.detail ?? `Not kept: ${notice!.reason}.`}</span>}
       <span className="gap" />
       <Button size="sm" variant="ghost" onClick={onDiscard}>Discard</Button>
-      <Button size="sm" variant="primary" disabled={busy} onClick={() => setUnsent(!onKeep())}>Keep</Button>
+      <Button size="sm" variant="primary" disabled={busy || (declined.size > 0 && taking === 0)} onClick={() => setUnsent(!onKeep())}>
+        {declined.size > 0 ? `Keep ${taking} of ${choosable}` : "Keep"}
+      </Button>
     </div>
   );
 }
 
 /** The draft read in place: added in grey, removed struck, a rewrite as the old struck over the new. */
-function DraftScore({ rows, name, episode, onScroll }: {
+function DraftScore({ rows, name, episode, onScroll, declined, onToggle }: {
   rows: ReturnType<typeof draftRows>; name: (slug: string) => string; episode: number; onScroll?: (event: UIEvent<HTMLDivElement>) => void;
+  declined: ReadonlySet<string>; onToggle: (key: string) => void;
 }) {
   const line = (block: EpisodeScriptBlock, how: string) => {
     const { who, text } = blockLine(block, name);
@@ -658,7 +680,15 @@ function DraftScore({ rows, name, episode, onScroll }: {
   return (
     <div className="fy-ad-score fy-ad-score--draft" role="list" aria-label={`Episode ${episode} draft`} onScroll={onScroll}>
       {rows.map((row) => (
-        <div key={`${row.state}:${row.block.id}`} role="listitem" data-block={row.block.id}>
+        <div key={`${row.state}:${row.block.id}`} role="listitem" data-block={row.block.id}
+          className={cx(draftRowChoosable(row) && declined.has(draftRowKey(row)) && "fy-ad-draft__left")}>
+          {/* Each change taken or left out on its own (issue 1882). */}
+          {draftRowChoosable(row) && (
+            <button type="button" className="fy-ad-draft__take" aria-pressed={!declined.has(draftRowKey(row))}
+              aria-label={declined.has(draftRowKey(row)) ? "Take this change" : "Leave this change out"} onClick={() => onToggle(draftRowKey(row))}>
+              {declined.has(draftRowKey(row)) ? "○" : "✓"}
+            </button>
+          )}
           {row.state === "changed" ? <>{line(row.was, "removed")}{line(row.block, "added")}
             {changedFields(row.was, row.block).length > 0 && <small className="fy-ad-draft__fields">also changes {changedFields(row.was, row.block).join(", ")}</small>}</> : line(row.block, row.state)}
         </div>

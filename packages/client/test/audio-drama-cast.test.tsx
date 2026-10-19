@@ -10,7 +10,7 @@ import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
 import { DramaEpisodesScreen } from "../src/screens/drama-episodes.js";
 import { dramaLineHash } from "@arke-studio/contracts";
 import { takeParked } from "../src/lib/episode-script-drafts.js";
-import { changedFields, draftRows } from "../src/lib/episode-script.js";
+import { changedFields, draftRows, keepDraftRows } from "../src/lib/episode-script.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -198,6 +198,40 @@ describe("Arke's draft in the score (R-9, R-54)", () => {
     const discard = [...container.querySelectorAll("button")].find((button) => button.textContent === "Discard")!;
     await act(async () => props(discard).onClick!({}));
     assert.deepEqual(sent.at(-1), { kind: "proposal-discard", worldId: FIXTURE_WORLD_ID, proposalId: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA" });
+  });
+});
+
+describe("issue 1882: one change of a draft and not another", () => {
+  it("writes each row as drafted or as it was, and lets a bed whose stop is left out run on", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const added = line("bray", "Four.");
+    const bed = { id: ulid(), kind: "ambience" as const, heard: "Gulls.", until: added.id };
+    const rows = draftRows([a, b, c], [bed, a, { ...b, words: "Two, climb." } as EpisodeScriptBlock, added]);
+    const key = (state: string, id: string) => `${state}:${id}`;
+    assert.deepEqual(keepDraftRows(rows, new Set()).map((block) => block.id), [bed.id, a.id, b.id, added.id], "nothing left out is the draft");
+    const some = keepDraftRows(rows, new Set([key("changed", b.id), key("removed", c.id), key("added", added.id)]));
+    assert.deepEqual(some.map((block) => block.id), [bed.id, a.id, b.id, c.id]);
+    assert.equal((some[2] as { words: string }).words, "Two.", "a rewrite left out keeps its old words");
+    assert.equal((some[0] as { until?: string }).until, undefined, "the bed's stop was left out, so it runs to the scene's end");
+  });
+
+  it("Keep N of M saves the script with the changes taken, and lets the draft go", async () => {
+    const a = line("maren-kest", "The log said two hours."), b = line("bray", "The log's wrong.");
+    const state = drama([a, b]);
+    const proposed = { version: 3, episode: 1, title: "", blocks: [a, { ...b, words: "The log's wrong. Climb." }, line("bray", "Now.")] };
+    state.world!.proposals = [{ proposal: { id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", kind: "episode-script", summary: "Episode 1 script", targets: [], draftRevision: 2 },
+      ripple: null, episodeScripts: { "productions/low-water-drama/scripts/episode-001.json": proposed } }] as never;
+    const { container, sent } = await mount(state, "script/1");
+    const leave = [...container.querySelectorAll("button[aria-label='Leave this change out']")];
+    assert.equal(leave.length, 2, "each change has its own choice");
+    await act(async () => props(leave[1]!).onClick!({}));
+    const keep = [...container.querySelectorAll("button")].find((button) => button.textContent === "Keep 1 of 2")!;
+    assert.ok(keep, "Keep names what it writes");
+    await act(async () => props(keep).onClick!({}));
+    assert.ok(sent.some((message) => message.kind === "proposal-discard"), "the draft is let go, so nothing left out can be kept later");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.deepEqual(save.blocks.map((block) => (block as { words: string }).words), ["The log said two hours.", "The log's wrong. Climb."]);
   });
 });
 

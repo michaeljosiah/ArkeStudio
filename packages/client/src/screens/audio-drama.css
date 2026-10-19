@@ -235,6 +235,11 @@ button.fy-ad-chip { cursor: pointer; }
 .fy-ad-draftbar .gap { flex: 1; }
 .fy-ad-draftbar span { color: var(--muted-foreground); }
 .fy-ad-score--draft { padding-top: 12px; }
+/* A change taken or left out on its own (issue 1882): its toggle in the margin, a left one faded. */
+.fy-ad-score--draft [role="listitem"] { position: relative; }
+.fy-ad-draft__take { position: absolute; left: -2px; top: 6px; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 50%; background: var(--background); color: var(--foreground); font-size: 12px; line-height: 1; cursor: pointer; }
+.fy-ad-draft__take[aria-pressed="false"] { color: var(--muted-foreground); }
+.fy-ad-draft__left { opacity: 0.45; }
 .fy-ad-draft__row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 4px 0; font-size: 17px; line-height: 1.5; }
 .fy-ad-draft__who { font-size: 13px; font-weight: 600; text-align: right; padding-top: 3px; }
 .fy-ad-draft__row--added .fy-ad-draft__text, .fy-ad-draft__row--moved .fy-ad-draft__text { color: var(--muted-foreground); }

@@ -237,6 +237,35 @@ export function draftRows(current: readonly EpisodeScriptBlock[], proposed: read
   return rows;
 }
 
+/** A draft row's key, as the score names it: one change of Arke's to take or leave. */
+export const draftRowKey = (row: DraftRow): string => `${row.state}:${row.block.id}`;
+
+/** Whether a row is a change the author can take or leave: an order kept as drafted is not. */
+export const draftRowChoosable = (row: DraftRow): boolean => row.state === "added" || row.state === "removed" || row.state === "changed";
+
+/**
+ * The script Keep writes when some of Arke's changes are left out (issue 1882): Arke's draft was
+ * kept or discarded whole. Each row is taken as drafted or as it was — an addition left out, a
+ * removal undone where the line stood, a rewrite kept in its old words — in the draft's order.
+ * A bed whose stop was left out runs to its scene's end, and interruptions are mended.
+ */
+export function keepDraftRows(rows: readonly DraftRow[], declined: ReadonlySet<string>): EpisodeScriptBlock[] {
+  const kept: EpisodeScriptBlock[] = [];
+  for (const row of rows) {
+    const leave = draftRowChoosable(row) && declined.has(draftRowKey(row));
+    if (row.state === "added") { if (!leave) kept.push(row.block); }
+    else if (row.state === "removed") { if (leave) kept.push(row.block); }
+    else if (row.state === "changed") kept.push(leave ? row.was : row.block);
+    else kept.push(row.block);
+  }
+  const ids = new Set(kept.map((block) => block.id));
+  return mendRelations(kept.map((block) => {
+    if ((block.kind !== "ambience" && block.kind !== "music") || block.until === undefined || ids.has(block.until)) return block;
+    const { until: _gone, ...rest } = block;
+    return rest as EpisodeScriptBlock;
+  }));
+}
+
 /**
  * The fields a rewrite changes beyond its words (codex on PR 1874): a channel, a bed's stop, a
  * source pin — written by Keep, so said beside the line.
