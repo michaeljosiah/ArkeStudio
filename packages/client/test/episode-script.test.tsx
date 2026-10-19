@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
-import { bedMarks, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
+import { bedMarks, directionText, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
 import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -310,6 +310,20 @@ describe("issue 1883: the selection and the Hear dialog", () => {
   });
 });
 
+describe("issue 1883: a direction's parentheses are the score's", () => {
+  it("drops a typed pair round the whole direction, and keeps one inside it (codex on PR 1884)", () => {
+    assert.equal(directionText("((quietly))"), "quietly");
+    assert.equal(directionText("(quietly)"), "quietly");
+    assert.equal(directionText("quiet (but urgent)"), "quiet (but urgent)");
+    assert.equal(directionText("(quiet) (but urgent)"), "(quiet) (but urgent)");
+    assert.equal(directionText("(quietly"), "quietly", "an opener typed first, before its closer");
+    assert.equal(directionText("quietly)"), "quietly");
+    assert.equal(directionText("quiet (but"), "quiet (but", "typing toward a closer");
+    assert.equal(directionText("quiet "), "quiet ", "a space before the next word stays");
+    assert.equal(directionText("("), undefined);
+  });
+});
+
 describe("issue 1883: speakers no sheet carries (R-55)", () => {
   it("names them from their keys, and numbers each new unnamed speaker", () => {
     assert.equal(speakerLabel("crowd"), "Crowd");
@@ -317,6 +331,18 @@ describe("issue 1883: speakers no sheet carries (R-55)", () => {
     assert.equal(speakerLabel("a-dockhand"), "A dockhand");
     assert.equal(unnamedSpeaker(["maren"]), "someone");
     assert.equal(unnamedSpeaker(["someone", "someone-2"]), "someone-3");
+  });
+
+  it("never mints a key a sheet or a cast role already holds (codex on PR 1884)", async () => {
+    const a = line("maren", "Climb.");
+    const state = withScript([a]);
+    state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.audioDrama!.cast = { someone: {} } as never;
+    const m = await mount(state);
+    await act(async () => { m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    await act(async () => props(m.container.querySelector(`[data-block="${a.id}"] select[aria-label='Speaker']`)!).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone-2", "the role kept in the cast is not reused");
   });
 
   it("offers a crowd and someone unnamed beside the world's characters, and the script's own", async () => {

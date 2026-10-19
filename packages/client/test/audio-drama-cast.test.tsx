@@ -208,8 +208,8 @@ describe("issue 1882: one change of a draft and not another", () => {
     const bed = { id: ulid(), kind: "ambience" as const, heard: "Gulls.", until: added.id };
     const rows = draftRows([a, b, c], [bed, a, { ...b, words: "Two, climb." } as EpisodeScriptBlock, added]);
     const key = (state: string, id: string) => `${state}:${id}`;
-    assert.deepEqual(keepDraftRows(rows, new Set()).map((block) => block.id), [bed.id, a.id, b.id, added.id], "nothing left out is the draft");
-    const some = keepDraftRows(rows, new Set([key("changed", b.id), key("removed", c.id), key("added", added.id)]));
+    assert.deepEqual(keepDraftRows([a, b, c], rows, new Set()).map((block) => block.id), [bed.id, a.id, b.id, added.id], "nothing left out is the draft");
+    const some = keepDraftRows([a, b, c], rows, new Set([key("changed", b.id), key("removed", c.id), key("added", added.id)]));
     assert.deepEqual(some.map((block) => block.id), [bed.id, a.id, b.id, c.id]);
     assert.equal((some[2] as { words: string }).words, "Two.", "a rewrite left out keeps its old words");
     assert.equal((some[0] as { until?: string }).until, undefined, "the bed's stop was left out, so it runs to the scene's end");
@@ -232,6 +232,31 @@ describe("issue 1882: one change of a draft and not another", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
     const save = sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
     assert.deepEqual(save.blocks.map((block) => (block as { words: string }).words), ["The log said two hours.", "The log's wrong. Climb."]);
+  });
+
+  it("puts a removal left out back where it stood, among lines the draft moves (codex on PR 1884)", () => {
+    const a = line("maren-kest", "One."), b = line("bray", "Two."), c = line("maren-kest", "Three.");
+    const rows = draftRows([a, b, c], [c, b]);
+    assert.deepEqual(keepDraftRows([a, b, c], rows, new Set([`removed:${a.id}`])).map((block) => block.id), [a.id, c.id, b.id]);
+    const d = line("bray", "Four.");
+    assert.deepEqual(keepDraftRows([a, b, c, d], draftRows([a, b, c, d], [d, a, c]), new Set([`removed:${b.id}`])).map((block) => block.id),
+      [d.id, a.id, b.id, c.id], "after the line it followed");
+  });
+
+  it("keeps a drafted title with every line change left out (codex on PR 1884)", async () => {
+    const a = line("maren-kest", "The log said two hours."), b = line("bray", "The log's wrong.");
+    const state = drama([a, b]);
+    const proposed = { version: 3, episode: 1, title: "The log", blocks: [a, { ...b, words: "The log's wrong. Climb." }] };
+    state.world!.proposals = [{ proposal: { id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HA", kind: "episode-script", summary: "Episode 1 script", targets: [], draftRevision: 2 },
+      ripple: null, episodeScripts: { "productions/low-water-drama/scripts/episode-001.json": proposed } }] as never;
+    const { container, sent } = await mount(state, "script/1");
+    await act(async () => props(container.querySelector("button[aria-label='Leave this change out']")!).onClick!({}));
+    const keep = [...container.querySelectorAll("button")].find((button) => button.textContent === "Keep title") as HTMLButtonElement | undefined;
+    assert.equal(keep?.disabled, false, "the title is still taken");
+    await act(async () => props(keep!).onClick!({}));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 800)); });
+    const save = sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.deepEqual([save.title, save.blocks.map((block) => (block as { words: string }).words)], ["The log", ["The log said two hours.", "The log's wrong."]]);
   });
 });
 

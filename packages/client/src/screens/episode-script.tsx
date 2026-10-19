@@ -11,7 +11,7 @@ import {
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
-  blockLine, changedFields, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
+  blockLine, changedFields, directionText, draftRowChoosable, draftRowKey, draftRows, keepDraftRows, scenesOf, scriptAsText, scriptSaveProblem, speakerLabel, speakerTones, splitBlock, unnamedSpeaker,
 } from "../lib/episode-script.js";
 import { parkDraft, takeParked } from "../lib/episode-script-drafts.js";
 import { BookOpen, ChevronLeft, ChevronRight, ListCheck, More, Pencil, Users, X } from "../components/icons.js";
@@ -270,7 +270,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
     if (!drafted || !draft) return false;
     // Written as the author's own save, fenced on the script it was drafted against; the rest of
     // the draft is let go, so a later Keep cannot write what was left out.
-    edit(keepDraftRows(draft, declined));
+    edit(keepDraftRows(blocks, draft, declined));
     const draftTitle = drafted.episodeScripts![scriptPath]!.title;
     if (draftTitle !== title) setTitle(draftTitle);
     discardProposal(world.meta.worldId, drafted.proposal.id);
@@ -453,7 +453,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                     <div className="fy-ad-score__who">
                       {block.kind === "dialogue" && (on
                         ? <select aria-label="Speaker" value={block.speaker} onChange={(event) => change(block.id, {
-                            speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker(blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : [])) : event.target.value,
+                            speaker: event.target.value === NEW_UNNAMED ? unnamedSpeaker([...blocks.flatMap((candidate) => candidate.kind === "dialogue" ? [candidate.speaker] : []),
+                              ...world.sheets.map((sheet) => sheet.id), ...Object.keys(production.audioDrama?.cast ?? {})]) : event.target.value,
                           })}>
                             {cast.map((sheet) => <option key={sheet.id} value={sheet.id}>{sheet.name}</option>)}
                             {others.map((key) => <option key={key} value={key}>{name(key)}</option>)}
@@ -474,7 +475,7 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                             // How, in parentheses above the words, never part of them (R-13).
                             <span className="fy-ad-score__dirwrap">(<input className="fy-ad-score__direction" aria-label="Direction" placeholder="direction" value={block.direction ?? ""} maxLength={240}
                               // The parentheses are the score's own (issue 1883): typed ones read "((quietly))".
-                              onChange={(event) => change(block.id, { direction: event.target.value.replace(/^\s*\(+/u, "").replace(/\)+\s*$/u, "") || undefined } as Partial<EpisodeScriptBlock>)} />)</span>
+                              onChange={(event) => change(block.id, { direction: directionText(event.target.value) } as Partial<EpisodeScriptBlock>)} />)</span>
                           )}
                           <span className="fy-ad-score__line">
                             <textarea data-words={block.id} aria-label={block.kind === "dialogue" ? `${name(block.speaker)}'s line` : "Narration"}
@@ -663,8 +664,9 @@ function DraftBar({ rows, busy, proposalId, title, onKeep, onDiscard, declined }
       {(unsent || notice) && <span className="fy-ad-draftbar__why" role="alert">{unsent ? "The studio is disconnected." : notice!.detail ?? `Not kept: ${notice!.reason}.`}</span>}
       <span className="gap" />
       <Button size="sm" variant="ghost" onClick={onDiscard}>Discard</Button>
-      <Button size="sm" variant="primary" disabled={busy || (declined.size > 0 && taking === 0)} onClick={() => setUnsent(!onKeep())}>
-        {declined.size > 0 ? `Keep ${taking} of ${choosable}` : "Keep"}
+      {/* A changed title is taken on its own too (codex on PR 1884), with every line change left out. */}
+      <Button size="sm" variant="primary" disabled={busy || (declined.size > 0 && taking === 0 && title === null)} onClick={() => setUnsent(!onKeep())}>
+        {declined.size === 0 ? "Keep" : taking === 0 ? "Keep title" : `Keep ${taking} of ${choosable}`}
       </Button>
     </div>
   );

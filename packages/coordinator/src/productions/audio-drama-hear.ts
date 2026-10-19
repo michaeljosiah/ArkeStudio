@@ -12,7 +12,7 @@ import { speechConsentToken } from "../voice/quote.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
-import { FILLERS, alignWords, annotations, textTokens } from "../audio/heard-match.js";
+import { FILLERS, alignWords, annotations, textTokens, wordsTokens } from "../audio/heard-match.js";
 import { splitLexicon } from "./audiobook-split.js";
 import { oneAtATime } from "./audio-drama.js";
 
@@ -325,16 +325,22 @@ async function heardOtherWords(bytes: Uint8Array, format: string, entry: Planned
  * "The log said two hours."
  */
 export function saysLine(written: string, heard: string, lexicon: ReadonlySet<string>): boolean {
-  const want = textTokens(written);
+  const writtenWords = written.split(/\s+/u).filter((word) => word !== "");
+  const tokensByWord = wordsTokens(writtenWords);
+  const want = tokensByWord.flat();
+  // Near is a name's allowance only where the line writes it as one (codex on PR 1884): with
+  // a character called May, "You may go" heard as "You my go" is a misread.
+  const named = tokensByWord.flatMap((tokens, at) => tokens.map(() => /^[^\p{L}\p{N}]*\p{Lu}/u.test(writtenWords[at]!)));
+  const loose = (at: number) => named[at] === true && lexicon.has(want[at]!);
   const wanted = new Set(want);
   const words = heard.split(/\s+/u).filter((word) => word !== "");
   const notes = annotations(words);
   const got = words.filter((_, at) => !notes[at]).flatMap(textTokens).filter((token) => !FILLERS.has(token) || wanted.has(token));
   if (want.join(" ") === got.join(" ")) return true;
-  const matches = alignWords(want, got, { loose: (at) => lexicon.has(want[at]!) });
+  const matches = alignWords(want, got, { loose });
   let matched = 0, said = 0;
   for (const match of matches) {
-    if (match.similarity < 1 && !want.slice(match.w, match.w + match.wn).some((token) => lexicon.has(token))) return false;
+    if (match.similarity < 1 && !Array.from({ length: match.wn }, (_, k) => match.w + k).some(loose)) return false;
     matched += match.wn;
     said += match.hn;
   }

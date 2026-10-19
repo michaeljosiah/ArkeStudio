@@ -130,6 +130,13 @@ describe("hearing an audio drama's lines (SPEC-057 R-25..R-31)", () => {
     assert.ok(!saysLine("Climb now.", "Climb.", names), "a word left out is another line");
   });
 
+  it("allows a name heard near only where the line writes it as a name (codex on PR 1884)", () => {
+    const names = new Set(["may", "hope"]);
+    assert.ok(saysLine("Ask May, then.", "Ask Mae, then.", names), "May the character, heard near");
+    assert.ok(!saysLine("You may go.", "You my go.", names), "may the word, misheard, is a misread");
+    assert.ok(!saysLine("We hope so.", "We hop so.", names));
+  });
+
   it("places takes: a first keeps itself, one for changed words replaces, a retake or misread waits", () => {
     const take = (textHash: string, extra: object = {}) => ({ artifactId: `art_${textHash}`, file: "artifacts/x.mp3", textHash, voice: NARRATOR, estimatedMicroUsd: 0, madeAt: CLOCK, ...extra }) as never;
     assert.deepEqual(placeTake(undefined, take("a"), false), { kept: take("a") });

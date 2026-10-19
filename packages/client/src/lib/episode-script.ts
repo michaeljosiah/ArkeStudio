@@ -79,7 +79,30 @@ export function speakerLabel(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** The key a new unnamed speaker takes: someone, then someone-2, and so on. */
+/**
+ * A direction as typed, without the parentheses the score draws round it (issue 1883): typed ones
+ * read "((quietly))". Only a pair wrapping the whole direction, or an opener or closer left
+ * unmatched at its ends, is the score's (codex on PR 1884): "quiet (but urgent)" keeps its own.
+ */
+export function directionText(typed: string): string | undefined {
+  const balanced = (text: string) => {
+    let depth = 0;
+    for (const char of text) { if (char === "(") depth += 1; else if (char === ")" && --depth < 0) return false; }
+    return depth === 0;
+  };
+  let text = typed;
+  for (let wrapped = /^\s*\((.*)\)\s*$/su.exec(text); wrapped && balanced(wrapped[1]!); wrapped = /^\s*\((.*)\)\s*$/su.exec(text)) text = wrapped[1]!;
+  const count = (char: string) => [...text].filter((candidate) => candidate === char).length;
+  while (count("(") > count(")") && /^\s*\(/u.test(text)) text = text.replace(/^\s*\(/u, "");
+  while (count(")") > count("(") && /\)\s*$/u.test(text)) text = text.replace(/\)\s*$/u, "");
+  return text || undefined;
+}
+
+/**
+ * The key a new unnamed speaker takes: someone, then someone-2, and so on. Every key already
+ * meaning someone is taken (codex on PR 1884) — a sheet or a cast role as well as a line's
+ * speaker — or the new line would speak as them, in their voice.
+ */
 export function unnamedSpeaker(taken: Iterable<string>): string {
   const used = new Set(taken);
   if (!used.has("someone")) return "someone";
@@ -249,15 +272,27 @@ export const draftRowChoosable = (row: DraftRow): boolean => row.state === "adde
  * removal undone where the line stood, a rewrite kept in its old words — in the draft's order.
  * A bed whose stop was left out runs to its scene's end, and interruptions are mended.
  */
-export function keepDraftRows(rows: readonly DraftRow[], declined: ReadonlySet<string>): EpisodeScriptBlock[] {
+export function keepDraftRows(current: readonly EpisodeScriptBlock[], rows: readonly DraftRow[], declined: ReadonlySet<string>): EpisodeScriptBlock[] {
+  const leave = (row: DraftRow) => draftRowChoosable(row) && declined.has(draftRowKey(row));
   const kept: EpisodeScriptBlock[] = [];
   for (const row of rows) {
-    const leave = draftRowChoosable(row) && declined.has(draftRowKey(row));
-    if (row.state === "added") { if (!leave) kept.push(row.block); }
-    else if (row.state === "removed") { if (leave) kept.push(row.block); }
-    else if (row.state === "changed") kept.push(leave ? row.was : row.block);
+    if (row.state === "removed") continue;
+    if (row.state === "added") { if (!leave(row)) kept.push(row.block); }
+    else if (row.state === "changed") kept.push(leave(row) ? row.was : row.block);
     else kept.push(row.block);
   }
+  // A removal left out goes back after the line it followed (codex on PR 1884): where a draft
+  // also moves lines, its struck row trails them, and [A, B, C] drafted as [C, B] kept A last.
+  const restored = new Set(rows.filter((row) => row.state === "removed" && leave(row)).map((row) => row.block.id));
+  current.forEach((block, i) => {
+    if (!restored.has(block.id)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const before = kept.findIndex((candidate) => candidate.id === current[j]!.id);
+      if (before >= 0) { at = before + 1; break; }
+    }
+    kept.splice(at, 0, block);
+  });
   const ids = new Set(kept.map((block) => block.id));
   return mendRelations(kept.map((block) => {
     if ((block.kind !== "ambience" && block.kind !== "music") || block.until === undefined || ids.has(block.until)) return block;
