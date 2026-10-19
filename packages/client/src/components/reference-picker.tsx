@@ -443,6 +443,8 @@ export function ReferencePickerBody({
           <h2 style={{ margin: 0, font: "650 17px var(--font-sans)", letterSpacing: "-0.01em" }}>
             {title ?? (mode === "slot" ? "Reference image" : "Add a reference")}
           </h2>
+          {/* With a confirm step the foot says what is picked, so what it is for sits under the title (230w). */}
+          {confirm && note && <small style={{ display: "block", marginTop: 3, font: "400 12px var(--font-sans)", color: "var(--muted-foreground)" }}>{note}</small>}
         </div>
         <button
           type="button"

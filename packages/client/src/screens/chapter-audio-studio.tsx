@@ -14,7 +14,7 @@ import type { TimingRowLike } from "./chapter-timing.js";
 export function ChapterAudioStudio({ book, title, rows, timing, selected, onSelect, playhead, onPlayhead,
   timeline, inspector, conversation, proposal, propose, reviewing, playing, pending, canPlay,
   onPlay, onStop, onBack, onExport, exportDisabled, problem, library: suppliedLibrary, audioClock, showInspector = false,
-  backLabel = "Audiobook", views, unit = "Chapter",
+  backLabel = "Audiobook", unit = "Chapter",
 }: {
   book: string; title: string; rows: readonly TimingRowLike[]; timing: ChapterTiming;
   selected: string | null; onSelect: (key: string) => void; playhead: number; onPlayhead: (seconds: number) => void;
@@ -26,8 +26,6 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
   audioClock?: { seconds: number; passages: readonly { key: string; at: number; seconds: number; made: boolean }[] };
   /** Where Back goes, by name: an episode's studio goes back to its script, not to an audiobook (issue 1883). */
   backLabel?: string;
-  /** The views of what is arranged, kept in the head: an episode's Episodes · Script · Audio Studio. */
-  views?: ReactNode;
   /** What is arranged, as the studio names it. */
   unit?: "Chapter" | "Episode";
 }) {
@@ -67,7 +65,6 @@ export function ChapterAudioStudio({ book, title, rows, timing, selected, onSele
       {phone && <header className="fy-cut-back"><button type="button" aria-label={`Back to ${backLabel}`} onClick={onBack}><ChevronLeft size={20} /></button><div><span>{book}</span><b>Audio Studio · {title}</b></div><Button onClick={onExport} disabled={exportDisabled || reviewing}><Download size={16} />Export</Button></header>}
       <header className="fy-cuthead">
         <Button size="sm" variant="ghost" onClick={onBack}><ChevronLeft size={12} />{backLabel}</Button>
-        {views}
         <div className="fy-cuthead__title"><h1>Audio Studio</h1><span className="fy-cuthead__meta">{title} · {formatTimingSeconds(clock.seconds)}</span></div>
         <span className="fy-h1row__push" />
         <Button size="sm" disabled={!canPlay || pending || reviewing} onClick={() => onPlay(0)}><Play size={12} />Listen from top</Button>

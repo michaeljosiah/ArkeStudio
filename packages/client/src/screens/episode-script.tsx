@@ -439,6 +439,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
                   // (issue 1883); its words, a field, or any other row opens the editor.
                   const spokenRow = block.kind === "dialogue" || block.kind === "narration";
                   const inField = (event.target as Partial<HTMLElement> | undefined)?.closest?.("input, textarea, select, button, a") != null;
+                  // Shift only extends the run to hear, wherever on the line it lands.
+                  if (event.shiftKey && spokenRow) { if (selected !== null) setSelected(null); pick(block.id, true); return; }
                   if (!spokenRow || inField) setSelected(block.id); else if (selected !== null && selected !== block.id) setSelected(null);
                   pick(block.id, event.shiftKey);
                 }}>
@@ -712,6 +714,8 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const stored = production.episodeScripts?.find((entry) => entry.script.episode === episode) ?? null;
   const takes = production.episodeTakes?.find((entry) => entry.episode === episode);
   const [passage, setPassage] = useState<string | null>(null);
+  const phone = useMediaQuery("(max-width: 599px)");
+  const episodes = Math.max(production.audioDrama?.plan.episodes ?? 1, episode);
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
@@ -738,21 +742,30 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   });
   if (!stored) return <Screen id="episode-script"><EmptyState title="This episode has no script yet." /></Screen>;
   return (
+    // The episode's own bar above its studio (230o, issue 1883): the views stay where the script has them.
+    <div className="fy-ad-ep fy-ad-ep--studio" data-screen="episode-audio-studio">
+      {!phone && (
+        <header className="fy-ad-ep__bar">
+          <IconButton label="Previous episode" disabled={episode <= 1} onClick={() => navigate(`${base}/script/${episode - 1}?view=audio-studio`)}><ChevronLeft size={16} /></IconButton>
+          <IconButton label="Next episode" disabled={episode >= episodes} onClick={() => navigate(`${base}/script/${episode + 1}?view=audio-studio`)}><ChevronRight size={16} /></IconButton>
+          <nav className="fy-ad-ep__views" aria-label="Episode views">
+            <button type="button" onClick={() => navigate(base)}>Episodes</button>
+            <button type="button" onClick={() => navigate(`${base}/script/${episode}`)}>Script</button>
+            <button type="button" aria-current="page">Audio Studio</button>
+          </nav>
+          <span className="fy-ad-ep__title"><span>Episode {episode}</span>{stored.script.title && <b>{stored.script.title}</b>}</span>
+        </header>
+      )}
+      <div className="fy-ad-ep__studio">
     <AudioStudioWorkspace worldId={world.meta.worldId} productionId={production.meta.id} chapterId={stem} chapterFile={stem} slug={world.meta.slug}
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
       connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
       passage={passage} onPassage={setPassage} conversation={null} propose={null}
       onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode"
-      views={(
-        // The episode's views stay in the head (issue 1883), as they are over its script.
-        <nav className="fy-ad-ep__views" aria-label="Episode views">
-          <button type="button" onClick={() => navigate(base)}>Episodes</button>
-          <button type="button" onClick={() => navigate(`${base}/script/${episode}`)}>Script</button>
-          <button type="button" aria-current="page">Audio Studio</button>
-        </nav>
-      )}
       onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />
+      </div>
+    </div>
   );
 }
 
