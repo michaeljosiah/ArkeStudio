@@ -19,8 +19,21 @@ export function scenePlatePath(plate: ScenePlate, artifacts: readonly { id: stri
 }
 
 /** The plate's own words in a brief: "the lobby". */
-export function scenePlateName(plate: ScenePlate): string {
+export function scenePlateName(plate: Pick<ScenePlate, "label">): string {
   return `the ${plate.label.charAt(0).toLowerCase()}${plate.label.slice(1)}`;
+}
+
+/** The plate's Bench tile, "Lobby · plate". */
+export function stagePlateTileLabel(plate: Pick<ScenePlate, "label">): string {
+  return `${plate.label} · plate`;
+}
+
+/**
+ * The plate's words read back from its tile, for a brief rewritten where the scene is not to hand:
+ * a model switch re-cited cast and the blockout but dropped the plate that still rode (issue 1865).
+ */
+export function stagePlateTileName(tileLabel: string): string {
+  return scenePlateName({ label: tileLabel.replace(/ · plate$/, "") });
 }
 
 /**

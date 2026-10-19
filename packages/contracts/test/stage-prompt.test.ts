@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   STAGE_FRAMED_HEIGHT,
+  STAGE_PLATE_DETAIL,
+  scenePlateName,
+  stagePlateTileLabel,
+  stagePlateTileName,
   stageBriefForRouting,
   stageBriefWithFollow,
   stageRoutingCitations,
@@ -80,6 +84,15 @@ describe("the blockout written for a video model (issue 1817)", () => {
     assert.equal(stageBriefForRouting(onVideo, { ...all, follow: "camera" }), onVideo, "a route that changes nothing changes nothing");
     const authored = "Make it moody. Use @Video 1 for the camera.";
     assert.equal(stageBriefForRouting(authored, { ...pictures, follow: "camera" }), authored, "a brief without the Stage's lines is the author's");
+  });
+
+  it("keeps citing the plate after a model switch, as the prefill cites it (issue 1865)", () => {
+    const references = [
+      { token: "Image 1", kind: "image" as const, label: stagePlateTileLabel({ label: "Lobby" }), detail: STAGE_PLATE_DETAIL, ride: "when-supported" as const },
+      { token: "Image 2", kind: "image" as const, sheetId: "ade", label: "Ade", detail: "Ade", ride: "when-supported" as const },
+    ] as unknown as Parameters<typeof stageRoutingCitations>[0];
+    assert.deepEqual(stageRoutingCitations(references, ["Image 1", "Image 2"], nameOf).cited, ["@Image 1 the lobby", "@Image 2 Ade"]);
+    assert.equal(stagePlateTileName(stagePlateTileLabel({ label: "Lobby" })), scenePlateName({ label: "Lobby" }), "the tile reads back as the scene names it");
   });
 
   it("puts a shot's lines on a board's clock", () => {

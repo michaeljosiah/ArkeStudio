@@ -17,6 +17,7 @@ import { parseAspect } from "./manifest.js";
 import type { StagePose, StagingFigure } from "./scene.js";
 import { stagePoseHeight, stagePoseVerb, stageTurnWarnings } from "./stage-pose.js";
 import type { BenchReferenceToken } from "./bench.js";
+import { STAGE_PLATE_DETAIL, stagePlateTileName } from "./stage-plate.js";
 
 /**
  * The blockout as a video model reads it: shot size, side and angle in a camera operator's
@@ -287,8 +288,8 @@ const TIMED_LINE = /^\d+\.\d–\d+\.\d s · /m;
 
 /**
  * What a staged subject's brief cites on the route its references ride now (issue 1817): the
- * riding pictures of cast and the blockout video, in the subject's reference order, worded as the
- * prefill words them, and the video's label when it rides.
+ * riding plate, pictures of cast and the blockout video, in the subject's reference order, worded
+ * as the prefill words them, and the video's label when it rides.
  */
 export function stageRoutingCitations(
   references: readonly BenchReferenceToken[],
@@ -297,8 +298,8 @@ export function stageRoutingCitations(
 ): { cited: string[]; video: string | null } {
   const rides = new Set(riding);
   const cited = references
-    .filter((entry) => rides.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video"))
-    .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : nameOf(entry.sheetId!)}`);
+    .filter((entry) => rides.has(entry.token) && (entry.sheetId !== undefined || entry.kind === "video" || (entry.detail === STAGE_PLATE_DETAIL && entry.label !== undefined)))
+    .map((entry) => `@${entry.token} ${entry.kind === "video" ? "the blockout" : entry.sheetId === undefined ? stagePlateTileName(entry.label!) : nameOf(entry.sheetId)}`);
   const video = references.find((entry) => entry.kind === "video" && rides.has(entry.token))?.token ?? null;
   return { cited, video };
 }

@@ -355,6 +355,8 @@ export class StageViewport {
   private readonly overlay: HTMLDivElement;
   private readonly pip: HTMLDivElement;
   private readonly pipCaption: HTMLSpanElement;
+  /** The focal length the lens is drawn at now, when a key sets one; null leaves the shot's lens. */
+  private focalNow: number | null = null;
   private readonly gizmo: { scene: Scene; camera: OrthographicCamera; renderer: WebGLRenderer; knobs: Mesh[] };
   private readonly resize: ResizeObserver | null;
   private labels: Array<{ element: HTMLDivElement; object: Object3D; up: number }> = [];
@@ -1352,6 +1354,7 @@ export class StageViewport {
       this.cam.rig.rotateZ(motion.rotation[2] + stageCameraScalar(this.data.keys, this.data.keys.map(key => key.roll ?? 0), at) * Math.PI / 180);
       const defaultFocal = stagingFocalForFov(this.data.fov,this.data.aspect);
       const focal = span.a.focalMm === undefined && span.b.focalMm === undefined ? null : stageCameraScalar(this.data.keys, this.data.keys.map(key => key.focalMm ?? defaultFocal), at);
+      this.focalNow = focal;
       this.shot.fov = focal === null ? this.data.fov : stagingFov(`${focal}mm`, `${this.data.aspect}:1`);
       this.shot.updateProjectionMatrix();
       segment(this.cam.stem, new Vector3(position.x, 0, position.z), position);
@@ -1498,7 +1501,9 @@ export class StageViewport {
       this.pip.style.top = `${(canvasHeight - y - box.h) / ratio}px`;
       this.pip.style.width = `${box.w / ratio}px`;
       this.pip.style.height = `${box.h / ratio}px`;
-      this.pipCaption.textContent = data.board?.caption ?? `camera · ${data.lensLabel}`;
+      // The caption names the lens the picture is drawn through (issue 1865 §7): a key's own focal
+      // length rode the picture while the caption read the shot's lens field, "lens unset".
+      this.pipCaption.textContent = data.board?.caption ?? `camera · ${this.focalNow === null ? data.lensLabel : `${Math.round(this.focalNow)} mm`}`;
     }
     this.drawLabels(lens);
     this.gizmo.camera.position.copy(this.view.position).sub(this.controls.target).normalize().multiplyScalar(4);
