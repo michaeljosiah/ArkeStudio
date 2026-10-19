@@ -1,6 +1,6 @@
 # AI tells in the chapter review · turn 232
 
-Status: **revision 1, drawn 19 October 2026 for the owner's review.** Nothing is built.
+Status: **revision 2, drawn 19 October 2026 for the owner's review.** Nothing is built.
 
 - Issues: #1744 (prose findings) and #1782 (evidence-based chapter review).
 - Extends turn 227's review notes (227r) and the chapter review now shipped.
@@ -11,9 +11,16 @@ Status: **revision 1, drawn 19 October 2026 for the owner's review.** Nothing is
 
 1. **One chapter at a time.** #1744's whole-book Prose view and cross-chapter habits are not in
    this turn.
-2. **An AI tells note has no Fix.** The 227r note offers Fix, meaning Arke proposes a rewrite in
-   the page. Here it would hand an AI tell back to an AI, which tends to trade one tell for
-   another. The writer rewrites; the note offers Intentional, Dismiss and What counts.
+2. **Rewrite with Arke, checked before it is shown.** Revision 1 left the note without a
+   rewrite: an AI rewrite of an AI tell tends to trade one tell for another. The owner then asked
+   for the option. Revision 2 adds it with that risk designed in:
+   - the AI tells check reads Arke's words before the writer sees them
+   - the result shows as before → after counts
+   - any tell Arke added is underlined
+   - a rewrite still over the line says so
+
+   The note's actions are Rewrite, Intentional and Dismiss, at the same weight; What counts moves
+   to its head.
 3. **The line is provisional.** It is set at 8 for drawing. Before release it is calibrated
    against chapters the author wrote unaided (see below).
 
@@ -51,6 +58,46 @@ source's numbers. It is also about a page, the span in which a reader forms an i
 **Why a kind line.** The source's word for the tell is *stacking*: the same device again and
 again. In the thriller sample that was eight metaphors in 451 words. Four of one kind in a
 stretch catches that even when the total stays under 8.
+
+## Rewrite with Arke (revision 2)
+
+**What Arke is asked.** Arke receives:
+
+- the saved passage (the whole crowded stretch)
+- its tagged tells, each a kind and a quotation
+- the kind chosen, if the writer chose one
+- the story's prose style (`prose-style.json`: point of view, tense, voice and samples)
+
+The brief:
+
+- Remove or plainly restate the tagged devices.
+- Keep the events and their order, point of view, tense and every linked name.
+- Leave dialogue word for word.
+- Add no new figures, triads, lists, contrasts or summed-up feelings.
+- Add no information the passage did not have.
+
+**What the writer sees, in order:**
+
+1. Rewriting the passage, then Checking Arke's words, with Stop (232l).
+2. The rewrite waiting as tracked edits, with AI tells 14 → 4 in the held bar and before → after
+   per kind in the note (232m).
+3. Or, when it is still over the line, an amber Still crowded with Refuse all, Try again and
+   Accept, none of them primary (232n).
+
+**Rules that keep the counts honest:**
+
+| Case | What happens |
+|---|---|
+| Accept every edit | Exactly the checked words are kept, so the note becomes Cleared at once with no further model call (232o). |
+| Accept some edits | Words nobody has checked are kept, so the note becomes Changed with Check again. |
+| The check fails | The rewrite still shows, marked Not checked, and is never shown as cleared. |
+| A tell Arke added | Underlined in its proposed words even under the line. "New" is decided mechanically: a tell whose quotation falls inside inserted text. |
+| Try again | Another version, up to three as in turn 227. Each version is two model calls. |
+| Passage changed since the check | Rewrite waits for Check again; it never runs against a stale count. |
+
+**Provenance.** A kept rewrite saves a version labelled *Arke rewrite*, so Compare versions
+(227f) shows Arke's words against the writer's. That answers the question the source says a
+copyright examiner may ask, which sentences are the author's, without a new record.
 
 ## Calibration, before release
 
@@ -90,7 +137,12 @@ Until the line is calibrated, every screen that shows it also shows its number.
 | 232g | Checked again: under the line, the note is Cleared (5 in 450 words, was 14), and the strip's bar drops |
 | 232h | The report read whole: checks down the left; AI tells with the chapter's figures, the strip large, By kind, and the crowded passages as Cleared, Open and Kept |
 | 232i | A chapter with its tells spread out: the strip under the line, AI tells · None crowded, and the prose unmarked even where single tells sit |
-| 232j | Phone: the bar at the page edge, and the note as a half sheet with the strip |
+| 232j | Phone: the bar at the page edge, and the note as a half sheet with the strip and Rewrite |
+| 232k | Rewrite: the whole passage from the note, or only the chosen kind (Rewrite only these 5) |
+| 232l | Rewriting, then checking Arke's words, with Stop. Nothing changes yet. |
+| 232m | The rewrite waiting as tracked edits: 8 edits, AI tells 14 → 4, before → after per kind, its one new tell underlined |
+| 232n | Still crowded: 14 → 9, with Arke's five new tells underlined. Refuse all, Try again and Accept, none primary. |
+| 232o | Kept: Cleared (4 in 450 words, was 14, rewritten with Arke), saved as v5 · Arke rewrite |
 
 The prose in the drawings is written for them and deliberately crowded. It is not the book's.
 
@@ -108,6 +160,10 @@ The prose in the drawings is written for them and deliberately crowded. It is no
 - A per-passage Check again, which re-reads only that stretch: one small model call that never
   runs on its own.
 - The strip, the gutter bar, the underlines, the note and the report section in the client.
+- The rewrite brief, and a passage revision that spans several paragraphs. Today's passage path
+  stops at one paragraph and 1,200 characters; a crowded passage is about 450 words.
+- Checking the proposed words before the proposal is shown, and marking tells that fall inside
+  inserted text as new.
 
 **Reused:**
 
@@ -117,6 +173,7 @@ The prose in the drawings is written for them and deliberately crowded. It is no
 - staleness on changed prose
 - the Intentional and Dismiss decisions with their notes
 - the 60,000-character source budget
+- the proposal path for tracked edits, versions of an edit, and Compare versions
 
 **Kept apart on purpose.** The script reviewer's skill says to prefer a few important findings
 to stylistic policing. That is right for continuity and the opposite of what a density count
