@@ -31,7 +31,7 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
 export type RemoteTrace = (kind: string, detail: Record<string, unknown>) => void;
 const setCookie = (name: string, value: string, seconds: number) =>
   `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${seconds}`;
-const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
+const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml",
   ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2", ".mp4": "video/mp4", ".ico": "image/x-icon" };
 

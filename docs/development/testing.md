@@ -1,5 +1,34 @@
 # Running and validating changes
 
+Story PDF publishing (SPEC-058) uses contracts `test/story-publication.test.ts`, coordinator
+`test/publications/story-pdf.test.ts`, `test/publications/story.test.ts`, `test/publications/story-routes.test.ts` and
+`test/story-pdf-runner.test.ts`, client `test/story-pdf.test.tsx`, `test/manuscript.test.tsx`
+and `test/chapter-workspace.test.tsx`, plus desktop `test/story-publication-file.test.ts`.
+Run these with `node --import tsx --test` from their respective workspace directories.
+After `npm run build`, run `node apps/desktop/scripts/smoke-story-pdf.mjs`: it copies the built
+worker/fonts outside the checkout and creates a real Unicode PDF without resolving development
+dependencies from the repository. Run desktop `npm run smoke:main --workspace @arke-studio/desktop`
+and `npm run verify:licenses --workspace @arke-studio/desktop` for packaging/asset changes.
+The focused cases cover exact preview/create bytes, old formats, damage/Locate, cancellation,
+timeout, captured-input retry and font/navigation/text fidelity. Actual browser worker/text-layer
+rendering and every-page visual inspection of a long book are separate acceptance evidence;
+passing extraction or mocked UI tests does not establish them. Keep private manuscripts and
+their generated pages out of committed fixtures.
+
+PR #1886 review regressions also exercise running-header fallback glyphs, nonbreaking-space
+ToUnicode mappings, exact chapter destination coordinates, three-line paragraphs with scene
+breaks, and draining phase writes on cancellation/timeout/worker failure. Coordinator
+`test/remote-access.test.ts` checks the actual gateway's `.mjs` GET/HEAD MIME and nosniff headers,
+so the preview fixture's own static server cannot conceal an unsupported module-worker response.
+
+From `packages/client`, run `node --import tsx test/story-pdf-preview-smoke.mts` for the real
+Chrome preview, then repeat with `--electron` for a sandboxed Electron file page. These use
+synthetic Unicode content, the production content-security policy and the bundled PDF worker
+at 1100, 390 and 320 px. They check authenticated loading, selectable text, keyboard navigation,
+zoom and rapid page changes. The harness prints its evidence directory; Electron captures the
+rendered page canvas, while Chrome captures the full preview controls. Neither attaches to the
+installed app or opens a private world.
+
 Shared media evidence: from `packages/coordinator`, run
 `node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/world-chat/media-inspection.test.ts`.
 The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`

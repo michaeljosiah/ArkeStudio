@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { storyPublicationFileFilter } from "./story-publication-file.js";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
@@ -423,10 +424,12 @@ function registerHostIpc(): void {
     if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !coordinator ||
         !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
         typeof input.editionId !== "string" || typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
     const hit = await coordinator.storyPublicationFile(input.editionId, input.file);
     if (!hit || parent !== window || shuttingDown) return { ok: false };
     const chosen = await dialog.showSaveDialog(parent, { title: "Save edition", defaultPath: join(app.getPath("downloads"), hit.downloadName),
-      filters: [{ name: input.file.endsWith(".epub") ? "EPUB book" : "M4B audiobook", extensions: [input.file.endsWith(".epub") ? "epub" : "m4b"] }],
+      filters: [filter],
       properties: ["createDirectory", "showOverwriteConfirmation"] });
     if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true };
     const current = await coordinator?.storyPublicationFile(input.editionId, input.file);
@@ -438,9 +441,11 @@ function registerHostIpc(): void {
     if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !host ||
         !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
         typeof input.editionId !== "string" || !/^[a-f0-9-]{36}$/.test(input.editionId) ||
-        (input.file !== "story.epub" && input.file !== "story.m4b")) return { ok: false };
+        typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
     const chosen = await dialog.showOpenDialog(parent, { title: "Locate the same edition file", properties: ["openFile"],
-      filters: [{ name: "Edition file", extensions: [input.file === "story.epub" ? "epub" : "m4b"] }] });
+      filters: [filter] });
     if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true };
     if (parent !== window || host !== coordinator || shuttingDown) return { ok: false };
     try { await host.restoreStoryPublicationFile(input.editionId, input.file, chosen.filePaths[0]); return { ok: true }; }
