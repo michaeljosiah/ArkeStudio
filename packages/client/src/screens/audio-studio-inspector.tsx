@@ -5,20 +5,22 @@ import { Button, Input, Select } from "../components/ui.js";
 function NumberField({ label, value, onChange, min, max, step = 0.001 }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number }) {
   return <label className="fy-audio-inspector__field"><span>{label}</span><Input aria-label={label} type="number" value={Number(value.toFixed(6))} min={min} max={max} step={step} onChange={event => { if (Number.isFinite(event.target.valueAsNumber)) onChange(event.target.valueAsNumber); }} /></label>;
 }
-export function AudioStudioInspector({ snapshot, selected, trackId, disabled, onEdit, onReplace }: {
+export function AudioStudioInspector({ snapshot, selected, trackId, disabled, onEdit, onReplace, unit = "Chapter" }: {
   snapshot: AudioStudioSnapshot; selected: string | null; trackId: string | null; disabled: boolean;
   onEdit: (label: string, commands: AudioArrangementCommand[], base?: string) => void; onReplace: () => void;
+  /** What the mix is of (issue 1883): an episode's inspector said "Chapter mix". */
+  unit?: "Chapter" | "Episode";
 }) {
   const clip = snapshot.state.clips.find(entry => entry.id === selected);
   const track = snapshot.state.tracks.find(entry => entry.id === (trackId ?? clip?.trackId));
   if (clip) return <ClipInspector key={clip.id} clip={clip} snapshot={snapshot} disabled={disabled} onEdit={onEdit} onReplace={onReplace} />;
   return <div className="fy-audio-inspector">
-    <header><b>{track?.name ?? "Chapter mix"}</b></header>
+    <header><b>{track?.name ?? `${unit} mix`}</b></header>
     {track && <form key={`${track.id}/${snapshot.base}`} onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); onEdit("Update track", [{ kind: "set-track", id: track.id, changes: { name: String(data.get("name")), gainDb: Number(data.get("gain")) } }]); }}>
       <fieldset disabled={disabled}><label className="fy-audio-inspector__field"><span>Track name</span><Input name="name" defaultValue={track.name} maxLength={120} required /></label><label className="fy-audio-inspector__field"><span>Track level (dB)</span><Input name="gain" type="number" min={-96} max={24} step={0.1} defaultValue={track.gainDb} /></label><Button type="submit">Apply track</Button><Button type="button" variant="ghost" disabled={snapshot.state.clips.some(entry => entry.trackId === track.id)} onClick={() => onEdit("Remove track", [{ kind: "remove-track", id: track.id }])}>Remove empty track</Button></fieldset>
     </form>}
-    <form key={`master/${snapshot.base}`} onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); onEdit("Set chapter master", [{ kind: "set-master", master: { targetLufs: Number(data.get("lufs")), ceilingDb: Number(data.get("ceiling")) } }]); }}>
-      <fieldset disabled={disabled}><legend>Chapter master</legend><p>Applied once to the complete stereo mix.</p><label className="fy-audio-inspector__field"><span>Target loudness (LUFS)</span><Input name="lufs" type="number" min={-30} max={-10} step={0.1} defaultValue={snapshot.state.master.targetLufs} /></label><label className="fy-audio-inspector__field"><span>Sample ceiling (dBFS)</span><Input name="ceiling" type="number" min={-6} max={-0.1} step={0.1} defaultValue={snapshot.state.master.ceilingDb} /></label><Button type="submit">Apply master</Button></fieldset>
+    <form key={`master/${snapshot.base}`} onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); onEdit(`Set ${unit.toLowerCase()} master`, [{ kind: "set-master", master: { targetLufs: Number(data.get("lufs")), ceilingDb: Number(data.get("ceiling")) } }]); }}>
+      <fieldset disabled={disabled}><legend>{unit} master</legend><p>Applied once to the complete stereo mix.</p><label className="fy-audio-inspector__field"><span>Target loudness (LUFS)</span><Input name="lufs" type="number" min={-30} max={-10} step={0.1} defaultValue={snapshot.state.master.targetLufs} /></label><label className="fy-audio-inspector__field"><span>Sample ceiling (dBFS)</span><Input name="ceiling" type="number" min={-6} max={-0.1} step={0.1} defaultValue={snapshot.state.master.ceilingDb} /></label><Button type="submit">Apply master</Button></fieldset>
     </form>
   </div>;
 }

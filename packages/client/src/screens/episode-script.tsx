@@ -686,7 +686,15 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
       connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
       passage={passage} onPassage={setPassage} conversation={null} propose={null}
-      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem}
+      onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode"
+      views={(
+        // The episode's views stay in the head (issue 1883), as they are over its script.
+        <nav className="fy-ad-ep__views" aria-label="Episode views">
+          <button type="button" onClick={() => navigate(base)}>Episodes</button>
+          <button type="button" onClick={() => navigate(`${base}/script/${episode}`)}>Script</button>
+          <button type="button" aria-current="page">Audio Studio</button>
+        </nav>
+      )}
       onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />
   );

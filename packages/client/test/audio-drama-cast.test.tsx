@@ -223,6 +223,11 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     const read = sent.find((message) => message.kind === "read-audio-studio") as { chapterFile: string } | undefined;
     assert.equal(read?.chapterFile, "episode-001", "one arrangement an episode, on the same studio");
     assert.equal(container.querySelector("textarea[data-words]"), null, "the score is not drawn under it");
+    // Its own words (issue 1883): back to the script, the episode's views in the head, an episode's mix.
+    const head = container.querySelector(".fy-cuthead")!;
+    assert.match(head.textContent!, /^Script/, "Back names the script, not Audiobook");
+    assert.ok(head.querySelector("nav[aria-label='Episode views'] [aria-current='page']")?.textContent === "Audio Studio");
+    assert.ok(container.querySelector("section[aria-label='Episode script']"));
   });
 });
 

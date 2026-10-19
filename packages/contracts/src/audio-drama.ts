@@ -359,6 +359,19 @@ export function dramaTakeState(
   return line.kept.standIn ? "stand-in" : "kept";
 }
 
+/**
+ * Whether a kept take plays in the episode's mix: while it is in the role's voice now. An edited
+ * line's take keeps playing until it is retaken (R-36), marked out of date in the score; a take in
+ * another voice does not (R-60, codex on PR 1879). The studio left both out (issue 1883).
+ */
+export function dramaTakePlays(
+  block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>,
+  kept: DramaTake,
+  voice?: { provider: string; voiceId: string; model?: string | undefined },
+): boolean {
+  return dramaTakeState(block, { kept: { ...kept, textHash: dramaLineHash(block) } }, voice) !== "out of date";
+}
+
 /** What the author decides for a speaker with no voice (R-28): nothing is substituted unasked. */
 export const MissingVoiceChoiceSchema = z.enum(["narrator", "leave-out"]);
 export type MissingVoiceChoice = z.infer<typeof MissingVoiceChoiceSchema>;

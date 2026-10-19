@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaTakeState,
+  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaTakePlays,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
@@ -103,6 +103,8 @@ interface Subject {
   record: StudioRecord | null;
   passages: Array<{ key: string; text: string }>;
   derive: (options: Options) => Promise<AudioArrangementState>;
+  /** What the last derive could not place, by file: named in the snapshot rather than dropped unsaid. */
+  unplaced?: Map<string, string>;
   /** The record changed in one write; a chapter answers with its audiobook record. */
   update: (change: (current: StudioRecord & Record<string, unknown>) => Promise<(StudioRecord & Record<string, unknown>) | null>, beforeWrite?: () => Promise<void>) => Promise<ChapterAudiobook | null>;
   /** The base the subject would have with this record. */
@@ -150,27 +152,34 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
     const artifact = bundle.artifacts.find((candidate) => candidate.id === artifactId);
     return artifact ? `artifacts/${artifact.file}` : undefined;
   };
+  const unplaced = new Map<string, string>();
   return {
+    unplaced,
     script, base: baseWith(record), record,
     passages: entry.script.blocks.flatMap((block) => block.kind === "dialogue" || block.kind === "narration"
       ? [{ key: block.id, text: `${block.kind === "dialogue" ? name(block.speaker) : "Narrator"}: ${block.words}` }] : []),
     derive: async (options) => {
-      const files = new Set<string>();
+      const files = new Map<string, string>();
       for (const block of entry.script.blocks) {
         if (block.kind === "dialogue" || block.kind === "narration") {
           const kept = takes?.lines[block.id]?.kept;
-          const usable = kept ? dramaTakeState(block, { kept }, voice(block)) : "none";
-          if (kept && (usable === "kept" || usable === "stand-in")) files.add(kept.file);
+          // An edited line keeps playing until it is retaken (R-36); a recast one does not.
+          if (kept && dramaTakePlays(block, kept, voice(block))) files.set(kept.file, block.words);
         } else if ((block.kind === "sound" || block.kind === "ambience" || block.kind === "music") && block.soundArtifact) {
           const file = soundFile(block.soundArtifact);
-          if (file) files.add(file);
+          if (file) files.set(file, block.heard);
         }
       }
       const sources = new Map<string, AudioSource>();
-      // One clip that will not decode leaves its place empty, not the episode shut (codex on PR 1879):
-      // the snapshot names it as unavailable, and the rest is there to repair it around.
-      for (const file of files) {
-        const source = await audioStudioSource(store, productionId, file, options).catch(() => null);
+      // One clip that will not decode leaves its place empty, not the episode shut (codex on PR 1879),
+      // and is named as unavailable (issue 1883): a placed sound in a format this machine cannot
+      // read was simply missing from the timeline, and nothing said why.
+      unplaced.clear();
+      for (const [file, label] of files) {
+        const source = await audioStudioSource(store, productionId, file, options).catch((error: unknown) => {
+          unplaced.set(file, `${label.slice(0, 80)}: ${error instanceof Error ? error.message : "it could not be read"}`);
+          return null;
+        });
         if (source) sources.set(file, source);
       }
       return deriveEpisodeArrangement(script, entry.script.blocks, takes, soundFile, sources, name, voice);
@@ -196,6 +205,7 @@ export async function openAudioStudio(store: WorldStore, productionId: string, c
   const saved = subject.record?.arrangement;
   const state = saved ? validateAudioArrangement(saved.current) : await subject.derive(options);
   return { base: subject.base, saved: saved ?? null, state, script: subject.script,
+    unplaced: saved ? new Map<string, string>() : subject.unplaced ?? new Map<string, string>(),
     proposals: subject.record?.audioStudioProposals ?? [],
     passages: subject.passages,
     resolved: resolveAudioArrangement(state, subject.script) };
@@ -209,7 +219,7 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
   }));
   return { base: opened.base, revision: opened.saved?.revision ?? 0, undo: opened.saved?.undo.at(-1)?.label ?? null,
     redo: opened.saved?.redo.at(-1)?.label ?? null, state: opened.state, script: { hash: opened.script.hash, passages: [...opened.script.passages] }, passages: opened.passages, library, proposals: opened.proposals,
-    unavailable: [...await audioStudioSourceProblems(store, productionId, opened.state, true)].map(([file, message]) => ({ file, message })) };
+    unavailable: [...new Map([...opened.unplaced, ...await audioStudioSourceProblems(store, productionId, opened.state, true)])].map(([file, message]) => ({ file, message })) };
 }
 
 async function validateEditSources(store: WorldStore, productionId: string, script: AudioScript, edit: AudioArrangementEdit, options: Options): Promise<Map<string, AudioSource>> {

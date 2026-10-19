@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, ulid, type EpisodeScriptBlock, type Job } from "@arke-studio/contracts";
 import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { createProduction } from "../../src/productions/ops.js";
 import { saveEpisodeScript, setDramaRole } from "../../src/productions/audio-drama.js";
 import { hearDramaLines, type DramaHearDeps } from "../../src/productions/audio-drama-hear.js";
-import { editAudioStudio, openAudioStudio } from "../../src/productions/audio-studio.js";
+import { audioStudioSnapshot, editAudioStudio, openAudioStudio } from "../../src/productions/audio-studio.js";
 import { importAudioStudioMedia } from "../../src/productions/audio-studio-import.js";
 import { DRAMA_MIX_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -169,5 +169,40 @@ describe("codex round 2 on PR 1880", () => {
     const credits = await readFile((await editions.serve(edition.id, "credits.txt"))!.path, "utf8");
     assert.match(credits, /gull\.wav — recorded or uploaded/);
     assert.doesNotMatch(credits, /Bell/, "a sound not heard is not credited");
+  });
+});
+
+describe("issue 1883: the episode's studio", () => {
+  it("keeps an edited line's take playing until it is retaken (R-36), and leaves a recast one out", async () => {
+    const a: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Same ink." };
+    const b: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "bray", words: "Both columns." };
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The counting house" }, a, b]);
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash,
+      blocks: entry.script.blocks.map((block) => block.id === a.id ? { ...block, words: "Same ink, both columns." } as EpisodeScriptBlock : block) });
+    const edited = await openAudioStudio(store, id, "episode-001");
+    assert.ok(edited.state.clips.some((clip) => clip.id === `line:${a.id}`), "the edited line's take still plays");
+    await setDramaRole(store, id, "bray", { voice: { ...BREEZE, voiceId: "breeze-b", label: "Breeze B" } });
+    const recast = await openAudioStudio(store, id, "episode-001");
+    assert.equal(recast.state.clips.some((clip) => clip.id === `line:${b.id}`), false, "a take in another voice does not");
+  });
+
+  it("names a placed sound it cannot read, rather than leaving it off the timeline unsaid", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren-kest", words: "Listen." };
+    let cue = "";
+    const { store, id } = await episode(() => [{ id: ulid(), kind: "heading", place: "The quay" }, line]);
+    await writeFile(join(store.dir, ".staging/sound/bells.wav"), second(0.5));
+    const bells = await fileGeneratedArtifact(store, { sourcePath: join(store.dir, ".staging/sound/bells.wav"), production: id, generation: {
+      source: "sound", productionId: id, name: "Harbour bells", cue: "sound", heard: "Harbour bells.", prompt: "Harbour bells.", provider: "elevenlabs",
+      model: "eleven_text_to_sound_v2", outputFormat: "mp3_44100_128", estimatedMicroUsd: 0, costMicroUsd: null } as never });
+    // Filed, then gone from this machine: the cue's sound cannot be read.
+    await rm(join(store.dir, "artifacts", bells.file));
+    const entry = store.getBundle().productions.find((p) => p.meta.id === id)!.episodeScripts![0]!;
+    cue = ulid();
+    await saveEpisodeScript(store, id, { episode: 1, title: "", baseHash: entry.hash,
+      blocks: [...entry.script.blocks, { id: cue, kind: "sound", heard: "Harbour bells.", soundArtifact: bells.id }] });
+    const snapshot = await audioStudioSnapshot(store, id, "episode-001");
+    assert.equal(snapshot.state.clips.some((clip) => clip.id === `sound:${cue}`), false);
+    assert.match(snapshot.unavailable?.map((entry) => entry.message).join(" ") ?? "", /^Harbour bells\.: /, "the cue is named, with why");
   });
 });

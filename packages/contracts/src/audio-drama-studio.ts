@@ -2,7 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { AudioArrangementSchema, AudioStudioProposalSchema, type AudioArrangementState, type AudioArrangementTrack, type AudioSource } from "./audio-arrangement-schema.js";
 import { audioPassageId, audioSamples, newAudioClip, validateAudioArrangement, type AudioScript } from "./audio-arrangement.js";
-import { DRAMA_NARRATOR, dramaLineHash, dramaTakeState, type EpisodeScriptBlock, type EpisodeTakes } from "./audio-drama.js";
+import { DRAMA_NARRATOR, dramaLineHash, dramaTakePlays, type EpisodeScriptBlock, type EpisodeTakes } from "./audio-drama.js";
 
 /**
  * An audio drama episode in Audio Studio (SPEC-057 R-67..R-70, design turn 230o): one arrangement
@@ -43,7 +43,8 @@ type Cue = { at: number } | { passageId: string; edge: "end"; offset: number };
  * - a line that cuts in starts under the one it breaks: a sequence placement with a negative offset;
  * - a sound is anchored where it sits, and the next line waits for it;
  * - an ambience loops from its cue to its `until` or its scene's end; music plays from its cue.
- * A line with no current kept take has no clip, and Audio Studio says so.
+ * A line with no kept take in the role's voice now has no clip, and Audio Studio says so; one whose
+ * words were edited since keeps its take until it is retaken (R-36).
  */
 export function deriveEpisodeArrangement(
   script: AudioScript,
@@ -52,7 +53,7 @@ export function deriveEpisodeArrangement(
   soundFile: (artifactId: string) => string | undefined,
   sources: ReadonlyMap<string, AudioSource>,
   name: (speaker: string) => string,
-  /** The role's voice now (codex on PR 1879): a take in another voice is out of date, and left out. */
+  /** The role's voice now (codex on PR 1879): a take in another voice is left out; one for older words plays (R-36). */
   voice: (block: Spoken) => Voice | undefined = () => undefined,
 ): AudioArrangementState {
   const passages = script.passages.map((passage) => ({ ...passage, id: audioPassageId(passage.key, passage.textHash) }));
@@ -97,8 +98,7 @@ export function deriveEpisodeArrangement(
     if (!spoken(block)) return;
     begun = true;
     const kept = takes?.lines[block.id]?.kept;
-    const usable = kept ? dramaTakeState(block, { kept }, voice(block)) : "none";
-    const source = kept && (usable === "kept" || usable === "stand-in") ? sources.get(kept.file) : undefined;
+    const source = kept && dramaTakePlays(block, kept, voice(block)) ? sources.get(kept.file) : undefined;
     const passageId = passageOf.get(block.id)!;
     if (!source) { previousPerformed = false; return; }
     const speaker = block.kind === "dialogue" ? block.speaker : DRAMA_NARRATOR;
