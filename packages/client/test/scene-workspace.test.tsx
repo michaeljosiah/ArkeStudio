@@ -282,6 +282,29 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(own, { value: "camera", choices: [["Nothing", false], ["This shot", false], ["The scene · no blocking yet", true]], preserve: "camera" }, "only the shot's own marks: it starts from this shot");
   });
 
+  it("Quick layout over a shot's own marks keeps them, and writes no first shared block over them (codex on PR 1903)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.blocking = undefined;
+    const own = { cast: [{ sheetId: "maren-kest", x: 3.25, z: -1.5 }], sets: [{ name: "kept rail", x: 0, z: -2, w: 4, h: 1, d: 0.2 }] };
+    orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = {
+      version: 2, ...structuredClone(own), keys: [{ t: 0, p: [5, 2.4, 6], l: [2, 1.1, -1] }, { t: 4, p: [4, 2.4, 5], l: [2, 1.1, -1] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await openStage(mounted);
+    await click([...q(mounted, ".fy-swstage__construction")!.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement);
+    assert.ok(stageItem(mounted, "kept rail"), "the shot's own set stands in the draft");
+    await click(all(mounted, '[data-testid="stage-draft"] button').find((button) => button.textContent === "Keep")!);
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.blocking, undefined, "no generated block over the shot's marks");
+    assert.deepEqual([command.staging?.cast, command.staging?.sets], [own.cast, own.sets], "the shot keeps its own marks");
+  });
+
   it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
     await openStage(mounted);
@@ -372,6 +395,8 @@ describe("scene detail owns the workspace", () => {
     assert.ok(lines.includes("desk lamp"),"the build's lamp is on the Stage it is reviewed on, not only in what Keep writes");
     assert.match(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/\+light · desk lamp/,"the bar counts the build's lamp");
     assert.doesNotMatch(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/A warm desk lamp/,"and says nothing in the model's words");
+    await click(all(mounted,"button").find(button=>button.textContent?.trim()==="Add light")!);
+    assert.equal(q(mounted,".fy-swstage__who")?.textContent,"Arke’s blockout · edited","a light the person adds to Arke's draft is their edit (codex on PR 1904)");
     await click(q(mounted,".fy-swstage__notesbtn")!);
     assert.ok(q(mounted,'[data-testid="stage-notes"]'));
     await click(q(mounted,'[data-testid="stage-draft"] [aria-label="Discard"]')!);

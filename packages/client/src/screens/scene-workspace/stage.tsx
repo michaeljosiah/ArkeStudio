@@ -1023,12 +1023,15 @@ export function SceneStage({
     if (frozen || locked || moved) return;
     stop();
     const inherited = effectiveStageBlocking(scene, undefined);
-    const firstBlock = scene.blocking === undefined
+    // A shot with its own marks is laid out over them, and keeps them; otherwise over the scene's.
+    // Only a scene with no blocking and a shot with none of its own gets a first shared block: a
+    // shot that owns its marks (a kept build on an empty scene) had them replaced by generated
+    // defaults, and no shared block was written either (codex on PR 1903).
+    const own = scope === "shot" && working !== null ? working : null;
+    const firstBlock = scene.blocking === undefined && own === null
       ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
-    // A shot with its own marks is laid out over them; otherwise over the scene's.
-    const own = scope === "shot" && working !== null ? working : null;
-    const availableCast = firstBlock?.cast ?? own?.cast ?? inherited.cast;
+    const availableCast = own?.cast ?? firstBlock?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
@@ -1053,8 +1056,8 @@ export function SceneStage({
     setDraft({
       ...camera,
       version: persisted?.version ?? 1,
-      cast: firstBlock?.cast ?? own?.cast ?? inherited.cast,
-      sets: firstBlock?.sets ?? own?.sets ?? inherited.sets,
+      cast: own?.cast ?? firstBlock?.cast ?? inherited.cast,
+      sets: own?.sets ?? firstBlock?.sets ?? inherited.sets,
     } as ResolvedShotStaging);
     setDraftFrom({ who: "quick" });
     setNote(null);
@@ -1419,15 +1422,16 @@ export function SceneStage({
   const sceneLights = scene.blocking?.lights ?? [];
   // While a draft waits, a light added, changed or removed, and the atmosphere, join the draft
   // (design turn 231b, rule 8): Keep writes them with its blocking in one command and Discard drops
-  // them. Without a draft they are the scene's own and land at once, as before.
+  // them, and on Arke's draft they are the person's edit too (codex on PR 1904). Without a draft
+  // they are the scene's own and land at once, as before.
   const writeLight = (index: number, next: StageLight | null) => {
     const base = moved ? shownLights : sceneLights;
     const lights = next === null ? base.filter((_, at) => at !== index) : base.map((light, at) => (at === index ? next : light));
-    if (moved) setDraftLook((look) => ({ ...look, lights }));
+    if (moved) { setDraftLook((look) => ({ ...look, lights })); markEdited(); }
     else writeScene({ lights: lights.length === 0 ? null : lights });
   };
   const writeAtmosphere = (atmosphere: SceneAtmosphere) => {
-    if (moved) setDraftLook((look) => ({ ...look, atmosphere }));
+    if (moved) { setDraftLook((look) => ({ ...look, atmosphere })); markEdited(); }
     else writeScene({ atmosphere });
   };
   const addLight = () => {
@@ -1438,7 +1442,7 @@ export function SceneStage({
     for (let n = 2; taken.has(name); n++) name = `light ${n}`;
     const figure = working.cast[0];
     const light = stageLightDefault(name, { x: figure?.x ?? 0, z: figure?.z ?? 0 });
-    if (moved) setDraftLook((look) => ({ ...look, lights: [...base, light] }));
+    if (moved) { setDraftLook((look) => ({ ...look, lights: [...base, light] })); markEdited(); }
     else writeScene({ lights: [...base, light] });
     setSelection(null); viewport.current?.select(null); setPlateSelected(false);
     setLightSelected(base.length);
