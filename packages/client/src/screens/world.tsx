@@ -462,6 +462,7 @@ export function WorldOverviewScreen() {
   const proposals = unattendedProposalsOf(world.proposals, world.conversations);
   const production = world.productions[0];
   const cut = production ? deriveCut(production) : null;
+  const hasChapters = production && productionShape(production.meta).hasChapters;
   // The prototype's fan: per-slot offset, rotation and drift, centre card forward.
   const FAN = [
     { left: -410, top: 30, rotate: -9, z: 1, dur: 7.4, delay: 0 },
@@ -612,7 +613,7 @@ export function WorldOverviewScreen() {
             <div className="fy-cta__frame">
               <Portrait
                 worldSlug={slug}
-                path={`productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
+                path={hasChapters ? (world.keyArt ?? "") : `productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
                 label={production.meta.title}
                 radius={8}
               />
@@ -620,10 +621,11 @@ export function WorldOverviewScreen() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-cta__title">Continue {production.meta.title}</div>
               <div className="fy-cta__sub">
-                {cut.covered} of {cut.entries.length} shots covered
-                {cut.gaps > 0
-                  ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.`
-                  : " · the boards are ready."}
+                {hasChapters ? `${chapterCountLabel(production)} · ${production.meta.status}`
+                  : cut.entries.length === 0 ? "No shots yet."
+                  : `${cut.covered} of ${cut.entries.length} shots covered${cut.gaps > 0
+                    ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.`
+                    : " · the boards are ready."}`}
               </div>
             </div>
             <Button>Open</Button>
@@ -759,12 +761,14 @@ function WorldGlance({ world }: { world: WorldBundle }) {
   );
 }
 
+function chapterCountLabel(production: WorldBundle["productions"][number]): string {
+  const count = production.chapters.filter(chapter => !chapter.retired).length;
+  return `${count} chapter${count === 1 ? "" : "s"}`;
+}
+
 /**
  * What the world has been made into (design 63b).
- *
- * The same tiles the Productions tab draws at full size, in a row that fits under the glance.
- * A percentage is shown only where there are shots to divide: a story production carries its
- * scenes and chapters instead, because a completion figure over nothing countable is invented.
+ * A story names its live chapters and saved status; a film keeps its shot coverage.
  */
 function WorldProductions({ worldId, world }: { worldId: string; world: WorldBundle }) {
   const navigate = useNavigate();
@@ -794,6 +798,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           } as CSSProperties}
         >
           {productions.map((p) => {
+            const hasChapters = productionShape(p.meta).hasChapters;
             const shots = p.scenes.flatMap((s) => orderedShots(s));
             const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
             const board = p.scenes.find((s) => s.board)?.board;
@@ -823,11 +828,11 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                 <div className="fy-prodtile__name">{p.meta.title}</div>
                 <div className="fy-prodtile__foot">
                   <span className="fy-prodtile__meta">
-                    {shots.length > 0
+                    {hasChapters ? `${chapterCountLabel(p)} · ${p.meta.status}` : shots.length > 0
                       ? `${shots.length} shot${shots.length === 1 ? "" : "s"} · ${covered} accepted`
                       : `${p.scenes.length} scene${p.scenes.length === 1 ? "" : "s"} · ${p.meta.status}`}
                   </span>
-                  {shots.length > 0 && (
+                  {!hasChapters && shots.length > 0 && (
                     <span className="fy-prodtile__pct">{Math.round((covered / shots.length) * 100)}%</span>
                   )}
                 </div>
