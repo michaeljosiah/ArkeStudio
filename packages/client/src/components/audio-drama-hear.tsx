@@ -153,9 +153,10 @@ export function HearBar({ worldId, productionId, episode, lines, script, scriptH
       <span className="gap" />
       {/* A refused price is said with its reason, not left as a dead button (codex on PR 1871). */}
       {said && <span className="fy-ad-hear__fail" role="alert">{said}</span>}
+      {/* Hear first, then what else the selection can do (230g). */}
+      {press}
       {actions}
       <Button variant="ghost" size="sm" onClick={onClear}>Done</Button>
-      {press}
       {dialog}
     </div>
   );

@@ -37,6 +37,11 @@ import { EmptyState, Screen } from "../components/layout.js";
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
 
 const CUE_LABEL = { sound: "Sound", ambience: "Ambience", music: "Music" } as const;
+/** Ask Arke about picked lines (230g): each an ask already worded. */
+const ASKS: ReadonlyArray<[string, string]> = [
+  ["Clearer by ear", "Make clearer to the ear"], ["Tighten", "Tighten"], ["More tension", "Give more tension to"],
+  ["Give it to the narrator", "Give to the narrator"], ["Say it with sound", "Say with sound rather than words"], ["Review these lines", "Review"],
+];
 /** The speaker list's way to a new unnamed speaker: never a key, since no slug starts with "@". */
 const NEW_UNNAMED = "@unnamed";
 const INSERTS: Array<[EpisodeScriptBlock["kind"], string]> = [
@@ -101,6 +106,8 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   const [adding, setAdding] = useState<string | null>(null);
   // The role the Cast column opens on: Hear's Choose a voice stays in the episode (issue 1883).
   const [castRole, setCastRole] = useState<string | null>(null);
+  // The selection's Ask Arke menu (230g, R-28).
+  const [asking, setAsking] = useState(false);
   const anchor = useRef<string | null>(null);
   const focusNext = useRef<{ id: string; at: number } | null>(null);
   // The player sits in the page's flow above its foot (issue 1883), never floating over it.
@@ -259,6 +266,14 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
   // Arke drafts in the chat beside the page; its script arrives here as a draft (R-9).
   const chat = useGlobalChat();
   const chatSurface = chat?.forPage() ?? null;
+  // An ask about the picked lines, quoted with who says them, put in Chat's composer to send.
+  const askAbout = (ask: string) => {
+    if (!chatSurface) return;
+    const quoted = blocks.filter((block): block is Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }> => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"))
+      .map((block) => `${block.kind === "dialogue" ? name(block.speaker) : "Narrator"}: “${block.words}”`);
+    chat!.setValue(chatSurface.key, "draft", `${ask ? `${ask} ` : "About "}these lines in episode ${episode}'s script:\n${quoted.join("\n")}\n`);
+    chat!.open(chatSurface);
+  };
 
   const download = () => {
     const text = scriptAsText(title, episode, blocks, name);
@@ -532,12 +547,17 @@ function EpisodeScript({ world, production, episode }: { world: WorldBundle; pro
             onHeard={() => setRetake(false)} onChooseVoice={(speaker) => { setCastRole(speaker); setSide("cast"); }}
             // What else the selection can do (R-28): ask about it, read its source, see who says it.
             actions={<>
-              {chatSurface && <Button variant="ghost" size="sm" onClick={() => {
-                const quoted = blocks.filter((block): block is Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }> => lines.includes(block.id) && (block.kind === "dialogue" || block.kind === "narration"))
-                  .map((block) => `${block.kind === "dialogue" ? name(block.speaker) : "Narrator"}: “${block.words}”`);
-                chat!.setValue(chatSurface.key, "draft", `About these lines in episode ${episode}'s script:\n${quoted.join("\n")}\n`);
-                chat!.open(chatSurface);
-              }}>Ask Arke</Button>}
+              {/* Ask Arke about the lines (230g): an ask already worded, or Chat to word one. */}
+              {chatSurface && <span className="fy-ad-ep__more">
+                <Button variant="ghost" size="sm" aria-haspopup="menu" aria-expanded={asking} onClick={() => setAsking(!asking)}>Ask Arke ▾</Button>
+                {asking && (
+                  <div role="menu" className="fy-ad-ep__menu fy-ad-ep__menu--up" aria-label="Ask about these lines" onClick={() => setAsking(false)}>
+                    {ASKS.map(([label, ask]) => <button key={label} type="button" role="menuitem" onClick={() => askAbout(ask)}>{label}</button>)}
+                    <hr />
+                    <button type="button" role="menuitem" onClick={() => askAbout("")}>Open in Chat</button>
+                  </div>
+                )}
+              </span>}
               <Button variant="ghost" size="sm" aria-pressed={side === "source"} onClick={() => toggle("source")}>Source</Button>
               <Button variant="ghost" size="sm" aria-pressed={side === "cast"} onClick={() => { setCastRole(null); toggle("cast"); }}>Cast</Button>
             </>} />

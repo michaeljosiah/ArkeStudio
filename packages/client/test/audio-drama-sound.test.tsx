@@ -131,6 +131,15 @@ describe("issue 1883: the Add a sound picker", () => {
     await click([...container.querySelectorAll("button")].find((b) => b.textContent === "Add a sound")!);
     const dialog = dom.document.body.querySelector(".fy-ad-sound")!;
     assert.equal(dialog.getAttribute("role"), "dialog");
+    // The lanes and chips of 230w (R-41).
+    const lanes = [...dialog.querySelectorAll("[aria-label='Where from'] button")].map((b) => b.textContent!);
+    assert.match(lanes[0]!, /^All \d+$/);
+    assert.equal(lanes[1], "This production 1");
+    assert.match(lanes[2]!, /^World artifacts \d+$/, "the world's own sounds beyond this production");
+    const chips = [...dialog.querySelectorAll("[aria-label='Sound category'] button")].map((b) => b.textContent!);
+    assert.equal(chips[0], "All");
+    assert.ok(chips.includes("Sound 1"), chips.join(", "));
+    assert.match(dialog.querySelector(".fy-refpicker__foot")!.textContent!, /Nothing picked/);
     const use = () => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Use sound")!;
     assert.ok(use().disabled, "nothing is placed before a sound is chosen");
     await click(dialog.querySelector("[data-testid='picker-tile']")!);

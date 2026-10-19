@@ -299,7 +299,7 @@ export function ReferencePickerBody({
   onUpload: () => void;
   onClose: () => void;
 }) {
-  const [lane, setLane] = useState<"world" | "characters" | "session">("world");
+  const [lane, setLane] = useState<"world" | "characters" | "session" | "elsewhere">("world");
   const [kindFilter, setKindFilter] = useState<PickerSource["kind"] | null>(null);
   const [search, setSearch] = useState("");
   const [group, setGroup] = useState<string | null>(null);
@@ -311,7 +311,10 @@ export function ReferencePickerBody({
   const [chosen, setChosen] = useState<PickerSource | null>(null);
 
   const offered = (list: PickerSource[]): PickerSource[] => (only !== undefined ? list.filter((s) => s.kind === only) : list);
-  const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : session);
+  // Sounds (230w, R-41): All, This production, and the world's own beyond it (issue 1883).
+  const sounds = only === "audio";
+  const elsewhere = sounds ? world.filter((source) => !session.some((mine) => mine.key === source.key)) : [];
+  const sources = offered(lane === "world" ? world : lane === "characters" ? (characters ?? []) : lane === "elsewhere" ? elsewhere : session);
   const searched = search.trim().toLowerCase();
   const visible = sources.filter(
     (s) =>
@@ -455,7 +458,7 @@ export function ReferencePickerBody({
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`${only === "audio" ? "World sounds" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
+            {`${sounds ? "All" : worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
           </button>
           {offered(characters ?? []).length > 0 && (
             <button
@@ -470,6 +473,11 @@ export function ReferencePickerBody({
           {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
               {`${sessionLabel} ${offered(session).length}`}
+            </button>
+          )}
+          {sounds && offered(elsewhere).length > 0 && (
+            <button type="button" aria-pressed={lane === "elsewhere"} onClick={() => setLane("elsewhere")}>
+              {`World artifacts ${offered(elsewhere).length}`}
             </button>
           )}
           <button type="button" aria-pressed={false} onClick={onUpload}>
@@ -512,13 +520,22 @@ export function ReferencePickerBody({
       </div>}
 
       {/* Grouping is not proof of images (codex on PR 1872): the audio picker groups by cue. */}
-      {sources.some((source) => source.group) && (
-        <div className="fy-refpicker__lanes" role="group" aria-label={only === "audio" ? "Sound category" : "Image category"}>
+      {sources.some((source) => source.group) && (sounds ? (
+        // A sound's kind as chips, each with its count (230w).
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }} role="group" aria-label="Sound category">
           {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
-            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? (only === "audio" ? "All sounds" : "All images")}</button>
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} className={cx("fy-filterchip", group === value && "fy-filterchip--active")} onClick={() => setGroup(value)}>
+              {value === null ? "All" : `${value} ${sources.filter((source) => source.group === value).length}`}
+            </button>
           ))}
         </div>
-      )}
+      ) : (
+        <div className="fy-refpicker__lanes" role="group" aria-label="Image category">
+          {[null, ...new Set(sources.map((source) => source.group).filter((value): value is string => !!value))].map((value) => (
+            <button type="button" key={value ?? "all"} aria-pressed={group === value} onClick={() => setGroup(value)}>{value ?? "All images"}</button>
+          ))}
+        </div>
+      ))}
 
       {searched.length > 0 && (
         <div
@@ -647,6 +664,8 @@ export function ReferencePickerBody({
                 </button>
               </>
             )
+          ) : confirm && !chosen ? (
+            "Nothing picked"
           ) : confirm && chosen ? (
             <>
               <strong style={{ fontWeight: 600, color: "var(--foreground)" }}>{chosen.name}</strong>
