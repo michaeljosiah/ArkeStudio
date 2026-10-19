@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { cp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -62,6 +62,16 @@ it("says each part of a world's open as it starts, before the world arrives", as
 
 it("counts the reading against how many files the world's last open read", async () => {
   const dir = await makeTempWorld();
+  // Measured takes, whose media-info.json the manifest takes beside take.json: a count that left
+  // them out ended an unchanged world short of its own total (codex on PR 1887).
+  const takes = join(dir, "productions/saltlight/takes");
+  for (let i = 0; i < 12; i++) {
+    const id = `tk_01J8Z${String(i).padStart(21, "0")}`;
+    await cp(join(takes, "tk_01J8A0000000000000000000A1"), join(takes, id), { recursive: true });
+    const take = JSON.parse(await readFile(join(takes, id, "take.json"), "utf8"));
+    await writeFile(join(takes, id, "take.json"), JSON.stringify({ ...take, id }));
+    await writeFile(join(takes, id, "media-info.json"), JSON.stringify({ sourceHash: `sha256:${"0".repeat(64)}`, mediaInfo: { durationSec: 4, hasAudio: false }, probedAt: CLOCK }));
+  }
   const first = await WorldStore.open(dir, { clock: () => CLOCK });
   await first.close();
   const heard: WorldStoreOpenProgress[] = [];
@@ -73,7 +83,7 @@ it("counts the reading against how many files the world's last open read", async
   const total = reading[0]!.total!;
   assert.ok(total > 0, "the last open's count is the total");
   assert.ok(reading.every((progress) => progress.total === total));
-  assert.ok(Math.abs(reading.at(-1)!.done - total) <= 3, `the estimate is close: ${reading.at(-1)!.done} read of ${total}`);
+  assert.equal(reading.at(-1)!.done, total, "an unchanged world ends on its own total");
   assert.deepEqual(heard.at(-1), { phase: "checking" }, "and the checks after the scan are said after it");
 });
 
@@ -99,6 +109,29 @@ it("tells a window that connects mid-open where it has got, and says nothing onc
   release();
   await opening;
   assert.deepEqual(replayed(), [], "an open that is over has nothing to say");
+});
+
+it("says nothing more about an open once it has said the world is open", async () => {
+  // Every broadcast snapshot is followed by the hello replay, and the snapshot that ends an open
+  // came before its progress was forgotten: the last phase arrived after `world.opened` and stayed
+  // on the client (codex on PR 1887).
+  const { root } = await makeTempRoot();
+  let atOpened: DomainEvent[] | null = null;
+  const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+  closeOnCleanup(() => provider.close());
+  const coordinator: Coordinator = new Coordinator({
+    provider,
+    adapter: null,
+    appRoot: root,
+    changeLogPath: join(root, "logs", "coordinator.jsonl"),
+    appVersion: "test",
+    observeEvent: (event) => {
+      if (event.type === "world.opened") atOpened = coordinator.serverApplication.getInitialEvents!();
+    },
+  });
+  await (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({ kind: "open-world", worldId: WORLD_ID });
+  assert.ok(atOpened !== null, "the world opened");
+  assert.deepEqual((atOpened as DomainEvent[]).filter((event) => event.type === "world.open-progress"), []);
 });
 
 it("keeps the open's progress out of coordinator.jsonl", async () => {

@@ -5032,6 +5032,10 @@ export class Coordinator {
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
     if (this.stopping || (store && !this.stillOpen(store))) return;
+    // Forgotten before the snapshot, not after it (codex on PR 1887): every broadcast snapshot is
+    // followed by the hello replay, and a finished open's last phase would arrive after the event
+    // that ended it and stay on the client.
+    this.worldOpenProgress.delete(worldId);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();

@@ -128,3 +128,46 @@ it("stops reading when the scan is aborted, and leaves no read open behind it", 
   assert.equal(reads.open, 0);
   assert.ok(reads.started < ARTIFACTS, `${reads.started} artifact reads started after the abort`);
 });
+
+it("reads no more than sixteen ahead of a loop that is slow to take them", async (t) => {
+  // The take loop hashes media between items. Unchecked, the loads went on to read every remaining
+  // take meanwhile and held all of it (codex on PR 1887).
+  const dir = await largeWorld();
+  const takes = join(dir, "productions/saltlight/takes");
+  const source = join(takes, "tk_01J8A0000000000000000000A1");
+  const take = JSON.parse(await readFile(join(source, "take.json"), "utf8"));
+  const info = { sourceHash: `sha256:${"0".repeat(64)}`, mediaInfo: { durationSec: 4, hasAudio: false }, probedAt: "2026-07-30T13:41:00Z" };
+  for (let i = 0; i < 60; i++) {
+    const id = `tk_01J8Y${String(i).padStart(21, "0")}`;
+    await cp(source, join(takes, id), { recursive: true });
+    await writeFile(join(takes, id, "take.json"), JSON.stringify({ ...take, id }));
+    await writeFile(join(takes, id, "media-info.json"), JSON.stringify(info));
+  }
+  const SLOW = /\/takes\/tk_01J8Y\d+\//;
+  let read = 0, hashed = 0, lead = 0;
+  const original = { readFile: fs.readFile, stat: fs.stat };
+  t.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+    const path = String(args[0]).replace(/\\/g, "/");
+    if (path.endsWith("/take.json") && SLOW.test(path)) read += 1;
+    return original.readFile(...args);
+  });
+  t.mock.method(fs, "stat", async (...args: Parameters<typeof fs.stat>) => {
+    const path = String(args[0]).replace(/\\/g, "/");
+    // The media hash is the loop's own work on a take, after the take was handed to it.
+    if (path.endsWith("/frame.png") && SLOW.test(path)) {
+      hashed += 1;
+      lead = Math.max(lead, read - hashed);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    return original.stat(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await scanWorld(dir);
+  assert.equal(hashed, 60, "every measured take's media was hashed");
+  assert.ok(lead <= 16, `the loads ran ${lead} takes ahead of the loop`);
+  assert.ok(lead >= 8, `and still read ahead: ${lead}`);
+});

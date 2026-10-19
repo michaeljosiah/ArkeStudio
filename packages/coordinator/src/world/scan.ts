@@ -405,14 +405,17 @@ const scanIo = { exists, listDir, read };
 const SCAN_READ_AHEAD = 16;
 
 /**
- * Each item beside what `load` found for it, in the order given, with up to sixteen loads in flight.
+ * Each item beside what `load` found for it, in the order given, with up to sixteen loads ahead.
  *
  * Only the reading moves. The loop that consumes this still takes one item at a time in the order
  * it always has, so problems, the manifest's key order and every record list come out exactly as
  * a scan reading in turn made them — which is why `load` does I/O and pure parsing only, and never
  * touches the scan's shared state: a load runs out of turn, and its effects would too.
  *
- * Loads start in item order, so the one the loop waits on is never queued behind later ones.
+ * Loads start in item order, so the one the loop waits on is never queued behind later ones, and
+ * none starts more than sixteen ahead of the loop: read or reading, at most sixteen items' text is
+ * held here at once, however slowly the loop gets through them (codex on PR 1887) — the take loop
+ * hashes media between items, and unchecked the loads would read every remaining take meanwhile.
  */
 async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<R>): AsyncGenerator<[T, R]> {
   const settle: Array<{ resolve: (value: R) => void; reject: (error: unknown) => void }> = [];
@@ -423,9 +426,16 @@ async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<
     loaded.catch(() => {});
     return loaded;
   });
-  let next = 0;
+  let next = 0, consumed = 0;
+  let waiting: Array<() => void> = [];
+  const wake = () => { const woken = waiting; waiting = []; for (const resolve of woken) resolve(); };
   const worker = async (): Promise<void> => {
-    for (let index = next++; index < items.length; index = next++) {
+    while (next < items.length) {
+      if (next >= consumed + SCAN_READ_AHEAD) {
+        await new Promise<void>((resolve) => waiting.push(resolve));
+        continue;
+      }
+      const index = next++;
       try {
         settle[index]!.resolve(await load(items[index]!));
       } catch (error) {
@@ -437,14 +447,17 @@ async function* readAhead<T, R>(items: readonly T[], load: (item: T) => Promise<
   try {
     for (const [index, item] of items.entries()) {
       const found = await loads[index]!;
-      // Handed on, it is the loop's to keep: a large world's text need not all sit here at once.
+      // Handed on, it is the loop's to keep, and it makes room for one more load.
       loads[index] = null;
+      consumed = index + 1;
+      wake();
       yield [item, found];
     }
   } finally {
     // Nor does it leave a read still open behind it: nothing new starts, and what had started is
     // waited out, so a scan that has refused holds no file a caller may be about to remove.
     next = items.length;
+    wake();
     await Promise.allSettled(workers);
   }
 }
@@ -541,12 +554,19 @@ export async function scanWorld(
       return { error };
     }
   };
-  let settled = 0;
+  // Every file the manifest takes is counted for the open's progress (issue 1844), so the count
+  // ends where the last open's manifest did: settled records, and the media measurements, editor
+  // requests, world.json and Bible written beside them. Proposals leave the manifest below, so they
+  // are not counted.
+  let recorded = 0;
+  const manifested = (path: string, raw: string): void => {
+    manifest[path] = sha256(raw);
+    if (!path.startsWith(".proposals/")) opts.onProgress?.(++recorded);
+  };
   const settle = <T>(rel: string, found: ReadAttempt, parse: (raw: string) => T): T | null => {
-    opts.onProgress?.(++settled);
     try {
       if ("error" in found) throw found.error;
-      manifest[toPortable(rel)] = sha256(found.raw);
+      manifested(toPortable(rel), found.raw);
       return parse(found.raw);
     } catch (err) {
       signal?.throwIfAborted();
@@ -559,12 +579,12 @@ export async function scanWorld(
   const attemptIfPresent = async (rel: string): Promise<ReadAttempt | null> =>
     (await exists(join(dir, rel))) ? attempt(rel) : null;
 
-  manifest["world.json"] = sha256(await read(join(dir, "world.json")));
+  manifested("world.json", await read(join(dir, "world.json")));
 
   // Bible bytes participate in history integrity checks. Outside-edit reconciliation still
   // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir, signal);
-  if (bible.present) manifest[BIBLE_PATH] = sha256(await read(join(dir, BIBLE_PATH)));
+  if (bible.present) manifested(BIBLE_PATH, await read(join(dir, BIBLE_PATH)));
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -919,7 +939,7 @@ export async function scanWorld(
         if (raw instanceof Error) {
           problems.push({ path: toPortable(rel), message: raw.message.slice(0, 500) });
         } else if (raw !== null) {
-          manifest[toPortable(rel)] = sha256(raw);
+          manifested(toPortable(rel), raw);
           try {
             record = TakeMediaInfoRecordSchema.parse(JSON.parse(raw));
           } catch (err) {
@@ -1013,7 +1033,7 @@ export async function scanWorld(
     let editorRequestState: ProductionBundle["editorRequestState"] = { status: "absent" };
     try {
       const { raw, file } = await readEditorRequestFileAt(dir, id);
-      if (raw !== null) { manifest[`productions/${id}/editor-requests.json`] = sha256(raw); editorRequestState = { status: "ready" }; }
+      if (raw !== null) { manifested(`productions/${id}/editor-requests.json`, raw); editorRequestState = { status: "ready" }; }
       editorRequests = file.requests;
       if (file.schemaVersion === 2) effectFamilies = file.effectFamilies.map(effectProposalFamilyView);
       if (file.schemaVersion === 2) transitionFamilies = file.transitionFamilies ?? [];
