@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Minus, Plus } from "../../components/icons.js";
 import type { StageSelection } from "./stage-viewport.js";
 
@@ -45,7 +45,7 @@ export function Value({ children, muted }: { children: ReactNode; muted?: boolea
   return <span className="fy-swstage__value" data-muted={muted ? "true" : undefined}>{children}</span>;
 }
 
-export function Link({ children, onClick, disabled, title }: { children: ReactNode; onClick: () => void; disabled?: boolean; title?: string }) {
+export function Link({ children, onClick, disabled, title }: { children: ReactNode; onClick: (event: MouseEvent<HTMLButtonElement>) => void; disabled?: boolean; title?: string }) {
   return <button type="button" className="fy-swstage__link" disabled={disabled} title={title} onClick={onClick}>{children}</button>;
 }
 

@@ -616,6 +616,16 @@ it("a list line stands for every pick of its thing, and a line that leaves the l
 });
 
 // The location plate (issue 1818, design turn 229c).
+/** The plate picker (231f) is drawn on the body; Show all pictures reveals what is not a location's. */
+const platePicker = () => dom.document.querySelector<HTMLElement>('[data-testid="stage-plate-picker"]')!;
+const plateOptions = () => [...platePicker().querySelectorAll<HTMLElement>('[role="option"]')];
+const showAllPictures = async () => {
+  // linkedom's click does not toggle a checkbox, so the switch's change is called as React would.
+  const input = platePicker().querySelector<HTMLElement>('input[role="switch"]')!;
+  const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
+  await act(async () => (input as unknown as Record<string, { onChange: (event: { target: { checked: boolean } }) => void }>)[key]!.onChange({ target: { checked: true } }));
+};
+const usePlate = async () => click([...platePicker().querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Use plate")!);
 const PLATE_PICTURE = { id: "ar_01J8G0000000000000000000P1", kind: "image" as const, file: "lobby-plate.png", hash: "sha256:aaaabbbbccccdddd", origin: { by: "user" as const }, links: [], created: "2026-10-17T09:00:00.000Z" };
 
 it("opens the blockout line with a dashed Add plate, and a pick writes the plate with the scene's marks", async () => {
@@ -627,9 +637,13 @@ it("opens the blockout line with a dashed Add plate, and a pick writes the plate
   assert.equal(chip.getAttribute("data-empty"), "true");
   assert.equal(chip.parentElement?.nextElementSibling?.getAttribute("aria-label"), "Blockout instruction", "the plate opens the line");
   await click(chip);
-  const options = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')];
+  assert.equal(plateOptions().some((option) => option.title === "lobby-plate.png"), false, "a picture of no location waits behind Show all pictures");
+  await showAllPictures();
+  const options = plateOptions();
   assert.ok(options.length >= 1);
   await click(options.find((option) => option.title === "lobby-plate.png") ?? options[0]!);
+  assert.equal(sent.length, 0, "a pick is chosen first");
+  await usePlate();
   const write = sent.at(-1);
   assert.equal(write?.kind, "edit-stage");
   const blocking = write?.kind === "edit-stage" ? write.blocking : undefined;
@@ -646,10 +660,12 @@ it("writes a first plate with the scene's marks, never this shot's own, from thi
   world.artifacts.push(PLATE_PICTURE as never, { ...PLATE_PICTURE, id: "ar_01J8G0000000000000000000P2", file: "elsewhere.png", production: "another" } as never);
   await render();
   await click(q('[data-testid="stage-plate-chip"]'));
-  const titles = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.title);
+  await showAllPictures();
+  const titles = plateOptions().map((option) => option.title);
   assert.ok(titles.includes("lobby-plate.png"));
   assert.equal(titles.includes("elsewhere.png"), false, "another production's picture is not this one's to use");
-  await click([...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')].find((option) => option.title === "lobby-plate.png")!);
+  await click(plateOptions().find((option) => option.title === "lobby-plate.png")!);
+  await usePlate();
   const write = sent.at(-1);
   const blocking = write?.kind === "edit-stage" ? write.blocking : undefined;
   assert.deepEqual([blocking?.cast, blocking?.sets], [[], []], "this shot's marks stay its own: every inheriting shot would get them");
@@ -664,7 +680,8 @@ it("offers no Stage render as a plate, and names a tile by what it is of (issue 
   );
   await render();
   await click(q('[data-testid="stage-plate-chip"]'));
-  const tiles = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')];
+  await showAllPictures();
+  const tiles = plateOptions();
   assert.equal(tiles.some((tile) => tile.title.includes("Shot 12")), false, "the greybox's own still is not a picture of the place");
   assert.ok(tiles.some((tile) => tile.textContent === "Maren Kest"), "a portrait says whose it is rather than \"picture\"");
   assert.equal(tiles.some((tile) => tile.textContent === "picture"), false);

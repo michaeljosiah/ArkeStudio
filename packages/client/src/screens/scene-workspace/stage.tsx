@@ -1458,7 +1458,7 @@ export function SceneStage({
     const plate = scene.blocking?.plate;
     // Another picture is another view: the old camera estimate does not carry over to it.
     writePlate({
-      source: { source: "artifact", artifactId: candidate.id, hash: candidate.hash },
+      source: candidate.source,
       label: plate?.label ?? candidate.location ?? "Location",
       shotId: plate?.shotId ?? shot.id,
       ...(plate?.rides === false ? { rides: false } : {}),
@@ -1752,7 +1752,7 @@ export function SceneStage({
       ) : (
         <div className="fy-swstage__construction">
           {head || fullscreen !== null ? null : boardScope}
-          {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
+          {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} locationId={sceneLocationIds[0]} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
           <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
           {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
           <Select label="Start from" mark="start from" wrapClassName="fy-swstage__preserve" value={startFrom} onChange={e => setPreserve(e.target.value as typeof startFrom)} disabled={constructing}>
@@ -2034,6 +2034,7 @@ export function SceneStage({
                   plate={scene.blocking.plate}
                   world={world}
                   productionId={production.meta.id}
+                  locationId={sceneLocationIds[0]}
                   light={{
                     time: shownAtmosphere?.time,
                     summary: shownLights.length === 0 && shownAtmosphere?.time === undefined ? undefined
