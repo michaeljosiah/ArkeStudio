@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaTakePlays,
+  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaSpeakerLabel, dramaTakePlays,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
@@ -143,7 +143,7 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
     record = parsed.data;
   }
   const script = episodeAudioScript(entry.hash, entry.script.blocks);
-  const name = (slug: string) => bundle.sheets.find((sheet) => sheet.id === slug)?.name ?? slug;
+  const name = (slug: string) => bundle.sheets.find((sheet) => sheet.id === slug)?.name ?? dramaSpeakerLabel(slug);
   // A role's voice now, as Hear and Cast read it (codex on PR 1879): a recast puts its old takes out.
   const voice = (block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>) => dramaRoleVoice(production.audioDrama?.cast, bundle.sheets, block);
   const voices = Object.fromEntries(entry.script.blocks.flatMap((block) => block.kind === "dialogue" || block.kind === "narration" ? [[block.id, voice(block) ?? null]] : []));
@@ -177,7 +177,7 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
       unplaced.clear();
       for (const [file, label] of files) {
         const source = await audioStudioSource(store, productionId, file, options).catch((error: unknown) => {
-          unplaced.set(file, `${label.slice(0, 80)}: ${error instanceof Error ? error.message : "it could not be read"}`);
+          unplaced.set(file, `${label.slice(0, 80).replace(/[.:;,\s]+$/u, "")}: ${error instanceof Error ? error.message : "it could not be read"}`);
           return null;
         });
         if (source) sources.set(file, source);
