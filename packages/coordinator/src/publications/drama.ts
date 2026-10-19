@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -21,6 +22,9 @@ import { renderAudioStudioMix } from "../productions/audio-studio-mix.js";
 export class DramaEditionService {
   // Quitting stops a publication before the coordinator waits on it (codex on PR 1880).
   private readonly stopping = new AbortController();
+  // A file verified once is trusted while its size and time are unchanged (codex on PR 1880):
+  // a range request is never a full rehash.
+  private readonly verified = new Map<string, string>();
   constructor(private readonly root: string, private readonly options: { ffmpeg?: FfmpegRunner } = {}) {}
 
   stop(): void { this.stopping.abort(); }
@@ -83,9 +87,9 @@ export class DramaEditionService {
             if (artifact) heardSounds.add(artifact.id);
           }
         }
-        signal.throwIfAborted();
+        // Streamed under the signal (codex on PR 1880): a closing world never waits on a long copy.
         const audio = `${stem}.wav`;
-        await copyFile(join(store.dir, mix.file), join(dir, audio));
+        await pipeline(createReadStream(join(store.dir, mix.file), { signal }), createWriteStream(join(dir, audio)), { signal });
         files.push(await describe(dir, audio));
         await keep(`${stem}-script.txt`, episodeScriptText(entry.script.title, episode, entry.script.blocks, name));
         episodes.push({ episode, title: entry.script.title, seconds: mix.seconds, scriptVersion: entry.script.version, scriptHash: entry.hash, file: audio });
@@ -103,7 +107,8 @@ export class DramaEditionService {
           if (block.kind === "dialogue" || block.kind === "narration") {
             const key = block.kind === "dialogue" ? block.speaker : "@narrator";
             const kept = takes?.lines[block.id]?.kept;
-            if (!kept || roles.has(key)) continue;
+            // Only a voice the mix plays is credited (codex on PR 1880).
+            if (!kept || roles.has(key) || !heard.has(block.id)) continue;
             const artifact = bundle.artifacts.find((candidate) => candidate.id === kept.artifactId);
             const recorded = artifact?.generation?.source === "audiobook" && artifact.generation.recording !== undefined;
             roles.set(key, { role: key === "@narrator" ? "Narrator" : dramaRoleName(name(key), cast?.[key], last),
@@ -154,8 +159,15 @@ export class DramaEditionService {
     const edition = await readFile(join(this.root, id, "edition.json"), "utf8").then((raw) => DramaEditionSchema.parse(JSON.parse(raw)), () => null);
     const file = edition?.files.find((candidate) => candidate.name === name);
     if (!edition || !file) return null;
-    const described = await describe(join(this.root, id), file.name).catch(() => null);
-    if (!described || described.sha256 !== file.sha256) return null;
+    const path = join(this.root, id, file.name);
+    const seen = await stat(path).catch(() => null);
+    if (!seen) return null;
+    const identity = `${path}:${seen.size}:${seen.mtimeMs}`;
+    if (this.verified.get(identity) !== file.sha256) {
+      const described = await describe(join(this.root, id), file.name).catch(() => null);
+      if (!described || described.sha256 !== file.sha256) return null;
+      this.verified.set(identity, file.sha256);
+    }
     return { path: join(this.root, id, file.name), contentType: file.name.endsWith(".wav") ? "audio/wav" : "text/plain; charset=utf-8", downloadName: `${edition.name} - ${file.name}` };
   }
 }

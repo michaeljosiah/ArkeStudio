@@ -629,6 +629,8 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
     setExporting(null);
     // A refused export says why (codex on PR 1880), as the show page's play does.
     if (!answer.mix) { setExportProblem(answer.refused ?? "Not exported."); return; }
+    // A mix that came back with problems is not handed over as finished (codex on PR 1880).
+    if (answer.issues?.length) { setExportProblem(answer.issues.join(" · ")); return; }
     const link = document.createElement("a");
     link.href = mediaUrl(world.meta.slug, answer.mix.file);
     link.download = `${production.meta.id}-${stem}.wav`;

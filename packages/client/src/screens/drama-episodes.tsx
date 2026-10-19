@@ -17,7 +17,7 @@ import { useProduction } from "../lib/selectors.js";
 import { dramaCastRoles } from "../lib/audio-drama-cast.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { dramaEditionMediaUrl, mediaUrl } from "../lib/media.js";
-import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAudiobookMix, subscribeDramaEditions } from "../lib/store.js";
+import { listDramaEditions, publishDramaEdition, renderAudiobookMix, subscribeAudiobookMix, subscribeDramaEditions, useStore } from "../lib/store.js";
 
 type Spoken = Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>;
 const spoken = (block: EpisodeScriptBlock): block is Spoken => block.kind === "dialogue" || block.kind === "narration";
@@ -231,6 +231,13 @@ function PublishDialog({ world, production, states, onClose }: {
   const [chosen, setChosen] = useState<number[]>(ready.map((state) => state.n));
   const [pressed, setPressed] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // A dropped connection loses the answer (codex on PR 1880): the dialog is let go and says where to look.
+  const { connection } = useStore();
+  useEffect(() => {
+    if (pressed === null || connection === "open") return;
+    setPressed(null);
+    setFailure("The studio disconnected. Check Editions before publishing again.");
+  }, [connection]);
   useEffect(() => subscribeDramaEditions((answer) => {
     if (answer.requestId !== pressed) return;
     setPressed(null);
