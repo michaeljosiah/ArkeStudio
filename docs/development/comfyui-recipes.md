@@ -8,6 +8,18 @@ submits successfully is not yet a verified recipe.
 Optional H3 adapter intake, policy and evidence requirements are documented in
 [Local H3 adapter library](h3-adapters.md).
 
+For a separately managed Windows repository install, start Python in UTF-8 mode before
+pointing Arke at its URL. For example, from the ComfyUI repository:
+
+```powershell
+.\venv\Scripts\python.exe -X utf8 main.py --listen 127.0.0.1 --port 8188
+```
+
+This also applies when redirecting its logs: custom nodes may print characters the Windows
+code page cannot encode. Arke's supervised portable workers set `PYTHONUTF8=1` in their
+existing isolated child environment. URL engines remain externally managed. A successful
+startup does not establish recipe readiness or a successful H3 render.
+
 1. **Author the API-format graph in the provider package.** Start with a ComfyUI API export:
    a record of node IDs with `class_type` and `inputs`, whose links are `[nodeId, outputIndex]`.
    The editable UI export with node positions and widgets is not a dispatch graph. Add a focused
