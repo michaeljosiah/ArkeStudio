@@ -24,7 +24,7 @@ export function isStoryReleaseLegacyChange(entity: unknown, productions: Readonl
 /** A deleted authored file still belongs to the release's audit trail. */
 export function isStoryReleaseAuthoredPath(relative: string, productions: ReadonlySet<string>): boolean {
   const parts = relative.split("/");
-  if (/[\\:\x00-\x1f]/.test(relative) || parts.some(p => !p || p.startsWith(".") || /[. ]$/.test(p))) return false;
+  if (/[\\:]/.test(relative) || [...relative].some(c => c.charCodeAt(0) < 32) || parts.some(p => !p || p.startsWith(".") || /[. ]$/.test(p))) return false;
   if (parts.length === 1) return ["world.json", "world-art.png", "bible.md"].includes(relative);
   if (parts[0] === "productions") return parts.length >= 3 && productions.has(parts[1]!);
   return ["art-direction", "canon", "characters", "locations", "factions", "references", "voices"].includes(parts[0]!);
