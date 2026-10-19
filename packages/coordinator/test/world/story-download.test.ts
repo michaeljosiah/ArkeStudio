@@ -4,7 +4,9 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ZipFile } from "yazl";
-import { downloadStory, type StoryDownload } from "../../src/world/story-download.js";
+import { cleanupStoryDownload, downloadStory, type StoryDownload } from "../../src/world/story-download.js";
+import { isStoryReleaseHistoryFile } from "../../src/world/story-release-history.js";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { installSampleWorld } from "../../src/world/sample-world.js";
 import { tempDir } from "../tmp.js";
 import { FIXTURE_WORLD } from "./helpers.js";
@@ -72,4 +74,43 @@ it("follows only the release asset redirect without sending credentials", async 
   };
   const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: request });
   await result.dispose(); assert.equal(calls, 2);
+});
+
+it("keeps authored versions while excluding operational and unselected history", () => {
+  const selected = new Set(["novel"]);
+  for (const p of ["bible/v1.md", "characters/maren/v2.md", "productions/novel/chapters/neap/v4.md", "productions/novel/story/v6.json"]) assert.equal(isStoryReleaseHistoryFile(p, selected), true, p);
+  for (const p of ["bible/prepared/act.json", "bible/prepared/v1.json", "world/prepared/action.generation.json", "world/transcription/v1.json", "world/conversation-actions/v1.json", "productions/other/chapters/neap/v1.md", "productions/novel/prepared/v1.json", "../bible/v1.md"]) assert.equal(isStoryReleaseHistoryFile(p, selected), false, p);
+});
+
+it("reports scratch cleanup failure separately from installation success", async () => {
+  assert.equal(await cleanupStoryDownload({ async dispose() { throw Object.assign(Error("scanner lock"), { code: "EPERM" }); } }), false);
+  assert.equal(await cleanupStoryDownload({ async dispose() {} }), true);
+});
+
+it("allows a progressing transfer to take longer than one hour", async t => {
+  const { source, data } = await archive(), root = await tempDir("story-slow-");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let offset = 0;
+  const request: typeof fetch = async () => new Response(new ReadableStream({ async pull(controller) {
+    await nextTurn();
+    if (offset === data.length) { controller.close(); return; }
+    t.mock.timers.tick(120_000);
+    const end = Math.min(data.length, offset + 8);
+    controller.enqueue(new Uint8Array(data.subarray(offset, end))); offset = end;
+  } }));
+  const result = await downloadStory(source, root, { signal: new AbortController().signal, fetch: request });
+  await result.dispose();
+  assert.ok(Math.ceil(data.length / 8) * 120_000 > 3_600_000);
+});
+
+it("aborts and cleans a transfer that stops making progress", async t => {
+  const { source } = await archive(), root = await tempDir("story-idle-");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let entered!: () => void;
+  const called = new Promise<void>(r => { entered = r; });
+  const request: typeof fetch = async () => { entered(); return new Response(new ReadableStream()); };
+  const attempt = downloadStory(source, root, { signal: new AbortController().signal, fetch: request });
+  const refused = assert.rejects(attempt, /abort|progress/i);
+  await called; await nextTurn(); t.mock.timers.tick(180_001);
+  await refused; assert.deepEqual(await readdir(root), []);
 });

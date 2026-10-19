@@ -32,8 +32,16 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
   }
   const container = await mkdtemp(join(scratchRoot, "story-download-"));
   const directory = join(container, "world"), archive = join(container, "story.zip");
-  const dispose = () => rm(container, { recursive: true, force: true });
-  const signal = AbortSignal.any([options.signal, AbortSignal.timeout(60 * 60 * 1000)]);
+  const dispose = () => rm(container, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // Bound stalled transfers, not the total time a slow connection needs for a large story.
+  const idle = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => idle.abort(new Error("Story download made no progress for three minutes. Please retry.")), 180_000);
+    idleTimer.unref();
+  };
+  const signal = AbortSignal.any([options.signal, idle.signal]);
   try {
     let url = new URL(source.url), response: Response | undefined;
     for (let redirects = 0; redirects <= 5; redirects++) {
@@ -41,6 +49,7 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
           !["github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(url.hostname)) {
         throw new Error("Story download redirected outside its release host.");
       }
+      resetIdle();
       response = await (options.fetch ?? fetch)(url, { signal, redirect: "manual" });
       if (![301, 302, 303, 307, 308].includes(response.status)) break;
       const location = response.headers.get("location");
@@ -48,12 +57,16 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
       if (!location || redirects === 5) throw new Error("Story download redirect failed.");
       url = new URL(location, url);
     }
-    if (!response?.ok || !response.body) throw new Error(`Story download failed (${response?.status ?? "no response"}). Try again when online.`);
+    if (!response?.ok || !response.body) {
+      await response?.body?.cancel();
+      throw new Error(`Story download failed (${response?.status ?? "no response"}). Try again when online.`);
+    }
     const length = response.headers.get("content-length");
     if (length !== null && Number(length) !== source.bytes) { await response.body.cancel(); throw new Error("Story download size differs from this release."); }
     let received = 0, lastPercent = -1;
     const digest = createHash("sha256");
     const measure = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+      resetIdle();
       received += chunk.length;
       if (received > source.bytes) { callback(new Error("Story download exceeds its declared size.")); return; }
       digest.update(chunk);
@@ -62,6 +75,8 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
       callback(null, chunk);
     } });
     await pipeline(Readable.fromWeb(response.body as never), measure, createWriteStream(archive, { flags: "wx" }), { signal });
+    clearTimeout(idleTimer);
+    idleTimer = undefined; // Extraction has caller cancellation, not the network idle deadline.
     if (received !== source.bytes || digest.digest("hex") !== source.sha256) throw new Error("Story download failed its integrity check. Please retry.");
     options.progress?.("Verifying and unpacking The Undersong…");
     await mkdir(directory);
@@ -103,5 +118,12 @@ export async function downloadStory(source: StoryDownload, scratchRoot: string, 
     await readWorldMeta(directory);
     options.progress?.("Installing your independent copy…");
     return { directory, dispose };
-  } catch (error) { await dispose(); throw error; }
+  } catch (error) { await dispose().catch(() => {}); throw error; }
+  finally { clearTimeout(idleTimer); }
+}
+
+/** Cleanup cannot turn an already installed world into a failed command. */
+export async function cleanupStoryDownload(download: { dispose(): Promise<void> } | undefined): Promise<boolean> {
+  try { await download?.dispose(); return true; }
+  catch { return false; }
 }

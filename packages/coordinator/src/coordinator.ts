@@ -495,7 +495,7 @@ import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
-import { downloadStory, type StoryDownload } from "./world/story-download.js";
+import { cleanupStoryDownload, downloadStory, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -7095,7 +7095,10 @@ export class Coordinator {
         const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
         const source = this.opts.sampleWorldPath ?? null;
         const release = this.opts.sampleWorldDownload;
+        let outcomeNote = "The story download stopped.";
+        let installed = false;
         const refuse = (reason: string) => {
+          outcomeNote = reason;
           this.readModel.setSampleWorld({ installing: false, note: { text: reason, refused: true } });
           this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
         };
@@ -7122,18 +7125,23 @@ export class Coordinator {
           });
           control.signal.throwIfAborted();
           const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
+          installed = true;
+          outcomeNote = `${name} is in your library.`;
           if (this.stopping) return;
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.readModel.setSampleWorld({
             installing: false,
-            note: { text: `${name} is in your library.`, refused: false },
+            note: { text: outcomeNote, refused: false },
           });
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
           if (!this.stopping) refuse(describeCoordinatorError(err));
         } finally {
-          try { await downloaded?.dispose(); }
-          finally { this.sampleInstallAbort = null; }
+          const cleaned = await cleanupStoryDownload(downloaded);
+          this.sampleInstallAbort = null;
+          if (!cleaned && !this.stopping) this.readModel.setSampleWorld({
+            note: { text: `${outcomeNote} Temporary download files could not be removed; check the downloads folder in your Arke app folder to reclaim space.`, refused: !installed },
+          });
         }
         if (!this.stopping) this.transport.broadcastSnapshot();
         return;

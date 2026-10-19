@@ -9,6 +9,7 @@ import { scanWorld } from "../packages/coordinator/src/world/scan.js";
 import { recordUploadedPropImage } from "../packages/coordinator/src/references/takes.js";
 import { acceptPropStateReference } from "../packages/coordinator/src/references/props.js";
 import { WORLD_EXPORT_EXCLUDED } from "../packages/coordinator/src/takes/export.js";
+import { isStoryReleaseHistoryFile } from "../packages/coordinator/src/world/story-release-history.js";
 
 // This assembles a new release directory; it never edits the author's live world.
 const [sourceArg, outputArg, configArg] = process.argv.slice(2);
@@ -38,11 +39,13 @@ for (const name of ["world.json", "world-art.png", "bible.md", "art-direction", 
   if (await exists(path.join(source, name))) await copy(path.join(source, name), path.join(target, name));
 }
 for (const id of selected) await copy(path.join(source, "productions", id), path.join(target, "productions", id));
-if (await exists(path.join(source, ".history"))) await fs.cp(path.join(source, ".history"), path.join(target, ".history"), { recursive: true, filter: async p => {
-  if ((await fs.lstat(p)).isSymbolicLink()) throw Error("Linked history");
-  const rel = path.relative(path.join(source, ".history"), p).replaceAll("\\", "/"), m = rel.match(/^productions\/([^/]+)/);
-  return !rel.startsWith("series") && (!m || selected.has(m[1]!));
-} });
+if (await exists(path.join(source, ".history"))) for (const file of await walk(path.join(source, ".history"))) {
+  const rel = path.relative(path.join(source, ".history"), file).replaceAll("\\", "/");
+  if (!isStoryReleaseHistoryFile(rel, selected)) continue;
+  const destination = path.join(target, ".history", rel);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(file, destination);
+}
 const artifacts = new Map<string, any>(), byFile = new Map<string, any>();
 for (const name of await fs.readdir(path.join(source, "artifacts"))) if (name.endsWith(".json")) {
   const a = JSON.parse(await fs.readFile(path.join(source, "artifacts", name), "utf8"));

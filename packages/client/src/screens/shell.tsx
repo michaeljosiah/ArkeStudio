@@ -2562,11 +2562,11 @@ export function SettingsSampleWorldScreen() {
             {available ? sample?.download ? "Novel illustrated · audiobook and video unfinished" : "cast · canon · a production · a proposal" : "not available in this build"}
           </div>
         </div>
-        {available && (
+        {available && (isRemoteSession() ? <OnYourPC>download and install the story</OnYourPC> : (
           <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
             {installing ? "Downloading / installing…" : sample?.download ? "Download and install" : "Install"}
           </Button>
-        )}
+        ))}
       </div>
 
       {sample?.note && (
