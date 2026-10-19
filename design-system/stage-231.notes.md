@@ -1,6 +1,6 @@
 # Turn 231 · the Stage in the page, and after Build
 
-Proposed on 19 October 2026. It completes turn 229 for #1865: 229 drew the Stage at full screen
+Drawn and approved by the owner on 19 October 2026. It completes turn 229 for #1865: 229 drew the Stage at full screen
 and Build while it runs, and left the Stage inside the normal page and the Stage after Build
 undrawn. Round 92 measured the page-mode viewport at 668 × 180 in a 1360 × 900 window.
 
@@ -24,7 +24,7 @@ undrawn. Round 92 measured the page-mode viewport at 668 × 180 in a 1360 × 900
 | 231e | Start from on an empty stage: only Nothing can be chosen |
 | 231f | The plate picker: three locations, Generate and Upload, Show all pictures off |
 
-## Carried proposals, drawn here for the owner to rule on
+## Carried proposals, approved with the turn
 
 - The draft bar's chips are built from the draft's own diff; no sentence in it comes from the
   model. Its chips add up to the stage list's change count.
