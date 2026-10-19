@@ -166,3 +166,6 @@ export const FRAMES = [
   ...COLLAB,
   ...CHAT,
 ];
+
+// Turn 232 draws the chapter review's AI tells in this writing room, from these parts unchanged.
+export { shell, writing, docHead, foot, frame };

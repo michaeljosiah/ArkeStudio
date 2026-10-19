@@ -1,0 +1,74 @@
+// Turn 232 · AI tells in the chapter review. Writes the review page and, unless --preview, places
+// the turn in the design master and registers its frames with build-review.
+//   node design-system/prose-review-232.mjs [--preview]
+// Then: node design-system/check-master.mjs --record && node design-system/build-review.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { FRAMES } from './prose-review-232.frames.mjs';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const read = name => fs.readFileSync(path.join(here, name), 'utf8');
+const write = (name, content) => fs.writeFileSync(path.join(here, name), content);
+const esc = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+const tokens = '_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens';
+// 232 draws inside turn 227's writing room, so it needs 227's sheet before its own.
+const STYLE = '<link rel="stylesheet" href="prose-review-232.css">';
+const STYLE227 = '<link rel="stylesheet" href="chapter-page-227.css">';
+const frames = FRAMES.map(([letter, title, width, height, kind, draw]) => ({ id: '232' + letter, title, width, height, kind, markup: draw() }));
+for (const f of frames) if (!f.markup.startsWith('<div class="ch227 pr232')) throw new Error(`${f.id}: frame root is not .ch227.pr232`);
+
+write('prose-review-232.review.html', `<!doctype html><html lang="en" class="dark" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI tells · Turn 232</title>${['fonts', 'colors', 'typography', 'spacing', 'effects'].map(n => `<link rel="stylesheet" href="${tokens}/${n}.css">`).join('')}${STYLE227}${STYLE}
+<style>body{margin:0;background:#131313;color:#ededed;font-family:var(--font-sans)}html:not(.dark) body{background:#EFEEEB;color:#1a1a1a}.rv{padding:32px;display:flex;flex-direction:column;gap:40px}.rv h2{font:var(--type-ui);margin:0 0 10px}.rv h2 a{color:inherit}.rv .fr{border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.08);width:max-content}.rv header{display:flex;gap:12px;align-items:center;font:var(--type-ui)}.rv header button{font:var(--type-ui);padding:6px 12px;border-radius:8px;border:1px solid #555;background:none;color:inherit;cursor:pointer}</style></head>
+<body><div class="rv"><header><b>Turn 232 · revision 1 · for review · AI tells in the chapter review</b><button type="button" onclick="document.documentElement.classList.toggle('dark')">Light / dark</button><a href="Arke%20Studio.dc.html#t232" style="color:inherit">Design master</a><a href="prose-review-232.notes.md" style="color:inherit">Notes</a></header>
+${frames.map(f => `<section id="${f.id}"><h2><a href="#${f.id}">${f.id}</a> ${esc(f.title)}</h2><div class="fr">${f.markup}</div></section>`).join('\n')}</div></body></html>`);
+
+if (process.argv.includes('--preview')) { console.log(`Wrote prose-review-232.review.html: ${frames.length} frames.`); process.exit(0); }
+
+export const rules = [
+  ['Review status', '19 October 2026. Revision 1, drawn for the owner’s review; nothing is built. Scope is one chapter at a time (owner, 19 October 2026); the whole-book Prose view of #1744 is not part of this turn. Builds on turn 227’s review notes (227r) and the chapter review shipped for #1782. The owner settled two calls before drawing: an AI tells note has no Fix, and the line is provisional until calibrated on the author’s own chapters.'],
+  ['What a tell is', 'Six patterns, taken from a craft writer’s published account of how agents and readers spot AI-written manuscripts: Rule of three, Stacked list, Metaphor (including personification), Not X but Y, Pivot sentence and Emotional shorthand. Each is ordinary craft. The tell is density: in the account’s two 450-word samples, an AI draft carried 21 and about 17. The full definitions, with what does and does not count, are in docs/research/ai-tells.md and become the reviewer’s brief.'],
+  ['Counted by the stretch', 'The review counts tells in stretches of about 450 words, sliding one paragraph at a time, so a crowded run cannot hide by straddling two. A stretch is crowded at 8 tells, or 4 of one kind. Overlapping crowded stretches make one passage; its note reports its densest 450 words. Below the line nothing is marked anywhere: a single metaphor is never a note.'],
+  ['The model tags, the app counts', 'The model returns each tell as a kind and an exact quotation. The coordinator drops any quotation not in the saved chapter, then does all the arithmetic: stretches, counts, the line and the passages. The model never states a density or a verdict. On screen and in the report this is called the model’s reading, checked against the writer’s words, never a detector or a score.'],
+  ['Choosing checks', 'Review chapter now lists its checks: AI tells (new, on by default), Clarity and continuity, Pictures with the chosen count, and Narration records (232a). Each can run alone; AI tells alone is one model call over the saved chapter. The foot says Notes only. The chapter doesn’t change.'],
+  ['The passage in the page', 'A crowded passage gets an amber bar in the left gutter, numbered to its note, and a wavy amber underline under each tell inside it (232b). Amber is the product’s caution colour; one hue for all six kinds, so speaker colours keep the linked names. Tells outside crowded passages are not underlined.'],
+  ['The strip', 'With AI tells in a review, the margin header carries the chapter’s strip under Review and its count: one bar per 450 words from start to end, its height the tells in it, a dashed line at 8 (232b). Crowded stretches are amber, a kept one is an amber outline, and a dot marks where the page is. A bar scrolls the page to its stretch.'],
+  ['The note', 'The note reads AI tells · Crowded, then the count large (14 in 450 words) with the line beside it, then the kinds in order of count, each with a pip per tell and its number; a kind at 4 or more has amber pips (232b). One line says why: Each is fine alone. Here they crowd together. Then Intentional, Dismiss and What counts. There is no Fix: Arke rewriting an AI tell tends to trade one tell for another (owner, 19 October 2026). The writer rewrites in the page.'],
+  ['A tell, and a kind', 'Hovering a tell, or a long press on touch, names its kind and says it is fine on its own, with its place in the passage’s count (232c). Choosing a kind in the note lights its tells and quietens the rest; choosing it again clears (232d).'],
+  ['What counts', 'What counts opens a card beside the note: the six kinds, each with one line and an example from this chapter, and the line in words: Flagged at 8 in any 450 words, or 4 of one kind (232e). The examples are quoted from the passage under review, never from a fixed list.'],
+  ['After a rewrite', 'Editing a crowded passage lifts its underlines, dashes its bar and turns the note to Changed, with the old count struck and Check again (232f). Check again re-reads only that passage’s stretch, one small model call, and never runs on its own. Under the line, the note becomes Cleared with the new and old counts and the bar and underlines go (232g). Still over, the note returns with the new count.'],
+  ['Intentional and Dismiss', 'Intentional keeps the passage as written, with an optional note; its underlines go and its bar in the strip becomes an outline. It is not flagged again until its words change. Dismiss records that the reading was wrong. Neither changes the manuscript. A kept or dismissed passage stays in the report.'],
+  ['The report', 'The modal report stays for reading a review whole (232h), now with the checks down its left side, each with its open count or Not checked. AI tells shows the chapter’s tells, words and tells per 1,000 words; the strip large with each stretch’s count; By kind across the chapter; and the crowded passages with their state (Open, Cleared with the old count, Kept with the writer’s note) and Show in page. Its foot names the coverage: words read, model calls, and that counts are the model’s reading, not an AI detector.'],
+  ['Nothing crowded', 'A chapter whose tells are spread out shows the strip under the line and one quiet note: AI tells · None crowded, with the chapter’s count (232i). The prose stays unmarked even where single tells sit, like Not the music — the room in this chapter’s opening.'],
+  ['Phone', 'The passage keeps its bar at the page edge and its underlines; the note is a half sheet with the count, the strip, the kinds and the same actions, and steps between notes (232j).'],
+  ['The line is provisional', 'Eight in 450 words sits at about half the two AI samples the source counted. No human baseline exists yet. Before release the check runs over chapters the author wrote unaided, and the line is set above where they sit; the kind line of 4 is calibrated the same way. Until then, every screen that shows the line shows its number.'],
+  ['Implementation boundary', 'New: a prose specialist and its versioned skill beside the script and visual reviewers; a passage finding that carries its instances and stretch rather than one quote; per-check selection; a per-passage recheck; the strip. Reused: the review service, its sidecar, exact-quote verification, staleness and the Intentional and Dismiss decisions. The script reviewer keeps its brief against stylistic policing; AI tells are a separate task so neither instruction weakens the other. Spec: SPEC-056 (the chapter page) and the prose-findings amendment #1744 asks for under SPEC-012 §2.4, to be written in the private set.'],
+];
+
+const turn = `<section class="dv-turn" id="t232"><div class="dv-thd"><a class="dv-tid" href="#t232">232</a><span class="dv-tname">AI tells · the chapter review counts them by the stretch, and marks only a crowded one (extends <a class="dv-oid" href="#t227">227</a>; #1744, #1782)</span></div><p class="dv-next">19 October 2026 · Revision 1 · For review · ${frames.length} HTML drawings. <a href="prose-review-232.review.html">Review page</a> · <a href="prose-review-232.notes.md">Notes</a></p><div class="dv-opts">${frames.map(f => `<div class="dv-opt" id="${f.id}"><div class="dv-olabel"><a class="dv-oid" href="#${f.id}">${f.id}</a>${esc(f.title)}</div><div class="dv-card" style="width:${f.width}px;max-width:none">${f.markup}</div></div>`).join('\n')}</div>${rules.map(([title, body], i) => `<p class="dv-rule"><b>${i + 1} · ${esc(title)}.</b> ${esc(body)}</p>`).join('\n')}<p class="dv-next">Try next: “a tell the model got wrong” · “AI tells while Arke drafts” · “the line set from your own chapters”</p></section>\n`;
+
+let master = read('Arke Studio.dc.html');
+const start = master.indexOf('<section class="dv-turn" id="t232">');
+if (start >= 0) {
+  const next = master.indexOf('<section class="dv-turn"', start + 1);
+  if (next < 0) throw new Error('Cannot safely replace final turn');
+  master = master.slice(0, start) + turn + master.slice(next);
+} else {
+  // Newest first: place above the first turn numbered below 232, never above a newer one.
+  const below = [...master.matchAll(/<section class="dv-turn" id="t(\d+)"/g)].find(m => Number(m[1]) > 0 && Number(m[1]) < 232);
+  if (!below) throw new Error('No turn below 232 to place against');
+  master = master.slice(0, below.index) + turn + master.slice(below.index);
+}
+// After 227's sheet, never before it: 232's note rules override 227's of equal specificity.
+master = master.replace(STYLE + '\n', '');
+master = master.includes(STYLE227) ? master.replace(STYLE227, STYLE227 + '\n' + STYLE) : master.replace('<helmet>', '<helmet>\n' + STYLE);
+write('Arke Studio.dc.html', master);
+
+let build = read('build-review.mjs').replace(/\r?\n  \/\/ BEGIN PROSE REVIEW 232[\s\S]*?  \/\/ END PROSE REVIEW 232(?:\r?\n)*/g, '\n');
+const entries = frames.map(f => `  { group: "Chapter review · turn 232", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },`);
+build = build.replace('const SCREENS = [', 'const SCREENS = [\n  // BEGIN PROSE REVIEW 232\n' + entries.join('\n') + '\n  // END PROSE REVIEW 232\n');
+const pageEntry = '{ file: "prose-review-232.review.html", what: "Turn 232: AI tells in the chapter review — choosing checks, a crowded passage marked in the page with its note and the chapter strip, a tell hovered, a kind lit, What counts, Check again after a rewrite, the report, a chapter with nothing crowded, and phone.", state: "for review" }';
+if (build.includes('file: "prose-review-232.review.html"')) build = build.replace(/\{ file: "prose-review-232\.review\.html",[^\n]+?\}/, pageEntry);
+else build = build.replace('const PAGES = [', 'const PAGES = [\n  ' + pageEntry + ',');
+if (!build.includes(STYLE)) build = build.includes(STYLE227) ? build.replace(STYLE227, STYLE227 + '\n' + STYLE) : build.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', STYLE + '\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
+write('build-review.mjs', build);
+console.log(`Registered turn 232: ${frames.length} frames, ${rules.length} rules. Run check-master --record and build-review next.`);

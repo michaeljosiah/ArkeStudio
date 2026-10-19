@@ -1,0 +1,140 @@
+/* Turn 232 · AI tells in the chapter review. Drawn inside turn 227's writing room (.ch227), so only
+   what is new lives here, scoped to .pr232. Type is set through the tokens only (check-master's rule
+   from turn 139). One hue: the product's caution amber marks tells; speaker colours keep the names. */
+.pr232{--tell:var(--warning);--tell-soft:color-mix(in srgb,var(--warning) 20%,transparent)}
+
+/* A tell in the prose: a wavy underline, an editor's "look again", only inside a crowded passage. */
+.pr232 .tl{text-decoration:underline wavy;text-decoration-color:color-mix(in srgb,var(--tell) 72%,transparent);text-decoration-thickness:1.25px;text-underline-offset:6px;text-decoration-skip-ink:none}
+.pr232 .tl.quiet{text-decoration-color:color-mix(in srgb,var(--tell) 22%,transparent)}
+.pr232 .tl.lit,.pr232 .tl.hot{background:var(--tell-soft);border-radius:3px;text-decoration-color:var(--tell)}
+.pr232 .tl .nm{text-decoration:none}
+
+/* The passage: a bar in the left gutter, numbered to its note. Stale once the writer edits it. */
+.pr232 .tbr{position:absolute;z-index:2;left:calc(50% - min(var(--measure),100% - 2*var(--gut))/2 - 24px);width:2px;border-radius:2px;background:var(--tell)}
+.pr232 .tbr b{position:absolute;top:-2px;left:-9px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--tell);color:var(--background);font:var(--type-meta);font-weight:var(--weight-semibold)}
+.pr232 .tbr.stale{background:none;border-left:2px dashed color-mix(in srgb,var(--muted-foreground) 70%,transparent);width:0}
+.pr232 .tbr.stale b{background:var(--muted);color:var(--muted-foreground)}
+
+/* The chapter at a glance: tells in each 450 words, start to end, against the line. */
+.pr232 .tstrip{display:flex;flex-direction:column;gap:6px;margin:2px 0 4px}
+.pr232 .tstrip .bars{position:relative;height:40px;display:flex;align-items:flex-end;gap:3px;border-bottom:1px solid var(--border)}
+.pr232 .tstrip .bars i{flex:1;min-height:2px;border-radius:2px 2px 0 0;background:color-mix(in srgb,var(--foreground) 24%,transparent);position:relative}
+.pr232 .tstrip .bars i.over{background:var(--tell)}
+.pr232 .tstrip .bars i.kept{background:none;box-shadow:inset 0 0 0 1.5px var(--tell)}
+.pr232 .tstrip .bars i.here::after{content:"";position:absolute;left:50%;bottom:-7px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--foreground)}
+.pr232 .tstrip .line{position:absolute;left:0;right:0;height:0;border-top:1px dashed color-mix(in srgb,var(--foreground) 55%,transparent)}
+.pr232 .tstrip .line small{position:absolute;right:-1px;top:-15px;font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .tstrip .cap{display:flex;justify-content:space-between;margin-top:4px;font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .tstrip.big .bars{height:96px;gap:8px}
+.pr232 .tstrip.big .bars i{border-radius:4px 4px 0 0}
+.pr232 .tstrip.big .bars i b{position:absolute;top:-18px;left:0;right:0;text-align:center;font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .tstrip.big .bars i.over b,.pr232 .tstrip.big .bars i.kept b{color:var(--foreground);font-weight:var(--weight-semibold)}
+.pr232 .tstrip.big .line small{top:-16px;right:-16px}
+.pr232 .tstrip .ends{display:flex;justify-content:space-between;font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .tstrip.big .cap{display:none}
+
+/* The note for a crowded passage: the count, what it is made of, Intentional and Dismiss. No Fix. */
+.pr232 .rnotes .rhead{margin-bottom:2px}
+.pr232 .tnote{gap:10px}
+.pr232 .tnote .big{display:flex;align-items:baseline;gap:6px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .tnote .big b{font:var(--type-title);color:var(--foreground);letter-spacing:var(--tracking-tight)}
+.pr232 .tnote .big small{margin-left:auto;font:var(--type-meta)}
+.pr232 .kinds{display:flex;flex-direction:column;gap:1px;margin:0 -6px}
+.pr232 .kd{display:grid;grid-template-columns:1fr auto 18px;align-items:center;gap:10px;height:26px;padding:0 6px;border-radius:6px;font:var(--type-label);text-align:left}
+.pr232 .kd b{font:var(--type-label);font-weight:var(--weight-semibold);text-align:right}
+.pr232 .kd.on{background:var(--muted)}
+.pr232 .pips{display:flex;gap:3px}
+.pr232 .pips i{width:6px;height:6px;border-radius:2px;background:color-mix(in srgb,var(--foreground) 34%,transparent)}
+.pr232 .kd.over .pips i{background:var(--tell)}
+.pr232 .tnote p{color:var(--muted-foreground)}
+.pr232 .tnote .acts2{align-items:center}
+.pr232 .tnote .acts2 .gap{flex:1}
+.pr232 .rnote .acts2 button.lnk{border:0;padding:0 2px;color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px}
+.pr232 .tnote .was{font:var(--type-label);color:var(--muted-foreground);text-decoration:line-through}
+.pr232 .tnote.done .k{color:var(--foreground)}
+.pr232 .tnote.done .k svg{width:14px;height:14px;color:var(--success)}
+.pr232 .rnote .k .gap{flex:1}
+
+/* A tell, hovered. */
+.pr232 .tpop{position:absolute;z-index:6;width:260px;padding:12px 14px;border-radius:var(--radius-lg);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);display:flex;flex-direction:column;gap:4px}
+.pr232 .tpop b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.pr232 .tpop p{margin:0;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .tpop small{font:var(--type-meta);color:var(--muted-foreground)}
+
+/* What counts: the six tells as the review reads them, and the line. */
+.pr232 .tcount{position:absolute;z-index:6;width:480px;padding:16px 18px;border-radius:var(--radius-xl);background:var(--popover);border:1px solid var(--border);box-shadow:0 18px 50px rgba(0,0,0,.42);display:flex;flex-direction:column;gap:12px}
+.pr232 .tcount .hd{display:flex;align-items:center;justify-content:space-between}
+.pr232 .tcount h3{margin:0;font:var(--type-ui);font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.pr232 .tcount .lede{margin:0;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .tcount dl{margin:0;display:flex;flex-direction:column}
+.pr232 .tcount dl>div{display:grid;grid-template-columns:150px 1fr;gap:12px;padding:9px 0;border-top:1px solid var(--border)}
+.pr232 .tcount dt{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.pr232 .tcount dd{margin:0;display:flex;flex-direction:column;gap:3px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.pr232 .tcount q{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground);quotes:none}
+.pr232 .tcount .rule{margin:0;padding-top:10px;border-top:1px solid var(--border);font:var(--type-ui);display:flex;align-items:center;gap:8px}
+
+/* Choosing checks. */
+.pr232 .tdlg{position:absolute;z-index:7;left:50%;top:150px;width:560px;margin-left:-259px;border-radius:var(--radius-xl);background:var(--popover);border:1px solid var(--border);box-shadow:0 24px 70px rgba(0,0,0,.5);display:flex;flex-direction:column}
+.pr232 .tdlg .hd,.pr232 .trep>.hd{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 18px 14px 22px;border-bottom:1px solid var(--border)}
+.pr232 .tdlg h3,.pr232 .trep h3{margin:0 0 3px;font:var(--type-h3)}
+.pr232 .tdlg .hd small,.pr232 .trep>.hd small{font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .cks{display:flex;flex-direction:column;padding:8px 10px}
+.pr232 .ck{display:grid;grid-template-columns:22px 1fr;gap:12px;align-items:start;padding:12px;border-radius:10px}
+.pr232 .ck>span:last-child{display:flex;flex-direction:column;gap:3px}
+.pr232 .ck b{font:var(--type-ui);font-weight:var(--weight-semibold)}
+.pr232 .ck b small{margin-left:6px;padding:1px 7px;border-radius:var(--radius-pill);background:var(--muted);font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .ck>span>small{font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .ck .box{width:20px;height:20px;margin-top:1px;border-radius:6px;border:1.5px solid color-mix(in srgb,var(--foreground) 40%,transparent);display:grid;place-items:center}
+.pr232 .ck.on .box{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground)}
+.pr232 .ck .box svg{width:13px;height:13px}
+.pr232 .tdlg .ft,.pr232 .trep .ft{display:flex;align-items:center;gap:8px;padding:14px 18px 16px 22px;border-top:1px solid var(--border);font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .tdlg .ft .gap,.pr232 .trep .ft .gap{flex:1}
+
+/* The review read whole: checks on the left, the AI tells section on the right. */
+.pr232 .trep{position:absolute;z-index:7;left:50%;top:92px;width:1000px;margin-left:-479px;border-radius:var(--radius-xl);background:var(--popover);border:1px solid var(--border);box-shadow:0 24px 70px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden}
+.pr232 .trep .cols{display:grid;grid-template-columns:220px 1fr}
+.pr232 .trep nav{display:flex;flex-direction:column;gap:2px;padding:12px 10px;border-right:1px solid var(--border)}
+.pr232 .trep nav button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;border-radius:8px;font:var(--type-ui);text-align:left}
+.pr232 .trep nav button small{font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .trep nav button.on{background:var(--muted)}
+.pr232 .trep .main{display:flex;flex-direction:column;gap:18px;padding:22px 28px 0}
+.pr232 .trep h2{margin:0;font:var(--type-h2)}
+.pr232 .trep .facts{display:flex;gap:22px;margin-top:-8px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .trep .facts b{color:var(--foreground);font-weight:var(--weight-semibold)}
+.pr232 .trep .tstrip{margin-top:18px}
+.pr232 .trep .two{display:grid;grid-template-columns:240px 1fr;gap:32px}
+.pr232 .trep h4{margin:0 0 10px;font:var(--type-label);color:var(--muted-foreground)}
+.pr232 .tot{display:grid;grid-template-columns:132px 1fr 22px;align-items:center;gap:10px;height:28px;font:var(--type-ui);font-weight:var(--weight-regular)}
+.pr232 .tot i{height:6px;border-radius:3px;background:color-mix(in srgb,var(--foreground) 34%,transparent)}
+.pr232 .tot b{font-weight:var(--weight-semibold);text-align:right}
+.pr232 .psg{display:grid;grid-template-columns:24px 1fr auto auto;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--border)}
+.pr232 .psg:first-of-type{border-top:0}
+.pr232 .psg .n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--tell);color:var(--background);font:var(--type-meta);font-weight:var(--weight-semibold)}
+.pr232 .psg.cleared .n,.pr232 .psg.kept .n{background:var(--muted);color:var(--muted-foreground)}
+.pr232 .psg>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pr232 .psg q{font:var(--type-ui);quotes:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr232 .psg small{font:var(--type-meta);color:var(--muted-foreground)}
+.pr232 .psg .st{font:var(--type-label);color:var(--muted-foreground)}
+.pr232 .psg.open .st{color:var(--tell)}
+.pr232 .psg .btn{height:30px;padding:0 12px;background:none}
+.pr232 .trep .ft{margin:6px -28px 0;padding-left:28px}
+.pr232 .trep .ft span:first-child{max-width:520px;line-height:1.45}
+
+/* Phone: the bracket hugs the edge; the note is a half sheet over the lower page. */
+.pr232.phone .wpage{position:relative}
+.pr232.phone .tbr{left:8px}
+.pr232.phone .tbr b{display:none}
+.pr232 .tsheet{position:absolute;z-index:7;left:0;right:0;bottom:0;padding:10px 20px 28px;border-radius:22px 22px 0 0;background:var(--popover);border-top:1px solid var(--border);box-shadow:0 -20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px}
+.pr232 .tsheet .grab{align-self:center;width:36px;height:4px;border-radius:2px;background:var(--border);margin-bottom:2px}
+.pr232 .tsheet .k{display:flex;align-items:center;gap:8px;font:var(--type-label);color:var(--muted-foreground)}
+.pr232 .tsheet .k b{font:var(--type-label);font-weight:var(--weight-semibold);color:var(--foreground)}
+.pr232 .tsheet .k .gap{flex:1}
+.pr232 .tsheet .k svg{width:14px;height:14px}
+.pr232 .tsheet .big{display:flex;align-items:baseline;gap:6px;font:var(--type-ui);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.pr232 .tsheet .big b{font:var(--type-title);color:var(--foreground)}
+.pr232 .tsheet .big small{margin-left:auto;font:var(--type-meta)}
+.pr232 .tsheet .kd{height:30px}
+.pr232 .tsheet .acts2{display:flex;align-items:center;gap:8px}
+.pr232 .tsheet .acts2 .gap{flex:1}
+.pr232 .tsheet .acts2 button{height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--border);font:var(--type-ui)}
+.pr232 .tsheet .acts2 button.lnk{border:0;padding:0;color:var(--muted-foreground);text-decoration:underline;text-underline-offset:3px}

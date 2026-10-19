@@ -28,6 +28,19 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN PROSE REVIEW 232
+  { group: "Chapter review · turn 232", screen: "Review chapter · choose the checks; AI tells is new", frame: "232a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "Manuscript · a crowded passage: its tells marked, its count in the margin", frame: "232b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "Manuscript · one tell hovered: its kind, and that it is fine alone", frame: "232c", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "Manuscript · one kind chosen: its five metaphors lit, the rest quiet", frame: "232d", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "What counts · the six tells, and the line", frame: "232e", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "The writer rewrote the passage · its marks lift; Check again", frame: "232f", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "Checked again · under the line, nothing marked", frame: "232g", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "The review read whole · AI tells across the chapter", frame: "232h", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "A chapter with tells spread out · nothing crowded, nothing marked", frame: "232i", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  { group: "Chapter review · turn 232", screen: "Phone · the passage, and its note as a sheet", frame: "232j", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Revision 1 for the owner's review; extends 227r for #1744 and #1782."] },
+  // END PROSE REVIEW 232
+
   // BEGIN STAGE 231
   { group: "Stage · turn 231", screen: "The Stage in the page. Its own workspace: the head on one line, the dock away, Export and Render at the inspector’s foot, and a viewport of 1004 × 580 at 1360 × 850.", frame: "231a", route: "Scene / shot / Stage", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Approved 19 October 2026; completes turn 229 for #1865."] },
   { group: "Stage · turn 231", screen: "After Build. The draft takes the line’s place: what it changed, counted and named from the draft itself, then Discard and Keep. The viewport draws the draft in its own look and lights.", frame: "231b", route: "Scene / shot / Stage", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Approved 19 October 2026; completes turn 229 for #1865."] },
@@ -828,6 +841,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "prose-review-232.review.html", what: "Turn 232: AI tells in the chapter review — choosing checks, a crowded passage marked in the page with its note and the chapter strip, a tell hovered, a kind lit, What counts, Check again after a rewrite, the report, a chapter with nothing crowded, and phone.", state: "for review" },
   { file: "stage-231.review.html", what: "Turn 231: the Stage as its own workspace in the page, the draft bar after Build and Quick layout with Arke’s notes apart, Start from, one Keep, lights in a draft, and the plate picker with locations first.", state: "current" },
   { file: "stage-229.review.html", what: "Turn 229: the Stage with a location plate, the Lit and Plate looks, jointed figures with poses and contacts, the kit and lights, the camera in words, Build with Arke as a working log, Board 1 with a cut animatic, and the Bench prompt written as timed cuts with Follow.", state: "approved; implementation tracked in #1826" },
   { file: "audio-drama-228.review.html", what: "Turn 228: source-linked Audio Drama adaptation, typed script, casting, reused Audio Studio, listening review, editions and source changes.", state: "proposed; interactive design fixture" },
@@ -989,6 +1003,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="global-chat-224.css">
 <link rel="stylesheet" href="audio-studio-226.frames.css">
 <link rel="stylesheet" href="chapter-page-227.css">
+<link rel="stylesheet" href="prose-review-232.css">
 <link rel="stylesheet" href="chapter-page-227.chat.css">
 <link rel="stylesheet" href="audio-drama-228.css">
 <link rel="stylesheet" href="stage-229.css">
