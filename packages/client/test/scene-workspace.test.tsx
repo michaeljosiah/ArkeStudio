@@ -227,12 +227,14 @@ describe("scene detail owns the workspace", () => {
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"working",round:0,detail:"Inspecting next",draft:{staging,cast:[],sets:[],assumptions:[],assessment:"Draft",inspected:[]}});
     // Keep waits for construction to finish (issue 1127): while the build works there is no Keep
     // to press at all (design turn 229f), so an in-flight draft cannot be presented as saved.
-    assert.equal(q(mounted,'[data-testid="stage-moved"]'), null, "no Keep while the build works");
+    assert.equal(q(mounted,'[data-testid="stage-draft"]'), null, "no Keep while the build works");
     assert.equal(sent.some(message=>message.kind==="scene-command"), false, "an in-flight draft cannot be presented as saved");
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:2,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",parent:"vehicle",x:0,z:0}],sets:[{name:"Vehicle",group:"vehicle",x:0,z:0,w:2,h:1,d:4,solid:true}],assumptions:[],assessment:"Inspected",inspected:[]}});
     assert.equal(sent.some(message=>message.kind==="scene-command"),false,"AI construction does not file changes");
-    assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/Framing inspected/);
-    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    assert.match(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/^Arke’s blockout/,"the draft bar says who made the draft (231b)");
+    await click(q(mounted,".fy-swstage__notesbtn")!);
+    assert.match(q(mounted,'[data-testid="stage-notes"]')?.textContent??"",/round 2 · \d+ calls · \d+:\d\dInspected/,"the build's own account is Arke's notes, apart from the bar (231c)");
+    await click(all(mounted,'[data-testid="stage-draft"] button').find(button=>button.textContent==="Keep")!);
     const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
     assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
     assert.equal(write.command.blocking,undefined,"shared blocking is untouched");
@@ -259,7 +261,7 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(lines.map(line=>line.querySelector("span:nth-child(2)")?.textContent),["read plate","deck · room 8 × 10 × 4","check"]);
     assert.deepEqual(lines.map(line=>line.getAttribute("data-state")),["ok","ok","run"],"the latest step is the one running");
     assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/building/);
-    assert.match(q(mounted,".fy-swstage__inspection summary")?.textContent??"",/Working/);
+    assert.equal(q(mounted,'[data-testid="stage-draft"]'),null,"the draft bar waits for the build to finish");
     await apply({...base,status:"ready",round:1,detail:"Ready",draft:{staging,cast:[],sets:[{name:"deck",x:0,z:0,w:8,h:4,d:10}],assumptions:[],assessment:"Deck built.",inspected:[]}});
     assert.equal(q(mounted,'[data-testid="stage-build-log"]'),null,"the log goes when the build is done");
   });
@@ -277,7 +279,7 @@ describe("scene detail owns the workspace", () => {
     const lights=[{name:"lamp",kind:"point" as const,colour:"#ffb867",strength:7,x:0,y:1.5,z:0}];
     const atmosphere={time:"night" as const};
     await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,atmosphere,assumptions:[],assessment:"Inspected",inspected:[]} as never});
-    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    await click(all(mounted,'[data-testid="stage-draft"] button').find(button=>button.textContent==="Keep")!);
     const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
     assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
     assert.deepEqual(write.command.blocking?.lights,lights,"the build's lights are kept, not dropped");
@@ -299,10 +301,80 @@ describe("scene detail owns the workspace", () => {
     await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Blockout ready to review. Keep applies this shot's override.",draft:{staging,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,atmosphere:{time:"night"},assumptions:[],assessment:"A warm desk lamp at night.",inspected:[]} as never});
     const lines=all(mounted,'[data-testid="stage-light-line"]').map(line=>line.querySelector("span:nth-child(2)")?.textContent);
     assert.ok(lines.includes("desk lamp"),"the build's lamp is on the Stage it is reviewed on, not only in what Keep writes");
-    assert.match(q(mounted,".fy-swstage__construction")?.textContent??"",/Blockout ready to review/);
-    await click(q(mounted,'[data-testid="stage-moved"] [aria-label="Discard"]')!);
-    assert.doesNotMatch(q(mounted,".fy-swstage__construction")?.textContent??"",/Blockout ready to review/,"nothing is waiting for review after Discard");
+    assert.match(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/\+light · desk lamp/,"the bar counts the build's lamp");
+    assert.doesNotMatch(q(mounted,'[data-testid="stage-draft"]')?.textContent??"",/A warm desk lamp/,"and says nothing in the model's words");
+    await click(q(mounted,".fy-swstage__notesbtn")!);
+    assert.ok(q(mounted,'[data-testid="stage-notes"]'));
+    await click(q(mounted,'[data-testid="stage-draft"] [aria-label="Discard"]')!);
+    assert.equal(q(mounted,'[data-testid="stage-draft"]'),null,"nothing is waiting for review after Discard");
+    assert.equal(q(mounted,'[data-testid="stage-notes"]'),null,"and the notes went with the draft");
     assert.equal(all(mounted,'[data-testid="stage-light-line"]').some(line=>line.textContent?.includes("desk lamp")),false,"and its lamp went with it");
+  });
+
+  it("says what a build changed in the draft bar, counted from its diff, and Keep or Discard clears it with its notes (231b, 231c, issue 1892)",async()=>{
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));
+    const state=structuredClone(FIXTURE_STATE) as ClientState;
+    const scene=state.world!.productions.find(candidate=>candidate.meta.id==="saltlight")!.scenes.find(candidate=>candidate.id==="sc_04")!;
+    const keys=[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}];
+    (orderedShots(scene).find(candidate=>candidate.id==="sh_12") as {staging?:unknown}).staging={version:1,cast:[],sets:[],keys};
+    const mounted=await mountState(state);
+    await openStage(mounted);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct")!;
+    const kit=(name:string,kind:string,x:number)=>({name,kit:{kind},x,z:1,w:0.9,h:0.9,d:0.9,solid:true});
+    const draft={
+      staging:{keys:[{...keys[0]!,p:[1,1.6,5] as [number,number,number]},keys[1]!],performances:[
+        {sheetId:"maren-kest",keys:[{t:0,x:1,z:1,pose:"sit" as const},{t:4,x:1,z:1,pose:"sit" as const}]},
+        {sheetId:"bray-half-hitch",keys:[{t:0,x:-2,z:-3},{t:4,x:-1,z:0.5,pose:"lean-on" as const}]},
+      ]},
+      cast:[{sheetId:"maren-kest",x:1,z:1,pose:"sit" as const},{sheetId:"bray-half-hitch",x:-2,z:-3}],
+      sets:[
+        {name:"lobby",x:0,z:0,w:8,h:5,d:12,kit:{kind:"room",open:["front"],openings:[{wall:"right",kind:"door",at:-2,w:1.2,h:2.2},{wall:"right",kind:"door",at:2,w:1.2,h:2.2}]}},
+        kit("armchair","armchair",1),kit("armchair 2","armchair",2),kit("planter","planter",3),kit("lamp","lamp",-1),
+      ],
+      lights:["niche wash","lamp","pendant","strip","strip 2"].map((name,index)=>({name,kind:"point",colour:"#ffb867",kelvin:3000,strength:4,x:index,y:2,z:0})),
+      assumptions:["The lifts are on the right wall."],assessment:"Matched the plate at 18 mm.",inspected:["camera"],
+    };
+    await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,calls:38,detail:"Blockout built; the model did not finish it. Review before keeping.",draft} as never);
+    const bar=()=>q(mounted,'[data-testid="stage-draft"]');
+    assert.equal(bar()?.querySelector(".fy-swstage__who")?.textContent,"Arke’s blockout");
+    const chips=[...bar()!.querySelectorAll(".fy-swstage__chip")].map(chip=>chip.textContent);
+    assert.deepEqual(chips.slice(0,1).map(chip=>chip?.replace(/ · .*/,"")),["~camera"],"the camera changed, in the warning colour");
+    assert.ok(chips.includes("+Maren Kest sits"),String(chips));
+    assert.ok(chips.some(chip=>/^\+\S+ walks · leans$/.test(chip??"")),String(chips));
+    assert.ok(chips.includes("+room · 2 doors")&&chips.includes("+4kit")&&chips.includes("+5lights"),String(chips));
+    const counted=[...bar()!.querySelectorAll(".fy-swstage__chip > b")].reduce((sum,mark)=>sum+(Number(mark.textContent!.slice(1))||1),0);
+    assert.equal(counted,13);
+    assert.match(q(mounted,".fy-swstage__panel")?.textContent??"",/draft · 13 changes/,"the chips add up to the stage list's header");
+    assert.equal(bar()?.querySelector('[data-changed="true"]')?.textContent,"~","changed in the warning colour, added in the success colour");
+    assert.equal(stageItem(mounted,"camera").querySelector(".fy-swstage__glyph")?.textContent,"~");
+    assert.equal(stageItem(mounted,"Maren Kest").querySelector(".fy-swstage__glyph")?.textContent,"+");
+    assert.doesNotMatch(bar()?.textContent??"",/Matched the plate|lifts|did not finish/,"no sentence in the bar is the model's");
+    // Export and Render wait for Keep.
+    const way=(text:string)=>all(mounted,".fy-swstage__ways button").find(button=>button.textContent===text) as HTMLButtonElement;
+    assert.equal(way("Export playblast").disabled,true);
+    assert.equal(way("Render with this").disabled,true);
+    assert.match(q(mounted,".fy-swstage__block--ways")?.textContent??"",/after Keep/);
+    // Arke's notes: the model's words and the run, a warning in the warning colour.
+    await click(q(mounted,".fy-swstage__notesbtn")!);
+    const notes=q(mounted,'[data-testid="stage-notes"]')!;
+    assert.match(notes.textContent??"",/round 1 · 38 calls · \d+:\d\d/);
+    assert.match(notes.textContent??"",/Matched the plate at 18 mm\.The lifts are on the right wall\./);
+    assert.equal(notes.querySelector('[data-warn="true"]')?.textContent,"Blockout built; the model did not finish it. Review before keeping.");
+    await click(all(mounted,'[data-testid="stage-draft"] button').find(button=>button.textContent==="Keep")!);
+    const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
+    assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
+    assert.equal(write.command.blocking?.lights?.length,5,"Keep writes the build's lights with its blocking, in one command");
+    assert.equal(write.command.staging?.sets?.length,5);
+    // The kept version lands: the bar and the notes go with the draft.
+    const landed=structuredClone(state);
+    const landedScene=landed.world!.productions.find(candidate=>candidate.meta.id==="saltlight")!.scenes.find(candidate=>candidate.id==="sc_04")!;
+    landedScene.version+=1;landedScene.blocking={version:1,...write.command.blocking!} as never;
+    (orderedShots(landedScene).find(candidate=>candidate.id==="sh_12") as {staging?:unknown}).staging={version:2,...write.command.staging};
+    await act(async()=>__setStateForTest(landed));
+    assert.equal(bar(),null,"Keep clears the bar");
+    assert.equal(q(mounted,'[data-testid="stage-notes"]'),null,"and the notes");
+    assert.ok(q(mounted,".fy-swstage__construction"),"the line is back");
   });
 
   it("holds a build that changed only the lights for Keep or Discard (issue 1865)",async()=>{
@@ -319,8 +391,8 @@ describe("scene detail owns the workspace", () => {
     assert.ok(request);
     const lights=[{name:"desk lamp",kind:"point" as const,colour:"#ffb867",strength:6,x:0,y:1.2,z:0}];
     await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Ready",draft:{staging:{keys},cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,assumptions:[],assessment:"Lit.",inspected:[]} as never});
-    assert.ok(q(mounted,'[data-testid="stage-moved"]'),"a lights-only build still has something to keep");
-    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    assert.ok(q(mounted,'[data-testid="stage-draft"]'),"a lights-only build still has something to keep");
+    await click(all(mounted,'[data-testid="stage-draft"] button').find(button=>button.textContent==="Keep")!);
     const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
     assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
     assert.deepEqual(write.command.blocking?.lights,lights);
@@ -475,7 +547,7 @@ describe("scene detail owns the workspace", () => {
     await openStage(mounted);
     await click(stageItem(mounted, "Maren Kest"));
     await click(stageLink(mounted, "Set a walk"));
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const sharedCommand = (shared.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(sharedCommand.kind, "edit-stage");
     if (sharedCommand.kind !== "edit-stage") return;
@@ -487,7 +559,7 @@ describe("scene detail owns the workspace", () => {
     const remounted = await mountState(structuredClone(state));
     await openStage(remounted);
     await click(all(remounted, ".fy-swstage__chips button").find((button) => button.textContent === "This shot")!);
-    await click([...q(remounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(remounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const localCommand = (local.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(localCommand.kind, "edit-stage");
     if (localCommand.kind !== "edit-stage") return;
@@ -529,7 +601,7 @@ describe("scene detail owns the workspace", () => {
     const updatedBlocking = { ...privateBlocking, cast: [{ sheetId: "maren-kest", x: 7, z: 1 }] };
     updatedShot.staging = { ...updatedShot.staging!, version: 2, ...updatedBlocking };
     await act(async () => __setStateForTest(updated));
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
 
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
@@ -568,7 +640,7 @@ describe("scene detail owns the workspace", () => {
     updatedScene.version += 1;
     updatedScene.blocking = { version: 1, cast: [{ sheetId: "maren-kest", x: 9, z: 1 }], sets: [] };
     await act(async () => __setStateForTest(updated));
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
 
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
@@ -594,7 +666,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
 
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
@@ -618,7 +690,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     await click(stageItem(mounted, "Maren Kest"));
     const walk = stageLink(mounted, "Set a walk") as HTMLButtonElement;
     assert.equal(walk.disabled, true);
@@ -634,7 +706,7 @@ describe("scene detail owns the workspace", () => {
     await act(async () => __setStateForTest(landed));
 
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 1);
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
     // She still stands where she was: the walk pressed while frozen never landed (229a's words).
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /stands$/);
     assert.doesNotMatch(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
@@ -662,7 +734,7 @@ describe("scene detail owns the workspace", () => {
     const newerShot = orderedShots(newerScene).find((candidate) => candidate.id === "sh_12")!;
     newerShot.staging = { ...newerShot.staging!, cast: [{ sheetId: "maren-kest", x: 7, z: 2 }], sets: [] };
     await act(async () => __setStateForTest(blockingMoved));
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const cameraCommand = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(cameraCommand.kind, "edit-stage");
     if (cameraCommand.kind !== "edit-stage") return;
@@ -684,7 +756,7 @@ describe("scene detail owns the workspace", () => {
     const cameraShot = orderedShots(cameraScene).find((candidate) => candidate.id === "sh_12")!;
     cameraShot.staging = { version: 2, keys: [{ t: 0, p: [0, 2, 8], l: [0, 1.2, 0] }] };
     await act(async () => __setStateForTest(cameraMoved));
-    await click([...q(second, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(second, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const blockingCommand = (secondSent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(blockingCommand.kind, "edit-stage");
     if (blockingCommand.kind !== "edit-stage") return;
@@ -716,7 +788,7 @@ describe("scene detail owns the workspace", () => {
     movedScene.version += 1;
     movedScene.blocking = { version: 3, cast: [{ sheetId: "maren-kest", x: 9, z: 1 }], sets: [] };
     await act(async () => __setStateForTest(moved));
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
     if (command.kind !== "edit-stage") return;
@@ -741,7 +813,7 @@ describe("scene detail owns the workspace", () => {
     delete orderedShots(clearedScene)[0]!.staging;
     await act(async () => __setStateForTest(cleared));
 
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
     assert.match(q(mounted, '[data-testid="workspace-stage"]')?.textContent ?? "", /Nothing staged yet/);
   });
 
@@ -777,15 +849,15 @@ describe("scene detail owns the workspace", () => {
     assert.equal(all(mounted, ".fy-swstage__chips button").find((chip) => chip.textContent === "Maren Kest")?.getAttribute("data-on"), "true", "the key rides with Maren");
     assert.equal(all(mounted, ".fy-swstage__key").length, 3);
     assert.equal(all(mounted, ".fy-swstage__key[data-mid=\"true\"]").length, 1, "only interior keys retime");
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
 
     // A move in hand cannot be rendered: the session is prepared from the KEPT staging.
     await click(q(mounted, '[aria-label="Raise"]')!);
     const held = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Render with this") as unknown as HTMLButtonElement;
     assert.equal(held.disabled, true, "Render waits for Keep");
     assert.equal(held.getAttribute("title"), "Keep the move first");
-    await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    await click(q(mounted, '[data-testid="stage-draft"] [aria-label="Discard"]')!);
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
 
     // A kept camera still needs a current exported reference before the Stage handoff.
     const render = [...stage.querySelectorAll("button")].find(button=>button.textContent==="Render with this") as unknown as HTMLButtonElement;
@@ -797,8 +869,8 @@ describe("scene detail owns the workspace", () => {
     // A nudge is a draft: nothing is written until Keep, and Keep writes the next version.
     await click(q(mounted, '[aria-label="Raise"]')!);
     assert.equal(height(), "1.65");
-    const moved = q(mounted, '[data-testid="stage-moved"]')!;
-    assert.match(moved.textContent ?? "", /start moved/);
+    const moved = q(mounted, '[data-testid="stage-draft"]')!;
+    assert.match(moved.textContent ?? "", /^Changes~camera · /, "the bar names the camera as what changed (231b)");
     const before = sent.length;
     await click([...moved.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     assert.equal(sent.length, before + 1);
@@ -823,22 +895,22 @@ describe("scene detail owns the workspace", () => {
     const landedShot = orderedShots(landedScene).find((candidate) => candidate.id === "sh_12")!;
     landedShot.staging = { ...landedShot.staging!, ...kept, version: landedShot.staging!.version + 1 };
     await act(async () => __setStateForTest(landed));
-    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null, "the landed draft retires");
+    assert.ok(q(mounted, '[data-testid="stage-draft"]') === null, "the landed draft retires");
     assert.equal(height(), "1.65");
 
     // Returning to the newly kept height is not a move at all.
     await click(q(mounted, '[aria-label="Lower"]')!);
     assert.equal(height(), "1.55");
-    assert.ok(q(mounted, '[data-testid="stage-moved"]'));
+    assert.ok(q(mounted, '[data-testid="stage-draft"]'));
     await click(q(mounted, '[aria-label="Raise"]')!);
-    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
+    assert.ok(q(mounted, '[data-testid="stage-draft"]') === null);
 
     // Discard returns a later draft to the camera that actually landed.
     await click(q(mounted, '[aria-label="Lower"]')!);
     await click(q(mounted, '[aria-label="Lower"]')!);
     assert.equal(height(), "1.45");
-    await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
-    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
+    await click(q(mounted, '[data-testid="stage-draft"] [aria-label="Discard"]')!);
+    assert.ok(q(mounted, '[data-testid="stage-draft"]') === null);
     assert.equal(height(), "1.65");
   });
 
@@ -878,7 +950,7 @@ describe("scene detail owns the workspace", () => {
     await click(stageItem(mounted, "Maren Kest"));
     await chooseOption(q(mounted, '[aria-label="Maren Kest pose"]')!, "lie");
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /lies/);
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
     if (command.kind !== "edit-stage") return;
@@ -904,8 +976,8 @@ describe("scene detail owns the workspace", () => {
     await editInput(q(mounted, '[aria-label="Set 1 x"]') as HTMLInputElement, "1.5");
     await editInput(q(mounted, '[aria-label="Set 1 width"]') as HTMLInputElement, "2");
     await editInput(q(mounted, '[aria-label="Set 1 height"]') as HTMLInputElement, "0.9");
-    assert.match(q(mounted, '[data-testid="stage-moved"]')?.textContent ?? "", /blocking moved/);
-    await click(all(mounted, '[data-testid="stage-moved"] button').find((button) => button.textContent === "Keep")!);
+    assert.match(q(mounted, '[data-testid="stage-draft"]')?.textContent ?? "", /^Changes\+counter/);
+    await click(all(mounted, '[data-testid="stage-draft"] button').find((button) => button.textContent === "Keep")!);
 
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
@@ -934,7 +1006,7 @@ describe("scene detail owns the workspace", () => {
     await openStage(mounted);
     await chooseOption(q(mounted, '[aria-label="Camera rig"]')!, "crane");
     await click(q(mounted, '[aria-label="More rig motion"]')!);
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
     if (command.kind !== "edit-stage") return;
@@ -967,11 +1039,11 @@ describe("scene detail owns the workspace", () => {
     const keys = all(mounted, ".fy-swstage__key").map((key) => key.getAttribute("title") ?? "");
     assert.match(keys[2]!, /4.0s/, "the end key sits at the shot's length");
     assert.match(keys[1]!, /2.0s/, "an interior key that still fits is left where it was");
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null, "reading is not a move");
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null, "reading is not a move");
 
     await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
-    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    await click([...q(mounted, '[data-testid="stage-draft"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.command.kind, "edit-stage");
     if (command.command.kind !== "edit-stage") return;
@@ -994,7 +1066,7 @@ describe("scene detail owns the workspace", () => {
     assert.equal(keys.length, 2, "a first key brings its end pose with it");
     assert.match(keys[0]!, /start · 0.0s/);
     assert.match(keys[1]!, /end · 4.0s/);
-    assert.ok(q(mounted, '[data-testid="stage-moved"]'), "and it is a move to keep");
+    assert.ok(q(mounted, '[data-testid="stage-draft"]'), "and it is a move to keep");
   });
 
   it("reaches the Stage through the shot's page and draws a staged shot's blocking on the canvas", async () => {

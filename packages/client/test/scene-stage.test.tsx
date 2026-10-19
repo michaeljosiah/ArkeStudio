@@ -210,7 +210,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   await pointer(first, "pointermove", 500);
   await pointer(first, "pointerup", 500);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "2.9", "cannot cross the next mark");
-  assert.match(q('[data-testid="stage-moved"]').textContent ?? "", /^Stage changed/, "motion edits do not claim the camera start moved");
+  assert.match(q('[data-testid="stage-draft"]').textContent ?? "", /^Changes~Maren Kest /, "motion edits are the figure's in the draft bar, not the camera start's (231b)");
   await pointer(first, "pointerdown", 390);
   await pointer(first, "pointermove", 225);
   await pointer(first, "pointerup", 225);
@@ -228,7 +228,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   await pointer(last, "pointerup", 600);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "4");
   assert.equal(sent.length, 0, "timing stays in the local draft");
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind !== "edit-stage") return;
@@ -252,12 +252,12 @@ it("scales every lane and stops a drag when duration or editability changes (#10
   shot.durationSec = 4;
   await render();
   await pointer(mark, "pointermove", 400);
-  assert.equal(q('[data-testid="stage-moved"]'), null, "old drag bounds cannot edit a retimed track");
+  assert.equal(q('[data-testid="stage-draft"]'), null, "old drag bounds cannot edit a retimed track");
   await pointer(mark, "pointerdown", 150);
   await render(true);
   await pointer(mark, "pointermove", 400);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "0.5");
-  assert.equal(q('[data-testid="stage-moved"]'), null);
+  assert.equal(q('[data-testid="stage-draft"]'), null);
 });
 
 it("edits camera easing through Keep and preserves duplicate-key holds when their edge is dragged (#1042)", async () => {
@@ -287,7 +287,7 @@ it("edits camera easing through Keep and preserves duplicate-key holds when thei
   await pointer(edge, "pointerup", 350);
   assert.equal(track.getAttribute("aria-valuenow"), "2.5");
   assert.ok(q('[aria-label="Hold from 0.00 to 2.50 seconds"]'));
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind !== "edit-stage") return;
@@ -354,7 +354,7 @@ it("edits gait, ease and hold with a single-key camera through retiming and Keep
   shot.durationSec = 8;
   await render();
   assert.ok(q('[aria-label="Maren Kest hold from 0.00 to 0.50 seconds"]'));
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind === "edit-stage") {
@@ -378,7 +378,7 @@ it("puts a chosen camera move in the draft and Keeps it without changing timed a
   await act(async () => props.onChange({ target: { value: "orbit-360" } }));
   assert.equal(sent.length, 0, "choosing a move only authors a draft");
   assert.equal(q('[data-key-track="1"]')?.querySelectorAll("button.fy-swstage__key").length, 9);
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind !== "edit-stage") return;
@@ -462,7 +462,7 @@ it("a set's form writes its place, size, rotation and group, and Add set selects
   await commit("Set 1 elevation", "0.5");
   await commit("Cart turn", "90");
   await commit("Set 1 group", "Wagon Train");
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind !== "edit-stage") return;
@@ -493,7 +493,7 @@ it("a group's references follow it: cleared, its track and the camera's anchor g
   });
   await click(stageItem(q, "Cart"));
   await leaveField(q('[aria-label="Set 1 group"]') as HTMLInputElement, "");
-  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
+  await click([...q('[data-testid="stage-draft"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
   if (command.kind !== "edit-stage") return;
@@ -525,13 +525,11 @@ it("Escape restores the whole authored draft after valid live numeric edits", as
   }>)[Object.keys(input).find(key => key.startsWith("__reactProps$"))!]!;
   await act(async () => props().onFocus());
   await act(async () => props().onChange({ target: { value: "1.75" } }));
-  assert.ok(q('[data-testid="stage-moved"]'), "valid typing previews the change");
+  assert.ok(q('[data-testid="stage-draft"]'), "valid typing previews the change");
   await act(async () => props().onKeyDown({ key: "Escape", currentTarget: input, preventDefault() {}, stopPropagation() {} }));
   await act(async () => props().onBlur({ currentTarget: input }));
   assert.equal(input.value, "1.00");
-  assert.equal(q('[data-testid="stage-moved"]'), null);
-  assert.match(q(".fy-swstage__inspection").textContent ?? "", /Reviewed framing/);
-  assert.match(q(".fy-swstage__inspection").textContent ?? "", /3 views inspected/);
+  assert.equal(q('[data-testid="stage-draft"]'), null);
 });
 
 it("Escape in a field is the field's: it drops what was typed without committing, and stops there; other keys pass", async () => {
@@ -545,13 +543,13 @@ it("Escape in a field is the field's: it drops what was typed without committing
     const props = (intensity as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[propsKey]!;
     await act(async () => props.onChange({ target: { value: "999" } }));
     assert.equal(intensity.value, "999", "typing out of range shows but does not land");
-    assert.equal(q('[data-testid="stage-moved"]'), null);
+    assert.equal(q('[data-testid="stage-draft"]'), null);
     await key(intensity, "ArrowUp");
     await key(intensity, "Escape");
     // The Escape's blur has no focusout in linkedom; the one a browser fires must not commit either.
     await act(async () => props.onBlur({ currentTarget: intensity }));
     assert.equal(intensity.value, "1.00", "Escape reverts to the value that stands");
-    assert.equal(q('[data-testid="stage-moved"]'), null, "and nothing was clamped into the draft on the way out");
+    assert.equal(q('[data-testid="stage-draft"]'), null, "and nothing was clamped into the draft on the way out");
     assert.deepEqual(reached, ["ArrowUp"], "Escape stopped at the field; the arrow reached the page");
 
     await click(stageItem(q, "Cart"));
@@ -680,7 +678,7 @@ it("lists the plate second, opens its form, and Match camera puts the opening ke
   assert.match(form.textContent ?? "", /Match camera/);
   const match = [...form.querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Match camera")!;
   await click(match);
-  assert.ok(q('[data-testid="stage-moved"]'), "matching is an edit to keep or discard");
+  assert.ok(q('[data-testid="stage-draft"]'), "matching is an edit to keep or discard");
   await click(q(".fy-swstage__keep"));
   const kept = sent.at(-1);
   const opening = kept?.kind === "edit-stage" ? kept.staging?.keys[0] : undefined;
@@ -780,7 +778,8 @@ it("brings a Lamp's light with it, held with the draft until Keep (229e rule 7, 
   await click(lamp);
   assert.equal(sent.length, 0, "the light waits with the lamp rather than landing on the scene at once");
   const held = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>('[data-testid="stage-light-line"]')].find((line) => line.querySelector("span:nth-child(2)")?.textContent === "lamp");
-  assert.equal(held?.querySelector("span:nth-child(3)")?.textContent, "point · 8", "the held light is listed beside the scene's");
+  assert.equal(held?.querySelector("span:last-child")?.textContent, "point · 8", "the held light is listed beside the scene's");
+  assert.equal(held?.querySelector(".fy-swstage__glyph")?.textContent, "+", "and marked new in the draft (231b)");
   const addLight = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Add light")!;
   assert.equal(addLight.disabled, true);
   assert.equal(addLight.title, "Keep the move first", "a shut Add light says why");

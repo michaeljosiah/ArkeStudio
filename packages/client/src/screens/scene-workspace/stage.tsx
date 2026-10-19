@@ -63,9 +63,13 @@ import { send, useStore, subscribeStageConstruction, beginStageExport, cancelSta
 import { Button, Select } from "../../components/ui.js";
 import { languageChoiceReason } from "../../components/harness-models.js";
 import { productionModel } from "../../components/dispatch-bar.js";
-import { Check, ChevronLeft, ChevronRight, Lamp, Maximize2, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
+import { Check, ChevronLeft, ChevronRight, Lamp, Maximize2, Minimize2, Minus, PauseSolid, PlaySolid, Plus } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
+/** Arke's notes on a build (design turn 231c): its words, and how the run went. */
+type ArkeNotes = { assessment: string; assumptions: readonly string[]; model?: string; inspected?: number; round?: number; calls?: number; seconds?: number; warning?: string };
+/** One chip of the draft bar (231b): what the draft did, counted from its own diff against the kept staging. */
+type DraftChip = { mark: "+" | "~" | "−"; count: number; label: string };
 type MotionLane = { kind: "performance" | "object"; id: string };
 type MotionMark = MotionLane & { index: number; keyCount: number };
 
@@ -292,6 +296,11 @@ export function SceneStage({
   const [draftPlateCamera, setDraftPlateCamera] = useState<ScenePlate["camera"] | null>(null);
   // A build's lights and atmosphere (issue 1825), kept with the blocking.
   const [draftLook, setDraftLook] = useState<{ lights?: StageLight[]; atmosphere?: SceneAtmosphere } | null>(null);
+  // Who made the waiting draft, for the draft bar (design turn 231b), and Arke's own account of a
+  // build (231c), held apart from the bar's summary so no sentence in the bar is the model's. Both
+  // go with the draft.
+  const [draftFrom, setDraftFrom] = useState<{ who: "arke"; notes: ArkeNotes } | { who: "quick" } | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
   // Where the shot's form puts the reference rows; null while another form is up (turn 144).
   const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
@@ -331,12 +340,13 @@ export function SceneStage({
     return () => clearInterval(timer);
   }, [constructing]);
   const construction = useRef<{ id: string; version: number } | null>(null);
+  // When the running build started and its calls so far, for Arke's notes once it ends.
+  const buildRun = useRef({ started: 0, calls: 0 });
   const inspectionTimes = useRef<number[]>([]);
   const aiDraftVersion = useRef<number | null>(null);
   const [exporting, setExporting] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
-  const inspection = useRef<HTMLDetailsElement | null>(null);
   const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (viewportElement === null || typeof ResizeObserver === "undefined") return;
@@ -382,11 +392,6 @@ export function SceneStage({
     const base = draft ?? resolvedPersisted;
     return base === null ? null : stagingRetimed(base, durationSec);
   }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
-  // A hand edit strips the build's provenance (the draft is no longer what the model said), and a
-  // native <details> keeps its own open state regardless — so the disclosure is shut here, not
-  // left expanded over an empty body while its dress says it cannot open.
-  const inspected = working?.authorship !== undefined;
-  useEffect(() => { if (!inspected) inspection.current?.removeAttribute("open"); }, [inspected]);
   const cameraWarnings = useMemo(() => working ? [...stageCameraStandoffWarnings(working, durationSec), ...stageCameraMotionWarnings(working, durationSec)] : [], [working, durationSec]);
   // Where the Stage has its own head (the page's workspace, 231a, and full screen) its line stays
   // one row: a camera warning is said on the camera's list line, in the warning colour, and in the
@@ -394,10 +399,6 @@ export function SceneStage({
   const warningsInList = head || fullscreen !== null;
   const motionSpeeds = useMemo(() => working ? stageMotionSpeeds(working, durationSec) : [], [working, durationSec]);
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
-  const motionChanged = draft !== null && (
-    JSON.stringify(draft.performances) !== JSON.stringify(resolvedPersisted?.performances) ||
-    JSON.stringify(draft.objectMotions) !== JSON.stringify(resolvedPersisted?.objectMotions)
-  );
   const currentBlocking = effectiveStageBlocking(scene, persisted ?? undefined);
   const desiredBlocking = draft === null ? null : { cast: draft.cast, sets: draft.sets };
   const overrideChanged = draft !== null && (
@@ -465,6 +466,8 @@ export function SceneStage({
     if (draft !== null) return;
     setDraftLook(null);
     setDraftPlateCamera(null);
+    setDraftFrom(null);
+    setNotesOpen(false);
   }, [draft]);
   // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
   useEffect(() => {
@@ -895,8 +898,23 @@ export function SceneStage({
         calls: result.calls ?? log.calls,
         round: result.round,
       });
-    } else if (result.status === "ready" || result.status === "failed") setNote(result.detail);
+      if (result.calls !== undefined) buildRun.current.calls = result.calls;
+    } else if ((result.status === "ready" || result.status === "failed") && !result.draft) setNote(result.detail);
     if (result.draft) {
+      // The build's own account goes to Arke's notes (231c), never to the bar or the line; a build
+      // that ended short of "ready to review" says so there, in the warning colour.
+      const ended = result.status === "ready" || result.status === "failed";
+      const model = result.draft.staging.authorship?.model;
+      setDraftFrom({ who: "arke", notes: {
+        assessment: result.draft.assessment,
+        assumptions: result.draft.assumptions,
+        ...(model === undefined ? {} : { model }),
+        inspected: result.draft.inspected.length,
+        round: result.round,
+        calls: result.calls ?? buildRun.current.calls,
+        seconds: Math.max(0, Math.round((Date.now() - buildRun.current.started) / 1000)),
+        ...(ended && (result.status === "failed" || !result.detail.startsWith("Blockout ready")) ? { warning: result.detail } : {}),
+      } });
       inspectionTimes.current = result.draft.sampleTimes ?? [];
       cameraDirty.current = true; blockingDirty.current = true; scopeDirty.current = true;
       aiDraftVersion.current = pending.version;
@@ -922,7 +940,8 @@ export function SceneStage({
       setDraft({ ...retained.draft.staging, version: persisted?.version ?? 1, cast: retained.draft.cast, sets: retained.draft.sets });
       setDraftPlateCamera(retained.draft.plateCamera ?? null);
       setDraftLook(retained.draft.lights || retained.draft.atmosphere ? { ...(retained.draft.lights ? { lights: retained.draft.lights } : {}), ...(retained.draft.atmosphere ? { atmosphere: retained.draft.atmosphere } : {}) } : null);
-      setNote(retained.draft.assessment);
+      const model = retained.draft.staging.authorship?.model;
+      setDraftFrom({ who: "arke", notes: { assessment: retained.draft.assessment, assumptions: retained.draft.assumptions, ...(model === undefined ? {} : { model }), inspected: retained.draft.inspected.length } });
     } else if (!retained && state?.stageReviews !== undefined && hydratedReviewId.current && retainedReviewId.current && !constructing) {
       retainedReviewId.current = null; hydratedReviewId.current = null; aiDraftVersion.current = null;
       cameraDirty.current = false; blockingDirty.current = false; scopeDirty.current = false;
@@ -963,7 +982,7 @@ export function SceneStage({
     if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
       construction.current = { id, version: scene.version }; setConstructing(true); setNote(null);
       const started = Date.now();
-      setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null;
+      setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null; buildRun.current = { started, calls: 0 };
     }
   };
   const handledConstructions = useRef(new Set<string>());
@@ -1445,7 +1464,8 @@ export function SceneStage({
   };
   // A figure's line in the list (design turn 229a): "walks 3.3 m · leans" for one that moves, else
   // its pose and where it is, "sits · armchair".
-  const figureState = (figure: ResolvedShotStaging["cast"][number]): string => {
+  // Short, for a draft chip (231b): "walks · leans", "sits", without the distance or the place.
+  const figureState = (figure: ResolvedShotStaging["cast"][number], short = false): string => {
     if (working === null) return "";
     const legs = figureLegs(figure.sheetId);
     const tooFast = legs.some((leg) => leg.ceiling !== undefined && leg.speed > leg.ceiling);
@@ -1457,8 +1477,10 @@ export function SceneStage({
     const verb = stagePoseVerb(end.pose, null);
     if (walked > 0.3) {
       const gait = track?.find((key) => key.gait === "run" || key.gait === "jog")?.gait;
-      return `${gait === "run" ? "runs" : gait === "jog" ? "jogs" : "walks"} ${walked.toFixed(1)} m · ${verb}${tooFast ? " · too fast" : ""}`;
+      const moves = gait === "run" ? "runs" : gait === "jog" ? "jogs" : "walks";
+      return short ? `${moves} · ${verb}` : `${moves} ${walked.toFixed(1)} m · ${verb}${tooFast ? " · too fast" : ""}`;
     }
+    if (short) return verb;
     const place = stagePlaceNear(working, figure.sheetId, end.x, end.z, durationSec, durationSec, nameOf);
     return `${verb}${place === null ? "" : ` · ${place}`}`;
   };
@@ -1504,6 +1526,83 @@ export function SceneStage({
       : (() => { const r = Number.parseInt(light.colour.slice(1, 3), 16), b = Number.parseInt(light.colour.slice(5, 7), 16); return r > b + 24 ? "warm" : b > r + 24 ? "cool" : "neutral"; })());
     return tones.every((tone) => tone === tones[0]) ? tones[0] ?? "" : "mixed";
   })();
+  // A draft waits once its build is done: the draft bar takes the line's place (231b).
+  const waiting = moved && !constructing && working !== null;
+  // The bar's summary (231b): what the waiting draft changed, counted from its own diff against
+  // the kept staging, the scene's lights and its plate. None of it is the model's words, and the
+  // stage list marks the same lines + and ~, so the list's count is the chips' sum.
+  const draftDiff = (() => {
+    const chips: DraftChip[] = [];
+    const marks = { camera: undefined as "+" | "~" | undefined, cast: new Map<string, "+" | "~">(), sets: new Map<number, "+" | "~">(), lights: new Map<number, "+" | "~">() };
+    if (!waiting || working === null) return { chips, marks, total: 0 };
+    // Key order is not a change: two records are the same when their sorted fields are.
+    const stable = (value: unknown): string => JSON.stringify(value ?? null, (_key, inner: unknown) =>
+      inner !== null && typeof inner === "object" && !Array.isArray(inner) ? Object.fromEntries(Object.entries(inner).sort(([a], [b]) => a.localeCompare(b))) : inner);
+    const cameraOfDraft = (staging: ResolvedShotStaging) => stable({ keys: staging.keys, rig: staging.rig, seed: staging.seed, rigIntensity: staging.rigIntensity });
+    if (resolvedPersisted === null || cameraOfDraft(resolvedPersisted) !== cameraOfDraft(working)) {
+      const size = working.keys[0]?.frame?.size;
+      const word = stagingMotionWord(working, durationSec);
+      const said = [size === undefined ? (word === "static" ? "locked off" : word) : size.charAt(0).toUpperCase() + size.slice(1), keyLensWords].filter(Boolean).join(" ");
+      marks.camera = resolvedPersisted === null ? "+" : "~";
+      chips.push({ mark: marks.camera, count: 1, label: `camera · ${said}` });
+    }
+    const keptCast = currentBlocking.cast;
+    for (const figure of working.cast) {
+      const before = keptCast.find((candidate) => candidate.sheetId === figure.sheetId);
+      const track = (staging: ResolvedShotStaging | null) => staging?.performances?.find((candidate) => candidate.sheetId === figure.sheetId);
+      const mark = before === undefined ? "+" : stable(before) !== stable(figure) || stable(track(resolvedPersisted)) !== stable(track(working)) ? "~" : null;
+      if (mark === null) continue;
+      marks.cast.set(figure.sheetId, mark);
+      chips.push({ mark, count: 1, label: `${nameOf(figure.sheetId)} ${figureState(figure, true)}` });
+    }
+    for (const figure of keptCast) {
+      if (!working.cast.some((candidate) => candidate.sheetId === figure.sheetId)) chips.push({ mark: "−", count: 1, label: nameOf(figure.sheetId) });
+    }
+    const keptSets = currentBlocking.sets;
+    const kit: number[] = [], shapes: number[] = [], changed: number[] = [];
+    working.sets.forEach((set, position) => {
+      const before = keptSets.find((candidate) => candidate.name === set.name);
+      if (before !== undefined) {
+        if (stable(before) !== stable(set)) { changed.push(position); marks.sets.set(position, "~"); }
+        return;
+      }
+      marks.sets.set(position, "+");
+      if (set.kit?.kind === "room") {
+        const doors = set.kit.openings?.filter((opening) => opening.kind === "door").length ?? 0;
+        chips.push({ mark: "+", count: 1, label: `room${doors > 0 ? ` · ${doors} ${doors === 1 ? "door" : "doors"}` : ""}` });
+      } else (set.kit ? kit : shapes).push(position);
+    });
+    const only = (positions: number[]) => working.sets[positions[0]!]!;
+    if (kit.length > 0) chips.push({ mark: "+", count: kit.length, label: kit.length === 1 ? STAGE_KIT_LABELS[only(kit).kit!.kind].toLowerCase() : "kit" });
+    if (shapes.length > 0) chips.push({ mark: "+", count: shapes.length, label: shapes.length === 1 ? only(shapes).name : "sets" });
+    if (changed.length > 0) chips.push({ mark: "~", count: changed.length, label: changed.length === 1 ? only(changed).name : "sets" });
+    const gone = keptSets.filter((set) => !working.sets.some((candidate) => candidate.name === set.name));
+    if (gone.length > 0) chips.push({ mark: "−", count: gone.length, label: gone.length === 1 ? gone[0]!.name : "sets" });
+    if (stable(working.objectMotions) !== stable(resolvedPersisted?.objectMotions)) chips.push({ mark: "~", count: 1, label: "set motion" });
+    if (draftLook?.lights !== undefined) {
+      const keptLights = scene.blocking?.lights ?? [];
+      const added: number[] = [], relit: number[] = [];
+      shownLights.forEach((light, position) => {
+        const before = keptLights.find((candidate) => candidate.name === light.name);
+        if (before === undefined) { added.push(position); marks.lights.set(position, "+"); }
+        else if (stable(before) !== stable(light)) { relit.push(position); marks.lights.set(position, "~"); }
+      });
+      const lights = (positions: number[]) => positions.length === 1 ? `light · ${shownLights[positions[0]!]!.name}` : "lights";
+      if (added.length > 0) chips.push({ mark: "+", count: added.length, label: lights(added) });
+      if (relit.length > 0) chips.push({ mark: "~", count: relit.length, label: lights(relit) });
+      const dark = keptLights.filter((light) => !shownLights.some((candidate) => candidate.name === light.name));
+      if (dark.length > 0) chips.push({ mark: "−", count: dark.length, label: dark.length === 1 ? `light · ${dark[0]!.name}` : "lights" });
+    }
+    if (draftLook?.atmosphere !== undefined && stable(draftLook.atmosphere) !== stable(scene.blocking?.atmosphere)) {
+      chips.push({ mark: scene.blocking?.atmosphere === undefined ? "+" : "~", count: 1, label: "atmosphere" });
+    }
+    if (draftPlateCamera !== null && stable(draftPlateCamera) !== stable(scene.blocking?.plate?.camera)) chips.push({ mark: "~", count: 1, label: "plate · matched" });
+    // Keep writes this shot's own marks, or hands them back to the scene: that is a change too.
+    if (scope !== persistedScope) chips.push({ mark: "~", count: 1, label: `blocking · ${scope === "shot" ? "this shot" : "the scene"}` });
+    if (chips.length === 0) chips.push({ mark: "~", count: 1, label: "staging" });
+    return { chips, marks, total: chips.reduce((sum, chip) => sum + chip.count, 0) };
+  })();
+  const listMark = (mark: "+" | "~" | undefined) => mark === undefined ? null : <span className="fy-swstage__glyph" data-mark={mark === "+" ? "new" : "changed"} aria-label={mark === "+" ? "new" : "changed"}>{mark}</span>;
   const filed = persisted?.playblast;
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
@@ -1575,36 +1674,43 @@ export function SceneStage({
         </div>
       ) : null}
 
-      <div className="fy-swstage__construction">
-        {head || fullscreen !== null ? null : boardScope}
-        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
-        <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
-        {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
-        {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
-          <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
-        </Select> : null}
-        {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
-        <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
-        {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
-        {stageModelReason === undefined || constructing ? null : <span className="fy-swstage__barnote" data-testid="stage-model-reason">{stageModelReason}</span>}
-        {note ? <span className="fy-swstage__barnote" role="status">{note}</span> : null}
-        {/* The disclosure ends the bar as 144a draws it, and opens once a build has something to
-            say — the kept staging's record as much as a draft's; until then it is shut and says
-            so by its dress, rather than absent — a person should see where a build's assessment
-            will land before asking for one. */}
-        <details
-          ref={inspection}
-          className="fy-swstage__inspection"
-          aria-disabled={working?.authorship ? undefined : "true"}
-          onToggle={(event) => { if (!working?.authorship && event.currentTarget.open) event.currentTarget.open = false; }}
-        >
-          <summary tabIndex={working?.authorship ? undefined : -1} onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />{constructing ? "Working" : "AI inspection and assumptions"}</summary>
-          {working?.authorship ? <><p>{working.authorship.assessment}</p><ul>{working.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{working.authorship.model} · {working.authorship.inspectedFrames} views inspected</small></> : null}
-        </details>
-        {warningsInList ? null : cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet fy-swstage__linewarning">{warning}</p>)}
-      </div>
+      {/* While a draft waits, the draft bar takes the line's place at its height (231b): who made it,
+          what it changed as chips counted from its own diff, Arke's notes, Discard and Keep. */}
+      {waiting ? (
+        <div className="fy-swstage__draft" data-testid="stage-draft">
+          <span className="fy-swstage__who">{draftFrom?.who === "arke" ? "Arke’s blockout" : draftFrom?.who === "quick" ? "Quick layout" : "Changes"}</span>
+          <span className="fy-swstage__sum" aria-label="What the draft changes">
+            {draftDiff.chips.map((chip, position) => (
+              <span key={position} className="fy-swstage__chip"><b data-changed={chip.mark === "+" ? undefined : "true"}>{chip.mark}{chip.count > 1 ? chip.count : ""}</b>{chip.label}</span>
+            ))}
+          </span>
+          {draftFrom?.who === "arke" ? (
+            <button type="button" className="fy-swstage__notesbtn" aria-expanded={notesOpen} onClick={() => setNotesOpen((open) => !open)}>
+              <ChevronRight size={12} />Arke’s notes
+            </button>
+          ) : null}
+          <Button variant="outline" size="sm" aria-label="Discard" onClick={discard}>Discard</Button>
+          <Button variant="primary" size="sm" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</Button>
+        </div>
+      ) : (
+        <div className="fy-swstage__construction">
+          {head || fullscreen !== null ? null : boardScope}
+          {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
+          <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
+          {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
+          {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
+            <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
+          </Select> : null}
+          {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
+          <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
+          {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
+          {stageModelReason === undefined || constructing ? null : <span className="fy-swstage__barnote" data-testid="stage-model-reason">{stageModelReason}</span>}
+          {note ? <span className="fy-swstage__barnote" role="status">{note}</span> : null}
+          {warningsInList ? null : cameraWarnings.map(warning => <p key={warning} className="fy-swstage__quiet fy-swstage__linewarning">{warning}</p>)}
+        </div>
+      )}
       <div className="fy-swstage__work">
-        <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode} data-building={constructing && buildLog !== null ? "true" : undefined}>
+        <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode} data-building={constructing && buildLog !== null ? "true" : undefined} data-notes={waiting && notesOpen && draftFrom?.who === "arke" ? "true" : undefined}>
           {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
           {working === null && !busy ? (
             <div className="fy-swstage__empty">
@@ -1629,6 +1735,24 @@ export function SceneStage({
                   {step.thumbs ? <div className="fy-swstage__logthumbs">{step.thumbs.map((src) => <i key={src.slice(-24)} style={{ backgroundImage: `url(${src})`, aspectRatio: aspect.replace(":", " / ") }} />)}</div> : null}
                 </Fragment>
               ))}
+            </div>
+          ) : null}
+          {/* Arke's notes (231c): the model's own account, over the viewport's top-left and apart
+              from the bar's summary, with the round, the calls and the time; a note that warns is
+              drawn in the warning colour. They go with the draft. */}
+          {waiting && notesOpen && draftFrom?.who === "arke" ? (
+            <div className="fy-swstage__notes" data-testid="stage-notes" role="note" aria-label="Arke’s notes">
+              <div className="fy-swstage__loghead">
+                <span>Arke’s notes</span>
+                <span>{(() => {
+                  const { round: turn, calls, seconds, model, inspected } = draftFrom.notes;
+                  if (turn === undefined || seconds === undefined) return [model, inspected === undefined ? undefined : `${inspected} views`].filter(Boolean).join(" · ");
+                  return `round ${turn} · ${calls ?? 0} calls · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+                })()}</span>
+              </div>
+              {draftFrom.notes.assessment.split(/\n+/).filter((text) => text.trim() !== "").map((text, position) => <p key={`a${position}`}>{text}</p>)}
+              {draftFrom.notes.assumptions.map((text, position) => <p key={`s${position}`}>{text}</p>)}
+              {draftFrom.notes.warning === undefined ? null : <p data-warn="true">{draftFrom.notes.warning}</p>}
             </div>
           ) : null}
           {mode === "camera" ? (
@@ -1663,13 +1787,6 @@ export function SceneStage({
                 }}>{candidate === "camera" ? "Camera" : candidate === "figures" ? "Figures" : "Set"}</button>)}
               </div>
               <div className="fy-swstage__corner">
-                {moved && !constructing ? (
-                  <span className="fy-swstage__moved" data-testid="stage-moved">
-                    <span>{motionChanged || lookHeld ? "Stage changed" : overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
-                    <button type="button" aria-label="Discard" title="Discard" onClick={discard}><X size={11} /></button>
-                    <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
-                  </span>
-                ) : null}
                 <div className="fy-swstage__looks" role="radiogroup" aria-label="Look" data-testid="stage-look">
                   {STAGE_LOOKS.map((candidate) => (
                     <button key={candidate} type="button" role="radio" aria-checked={look === candidate} data-on={look === candidate ? "true" : undefined}
@@ -1702,7 +1819,7 @@ export function SceneStage({
               {/* The stage list (turn 144): what is on the stage, one line each with its state. A press
                   is the viewport's selection too, and pressing the selected line again clears it. */}
               <div className="fy-swstage__block">
-                <Eyebrow title="Stage" meta={constructing ? "building" : scope === "scene" ? "shared · scene" : "this shot"} />
+                <Eyebrow title="Stage" meta={constructing ? "building" : waiting ? `draft · ${draftDiff.total} ${draftDiff.total === 1 ? "change" : "changes"}` : scope === "scene" ? "shared · scene" : "this shot"} />
                 <button
                   type="button"
                   className="fy-swstage__item"
@@ -1712,7 +1829,8 @@ export function SceneStage({
                 >
                   <span className="fy-swstage__mark" data-kind="camera" aria-hidden="true" />
                   <span>camera</span>
-                  <span {...(warningsInList && cameraWarnings.length > 0 && !boardOn ? { className: "fy-swstage__warnstate", title: cameraWarnings.join("\n") } : {})}>{boardOn ? `${boardCuts.length} cameras` : (() => {
+                  {listMark(draftDiff.marks.camera)}
+                  <span {...((warningsInList || waiting) && cameraWarnings.length > 0 && !boardOn ? { className: "fy-swstage__warnstate", title: cameraWarnings.join("\n") } : {})}>{boardOn ? `${boardCuts.length} cameras` : (() => {
                     const word = stagingMotionWord(working, durationSec);
                     return `${word === "static" ? "locked off" : word} · ${keyLensWords ?? `${keys.length} ${keys.length === 1 ? "key" : "keys"}`}`;
                   })()}</span>
@@ -1743,6 +1861,7 @@ export function SceneStage({
                   >
                     <span className="fy-swstage__mark" style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
                     <span>{nameOf(figure.sheetId)}</span>
+                    {listMark(draftDiff.marks.cast.get(figure.sheetId))}
                     {(() => {
                       const spin = stageFastTurns(working).find((turn) => turn.sheetId === figure.sheetId);
                       return spin === undefined
@@ -1759,6 +1878,7 @@ export function SceneStage({
                       onClick={() => { setSetsOpen(true); pick({ kind: "set", index: fold.members[0]! }); }}>
                       <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />
                       <span>{fold.label}</span>
+                      {listMark(fold.members.some((member) => draftDiff.marks.sets.get(member) === "+") ? "+" : fold.members.some((member) => draftDiff.marks.sets.has(member)) ? "~" : undefined)}
                       <span>{fold.state}</span>
                     </button>
                   );
@@ -1773,6 +1893,7 @@ export function SceneStage({
                   >
                     <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />
                     <span>{set.name}</span>
+                    {listMark(draftDiff.marks.sets.get(position))}
                     <span>{setState(set)}</span>
                   </button>
                 ))}
@@ -1782,6 +1903,7 @@ export function SceneStage({
                   <button type="button" className="fy-swstage__item" data-testid="stage-light-fold" disabled={boardOn} onClick={() => setLightsOpen(true)}>
                     <span className="fy-swstage__mark" data-kind="light" style={{ background: shownLights[0]!.colour }} aria-hidden="true" />
                     <span>{shownLights.map((light) => light.name).join(" · ")}</span>
+                    {listMark([...draftDiff.marks.lights.values()].includes("+") ? "+" : draftDiff.marks.lights.size > 0 ? "~" : undefined)}
                     <span>{lightWarmth}</span>
                   </button>
                 ) : shownLights.map((light, position) => (
@@ -1796,6 +1918,7 @@ export function SceneStage({
                   >
                     <span className="fy-swstage__mark" data-kind="light" style={{ background: light.colour }} aria-hidden="true" />
                     <span>{light.name}</span>
+                    {listMark(draftDiff.marks.lights.get(position))}
                     <span>{light.kind} · {light.strength}</span>
                   </button>
                 ))}
@@ -1870,7 +1993,7 @@ export function SceneStage({
               {(selection?.kind === "rig" || selection?.kind === "aim") && activeKey !== null ? (
                 <div className="fy-swstage__block">
                   <Eyebrow title="Camera" meta={`key ${active + 1} of ${keys.length}`} />
-                  {warningsInList ? cameraWarnings.map((warning) => <span key={warning} className="fy-swstage__quiet fy-swstage__warnstate">{warning}</span>) : null}
+                  {warningsInList || waiting ? cameraWarnings.map((warning) => <span key={warning} className="fy-swstage__quiet fy-swstage__warnstate">{warning}</span>) : null}
                   <CameraWords
                     words={activeKey.frame}
                     cast={working.cast.map((figure) => ({ sheetId: figure.sheetId, name: nameOf(figure.sheetId) }))}
@@ -2305,8 +2428,8 @@ export function SceneStage({
               ) : (
               <div className="fy-swstage__block fy-swstage__block--ways">
                 <Row label="playblast">
-                  <span className="fy-swstage__value" data-filed={filed === undefined || stale ? undefined : "true"}>
-                    {constructing ? <span className="fy-swstage__warnstate">building</span> : filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
+                  <span className="fy-swstage__value" data-filed={filed === undefined || stale || waiting ? undefined : "true"}>
+                    {constructing ? <span className="fy-swstage__warnstate">building</span> : waiting ? "after Keep" : filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
                   </span>
                 </Row>
                 {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}
