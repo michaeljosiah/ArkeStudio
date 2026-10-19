@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { scenePlatePath, stagePlateHorizon, type ScenePlate, type Shot, type WorldBundle } from "@arke-studio/contracts";
+import { artifactDisplayName, linkNameResolver, scenePlatePath, stagePlateHorizon, type ScenePlate, type Shot, type WorldBundle } from "@arke-studio/contracts";
 import { productionShelf } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
 import { Eyebrow, Link, Row, Stepper, Value } from "./stage-inspector.js";
@@ -18,6 +18,8 @@ export interface PlateCandidate {
   file: string;
   /** The location sheet it is linked to, when it is one's picture: the plate takes its name. */
   location: string | null;
+  /** What the picture is of, as the shelf names it — a tile said "picture" for every one. */
+  name: string;
 }
 
 /**
@@ -27,9 +29,16 @@ export interface PlateCandidate {
  */
 export function plateCandidates(world: WorldBundle, productionId: string): PlateCandidate[] {
   const locations = new Map(world.sheets.filter((sheet) => sheet.type === "location").map((sheet) => [sheet.id, sheet.name]));
+  const linkName = linkNameResolver(world);
   return productionShelf(world.artifacts, productionId)
-    .filter((artifact) => artifact.kind === "image")
-    .map((artifact) => ({ id: artifact.id, hash: artifact.hash, file: artifact.file, location: artifact.links.map((link) => locations.get(link)).find((name) => name !== undefined) ?? null }))
+    // The Stage's own stills — a playblast's frames, a board animatic's opening — are renders of the
+    // greybox, never a picture of the place, and they crowded out the plates (issue 1865 §9).
+    .filter((artifact) => artifact.kind === "image" && !(artifact.origin.by === "system" && /^stage(-board)?:/.test(artifact.origin.producedBy)))
+    .map((artifact) => ({
+      id: artifact.id, hash: artifact.hash, file: artifact.file,
+      location: artifact.links.map((link) => locations.get(link)).find((name) => name !== undefined) ?? null,
+      name: artifactDisplayName(artifact, linkName),
+    }))
     .reverse()
     .sort((a, b) => Number(b.location !== null) - Number(a.location !== null))
     .slice(0, 24);
@@ -41,11 +50,13 @@ export function platePicture(plate: ScenePlate, world: WorldBundle): string | nu
 }
 
 /** The blockout line's first control: the plate's thumbnail and name, or a dashed Add plate. */
-export function PlateChip({ plate, world, productionId, disabled, onPick }: {
+export function PlateChip({ plate, world, productionId, disabled, disabledReason, onPick }: {
   plate: ScenePlate | undefined;
   world: WorldBundle;
   productionId: string;
   disabled: boolean;
+  /** Why it is shut, when a person can do something about it (issue 1865 §5). */
+  disabledReason?: string;
   onPick: (candidate: PlateCandidate) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -58,7 +69,7 @@ export function PlateChip({ plate, world, productionId, disabled, onPick }: {
         data-empty={plate === undefined ? "true" : undefined}
         data-testid="stage-plate-chip"
         disabled={disabled}
-        title="Location plate"
+        title={disabled && disabledReason !== undefined ? disabledReason : "Location plate"}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
@@ -80,9 +91,9 @@ function PlatePicker({ world, productionId, onPick }: { world: WorldBundle; prod
   return (
     <div className="fy-swstage__platepicker" role="listbox" aria-label="Choose a location plate" data-testid="stage-plate-picker">
       {candidates.length === 0 ? <p className="fy-swstage__note">No pictures in this world yet.</p> : candidates.map((candidate) => (
-        <button key={candidate.id} type="button" role="option" aria-selected={false} title={candidate.location ?? candidate.file} onClick={() => onPick(candidate)}>
+        <button key={candidate.id} type="button" role="option" aria-selected={false} title={candidate.location ?? candidate.name} onClick={() => onPick(candidate)}>
           <i style={{ backgroundImage: `url("${mediaUrl(world.meta.slug, `artifacts/${candidate.file}`)}")` }} aria-hidden="true" />
-          <span>{candidate.location ?? "picture"}</span>
+          <span>{candidate.location ?? candidate.name}</span>
         </button>
       ))}
     </div>

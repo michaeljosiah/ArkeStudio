@@ -291,6 +291,18 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.equal(sent.filter((message) => message.kind === "list-harness-models").length, 2);
   });
 
+  it("says beside the agent when its saved model is gone from a catalogue that answered (issue 1865)", async () => {
+    const state = modelState();
+    state.app.agents[1]!.model = "anthropic/retired";
+    await mount(state, <AgentsPanel />);
+    const reason = container.querySelector('[data-testid="agent-model-reason"]');
+    assert.match(reason?.textContent ?? "", /anthropic\/retired is no longer available through the running harness/);
+    const row = select("Model for stage-designer").closest(".fy-set__row")!;
+    assert.ok(row.querySelector(".fy-set__dot--warn"), "the agent's dot warns rather than reading as set");
+    assert.equal(row.querySelector(".fy-set__dot--ok"), null);
+    assert.equal(container.querySelectorAll('[data-testid="agent-model-reason"]').length, 1, "an agent with nothing saved says nothing");
+  });
+
   it("disables models without reported text support in every writing picker and blocks a saved production choice", async () => {
     const state = modelState();
     state.app.harnessModels.push(

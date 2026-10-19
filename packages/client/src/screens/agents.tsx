@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
-import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { HarnessModelOptions, HarnessModelStatus, languageChoiceReason } from "../components/harness-models.js";
 
 /**
  * The writing agents, behind Advanced on Harness (design 54b — this was a settings tab
@@ -46,6 +46,10 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
       <HarnessModelStatus state={state} />
       {agents.map((a) => {
         const open = editing === a.name;
+        // A saved model the harness stopped listing showed a green dot here and failed only when the
+        // agent next ran (issue 1865): say so beside the agent, as AI models says a tile's reason.
+        // A catalogue that has not answered yet says nothing; the status above speaks for it.
+        const unusable = catalogStatus === "ready" ? languageChoiceReason(state, a.model, false, a.name === "stage-designer") : undefined;
         return (
           <div key={a.name} className="fy-set__row fy-set__row--stack">
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
@@ -76,8 +80,14 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
               >
                 {open ? "Close" : a.edited ? "Brief · edited" : "Brief"}
               </button>
-              <span className={cx("fy-set__dot", (a.model || a.edited) && "fy-set__dot--ok")} />
+              <span className={cx("fy-set__dot", unusable !== undefined ? "fy-set__dot--warn" : (a.model || a.edited) && "fy-set__dot--ok")} />
             </div>
+            {unusable === undefined ? null : (
+              <div className="fy-set__why" data-testid="agent-model-reason">
+                <span className="fy-set__dot fy-set__dot--warn" />
+                <span>{unusable}</span>
+              </div>
+            )}
             {open && (
               <div style={{ marginTop: 10 }}>
                 <Textarea

@@ -31,6 +31,7 @@ import {
   stagingBoardClause,
   STAGE_PLATE_DETAIL,
   scenePlateName,
+  stagePlateTileLabel,
   stageBriefForRouting,
   stageRoutingCitations,
   supportsMode,
@@ -255,7 +256,7 @@ function plateToken(scene: SceneRecord, world: WorldBundle): BenchReferenceToken
     source: plate.source.source === "artifact"
       ? { source: "artifact", artifactId: plate.source.artifactId, hash: plate.source.hash }
       : { source: "world-file", path: plate.source.path, hash: plate.source.hash },
-    label: `${plate.label} · plate`,
+    label: stagePlateTileLabel(plate),
     detail: STAGE_PLATE_DETAIL,
     ride: "when-supported",
     subjectRole: "reference",

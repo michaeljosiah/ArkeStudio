@@ -82,9 +82,11 @@
   [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > :is(.fy-ch__dochead, .fy-ch__prose, .fy-ch__source, .fy-ch__band, .fy-ch__foot, .fy-ch__draft) { width: min(var(--room-measure), 100%); max-width: none; margin-right: 0; box-sizing: border-box; }
   [data-screen="chapter"][data-room="true"] :is(.fy-ch__prose, .fy-ch__source, .fy-rme__doc) { font: 400 18px/1.75 var(--font-sans); }
   /* The foot (R-9, 227a): one line across the page's whole width at the window's foot, not a rule
-     under the column, and there however short the page (227v): titlebar 44 and bar 56 above. */
+     under the column, and there however short the page (227v): titlebar 44 and bar 56 above. It
+     reaches out by the body's gutters, whatever they are: a fixed 32 px outran the 12 px right
+     gutter while review notes show, and the centre scrolled sideways by 20 px (issue 1865 §12). */
   [data-screen="chapter"][data-room="true"] .fy-ch__body:not(.fy-ch__body--audiobook) .fy-ch__manuscript { min-height: calc(100dvh - 100px); }
-  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > .fy-ch__foot { align-self: stretch; width: auto; height: 36px; margin: auto -32px 0; padding: 0 48px; border-top: 1px solid var(--border); font: var(--type-meta); color: var(--muted-foreground); }
+  [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > .fy-ch__foot { align-self: stretch; width: auto; height: 36px; margin: auto calc(-1 * var(--room-gutter-end, 32px)) 0 calc(-1 * var(--room-gutter-start, 32px)); padding: 0 48px; border-top: 1px solid var(--border); font: var(--type-meta); color: var(--muted-foreground); }
   [data-screen="chapter"][data-room="true"] .fy-ch__foot button { font: var(--type-label); color: var(--foreground); }
   /* A held change stands just above the foot, wherever the words end (227e, 227v). */
   [data-screen="chapter"][data-room="true"] .fy-ch__manuscript > .fy-pageheld { margin-top: auto; }
@@ -484,7 +486,7 @@
 .fy-review-quote--here { background: color-mix(in srgb, var(--warning) 22%, transparent); }
 /* The notes hang at the page's right edge, the column where it always is (227r). The page gives up
    half its gutter while they show, so a 1360 window has the room. */
-[data-screen="chapter"][data-room="true"] .fy-ch__body:has(> .fy-ch__manuscript[data-notes="true"]) { padding-inline: 24px 12px; }
+[data-screen="chapter"][data-room="true"] .fy-ch__body:has(> .fy-ch__manuscript[data-notes="true"]) { --room-gutter-start: 24px; --room-gutter-end: 12px; padding-inline: var(--room-gutter-start) var(--room-gutter-end); }
 .fy-notes { position: absolute; top: 0; bottom: 0; right: 0; z-index: 2; width: 280px; }
 .fy-notes__head { position: sticky; top: 68px; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 18px 0 6px; padding: 0 0 0 2px; background: var(--background); font: var(--type-ui); }
 .fy-notes__head strong { font-weight: 600; }

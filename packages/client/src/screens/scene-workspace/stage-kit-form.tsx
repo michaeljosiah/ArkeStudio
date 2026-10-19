@@ -27,8 +27,9 @@ export function AddSetMenu({ disabled, onPick }: { disabled: boolean; onPick: (c
             {STAGE_KIT_KINDS.map((kind) => (
               <button key={kind} type="button" role="menuitem" onClick={() => { setOpen(false); onPick(kind); }}>
                 <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />{STAGE_KIT_LABELS[kind]}
-                {/* A room is the only kit that is more than one thing (229e): its walls and their openings. */}
-                {kind === "room" ? <em>walls · openings</em> : null}
+                {/* A room is the only kit that is more than one thing (229e): its walls and their openings.
+                    A lamp says what else it brings, a light (229e rule 7). */}
+                {kind === "room" ? <em>walls · openings</em> : kind === "lamp" ? <em>with light</em> : null}
               </button>
             ))}
             <hr />

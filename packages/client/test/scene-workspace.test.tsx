@@ -286,6 +286,59 @@ describe("scene detail owns the workspace", () => {
     assert.equal(write.command.staging?.cast?.[0]?.sheetId,"maren-kest");
   });
 
+  it("reviews a build under its own lights, sends no hidden Keep blocking, and Discard takes the note (issue 1865)",async()=>{
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
+    await openStage(mounted);
+    assert.equal(q(mounted,'select[aria-label="Preserve Stage work"]'),null,"an unstaged shot shows no preserve choice");
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    assert.equal(request.preserve,"none","what the bar does not show is not sent: Keep blocking refused every set");
+    const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}]};
+    const lights=[{name:"desk lamp",kind:"point" as const,colour:"#ffb867",kelvin:3000,strength:6,x:0,y:1.2,z:0}];
+    await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Blockout ready to review. Keep applies this shot's override.",draft:{staging,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,atmosphere:{time:"night"},assumptions:[],assessment:"A warm desk lamp at night.",inspected:[]} as never});
+    const lines=all(mounted,'[data-testid="stage-light-line"]').map(line=>line.querySelector("span:nth-child(2)")?.textContent);
+    assert.ok(lines.includes("desk lamp"),"the build's lamp is on the Stage it is reviewed on, not only in what Keep writes");
+    assert.match(q(mounted,".fy-swstage__construction")?.textContent??"",/Blockout ready to review/);
+    await click(q(mounted,'[data-testid="stage-moved"] [aria-label="Discard"]')!);
+    assert.doesNotMatch(q(mounted,".fy-swstage__construction")?.textContent??"",/Blockout ready to review/,"nothing is waiting for review after Discard");
+    assert.equal(all(mounted,'[data-testid="stage-light-line"]').some(line=>line.textContent?.includes("desk lamp")),false,"and its lamp went with it");
+  });
+
+  it("holds a build that changed only the lights for Keep or Discard (issue 1865)",async()=>{
+    const state=structuredClone(FIXTURE_STATE) as ClientState;
+    const scene=state.world!.productions.find(p=>p.meta.id==="saltlight")!.scenes.find(s=>s.id==="sc_04")!;
+    const shot=orderedShots(scene).find(s=>s.id==="sh_12")!;
+    const keys=[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}];
+    shot.durationSec=4;
+    shot.staging={version:3,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],keys};
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mountState(state);
+    await openStage(mounted);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    const lights=[{name:"desk lamp",kind:"point" as const,colour:"#ffb867",strength:6,x:0,y:1.2,z:0}];
+    await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Ready",draft:{staging:{keys},cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,assumptions:[],assessment:"Lit.",inspected:[]} as never});
+    assert.ok(q(mounted,'[data-testid="stage-moved"]'),"a lights-only build still has something to keep");
+    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
+    assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
+    assert.deepEqual(write.command.blocking?.lights,lights);
+  });
+
+  it("says a Stage model the harness stopped listing before Build, not after it (issue 1865)",async()=>{
+    const state=structuredClone(FIXTURE_STATE) as ClientState;
+    state.app.agents=[{name:"stage-designer",description:"Build a Stage",shippedBrief:"Brief",brief:"Brief",model:"anthropic/retired",edited:false}];
+    state.app.harnessModelStatus={status:"ready"};
+    state.app.harnessModels=[{id:"sonnet",provider:"anthropic",displayName:"Sonnet"}];
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mountState(state);
+    await openStage(mounted);
+    const build=all(mounted,"button").find(button=>button.textContent==="Build with Arke") as HTMLButtonElement;
+    assert.equal(build.disabled,true);
+    assert.match(q(mounted,'[data-testid="stage-model-reason"]')?.textContent??"",/anthropic\/retired is no longer available/);
+    assert.ok(q(mounted,'[data-testid="stage-model-reason"]')?.classList.contains("fy-swstage__barnote"),"on a line of its own, not squeezing the input");
+  });
+
   for (const entryContext of [
     { kind: "world" },
     { kind: "production", productionId: "saltlight" },

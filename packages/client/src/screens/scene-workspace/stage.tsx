@@ -29,6 +29,7 @@ import {
   stageSpeedWarning,
   stagePerformanceDeparture,
   stagingRetimed,
+  stagingFocalForFov,
   stagingFov,
   stagingMotionWord,
   stagePlayblastIsStale,
@@ -59,7 +60,9 @@ import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { readStageLook, rememberStageLook } from "../../lib/stage-look-preference.js";
 import { send, useStore, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
-import { Button } from "../../components/ui.js";
+import { Button, Select } from "../../components/ui.js";
+import { languageChoiceReason } from "../../components/harness-models.js";
+import { productionModel } from "../../components/dispatch-bar.js";
 import { Check, ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
@@ -84,6 +87,8 @@ function cameraOf(staging: ResolvedShotStaging | null): string {
 }
 
 const round = (value: number): number => Math.round(value * 100) / 100;
+// One empty list, so a scene without lights does not hand the viewport's data a new one each render.
+const NO_LIGHTS: readonly StageLight[] = [];
 
 function sortedKeys(keys: readonly StagingKey[]): StagingKey[] {
   return [...keys].sort((left, right) => left.t - right.t);
@@ -329,6 +334,13 @@ export function SceneStage({
   const playStart = useRef<{ wall: number; from: number } | null>(null);
   const handledPlayblastActions = useRef(new Set<string>());
   const frozen = locked || exporting !== null || constructing;
+  // The Stage designer's model as the coordinator picks it — its own override, else the production's
+  // language model — checked here as the composer checks its own (issue 1865). A saved choice the
+  // harness stopped listing was refused only after Build, as a long line that crushed the input.
+  // Only a catalogue that has answered speaks: one still loading or failed is the coordinator's to
+  // retry, and nothing chosen is its local default to find.
+  const stageModel = state?.app.agents.find((agent) => agent.name === "stage-designer")?.model ?? productionModel(state, production.meta.id, "llm");
+  const stageModelReason = state?.app.harnessModelStatus?.status === "ready" ? languageChoiceReason(state, stageModel, false, true) : undefined;
   // A board (issue 1824, design turn 229g): the shots the scene's packing cuts this one into, on
   // one clock, each with its own camera. The view is for watching, checking and recording the
   // board; editing stays on This shot, where each shot's own staging is.
@@ -369,7 +381,10 @@ export function SceneStage({
   const sharedChanged = draft !== null && scope === "scene" &&
     ((scene.blocking === undefined && promotingBlocking.current) ||
       JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] }));
-  const moved = draft !== null && (cameraChanged || overrideChanged || sharedChanged);
+  // A build's lights, atmosphere and plate camera are held beside the draft rather than in it, and
+  // Keep writes them: a build that changed only those still has something to keep or discard.
+  const lookHeld = draftLook !== null || draftPlateCamera !== null;
+  const moved = draft !== null && (cameraChanged || overrideChanged || sharedChanged || lookHeld);
   const keys = working?.keys ?? [];
   const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
   const activeKey = keys[active] ?? null;
@@ -418,6 +433,13 @@ export function SceneStage({
   useEffect(() => {
     if (draft === null) setScope(persistedScope);
   }, [draft, persistedScope]);
+  // The held look goes with its draft however the draft goes — a landing, a rebase, a new shot —
+  // or it would ride the next unrelated Keep onto the scene (issue 1865).
+  useEffect(() => {
+    if (draft !== null) return;
+    setDraftLook(null);
+    setDraftPlateCamera(null);
+  }, [draft]);
   // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
   useEffect(() => {
     setStaging(false);
@@ -541,6 +563,11 @@ export function SceneStage({
   // and says so: the control is off, so the viewport and the pin must not claim Plate either. The
   // preference stays Plate for the next scene that has one.
   const look: StageLook = preferredLook === "plate" && plateView === null ? "lit" : preferredLook;
+  // A held build is reviewed with its own lights and atmosphere (issue 1865): the scene's stand until
+  // Keep, and a review drawn under them hides what Keep is about to write — the build's own renders
+  // came from this view too, so it never saw its lamp either.
+  const shownLights = draftLook?.lights ?? scene.blocking?.lights ?? NO_LIGHTS;
+  const shownAtmosphere = draftLook?.atmosphere ?? scene.blocking?.atmosphere;
   const shotData: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
     const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
@@ -577,11 +604,11 @@ export function SceneStage({
       seed: working.seed,
       rigIntensity: working.rigIntensity,
       look,
-      lights: scene.blocking?.lights ?? [],
-      ...(scene.blocking?.atmosphere === undefined ? {} : { atmosphere: scene.blocking.atmosphere }),
+      lights: shownLights,
+      ...(shownAtmosphere === undefined ? {} : { atmosphere: shownAtmosphere }),
       plate: plateView,
     };
-  }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets, look, scene.blocking?.lights, scene.blocking?.atmosphere, plateView]);
+  }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets, look, shownLights, shownAtmosphere, plateView]);
   // Each member's staging and where its camera opens, for the board's view and its animatic.
   const boardMembers = useMemo(() => {
     if (!boardStaged) return [];
@@ -628,8 +655,8 @@ export function SceneStage({
       seed: resolved.seed,
       rigIntensity: resolved.rigIntensity,
       look,
-      lights: scene.blocking?.lights ?? [],
-      ...(scene.blocking?.atmosphere === undefined ? {} : { atmosphere: scene.blocking.atmosphere }),
+      lights: shownLights,
+      ...(shownAtmosphere === undefined ? {} : { atmosphere: shownAtmosphere }),
       plate: plateView,
       board: overview
         ? {
@@ -644,7 +671,7 @@ export function SceneStage({
   const boardLocal = boardHere?.local ?? 0;
   const boardData = useMemo(
     () => (boardOn && boardIndex >= 0 ? memberData(boardIndex, boardLocal, true) : null),
-    [boardOn, boardIndex, boardLocal, boardMembers, mode, aspect, look, sheets, scene.blocking?.lights, scene.blocking?.atmosphere, plateView],
+    [boardOn, boardIndex, boardLocal, boardMembers, mode, aspect, look, sheets, shownLights, shownAtmosphere, plateView],
   );
   const data = boardOn ? boardData : shotData;
 
@@ -899,11 +926,13 @@ export function SceneStage({
     construction.current = null; aiDraftVersion.current = null;
     setConstructing(false); setInspectionRound(null);
   }, [shot?.id, world.meta.worldId]);
+  // The preserve choice rides only when the bar shows it. An unstaged shot in a scene another shot
+  // had staged once sent "Keep blocking" unseen, and the build was refused every set it tried.
   const construct = (request?: typeof constructionRequest) => {
     if (!shot || moved || frozen) return;
     stop();
     const id = crypto.randomUUID();
-    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted || scene.blocking ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
+    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
       construction.current = { id, version: scene.version }; setConstructing(true); setNote(null);
       const started = Date.now();
       setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null;
@@ -989,7 +1018,8 @@ export function SceneStage({
       const marks = command.blocking ?? { cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] };
       command.blocking = { ...marks, ...draftLook };
     }
-    if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); setDraftLook(null); }
+    // The build's "ready to review" goes with the review; the landing snapshot retires the draft.
+    if (onCommand(command, retainedReviewId.current ?? undefined)) { aiDraftVersion.current = null; setDraftPlateCamera(null); setDraftLook(null); setNote(null); }
   };
   const discard = () => {
     if (retainedReviewId.current && !send({ kind: "stage-review-discard", worldId: world.meta.worldId, reviewId: retainedReviewId.current })) {
@@ -1004,6 +1034,8 @@ export function SceneStage({
     scopeDirty.current = false;
     promotingBlocking.current = false;
     setDraft(null);
+    // "Blockout ready to review" stood over an empty Stage after Discard (issue 1865 §8).
+    setNote(null);
   };
   const chooseScope = (next: "scene" | "shot") => {
     if (working === null || next === scope) return;
@@ -1204,6 +1236,7 @@ export function SceneStage({
   const addSet = (choice: AddSetChoice = "box") => {
     if (working === null) return;
     const index = working.sets.length;
+    const lamp: { light: StageLight | null } = { light: null };
     patchBlocking((current) => {
       const figure = current.cast[0];
       // A kit item (issue 1819) starts at its kit's own size and is named for what it is; a
@@ -1214,12 +1247,22 @@ export function SceneStage({
       const stem = kit === null ? "set" : kit;
       let name = kit === null ? `set ${current.sets.length + 1}` : stem;
       for (let n = 2; taken.has(name); n++) name = `${stem} ${n}`;
+      const x = kit === "room" || kit === "street" ? 0 : figure?.x ?? 0;
+      const z = kit === "room" || kit === "street" ? 0 : round((figure?.z ?? 0) + 1);
+      // A Lamp brings its light (229e rule 7), in its shade; before, only the shade glowed and the
+      // scene stayed as dark as it was. The light is held with the draft and lands with its Keep.
+      if (kit === "lamp" && shownLights.length < 24) {
+        const lit = new Set(shownLights.map((light) => light.name));
+        let lightName = name;
+        for (let n = 2; lit.has(lightName); n++) lightName = `${name} ${n}`;
+        lamp.light = { ...stageLightDefault(lightName, { x, z }), y: round(h - 0.15) };
+      }
       return {
         ...current,
         sets: [...current.sets, {
           name,
-          x: kit === "room" || kit === "street" ? 0 : figure?.x ?? 0,
-          z: kit === "room" || kit === "street" ? 0 : round((figure?.z ?? 0) + 1),
+          x,
+          z,
           w,
           h,
           d,
@@ -1227,6 +1270,8 @@ export function SceneStage({
         }],
       };
     });
+    const light = lamp.light;
+    if (light !== null) setDraftLook((look) => ({ ...look, lights: [...(look?.lights ?? scene.blocking?.lights ?? []), light] }));
     // A new set is the thing to name next, so it is the selection (turn 144).
     const selected: StageSelection = { kind: "set", index };
     setSelection(selected);
@@ -1293,6 +1338,9 @@ export function SceneStage({
     onCommand({ kind: "edit-stage", shotId: shot.id, blocking: { cast: marks.cast, sets: marks.sets, ...change } });
   };
   const writePlate = (next: ScenePlate | null) => writeScene({ plate: next });
+  // The scene's writes wait for a held move (issue 1865 §5): they land at once and bump the scene's
+  // version, and a draft is pinned to the version it was made on, so its Keep would be refused.
+  const sceneEditReason = moved ? "Keep the move first" : undefined;
   const sceneLights = scene.blocking?.lights ?? [];
   const writeLight = (index: number, next: StageLight | null) => {
     const lights = next === null ? sceneLights.filter((_, at) => at !== index) : sceneLights.map((light, at) => (at === index ? next : light));
@@ -1397,6 +1445,15 @@ export function SceneStage({
   // The three postures keep their verbs; the named poses (issue 1821) are said by their label.
   const poseWord = (pose: StagePose | undefined): string => (pose === "sit" ? "sits" : pose === "lie" ? "lies" : pose === undefined || pose === "stand" ? "stands" : STAGE_POSE_LABELS[pose].toLowerCase());
   const shotLensMm = framing.lens === undefined ? undefined : String(Number.parseFloat(framing.lens) || "");
+  // The camera's line names the lens its keys are drawn through (issue 1865 §7): once a key has its
+  // own focal length the viewport draws every key at its own or the shot's, so the line says the
+  // same, and a zoom as its range — "locked off · 14 mm" where it read the shot's unset lens.
+  const keyLensWords = (() => {
+    if (!keys.some((key) => key.focalMm !== undefined)) return shotLensMm ? `${shotLensMm} mm` : undefined;
+    const fallback = stagingFocalForFov(stagingFov(framing.lens, aspect), aspectNumber(aspect));
+    const lenses = [...new Set(keys.map((key) => Math.round(key.focalMm ?? fallback)))];
+    return lenses.length === 1 ? `${lenses[0]} mm` : `${Math.min(...lenses)}–${Math.max(...lenses)} mm`;
+  })();
   // The folds: same-kind kit items (two or more) and set dressing, while nothing in them is selected.
   const dressing = new Set(["planter", "tree", "lamp"]);
   const setFolds: Array<{ label: string; state: string; members: number[] }> = [];
@@ -1416,9 +1473,9 @@ export function SceneStage({
     }
   }
   const folded = new Set(setFolds.flatMap((fold) => fold.members));
-  const lightsFolded = !lightsOpen && sceneLights.length > 2 && lightSelected === null;
+  const lightsFolded = !lightsOpen && shownLights.length > 2 && lightSelected === null;
   const lightWarmth = (() => {
-    const tones = sceneLights.map((light) => light.kelvin !== undefined ? (light.kelvin < 4200 ? "warm" : light.kelvin > 5600 ? "cool" : "neutral")
+    const tones = shownLights.map((light) => light.kelvin !== undefined ? (light.kelvin < 4200 ? "warm" : light.kelvin > 5600 ? "cool" : "neutral")
       : (() => { const r = Number.parseInt(light.colour.slice(1, 3), 16), b = Number.parseInt(light.colour.slice(5, 7), 16); return r > b + 24 ? "warm" : b > r + 24 ? "cool" : "neutral"; })());
     return tones.every((tone) => tone === tones[0]) ? tones[0] ?? "" : "mixed";
   })();
@@ -1490,15 +1547,17 @@ export function SceneStage({
 
       <div className="fy-swstage__construction">
         {head || fullscreen !== null ? null : boardScope}
-        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} onPick={pickPlate} />}
+        {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
-        {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
+        {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
+        {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
-        </select> : null}
-        {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
+        </Select> : null}
+        {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
         <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
         {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
-        {note ? <span role="status">{note}</span> : null}
+        {stageModelReason === undefined || constructing ? null : <span className="fy-swstage__barnote" data-testid="stage-model-reason">{stageModelReason}</span>}
+        {note ? <span className="fy-swstage__barnote" role="status">{note}</span> : null}
         {/* The disclosure ends the bar as 144a draws it, and opens once a build has something to
             say — the kept staging's record as much as a draft's; until then it is shut and says
             so by its dress, rather than absent — a person should see where a build's assessment
@@ -1576,7 +1635,7 @@ export function SceneStage({
               <div className="fy-swstage__corner">
                 {moved && !constructing ? (
                   <span className="fy-swstage__moved" data-testid="stage-moved">
-                    <span>{motionChanged ? "Stage changed" : overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
+                    <span>{motionChanged || lookHeld ? "Stage changed" : overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
                     <button type="button" aria-label="Discard" title="Discard" onClick={discard}><X size={11} /></button>
                     <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>
@@ -1625,7 +1684,7 @@ export function SceneStage({
                   <span>camera</span>
                   <span>{boardOn ? `${boardCuts.length} cameras` : (() => {
                     const word = stagingMotionWord(working, durationSec);
-                    return `${word === "static" ? "locked off" : word} · ${shotLensMm ? `${shotLensMm} mm` : `${keys.length} ${keys.length === 1 ? "key" : "keys"}`}`;
+                    return `${word === "static" ? "locked off" : word} · ${keyLensWords ?? `${keys.length} ${keys.length === 1 ? "key" : "keys"}`}`;
                   })()}</span>
                 </button>
                 {scene.blocking?.plate === undefined ? null : (
@@ -1688,14 +1747,14 @@ export function SceneStage({
                   </button>
                 ))}
                 <AddSetMenu disabled={frozen || boardOn} onPick={addSet} />
-                {sceneLights.length === 0 ? null : <div className="fy-swstage__group">lights · {sceneLights.length}</div>}
+                {shownLights.length === 0 ? null : <div className="fy-swstage__group">lights · {shownLights.length}</div>}
                 {lightsFolded ? (
                   <button type="button" className="fy-swstage__item" data-testid="stage-light-fold" disabled={boardOn} onClick={() => setLightsOpen(true)}>
-                    <span className="fy-swstage__mark" data-kind="light" style={{ background: sceneLights[0]!.colour }} aria-hidden="true" />
-                    <span>{sceneLights.map((light) => light.name).join(" · ")}</span>
+                    <span className="fy-swstage__mark" data-kind="light" style={{ background: shownLights[0]!.colour }} aria-hidden="true" />
+                    <span>{shownLights.map((light) => light.name).join(" · ")}</span>
                     <span>{lightWarmth}</span>
                   </button>
-                ) : sceneLights.map((light, position) => (
+                ) : shownLights.map((light, position) => (
                   <button
                     key={`${light.name}:${position}`}
                     type="button"
@@ -1710,7 +1769,8 @@ export function SceneStage({
                     <span>{light.kind} · {light.strength}</span>
                   </button>
                 ))}
-                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || boardOn || sceneLights.length >= 24} onClick={addLight}><Plus size={12} />Add light</button>
+                <button type="button" className="fy-swstage__add" disabled={frozen || locked || moved || boardOn || sceneLights.length >= 24}
+                  title={sceneEditReason ?? (sceneLights.length >= 24 ? "24 lights at most" : undefined)} onClick={addLight}><Plus size={12} />Add light</button>
               </div>
 
               {boardOn && board !== null ? (
@@ -1746,16 +1806,16 @@ export function SceneStage({
                 </div>
               ) : null}
               {boardOn ? null : <>
-              {lightSelected !== null && sceneLights[lightSelected] !== undefined ? (
+              {lightSelected !== null && shownLights[lightSelected] !== undefined ? (
                 <>
                   <LightForm
-                    light={sceneLights[lightSelected]!}
+                    light={shownLights[lightSelected]!}
                     sets={working.sets}
                     disabled={frozen || locked || moved}
                     onChange={(next) => writeLight(lightSelected, next)}
                     onRemove={() => { const index = lightSelected; setLightSelected(null); writeLight(index, null); }}
                   />
-                  <AtmosphereRows atmosphere={scene.blocking?.atmosphere} disabled={frozen || locked || moved} onChange={(atmosphere) => writeScene({ atmosphere })} />
+                  <AtmosphereRows atmosphere={shownAtmosphere} disabled={frozen || locked || moved} onChange={(atmosphere) => writeScene({ atmosphere })} />
                 </>
               ) : null}
               {plateSelected && scene.blocking?.plate !== undefined ? (
@@ -1764,9 +1824,9 @@ export function SceneStage({
                   world={world}
                   productionId={production.meta.id}
                   light={{
-                    time: scene.blocking.atmosphere?.time,
-                    summary: sceneLights.length === 0 && scene.blocking.atmosphere?.time === undefined ? undefined
-                      : [scene.blocking.atmosphere?.time, sceneLights.length === 0 ? undefined : `${lightWarmth} practicals · ${sceneLights.length}`].filter(Boolean).join(" · "),
+                    time: shownAtmosphere?.time,
+                    summary: shownLights.length === 0 && shownAtmosphere?.time === undefined ? undefined
+                      : [shownAtmosphere?.time, shownLights.length === 0 ? undefined : `${lightWarmth} practicals · ${shownLights.length}`].filter(Boolean).join(" · "),
                   }}
                   shots={shots}
                   currentShotId={shot.id}
