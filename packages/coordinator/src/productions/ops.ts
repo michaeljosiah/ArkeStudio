@@ -837,11 +837,15 @@ export async function saveChapter(
       progress.days[day] = (progress.days[day] ?? 0) + added;
       progressFiles.push({ path: progressPath, action: raw === null ? "create" : "replace", content: `${JSON.stringify(progress, null, 2)}\n`, baseHash: raw === null ? null : sha256(raw) });
     }
+    // The manuscript editor can replace an outline, but has no status picker. A real prose
+    // edit leaves that planning state; merely opening or clearing it must not mark it drafted.
+    const replacesOutline = doc.data["status"] === "outlined" && body.trim() !== "" && body.trim() !== doc.body.trim();
     doc.setBody(body);
     // The summary's word count follows the prose it summarises: every surface that reads
     // `words` (the chapter tree, the story dashboard) would otherwise report the count the
     // chapter had when it was last stamped by hand, indefinitely.
     doc.setData({ words: countWords(body) });
+    if (replacesOutline) doc.setData({ status: "drafted" });
     // An imported chapter is the author's from its first save (turn 131): the mark comes off.
     doc.dropData("source");
     // The base is the file the editor read when the caller says so (turn 126), not the file as
