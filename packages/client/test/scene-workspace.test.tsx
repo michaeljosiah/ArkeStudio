@@ -198,9 +198,16 @@ describe("scene detail owns the workspace", () => {
     await click(q(mounted, '[aria-label="Previous shot"]')!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
 
-    // Staging writes the scene block and this shot's camera atomically.
+    // Quick layout is a draft that waits for Keep (231d): nothing is written until it is kept,
+    // and Keep writes the scene block and this shot's camera atomically.
     const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement;
     await click(stageButton);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "nothing lands until Keep");
+    const bar = q(mounted, '[data-testid="stage-draft"]')!;
+    assert.equal(bar.querySelector(".fy-swstage__who")?.textContent, "Quick layout");
+    assert.equal(bar.querySelector(".fy-swstage__notesbtn"), null, "a preset has no notes");
+    assert.match(bar.textContent ?? "", /\+camera · /);
+    await click([...bar.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.kind, "scene-command");
     assert.equal(command.command.kind, "edit-stage");
@@ -215,6 +222,36 @@ describe("scene detail owns the workspace", () => {
     assert.equal(staging.keys[0]!.anchor, undefined, "a push does not implicitly follow a performer");
     assert.ok(staging.keys[1]!.p[2] < staging.keys[0]!.p[2], "a push-in ends closer than it starts");
     assert.equal(staging.keys[1]!.t, 4, "the last key sits at the shot's length");
+  });
+
+  it("Quick layout on a kept stage is a draft: nothing on disk until Keep, and Discard returns the kept staging (231d, issue 1893)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 2, z: -1 }], sets: [{ name: "rail", x: 0, z: -2, w: 4, h: 1, d: 0.2 }] };
+    const kept = { version: 3, keys: [{ t: 0, p: [5, 2.4, 6] as [number, number, number], l: [2, 1.1, -1] as [number, number, number] }, { t: 4, p: [4, 2.4, 5] as [number, number, number], l: [2, 1.1, -1] as [number, number, number] }] };
+    orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = structuredClone(kept);
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await openStage(mounted);
+    const line = q(mounted, ".fy-swstage__construction")!;
+    await click([...line.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "Quick layout writes nothing until Keep");
+    const bar = q(mounted, '[data-testid="stage-draft"]')!;
+    assert.equal(bar.querySelector(".fy-swstage__who")?.textContent, "Quick layout");
+    assert.match(bar.textContent ?? "", /~camera · /, "the camera it lays out, counted as a change");
+    assert.equal(q(mounted, ".fy-swstage__construction"), null, "the bar stands where the line stood");
+    await click(stageItem(mounted, "camera"));
+    const height = () => (q(mounted, '[aria-label="Camera height"]') as HTMLInputElement | null)?.value;
+    assert.notEqual(height(), "2.40", "the draft's camera is the layout's");
+    await click(q(mounted, '[data-testid="stage-draft"] [aria-label="Discard"]')!);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "Discard writes nothing either");
+    assert.equal(q(mounted, '[data-testid="stage-draft"]'), null);
+    assert.ok(q(mounted, ".fy-swstage__construction"), "the line is back");
+    assert.equal(height(), "2.40", "the kept camera stands again, exactly");
+    assert.equal(all(mounted, '.fy-swstage__track[data-key-track="1"] .fy-swstage__key').length, kept.keys.length);
+    assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /^v3 · 2 keys/);
   });
 
   it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
@@ -523,6 +560,7 @@ describe("scene detail owns the workspace", () => {
     await openStage(mounted);
     await click(q(mounted, '[aria-label="Next shot"]')!);
     await click(all(mounted, '[data-testid="workspace-stage"] button').find((button) => button.textContent === "Quick layout")!);
+    await click(all(mounted, '[data-testid="stage-draft"] button').find((button) => button.textContent === "Keep")!);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.command.kind, "edit-stage");
     if (command.command.kind !== "edit-stage") return;

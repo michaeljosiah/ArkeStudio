@@ -42,7 +42,7 @@ async function mount(configure?: (shot: Shot) => void) {
     await act(async () => root!.render(
       <MemoryRouter><SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
         <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined}
-          locked={locked} generatorPending={false} refusalVersion={0} onCommand={command => { sent.push(command); return true; }} onRenderShot={() => {}} />
+          locked={locked} generatorPending={false} onCommand={command => { sent.push(command); return true; }} onRenderShot={() => {}} />
       </SelectionProvider></MemoryRouter>,
     ));
   };
@@ -589,7 +589,7 @@ it("a scene with no shots keeps the way out of full screen", async () => {
   await act(async () => root!.render(
     <SelectionProvider value={{ subject: { kind: "scene" }, select: () => {} }}>
       <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined} fullscreen={{ leave: () => { left += 1; } }}
-        locked={false} generatorPending={false} refusalVersion={0} onCommand={() => true} onRenderShot={() => {}} />
+        locked={false} generatorPending={false} onCommand={() => true} onRenderShot={() => {}} />
     </SelectionProvider>,
   ));
   const exit = container.querySelector<HTMLElement>(".fy-swstage--empty .fy-swstage__exit");
@@ -890,7 +890,7 @@ async function mountBoard(stageSecond = true) {
   await act(async () => root!.render(
     <MemoryRouter><SelectionProvider value={{ subject: { kind: "shot", shotId: "sh_12" }, select: () => {} }}>
       <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined}
-        locked={false} generatorPending={false} refusalVersion={0} onCommand={() => true} onRenderShot={() => {}}
+        locked={false} generatorPending={false} onCommand={() => true} onRenderShot={() => {}}
         board={{ letter: "A", memberShotIds: ["sh_12", "sh_13"], capSec: 10 }} onRenderBoard={members => rendered.push(members)} />
     </SelectionProvider></MemoryRouter>,
   ));

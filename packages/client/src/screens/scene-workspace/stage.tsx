@@ -174,7 +174,6 @@ export function SceneStage({
   sceneFile,
   locked,
   generatorPending,
-  refusalVersion,
   onCommand,
   onRenderShot,
   playblastRequest,
@@ -195,8 +194,6 @@ export function SceneStage({
   sceneFile: string | undefined;
   locked: boolean;
   generatorPending: boolean;
-  /** Counts up on every refused scene write, so a wait can end on a refusal as well as a landing. */
-  refusalVersion: number;
   onCommand: (command: Command, stageReviewId?: string) => boolean;
   onRenderShot?: (shotId: string) => void;
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
@@ -324,7 +321,6 @@ export function SceneStage({
   }, []);
   const keyDrag = useRef<{ pointerId: number; which: number; lane?: MotionLane; left: number; width: number; low: number; high: number } | null>(null);
   const [ghost, setGhost] = useState(false);
-  const [staging, setStaging] = useState(false);
   const [constructing, setConstructing] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [preserve, setPreserve] = useState<"blocking" | "camera" | "none">("blocking");
@@ -455,7 +451,6 @@ export function SceneStage({
       promotingBlocking.current = false;
       return null;
     });
-    setStaging(false);
   }, [scene.blocking, resolvedPersisted, persistedScope, scope]);
   useEffect(() => {
     if (draft === null) setScope(persistedScope);
@@ -469,10 +464,6 @@ export function SceneStage({
     setDraftFrom(null);
     setNotesOpen(false);
   }, [draft]);
-  // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
-  useEffect(() => {
-    setStaging(false);
-  }, [refusalVersion]);
   useEffect(() => {
     cameraDirty.current = false;
     blockingDirty.current = false;
@@ -1010,12 +1001,20 @@ export function SceneStage({
     );
   }
 
+  // Quick layout is a draft that waits for Keep, as Build's does (design turn 231d, rule 5): the
+  // deterministic first pass lands in the draft bar named Quick layout, and nothing from it reaches
+  // the scene until it is kept. It wrote straight to the scene before, so a stray press overwrote
+  // kept blocking with no way back but Undo.
   const stage = () => {
+    if (frozen || locked || moved) return;
+    stop();
     const inherited = effectiveStageBlocking(scene, undefined);
     const firstBlock = scene.blocking === undefined
       ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
-    const availableCast = firstBlock?.cast ?? inherited.cast;
+    // A shot with its own marks is laid out over them; otherwise over the scene's.
+    const own = scope === "shot" && working !== null ? working : null;
+    const availableCast = firstBlock?.cast ?? own?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
@@ -1032,12 +1031,19 @@ export function SceneStage({
       if (!key.anchor && !key.track) { key.l[0] += placed.x - first.x; key.l[2] += placed.z - first.z; }
     }
     const { cast: _cast, sets: _sets, version: _version, playblast: _playblast, ...camera } = fresh;
-    if (onCommand({
-      kind: "edit-stage",
-      shotId: shot.id,
-      staging: camera,
-      ...(firstBlock === null ? {} : { blocking: { cast: firstBlock.cast, sets: firstBlock.sets } }),
-    })) setStaging(true);
+    cameraDirty.current = true;
+    // A scene with no blocking yet gets its first block shared, written with the camera on Keep.
+    if (firstBlock !== null) { blockingDirty.current = true; promotingBlocking.current = scope === "scene"; }
+    // Held against this version, as a build's draft is: a snapshot that moves the scene retires it.
+    aiDraftVersion.current = scene.version;
+    setDraft({
+      ...camera,
+      version: persisted?.version ?? 1,
+      cast: firstBlock?.cast ?? own?.cast ?? inherited.cast,
+      sets: firstBlock?.sets ?? own?.sets ?? inherited.sets,
+    } as ResolvedShotStaging);
+    setDraftFrom({ who: "quick" });
+    setNote(null);
   };
   const keep = () => {
     if (frozen || draft === null || working === null) return;
@@ -1622,7 +1628,6 @@ export function SceneStage({
   const filed = persisted?.playblast;
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
-  const busy = staging && persisted === null;
   const boardPin = board === null ? null : stageBoardAnimatic(scene, board.memberShotIds);
   const boardStale = boardPin !== null && stageBoardAnimaticIsStale(scene, boardPin, aspect);
   const boardLines = boardOn && board !== null ? stageBoardLineFindings(scene, board.memberShotIds, aspect) : [];
@@ -1717,6 +1722,7 @@ export function SceneStage({
           {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
             <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
           </Select> : null}
+          {constructing || working === null ? null : <Button size="sm" disabled={frozen || locked || moved} onClick={stage}>Quick layout</Button>}
           {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
           <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
           {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
@@ -1728,13 +1734,12 @@ export function SceneStage({
       <div className="fy-swstage__work">
         <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode} data-building={constructing && buildLog !== null ? "true" : undefined} data-notes={waiting && notesOpen && draftFrom?.who === "arke" ? "true" : undefined}>
           {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
-          {working === null && !busy ? (
+          {working === null ? (
             <div className="fy-swstage__empty">
               <span>Nothing staged yet.</span>
               <Button variant="primary" size="sm" disabled={locked} onClick={stage}>Quick layout</Button>
             </div>
           ) : null}
-          {busy ? <div className="fy-swstage__busy">staging…</div> : null}
           {constructing && buildLog !== null ? (
             <div className="fy-swstage__log" data-testid="stage-build-log" aria-live="polite">
               <div className="fy-swstage__loghead">
