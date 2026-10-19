@@ -171,3 +171,37 @@ it("reads no more than sixteen ahead of a loop that is slow to take them", async
   assert.ok(lead <= 16, `the loads ran ${lead} takes ahead of the loop`);
   assert.ok(lead >= 8, `and still read ahead: ${lead}`);
 });
+
+it("counts a sheet's reference takes as each is read, not after the last of them", async (t) => {
+  // A sheet's takes were read inside its directory's load, so the open's count stood still until
+  // the last of them was read and then jumped past them all (codex on PR 1887).
+  const dir = await makeTempWorld();
+  const take = JSON.parse(await readFile(join(dir, "productions/saltlight/takes/tk_01J8A0000000000000000000A1/take.json"), "utf8"));
+  const TAKES = 60;
+  for (let i = 0; i < TAKES; i++) {
+    const id = `tk_01J8R${String(i).padStart(21, "0")}`;
+    await mkdir(join(dir, "references/many-takes/takes", id), { recursive: true });
+    await writeFile(join(dir, "references/many-takes/takes", id, "take.json"), JSON.stringify({ ...take, id }));
+  }
+  const log: Array<"read" | "counted"> = [];
+  const original = fs.readFile;
+  t.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+    if (!/\/references\/many-takes\/takes\/[^/]+\/take\.json$/.test(String(args[0]).replace(/\\/g, "/"))) return original(...args);
+    await new Promise((resolve) => setTimeout(resolve, 3));
+    try {
+      return await original(...args);
+    } finally {
+      log.push("read");
+    }
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await scanWorld(dir, { onProgress: () => log.push("counted") });
+  const reads = log.flatMap((entry, index) => (entry === "read" ? [index] : []));
+  assert.equal(reads.length, TAKES);
+  const counted = log.slice(reads[15]!, reads.at(-1)!).filter((entry) => entry === "counted").length;
+  assert.ok(counted >= TAKES / 2, `${counted} files counted while the sheet's takes were still being read`);
+});
