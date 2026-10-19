@@ -364,7 +364,7 @@ import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type
 import { acceptTimingProposal, chapterTiming, proposeChapterTiming, setBed, setBlockSound, setBlockTiming, setReaction, TimingRefusal } from "./productions/audiobook-timing.js";
 import { MixRefusal, renderChapterMix } from "./productions/audiobook-mix.js";
 import { audioWaveform } from "./audio/waveform.js";
-import { audioStudioMedia, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
+import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
 import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
@@ -16298,7 +16298,9 @@ export class Coordinator {
           try {
             const opened = await openAudioStudio(store, msg.productionId, episodeStudio.id, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {});
             // Played or downloaded once, never held as an audition (codex on PR 1880): nothing waits to release it.
-            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { signal: store.closingSignal, ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}) });
+            // Its sources are checked as Audio Studio checks them, a recording's rights included.
+            const unavailable = await audioStudioSourceProblems(store, msg.productionId, opened.state, true);
+            const rendered = await renderAudioStudioMix(store.dir, opened.state, opened.script, { signal: store.closingSignal, unavailable, ...(this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}) });
             this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: { file: rendered.file, seconds: rendered.seconds, from: 0 }, issues: rendered.issues.map((issue) => issue.message) });
           } catch (err) {
             this.emit({ at: this.nowIso(), type: "audiobook.mix", ...ids, mix: null, refused: describeCoordinatorError(err) });
