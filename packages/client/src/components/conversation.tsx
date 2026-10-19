@@ -63,7 +63,7 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { productionModel, productionVariants } from "./dispatch-bar.js";
-import { HarnessModelStatus, harnessModelsNeedAWord, harnessModelLabel, harnessModelUnavailableReason } from "./harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "./harness-models.js";
 import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -607,23 +607,6 @@ export function conversationTitle(text: string): string {
   const cut = flat.slice(0, 199);
   const space = cut.lastIndexOf(" ");
   return (space > 120 ? cut.slice(0, space) : cut) + "…";
-}
-
-/** Why a production language choice cannot run, without choosing another model in its place. */
-export function languageChoiceReason(
-  state: ReturnType<typeof useStore>["state"],
-  modelId: string | undefined,
-  needsTools = false,
-): string | undefined {
-  if (modelId === undefined) return undefined;
-  if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
-  if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
-  if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
-  const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
-  if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
-  if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
-  const reason = harnessModelUnavailableReason(state, model, false, needsTools);
-  return reason ? `${harnessModelLabel(state, model)} ${reason.startsWith("cannot") ? "" : "is "}${reason}.` : undefined;
 }
 
 /**

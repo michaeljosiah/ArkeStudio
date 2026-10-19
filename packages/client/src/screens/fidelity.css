@@ -8576,6 +8576,12 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-swstage__construction { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; }
 .fy-swstage__construction input { flex: 1; min-width: 180px; }
 .fy-swstage__construction > span { font-size: 11px; opacity: .7; }
+/* A note takes a line of its own (issue 1865): beside the input it was a flex item as wide as its
+   words, and a long refusal squeezed the instruction to its 180px floor. */
+.fy-swstage__construction > .fy-swstage__barnote { flex-basis: 100%; margin: 0; }
+/* The preserve choice stands at the buttons' height and type, not dimmed as the bar's notes are. */
+.fy-swstage__construction > .fy-swstage__preserve { flex: none; font-size: inherit; opacity: 1; }
+.fy-swstage__preserve > .ui-select__control { height: var(--space-8); padding-block: 0; font-size: 13px; }
 /* 144a's disclosure at the bar's end: a chevron and the words, muted; open, it takes the line
    below for the build's assessment; shut with nothing built, it is dimmed and does not open. */
 .fy-swstage__inspection[open] { width: 100%; }

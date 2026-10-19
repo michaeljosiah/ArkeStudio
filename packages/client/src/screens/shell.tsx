@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
 import { remoteStudio } from "./launch.js";
-import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
-import { languageChoiceReason } from "../components/conversation.js";
 import { Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { BodyLayer } from "../components/body-layer.js";

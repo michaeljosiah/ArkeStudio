@@ -3244,7 +3244,9 @@ async function sharedResourceProjection(
       const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
       const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
       if (!shot || !scene) throw new Error("That Stage shot is no longer available.");
-      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to three turns and five minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
+      // A tool build may run eight minutes and the single-reply build five (StageConstructor), and
+      // which runs is not known until it starts: the card names the longer (issue 1865).
+      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to eight minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
       authorityRevision = scene.version;
       break;
     }

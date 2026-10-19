@@ -14,13 +14,13 @@ import {
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
-import { ConversationTranscript, languageChoiceReason } from "../components/conversation.js";
+import { ConversationTranscript } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
 import { ProductionTargetCard } from "../components/production-target-card.js";
 import { Button } from "../components/ui.js";
-import { HarnessModelStatus, harnessModelsNeedAWord } from "../components/harness-models.js";
+import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
 import { AudioDramaPlanCard, NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";

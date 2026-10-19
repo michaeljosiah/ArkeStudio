@@ -391,6 +391,13 @@ it("puts a chosen camera move in the draft and Keeps it without changing timed a
 
 // ---- The panel as an inspector (design turn 144) ------------------------------------------------
 
+it("names the lens the keys are drawn through on the camera's line, a key's own before the shot's (issue 1865 §7)", async () => {
+  const { q } = await mount((shot) => { shot.framing = { lens: "35mm" }; for (const key of shot.staging!.keys) key.focalMm = 14; });
+  assert.match(stageItem(q, "camera").textContent ?? "", /· 14 mm$/);
+  const { q: zoom } = await mount((shot) => { shot.staging!.keys[2]!.focalMm = 50; });
+  assert.match(stageItem(zoom, "camera").textContent ?? "", /· \d+–50 mm$/, "a zoom says its range, the other keys at the lens they are drawn through");
+});
+
 it("lists what is on the stage with its state, and shows one form for the selection (turn 144)", async () => {
   const { q } = await mount((shot) => { movingShot(shot); shot.framing = { lens: "35mm" }; });
   const items = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].map((item) => item.textContent);
@@ -633,6 +640,21 @@ it("writes a first plate with the scene's marks, never this shot's own, from thi
   assert.deepEqual([blocking?.cast, blocking?.sets], [[], []], "this shot's marks stay its own: every inheriting shot would get them");
 });
 
+it("offers no Stage render as a plate, and names a tile by what it is of (issue 1865 §9)", async () => {
+  const { q, render, world } = await mount();
+  world.artifacts.push(
+    PLATE_PICTURE as never,
+    { ...PLATE_PICTURE, id: "ar_01J8G0000000000000000000P3", file: "stage-opening.png", origin: { by: "system", producedBy: "stage:sh_12" }, links: ["saltlight", "sc_04", "sh_12"] } as never,
+    { ...PLATE_PICTURE, id: "ar_01J8G0000000000000000000P4", file: "maren.png", links: ["maren-kest"] } as never,
+  );
+  await render();
+  await click(q('[data-testid="stage-plate-chip"]'));
+  const tiles = [...q('[data-testid="stage-plate-picker"]').querySelectorAll<HTMLElement>('[role="option"]')];
+  assert.equal(tiles.some((tile) => tile.title.includes("Shot 12")), false, "the greybox's own still is not a picture of the place");
+  assert.ok(tiles.some((tile) => tile.textContent === "Maren Kest"), "a portrait says whose it is rather than \"picture\"");
+  assert.equal(tiles.some((tile) => tile.textContent === "picture"), false);
+});
+
 it("lists the plate second, opens its form, and Match camera puts the opening key where the plate was taken", async () => {
   const { q, render, scene, world, sent } = await mount();
   world.artifacts.push(PLATE_PICTURE as never);
@@ -741,6 +763,27 @@ it("adds a light, opens its form with the scene's Look beneath, and writes both 
   await click([...q('[data-testid="stage-atmosphere"]').querySelectorAll<HTMLElement>('[role="radio"]')].find((option) => option.textContent === "Off")!);
   const shading = sent.at(-1);
   assert.deepEqual(shading?.kind === "edit-stage" ? shading.blocking?.atmosphere : undefined, { shading: "off" });
+});
+
+it("brings a Lamp's light with it, held with the draft until Keep (229e rule 7, issue 1865)", async () => {
+  const { q, sent, scene } = await mount();
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  const lamp = [...q('[data-testid="stage-kit-menu"]').querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.startsWith("Lamp"))!;
+  assert.equal(lamp.textContent, "Lampwith light", "the menu says what else a lamp brings");
+  await click(lamp);
+  assert.equal(sent.length, 0, "the light waits with the lamp rather than landing on the scene at once");
+  const held = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>('[data-testid="stage-light-line"]')].find((line) => line.querySelector("span:nth-child(2)")?.textContent === "lamp");
+  assert.equal(held?.querySelector("span:nth-child(3)")?.textContent, "point · 8", "the held light is listed beside the scene's");
+  const addLight = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Add light")!;
+  assert.equal(addLight.disabled, true);
+  assert.equal(addLight.title, "Keep the move first", "a shut Add light says why");
+  await click(q(".fy-swstage__keep"));
+  const kept = sent.at(-1);
+  const lights = kept?.kind === "edit-stage" ? kept.blocking?.lights : undefined;
+  assert.equal(lights?.length, (scene.blocking?.lights?.length ?? 0) + 1);
+  assert.deepEqual(lights?.at(-1) && [lights.at(-1)!.name, lights.at(-1)!.y], ["lamp", 1.45], "in the lamp's shade");
+  const sets = kept?.kind === "edit-stage" ? (kept.staging?.sets ?? kept.blocking?.sets) : undefined;
+  assert.equal(sets?.some((set) => set.kit?.kind === "lamp"), true, "and the lamp with it");
 });
 
 it("gives a plain set a material and a room its surfaces, kept with the set", async () => {
