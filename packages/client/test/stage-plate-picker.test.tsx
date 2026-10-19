@@ -112,7 +112,11 @@ it("Generate is the location's own picture flow and ends with the new view chose
   const sent: ClientMessage[] = [];
   __setBridgeForTest(capture(sent));
   __connectionStatusForTest("open");
-  const { world, picked, render } = await mount();
+  // A second location, so another place's job can finish while this one's is awaited.
+  const { world, picked, render } = await mount((bundle) => {
+    const vigil = bundle.sheets.find((sheet) => sheet.id === "the-vigil")!;
+    bundle.sheets.push({ ...structuredClone(vigil), id: "the-saltmarket", name: "The Saltmarket" } as never);
+  });
   await press("Generate");
   // The shim opens the property, not the attribute, so the open dialog is found by it.
   const dialog = [...dom.document.querySelectorAll<HTMLElement>("dialog")].find((element) => (element as unknown as { open: boolean }).open)!;
@@ -120,7 +124,12 @@ it("Generate is the location's own picture flow and ends with the new view chose
   await act(async () => [...dialog.querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Generate")!.click());
   const request = sent.find((message) => message.kind === "generate-location-view");
   assert.equal(request?.kind === "generate-location-view" ? request.sheetId : null, "the-vigil", "the location's own generation, not a new generator");
-  const landed = structuredClone(world);
+  // Another location's job finishing meanwhile is not this request's result (codex on PR 1902).
+  const elsewhere = structuredClone(world);
+  elsewhere.referenceTakes = [...(elsewhere.referenceTakes ?? []), { id: "tk_01J8G0000000000000000000G0", kind: "location-view", reference: { sheetId: "the-saltmarket" }, media: "market.png", mediaHash: "sha256:0000111122223333" } as never];
+  await render(elsewhere);
+  assert.equal(selected(), null, "not this request's view");
+  const landed = structuredClone(elsewhere);
   landed.referenceTakes = [...(landed.referenceTakes ?? []), { id: "tk_01J8G0000000000000000000G1", kind: "location-view", reference: { sheetId: "the-vigil" }, media: "view.png", mediaHash: "sha256:ddddeeeeffff0000" } as never];
   await render(landed);
   assert.equal(selected(), "The Vigil · new", "the new view is the pick");

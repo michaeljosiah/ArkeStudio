@@ -27,6 +27,8 @@ export interface PlateCandidate {
   location: string | null;
   /** What the tile says: the location and its view, or what the shelf calls the picture. */
   label: string;
+  /** The job that made a view still waiting to be named, so a Generate knows its own result. */
+  jobId?: string;
 }
 
 /**
@@ -57,7 +59,7 @@ export function plateCandidates(world: WorldBundle, productionId: string): Plate
     const location = sheetId === undefined ? undefined : locations.get(sheetId);
     if (take.kind !== "location-view" || location === undefined || reviewed.has(take.id) || take.media === undefined || take.mediaHash === undefined) continue;
     const path = `references/${sheetId}/takes/${take.id}/${take.media}`;
-    views.push({ key: path, source: { source: "world-file", path, hash: take.mediaHash }, path, location, label: `${location} · new` });
+    views.push({ key: path, source: { source: "world-file", path, hash: take.mediaHash }, path, location, label: `${location} · new`, ...(take.jobId === undefined ? {} : { jobId: take.jobId }) });
   }
   const linkName = linkNameResolver(world);
   const shelf = productionShelf(world.artifacts, productionId)
@@ -149,7 +151,7 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
   // Off by default (231f), unless the plate already chosen is one of the other pictures.
   const [showAll, setShowAll] = useState(() => candidates.some((candidate) => candidate.key === current && candidate.location === null));
   const [chosen, setChosen] = useState<string | null>(current);
-  const [awaiting, setAwaiting] = useState<{ kind: "upload" | "generate"; requestId: string; known: ReadonlySet<string> } | null>(null);
+  const [awaiting, setAwaiting] = useState<{ kind: "upload" | "generate"; requestId: string; known: ReadonlySet<string>; jobs?: readonly string[] } | null>(null);
   const { state } = useStore();
   const search = useRef<HTMLInputElement | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -163,7 +165,12 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
   // not hold when it was asked for, a location's for Generate.
   useEffect(() => {
     if (awaiting === null) return;
-    const landed = candidates.find((candidate) => !awaiting.known.has(candidate.key) && (awaiting.kind === "upload" || candidate.location !== null));
+    // A Generate's own result is the view its job made, once the queue has said which jobs those
+    // are; until then, a new view of this scene's location (codex on PR 1902): another location's
+    // job finishing meanwhile is not this one's.
+    const ours = (candidate: PlateCandidate) => awaiting.kind === "upload"
+      || (awaiting.jobs !== undefined && candidate.jobId !== undefined ? awaiting.jobs.includes(candidate.jobId) : candidate.location !== null && candidate.location === location?.name);
+    const landed = candidates.find((candidate) => !awaiting.known.has(candidate.key) && ours(candidate));
     if (landed === undefined) return;
     setChosen(landed.key);
     if (landed.location === null) setShowAll(true);
@@ -175,7 +182,10 @@ function PlatePicker({ world, productionId, locationId, current, anchor, onCance
   // on PR 1902). Generate and Upload stay open meanwhile, so a wait that never lands can be asked again.
   useEffect(() => subscribeQueueResults((result) => {
     if (awaiting === null || result.requestId !== awaiting.requestId) return;
-    if (result.disposition !== "rejected" && result.requestedCount > 0) return;
+    if (result.disposition !== "rejected" && result.requestedCount > 0) {
+      if (result.acceptedJobIds.length > 0) setAwaiting((current) => (current?.requestId === result.requestId ? { ...current, jobs: result.acceptedJobIds } : current));
+      return;
+    }
     setAwaiting(null);
     setNote(result.failures[0]?.reason ?? null);
   }), [awaiting]);
