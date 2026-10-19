@@ -305,6 +305,16 @@ describe("an episode in Audio Studio (SPEC-057 R-67)", () => {
     assert.ok(container.querySelector(".fy-ad-ep__bar nav[aria-label='Episode views'] [aria-current='page']")?.textContent === "Audio Studio");
     assert.ok(container.querySelector("section[aria-label='Episode script']"));
   });
+
+  it("has Arke beside the arrangement, and reads again when Arke's suggestion lands (issue 1882)", async () => {
+    const { container, sent } = await mount(drama([line("bray", "Climb.")]), "script/1?view=audio-studio");
+    assert.match(container.querySelector("#cut-arke-panel")!.textContent!, /Discuss the arrangement with Arke/);
+    const reads = () => sent.filter((message) => message.kind === "read-audio-studio").length;
+    const before = reads();
+    // The coordinator's signal for an episode carries no chapter record, only that its studio changed.
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "audiobook.record", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapterId: "episode-001" }));
+    assert.equal(reads(), before + 1, "the studio reads again, so Current/Suggested has the suggestion");
+  });
 });
 
 describe("the show page and Publish (230p, 230q)", () => {

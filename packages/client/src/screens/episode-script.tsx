@@ -7,7 +7,7 @@ import {
 import { useProduction } from "../lib/selectors.js";
 import {
   acceptProposal, discardProposal, openChapter, useGateNotices, readChapterVersion, saveEpisodeScript, subscribeChapterOpenResults, subscribeEpisodeScriptSaveResults, useStore,
-  renderAudiobookMix, subscribeAudiobookMix,
+  renderAudiobookMix, subscribeAudiobookMix, useAudiobookRecords,
 } from "../lib/store.js";
 import {
   bedMarks, chapterParagraphs, heardAsLabel, joinBlock, mendRelations, newBlock, paragraphLabel, parseParagraphs,
@@ -28,6 +28,7 @@ import { CastColumn } from "./drama-cast.js";
 import { roleVoice } from "../lib/audio-drama-cast.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
+import { ProductionConversation } from "../components/conversation.js";
 import type { TimingRowLike } from "./chapter-timing.js";
 import { loadPlaylist, playPlaylistLine } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
@@ -719,6 +720,9 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
   const [passage, setPassage] = useState<string | null>(null);
   const phone = useMediaQuery("(max-width: 599px)");
   const episodes = Math.max(production.audioDrama?.plan.episodes ?? 1, episode);
+  // Arke's suggestion staged for this episode (issue 1882) is signalled by its studio's record key:
+  // the studio reads again, and Current/Suggested has it to compare.
+  const signalled = useAudiobookRecords()[`${world.meta.worldId}/${production.meta.id}/${stem}`]?.seq ?? 0;
   const name = (slug: string) => world.sheets.find((sheet) => sheet.id === slug)?.name ?? speakerLabel(slug);
   // Export renders the episode's arrangement and hands its file over (R-67).
   const [exporting, setExporting] = useState<string | null>(null);
@@ -762,8 +766,14 @@ function EpisodeAudioStudio({ world, production, episode }: { world: WorldBundle
       <div className="fy-ad-ep__studio">
     <AudioStudioWorkspace worldId={world.meta.worldId} productionId={production.meta.id} chapterId={stem} chapterFile={stem} slug={world.meta.slug}
       book={production.meta.title} title={`Episode ${episode}${stored.script.title ? ` · ${stored.script.title}` : ""}`}
-      connection={connection} stamp={`${stored.hash}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
-      passage={passage} onPassage={setPassage} conversation={null} propose={null}
+      connection={connection} stamp={`${stored.hash}:${signalled}:${JSON.stringify([takes ?? null, production.audioDrama?.cast ?? null])}`} rows={rows} timing={NO_TIMING}
+      passage={passage} onPassage={setPassage}
+      // Arke beside the episode's arrangement (issue 1882), as beside a chapter's: a production
+      // conversation whose asks name the episode, since a chapter subject would name none here.
+      propose={<div className="fy-audio-studio__propose"><p>Discuss the arrangement with Arke. Review proposed changes before applying them.</p></div>}
+      conversation={(context) => <ProductionConversation worldId={world.meta.worldId} productionId={production.meta.id} entry={{ kind: "production", productionId: production.meta.id }}
+        dock={{ title: "Arke", subject: `Episode ${episode}`, conversationFirst: true, subjectPrefix: `${context} About episode ${episode}:`, about: `episode ${episode}` }}
+        placeholder={`Ask about episode ${episode}`} emptyLine={`No conversation about episode ${episode} yet.`} />}
       onBack={() => navigate(`${base}/script/${episode}`)} exportProblem={exportProblem} backLabel="Script" unit="Episode"
       onExport={() => { setExportProblem(null); setExporting(renderAudiobookMix(world.meta.worldId, production.meta.id, stem)); }}
       exportDisabled={connection !== "open" || exporting !== null} />

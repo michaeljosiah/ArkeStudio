@@ -488,6 +488,7 @@ import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
+import { studioEpisode } from "./world-chat/target-reads.js";
 import type { AudiobookVideoOptions, AudiobookVideoProgress } from "@arke-studio/contracts";
 import { worldChatContextExists } from "./world-chat/context-validation.js";
 import { worldChatContextSchemaVersion } from "@arke-studio/contracts";
@@ -21213,7 +21214,14 @@ export class Coordinator {
       effectDependencies: this.effectDependencies,
       audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
       audioStudioChanged: async (productionId, chapterId) => {
-        const chapter = store.getBundle().productions.find(entry => entry.meta.id === productionId)?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
+        const production = store.getBundle().productions.find(entry => entry.meta.id === productionId);
+        // An episode keeps no audiobook record (issue 1882): the signal alone tells its open studio
+        // to read again, so Arke's suggestion appears beside Current.
+        if (studioEpisode(production, chapterId)) {
+          if (this.opts.provider.openStore?.() === store) this.emit({ at: this.nowIso(), type: "audiobook.record", worldId: store.worldId, productionId, chapterId });
+          return;
+        }
+        const chapter = production?.chapters.find(entry => entry.id === chapterId || entry.file === chapterId);
         if (!chapter) return;
         const record = await readAudiobook(store, productionId, chapter.file);
         if (this.opts.provider.openStore?.() !== store || !record || record === "unreadable") return;

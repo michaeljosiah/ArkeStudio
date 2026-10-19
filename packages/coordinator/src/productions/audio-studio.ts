@@ -260,6 +260,33 @@ export async function savedEpisodeMixProblems(store: WorldStore, productionId: s
   return mixes;
 }
 
+/**
+ * The suggestion a chat action staged, a chapter's or an episode's (issue 1882), read from the
+ * records alone: finding a card's family never derives an arrangement or decodes a take.
+ */
+export async function findAudioStudioProposal(store: WorldStore, productionId: string, actionId: string): Promise<AudioStudioProposal | null> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) return null;
+  const made = (family: AudioStudioProposal) => family.versions.some((version) => version.actionId === actionId);
+  if (productionShape(production.meta).isAudioDrama) {
+    for (const { script } of production.episodeScripts ?? []) {
+      const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/drama-mix/${episodeScriptFile(script.episode)}`))), "utf8").catch(() => null);
+      if (raw === null) continue;
+      let parsed: ReturnType<typeof DramaMixRecordSchema.safeParse> | null = null;
+      try { parsed = DramaMixRecordSchema.safeParse(JSON.parse(raw)); } catch { parsed = null; }
+      const family = parsed?.success ? parsed.data.audioStudioProposals?.find(made) : undefined;
+      if (family) return family;
+    }
+    return null;
+  }
+  for (const chapter of production.chapters) {
+    const record = await readAudiobook(store, productionId, chapter.file);
+    const family = record && record !== "unreadable" ? record.audioStudioProposals?.find(made) : undefined;
+    if (family) return family;
+  }
+  return null;
+}
+
 async function validateEditSources(store: WorldStore, productionId: string, script: AudioScript, edit: AudioArrangementEdit, options: Options): Promise<Map<string, AudioSource>> {
   const sources = new Map<string, AudioSource>();
   if (edit.kind === "commands") for (const command of edit.commands) {
@@ -345,7 +372,7 @@ export async function stageAudioStudioProposal(store: WorldStore, productionId: 
     if (fresh.base !== proposal.base) throw new AudioArrangementRefusal("The arrangement changed; read Audio Studio again before proposing");
     const family = proposal.family ? families.find(entry => entry.id === proposal.family!.id) : undefined;
     if (proposal.family && (!family || family.status !== "pending" || family.versions.at(-1)?.number !== proposal.family.version)) throw new AudioArrangementRefusal("This proposal was revised or decided. Keep Current remains in force");
-    if (family && family.versions.length >= 20 || !family && families.length >= 100) throw new AudioArrangementRefusal("This chapter has reached its proposal history limit");
+    if (family && family.versions.length >= 20 || !family && families.length >= 100) throw new AudioArrangementRefusal("This arrangement has reached its proposal history limit");
     const edit: AudioArrangementEdit = { kind: "commands", label: proposal.summary, commands: proposal.commands };
     editAudioArrangement(fresh.saved ?? initialAudioArrangement(fresh.state, "{}"), edit);
     await validateEditSources(store, productionId, fresh.script, edit, scopedOptions(store, options));
