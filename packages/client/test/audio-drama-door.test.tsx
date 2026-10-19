@@ -254,7 +254,9 @@ describe("setup asks one question and proposes one plan (design turn 230c)", () 
     assert.match(card.textContent!, /PilotThe tide turns · chapter 3/);
     assert.match(card.textContent!, /Kept from the listener.*Ilo is alive.*until ep 5/);
     assert.doesNotMatch(m.container.textContent!, /Step 1|step list/i);
-    await click(m.container, "Change");
+    assert.equal(m.container.querySelector("[data-testid='models-card']"), null, "no picture or film models for the ear (issue 1883)");
+    assert.doesNotMatch(m.container.textContent!, /No media generation starts here/, "and no caption under the composer");
+    await click(m.container, "Change the plan");
     await fire(card.querySelector<HTMLInputElement>("input[type=number]")!, "onBlur", "8");
     const update = m.setup().at(-1)!;
     assert.equal(update.action.operation, "update");

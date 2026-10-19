@@ -1574,7 +1574,7 @@ export function ProductionConversationBody({
  * as answers come, unless the author has scrolled back to read, and a thread shown again after
  * being out of sight is put back at its end.
  */
-function useReadsFromEnd(): (element: HTMLDivElement | null) => void {
+export function useReadsFromEnd(): (element: HTMLDivElement | null) => void {
   const [log, setLog] = useState<HTMLDivElement | null>(null);
   const atEnd = useRef(true);
   useLayoutEffect(() => {

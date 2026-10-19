@@ -14,7 +14,7 @@ import {
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
-import { ConversationTranscript, languageChoiceReason } from "../components/conversation.js";
+import { ConversationTranscript, languageChoiceReason, useReadsFromEnd } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
@@ -43,6 +43,7 @@ export function ProductionSetupScreen() {
 
 export function ProductionSetupView({ embedded }: { embedded?: { worldId: string; setupId: string } }) {
   const phone = useMediaQuery("(max-width: 599px)");
+  const setLog = useReadsFromEnd();
   const [outlineOpen,setOutlineOpen] = useState(false);
   const route = useParams(), worldId = embedded?.worldId ?? route.worldId, routeId = embedded?.setupId ?? route.setupId;
   const presentation = useConversationPresentation();
@@ -104,7 +105,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     }
     setFailure(result.detail ?? null);
     if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
-    if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(`/w/${worldId}/p/${result.state.productionId}`, { replace: true });
+    if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(createdPath(worldId!, result.state), { replace: true });
   }), [worldId, setupId, navigate, onSetupPage, presentation?.owner]);
   useEffect(() => {
     if (!world || !worldId || !setupId || connection !== "open") return;
@@ -122,7 +123,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     }
   }, [connection]);
   useEffect(() => {
-    if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(`/w/${worldId}/p/${setup.productionId}`, { replace: true });
+    if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(createdPath(worldId!, setup), { replace: true });
   }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   /*
@@ -173,7 +174,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
       {failure && <p className="fy-production-setup__notice" role="alert">{failure}</p>}
       <div className="fy-production-setup__panels" data-active={tab}>
         <section id="setup-conversation" className="fy-production-setup__conversation" aria-label="Conversation with Arke"><ConversationPanelContent>
-          <div className="fy-production-setup__log">
+          {/* Read from its end as a thread is (issue 1883): the new reply was below the fold. */}
+          <div className="fy-production-setup__log" ref={setLog}>
             <ConversationTranscript workspace={workspace} autoRead={readReplies.autoRead} running={running} progress={progress}
               failure={workspace?.lastFailure ?? null} canRetry={!locked && !running}
               onStop={() => command({ operation: "cancel" })}
@@ -194,7 +196,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               agentLabel="Arke" busy={running} autoFocus={!phone}
               disabledReason={locked ? "Creation is being resolved." : !draft ? "Opening production setup…" : unavailable}
               onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} readReplies={readReplies.composer} />
-            <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>
+            {/* An audio drama's setup is the conversation and its plan (issue 1883, 230b): no caption under it. */}
+            {!audioDrama && <p className="fy-mono">Uses your configured writing model. No media generation starts here.</p>}
           </HeldBar>
         </ConversationPanelContent></section>
         <ResponsiveSheet sheet={phone} open={outlineOpen} onClose={() => setOutlineOpen(false)} title="Production so far" className="fy-setup-outline-sheet">
@@ -239,14 +242,16 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             {/* The production's own models (design turn 153), written with the production. Each
                 row follows Settings until chosen here — Settings, not the world: the world's
                 choice was for making the world. */}
-            <ModelsCard
+            {/* Not for an audio drama (issue 1883): its rows are a picture's and a film's, and a
+                drama's voices are chosen by role in Cast. */}
+            {!audioDrama && <ModelsCard
               state={state}
               capabilities={PRODUCTION_MODEL_CAPABILITIES}
               choices={draft.models}
               scopeWord="this production"
               disabled={!!pending || running || locked}
               onChange={(capability, modelId) => update({ models: withModelChoice(draft.models, capability, modelId) ?? {} })}
-            />
+            />}
             {draft.logline && <p>{draft.logline}</p>}
             <ProductionSetupOutline draft={draft} sheetName={id => world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
             {problems.length > 0 && <div className="fy-production-setup__problems" role="status"><h3>Still to resolve</h3><ul>{problems.map((problem, i) => <li key={i}>{problem}</li>)}</ul>
@@ -271,7 +276,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                   setTab("outline");
                   if (setup.review) command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id });
                   else command({ operation: "review", expectedRevision: draft.revision });
-                }}>{setup.review ? "Create production" : "Review production"}</Button>
+                }}>{setup.review ? audioDrama && draft.audioDrama?.pilot ? "Start the pilot" : "Create production" : "Review production"}</Button>
                 <Button variant="ghost" disabled={!!pending || running} onClick={() => command({ operation: "discard" })}>Discard setup</Button>
               </div>}
           </>}
@@ -282,6 +287,15 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   );
 }
 
+
+/**
+ * Where a created production opens: its home, or for an audio drama with a pilot the pilot's
+ * script (issue 1883, R-9), which is what Start the pilot said it would do.
+ */
+function createdPath(worldId: string, state: ProductionSetupState): string {
+  const home = `/w/${worldId}/p/${state.productionId}`;
+  return state.draft.kind === AUDIO_DRAMA_KIND && state.draft.audioDrama?.pilot ? `${home}/script/1` : home;
+}
 
 /** What Create will write for an audio drama: its plan, and nothing of a book's or a screen's. */
 function AudioDramaReview({ setup, sourceTitle }: { setup: ProductionSetupState; sourceTitle: string | undefined }) {

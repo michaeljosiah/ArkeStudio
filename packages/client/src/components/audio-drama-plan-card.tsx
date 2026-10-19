@@ -85,7 +85,7 @@ export function AudioDramaPlanCard({ plan, disabled, onChange }: {
           ))}
         </div>
       )}
-      <div><Button size="sm" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? "Done" : "Change"}</Button></div>
+      <div><Button size="sm" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? "Done" : "Change the plan"}</Button></div>
     </section>
   );
 }

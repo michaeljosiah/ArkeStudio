@@ -59,6 +59,7 @@ import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
+import { dramaCastRoles } from "../lib/audio-drama-cast.js";
 import { createEpisode, useAudiobookDoors } from "../lib/store.js";
 import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
@@ -333,7 +334,10 @@ export function ProductionLayout() {
   // What the Cast page lists (design turn 192, 58a's rail): its guests, the guests staged for
   // review, and the world's cast it shares. Counting the guests alone put "Cast 0" over a page of
   // seven people.
-  const castCount = prodId
+  // An audio drama's Cast page lists its roles, not the world's sheets (issue 1883): counting
+  // every sheet put "Cast 12" over a page of three.
+  const castCount = production && productionShape(production.meta).isAudioDrama && world ? dramaCastRoles(world, production).length
+    : prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length +
       (["character", "location", "faction"] as const).flatMap((kind) =>
         pendingGuestsOf(pendingSheets(world?.proposals ?? [], kind, world?.conversations ?? []), prodId),
