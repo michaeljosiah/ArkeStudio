@@ -45,7 +45,6 @@ import {
   Users,
   VideoMark,
 } from "../components/icons.js";
-import { Loading } from "../components/loading.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { ARKE_HALF_QUERY, useArkeHalfOpen } from "../lib/arke-half.js";
@@ -53,6 +52,7 @@ import { CUT_PHONE_QUERY } from "./editor-responsive.js";
 import { Button } from "../components/ui.js";
 import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
+import { WorldOpening } from "../components/world-opening.js";
 import { productionShelf } from "../lib/artifact-view.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { runtimeSeconds } from "../lib/format.js";
@@ -819,7 +819,7 @@ export function ProductionLayout() {
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
           ) : !world ? (
-            <Loading label="opening the world" />
+            <WorldOpening worldId={worldId} />
           ) : (
             <NewSceneContext.Provider value={newScene}>
               <NewChapterContext.Provider value={newChapter}>

@@ -47,6 +47,7 @@ import { Archive, ArrowRight, ChevronRight, Copy, Lock, Message, More, Pencil, P
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
+import { WorldOpening } from "../components/world-opening.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -210,7 +211,7 @@ export function WorldLayout() {
           ) : (
             <>
               <AppChrome back={{ label: "Worlds", to: "/worlds" }} />
-              <Loading label="opening the world" />
+              <WorldOpening worldId={worldId} />
             </>
           )}
         </div>
@@ -273,7 +274,7 @@ export function WorldLayout() {
         </WorldNavigation>
         <WorldConditionBanners />
         {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> :
-          world ? <Outlet /> : <Loading label="opening the world" />}
+          world ? <Outlet /> : <WorldOpening worldId={worldId} />}
       </div>
     </div>
   );
@@ -440,7 +441,7 @@ export function WorldOverviewScreen() {
   if (!world) {
     return (
       <Screen id="world-overview">
-        <Loading label="opening the world" />
+        <WorldOpening worldId={worldId} />
       </Screen>
     );
   }

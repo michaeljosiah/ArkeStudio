@@ -70,6 +70,12 @@ export interface WorldStoreEvents {
   onHeartbeatError?: (error: unknown, consecutive: number) => void;
 }
 
+/**
+ * How far `WorldStore.open` has got (issue 1844): the scan's count while it reads, against how
+ * many files the world's last open recorded, then the history and index work after it.
+ */
+export type WorldStoreOpenProgress = { phase: "reading"; done: number; total?: number } | { phase: "checking" };
+
 /** Checked after a fresh scan and inside the store's mutation queue. Null means still current. */
 export type WorldStatePrecondition = () => string | null;
 
@@ -122,6 +128,7 @@ export class WorldStore {
       clock?: () => string;
       sqlite?: DatabaseCtor;
       lockOptions?: WorldLockOptions;
+      onProgress?: (progress: WorldStoreOpenProgress) => void;
     } = {},
   ): Promise<WorldStore> {
     const committer = new Committer(dir, opts.clock, async () => {
@@ -154,7 +161,16 @@ export class WorldStore {
     try {
       if (opts.readOnly) pending = await committer.pendingRecovery();
       else { await committer.recover(); await lock!.assertOwned(); recoveredPerformances = await recoverPerformanceStorage(dir); }
-      const scan = await scanWorld(dir);
+      // Read before the scan rather than after it, which changes nothing — recovery has already
+      // run and the scan writes nothing — and gives the open's progress a total to read against:
+      // how many files the world held when it was last opened.
+      let scanState = await readScanState(dir);
+      const lastRead = scanState === null ? 0 : Object.keys(scanState.manifest).length;
+      const onProgress = opts.onProgress;
+      const scan = await scanWorld(dir, onProgress === undefined ? {} : {
+        onProgress: (done) => onProgress({ phase: "reading", done, ...(lastRead > 0 ? { total: lastRead } : {}) }),
+      });
+      onProgress?.({ phase: "checking" });
       if (pending.length > 0) {
         scan.bundle.problems = [
           ...scan.bundle.problems,
@@ -167,7 +183,6 @@ export class WorldStore {
           })),
         ];
       }
-      let scanState = await readScanState(dir);
       const seedMissingHistory = scanState === null;
       if (!opts.readOnly && scanState === null) scanState = await reconstructScanState(dir, scan);
       else if (scanState !== null) scanState = await advanceCommittedScanState(dir, scanState);

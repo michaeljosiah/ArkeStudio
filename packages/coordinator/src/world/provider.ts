@@ -28,7 +28,7 @@ import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from
 import { installSampleWorld } from "./sample-world.js";
 import { findKeyArt, hashMedia, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
-import { WorldStore } from "./store.js";
+import { WorldStore, type WorldStoreOpenProgress } from "./store.js";
 import { WorldChatStore } from "../world-chat/store.js";
 
 /**
@@ -441,16 +441,16 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   /** Open for read-write: recovery, lock, scan, index, watcher. Releases the previous selection; background work may retain its store. */
-  async loadWorld(worldId: string): Promise<WorldBundle> {
+  async loadWorld(worldId: string, opts: { onProgress?: (progress: WorldStoreOpenProgress) => void } = {}): Promise<WorldBundle> {
     if (this.closing) throw new Error("the world provider is closing");
     return this.accessWorld(() => {
       if (this.closing) throw new Error("the world provider is closing");
       if (this.archivingWorlds.has(worldId)) throw new Error("This world is being archived.");
-      return this.loadWorldOnce(worldId);
+      return this.loadWorldOnce(worldId, opts.onProgress);
     });
   }
 
-  private async loadWorldOnce(worldId: string): Promise<WorldBundle> {
+  private async loadWorldOnce(worldId: string, onProgress?: (progress: WorldStoreOpenProgress) => void): Promise<WorldBundle> {
     const dir = await this.findWorldDir(worldId);
     if (this.store) {
       if (this.store.worldId === worldId) {
@@ -467,6 +467,7 @@ export class FsWorldProvider implements WorldProvider {
     this.store = this.backgroundStores.get(worldId)?.store ?? await WorldStore.open(dir, {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
+      ...(onProgress ? { onProgress } : {}),
       events: {
         ...this.lockEvents(worldId),
         onAdopted: () => this.worldAdopted(worldId),

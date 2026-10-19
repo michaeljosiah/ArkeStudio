@@ -111,6 +111,10 @@ export type HealthStatus = z.infer<typeof HealthStatusSchema>;
 
 const base = { at: IsoDateTimeSchema };
 
+/** The parts of a world's open a window is told about (issue 1844), in the order they run. */
+export const WorldOpenPhaseSchema = z.enum(["reading", "checking", "conversations", "finishing"]);
+export type WorldOpenPhase = z.infer<typeof WorldOpenPhaseSchema>;
+
 export const QueueCommandSchema = z.enum([
   // An audio drama's sound for a cue (SPEC-057 R-41).
   "generate-drama-sound",
@@ -193,6 +197,27 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    */
   z
     .object({ ...base, type: z.literal("world.open-failed"), worldId: UlidSchema, reason: z.string().min(1) })
+    .strict(),
+  /**
+   * Which part of a world's open is under way (issue 1844).
+   *
+   * A large world opened behind one unchanging "opening the world" for up to two minutes, which
+   * is also what a hang looks like. Transient, like `world-chat.progress`: it has no durable home
+   * and needs none, and the open's own `world.opened` or `world.open-failed` ends it.
+   *
+   * While the world is read, `done` is how many record files the scan has read so far and `total`
+   * how many the world held when it was last opened: an estimate, absent on a first open, and
+   * outrun by a world that has grown since.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world.open-progress"),
+      worldId: UlidSchema,
+      phase: WorldOpenPhaseSchema,
+      done: z.number().int().nonnegative().optional(),
+      total: z.number().int().nonnegative().optional(),
+    })
     .strict(),
   /** Correlated answer to a reviewed chat-to-Bench handoff. It never means Generate was pressed. */
   z

@@ -4,6 +4,7 @@ import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { StoryPublicationService } from "./publications/story.js";
 import type { StoryPublishResult } from "@arke-studio/contracts";
+import type { WorldOpenPhase } from "@arke-studio/contracts";
 import { AudiobookActivityJournal } from "./productions/audiobook-activity.js";
 import { BrowserMediaImports } from "./artifacts/browser-media-import.js";
 import { draftDialogueSubtitles } from "./productions/transcription.js";
@@ -3350,6 +3351,8 @@ export class Coordinator {
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private openWorldTail: Promise<void> = Promise.resolve();
   private readonly openingWorlds = new Map<string, Promise<void>>();
+  /** The latest word on each world being opened (issue 1844), for a window that connects mid-open. */
+  private readonly worldOpenProgress = new Map<string, Extract<DomainEvent, { type: "world.open-progress" }>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
   private backfillAbort: AbortController | null = null;
   /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
@@ -3812,6 +3815,9 @@ export class Coordinator {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
         }
         replayed.push(...this.cataloguePreviews?.initialEvents() ?? []);
+        // A window that connects part-way through an open is told where it has got (issue 1844),
+        // rather than sitting on the bare loader line until the next phase starts.
+        replayed.push(...this.worldOpenProgress.values());
         // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
@@ -4352,7 +4358,9 @@ export class Coordinator {
       // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
       // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
       // Journalling the event would have durably recorded both on every generate.
-      parsed.type !== "diagnostics.ready"
+      parsed.type !== "diagnostics.ready" &&
+      // Several a second while a world opens, and over once it has (issue 1844).
+      parsed.type !== "world.open-progress"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: journalRecord(parsed) });
@@ -4926,7 +4934,7 @@ export class Coordinator {
     const opening = this.openWorldTail.then(() => {
       if (this.stopping) throw new Error("The coordinator is stopping.");
       return this.openWorldOnce(worldId);
-    });
+    }).finally(() => this.worldOpenProgress.delete(worldId));
     this.openWorldTail = opening.catch(() => {});
     this.openingWorlds.set(worldId, opening);
     try {
@@ -4951,13 +4959,35 @@ export class Coordinator {
     await this.openWorldTail;
   }
 
+  /**
+   * Say how far a world's open has got (issue 1844).
+   *
+   * A phase is said when it starts. The scan's count arrives once per file, thousands of times in
+   * a large world, so within a phase it is said at most four times a second, which is as fast as
+   * anybody reads a number. Nothing here may fail the open: it is commentary on the open.
+   */
+  private reportWorldOpen(worldId: string, progress: { phase: WorldOpenPhase; done?: number; total?: number }): void {
+    const previous = this.worldOpenProgress.get(worldId);
+    const now = Date.now();
+    if (previous?.phase === progress.phase && now - Date.parse(previous.at) < 250) return;
+    const event = { at: new Date(now).toISOString(), type: "world.open-progress" as const, worldId, ...progress };
+    this.worldOpenProgress.set(worldId, event);
+    try {
+      this.emit(event);
+    } catch {
+      /* a window that misses a phase shows the one before it, or the plain loader line */
+    }
+  }
+
   private async openWorldOnce(worldId: string): Promise<void> {
     // Captured before the load, because recovery must not run on a world that was already open:
     // it closes any run still marked running, and on the open world that could be a live turn
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.isWorldLoaded?.(worldId) ?? (this.opts.provider.openStore?.()?.worldId === worldId);
-    const loaded = await this.opts.provider.loadWorld(worldId);
+    const loaded = await this.opts.provider.loadWorld(worldId, {
+      onProgress: (progress) => this.reportWorldOpen(worldId, progress),
+    });
     // Requests are remembered for one world's session, which is as long as a window holds them.
     if (!wasAlreadyOpen) {
       this.worldChatSends.clear();
@@ -4988,11 +5018,13 @@ export class Coordinator {
     // Recovery always receives the store that owns this bundle, even across awaited reads.
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
+      this.reportWorldOpen(worldId, { phase: "conversations" });
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
       await this.repairOnOpen(worldId, "production-setup", async () => {
         try { await recoverProductionSetups(store); }
         finally { await this.refreshConversations(store); }
       });
+      this.reportWorldOpen(worldId, { phase: "finishing" });
       await this.repairOnOpen(worldId, "drama-source-snapshots", () => keepAllAdaptedText(store));
     }
     // Video artifacts filed before posters existed get their pictures now, before the snapshot
@@ -5000,6 +5032,10 @@ export class Coordinator {
     // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
     if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
     if (this.stopping || (store && !this.stillOpen(store))) return;
+    // Forgotten before the snapshot, not after it (codex on PR 1887): every broadcast snapshot is
+    // followed by the hello replay, and a finished open's last phase would arrive after the event
+    // that ended it and stay on the client.
+    this.worldOpenProgress.delete(worldId);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();

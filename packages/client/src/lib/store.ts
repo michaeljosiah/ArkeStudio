@@ -1,6 +1,7 @@
 import type { StoryPublishAction } from "@arke-studio/contracts";
 import { illustrationRowGoes, illustrationTotal, isRemoteHostCommand, RemoteCommandRefusalSchema, type RemoteCommandRefusal } from "@arke-studio/contracts";
 import type { AudiobookReader, PictureShot, PromptReview, PromptSourceSnapshot, RoutingCommand } from "@arke-studio/contracts";
+import type { WorldOpenPhase } from "@arke-studio/contracts";
 import { setMediaStateSource } from "./media.js";
 import { devSession } from "./dev-session.js";
 import { pickBrowserMedia, readBrowserMedia } from "./browser-media-import.js";
@@ -206,6 +207,14 @@ export interface StagedTake {
     differences: number;
   };
   refused?: string;
+}
+
+/** Which part of a world's open is under way, with how many files it has read (issue 1844). */
+export interface WorldOpenProgress {
+  worldId: string;
+  phase: WorldOpenPhase;
+  done?: number;
+  total?: number;
 }
 
 interface StoreState {
@@ -522,6 +531,14 @@ interface StoreState {
    * projection of the durable log, and this is deliberately not durable.
    */
   worldChatProgress: Record<string, { label: string; at: string }>;
+  /**
+   * How far the world being opened has got (issue 1844).
+   *
+   * Transient like the progress above: the open's own `world.opened` or `world.open-failed` ends
+   * it, as does a snapshot that carries the world, and a loader with nothing here says the plain
+   * "opening the world" it always did.
+   */
+  worldOpenProgress: WorldOpenProgress | null;
   voiceSidecar: { state: "not-started" | "downloading" | "unavailable" | "ready"; detail: string } | null;
   voiceRuntimeTest: {
     requestId: string;
@@ -661,6 +678,7 @@ let current: StoreState = {
   worldChatWrapUpRefusals: {},
   worldChatRipples: {},
   worldChatProgress: {},
+  worldOpenProgress: null,
   voiceSidecar: null,
   voiceRuntimeTest: null,
   mainPhotoAcceptance: {},
@@ -1669,6 +1687,9 @@ function handleFrame(json: string): void {
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       voiceParts: changedWorld ? {} : current.voiceParts,
+      // A snapshot carrying the world has ended its open, whatever event was missed on the way,
+      // and a window that rejoined is told again by the replay if the open is still going.
+      worldOpenProgress: rejoined || frame.state.world?.meta.worldId === current.worldOpenProgress?.worldId ? null : current.worldOpenProgress,
       // A run still going is replayed after the snapshot (turn 129, turn 130); one that finished
       // while this window was away is not, and would otherwise stay "casting" forever (codex on
       // PR 914, round two). The snapshot's records say what stands.
@@ -2579,6 +2600,7 @@ function handleFrame(json: string): void {
     let worldChatWrapUpRefusals = current.worldChatWrapUpRefusals;
     let worldChatRipples = current.worldChatRipples;
     let worldChatProgress = current.worldChatProgress;
+    let worldOpenProgress = current.worldOpenProgress;
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
     let mainPhotoAcceptance = current.mainPhotoAcceptance;
@@ -2672,6 +2694,15 @@ function handleFrame(json: string): void {
         ...worldChatProgress,
         [event.conversationId]: { label: event.label, at: event.at },
       };
+    } else if (event.type === "world.open-progress") {
+      worldOpenProgress = {
+        worldId: event.worldId,
+        phase: event.phase,
+        ...(event.done !== undefined ? { done: event.done } : {}),
+        ...(event.total !== undefined ? { total: event.total } : {}),
+      };
+    } else if (event.type === "world.opened" || event.type === "world.open-failed") {
+      if (worldOpenProgress?.worldId === event.worldId) worldOpenProgress = null;
     } else if (event.type === "voice.sidecar") {
       voiceSidecar = { state: event.state, detail: event.detail };
     } else if (event.type === "voice.runtime-test") {
@@ -2880,6 +2911,7 @@ function handleFrame(json: string): void {
       worldChatWrapUpRefusals,
       worldChatRipples,
       worldChatProgress,
+      worldOpenProgress,
       voiceSidecar,
       voiceRuntimeTest,
       mainPhotoAcceptance,
@@ -6601,6 +6633,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     worldChatWrapUpRefusals: {},
     worldChatRipples: {},
     worldChatProgress: {},
+    worldOpenProgress: null,
     voiceSidecar: null,
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
