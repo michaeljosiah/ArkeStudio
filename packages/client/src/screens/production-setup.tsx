@@ -76,6 +76,16 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const progress = useWorldChatProgress(setupId ?? undefined, workspace?.runStartedAt ?? null);
   const running = workspace?.runStatus === "running" || pending === "send" || pending === "retry";
   const locked = setup?.status === "creating" || setup?.status === "created";
+  // Change the plan opens the plan card to edit (230c); Start the pilot reviews, then creates.
+  const [planEdit, setPlanEdit] = useState(0);
+  const startingPilot = useRef(false);
+  useEffect(() => {
+    if (!startingPilot.current || !setup?.review || pending) return;
+    startingPilot.current = false;
+    command({ operation: "create", expectedRevision: setup.draft.revision, reviewId: setup.review.id });
+  }, [setup?.review?.id, pending]);
+  // A review refused or a draft changed under it lets the press go (it is pressed again).
+  useEffect(() => { if (!pending && !setup?.review) startingPilot.current = false; }, [pending]);
 
   useEffect(() => {
     if (state?.app.health.harness.status === "healthy") listHarnessModels();
@@ -148,6 +158,14 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const draft = setup?.draft;
   const audioDrama = draft?.kind === AUDIO_DRAMA_KIND;
   const problems = draft ? productionSetupProblems(draft, world?.sheets ?? [], world?.productions ?? []) : [];
+  // Arke's plan is in, its last word said, and nothing is being made: the choices stand under it.
+  const planProposed = audioDrama && !!draft?.audioDrama?.pilot && !running && !locked && workspace?.messages.at(-1)?.role === "studio";
+  const startPilot = () => {
+    if (!draft || !setup) return;
+    if (setup.review) { command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); return; }
+    startingPilot.current = true;
+    command({ operation: "review", expectedRevision: draft.revision });
+  };
   const stories = adaptableStories(world?.productions ?? []);
   const update = (fields: NonNullable<Extract<ProductionSetupCommand["action"], { operation: "update" }>["update"]["fields"]>) => {
     if (draft) command({ operation: "update", update: { expectedRevision: draft.revision, fields } });
@@ -183,6 +201,13 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
+            {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
+            {planProposed && (
+              <div className="fy-production-setup__choices" role="group" aria-label="The plan">
+                <Button size="sm" variant="primary" disabled={!!pending || problems.length > 0} onClick={startPilot}>Start the pilot</Button>
+                <Button size="sm" onClick={() => { setTab("outline"); setOutlineOpen(true); setPlanEdit(n => n + 1); }}>Change the plan</Button>
+              </div>
+            )}
           </div>
           <HeldBar className="fy-production-setup__composer">
             {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setOutlineOpen(true)}><span><b>Production so far · {draft ? [draft.title,draft.kind,draft.aspect,draft.logline,...draft.scenes.map(scene=>scene.title)].filter(Boolean).length : 0} settled</b><span>{draft ? formatLine(draft) : "Opening your draft…"}</span></span><ChevronUp size={18}/></button>}
@@ -237,7 +262,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
             </fieldset>
             {/* Where it will be watched, and the numbers that follow (design turn 205, SPEC-052 R-6). */}
             {draft.kind === "microdrama" && <ProductionTargetCard draft={draft} update={update} disabled={!!pending || running || locked} />}
-            {audioDrama && draft.audioDrama && <AudioDramaPlanCard plan={draft.audioDrama} disabled={!!pending || running || locked}
+            {audioDrama && draft.audioDrama && <AudioDramaPlanCard plan={draft.audioDrama} disabled={!!pending || running || locked} editRequest={planEdit}
               onChange={plan => update({ audioDrama: plan })} />}
             {/* The production's own models (design turn 153), written with the production. Each
                 row follows Settings until chosen here — Settings, not the world: the world's
@@ -276,7 +301,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                   setTab("outline");
                   if (setup.review) command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id });
                   else command({ operation: "review", expectedRevision: draft.revision });
-                }}>{setup.review ? audioDrama && draft.audioDrama?.pilot ? "Start the pilot" : "Create production" : "Review production"}</Button>
+                }}>{setup.review ? "Create production" : "Review production"}</Button>
                 <Button variant="ghost" disabled={!!pending || running} onClick={() => command({ operation: "discard" })}>Discard setup</Button>
               </div>}
           </>}

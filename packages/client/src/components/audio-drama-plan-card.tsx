@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_AUDIO_DRAMA_PLAN, type AudioDramaPlan } from "@arke-studio/contracts";
 import { Lock } from "./icons.js";
 import { Button } from "./ui.js";
@@ -23,12 +23,15 @@ export function pilotChapters(chapters: readonly number[]): string {
  * Every edit replaces the plan whole, because that is how the draft holds it: a field sent alone
  * would wipe the rest.
  */
-export function AudioDramaPlanCard({ plan, disabled, onChange }: {
+export function AudioDramaPlanCard({ plan, disabled, onChange, editRequest = 0 }: {
   plan: AudioDramaPlan;
   disabled: boolean;
   onChange: (plan: AudioDramaPlan) => void;
+  /** Raised by Change the plan under Arke's reply (230c): the card opens to edit. */
+  editRequest?: number;
 }) {
   const [editing, setEditing] = useState(false);
+  useEffect(() => { if (editRequest > 0) setEditing(true); }, [editRequest]);
   const untouched = plan.episodes === DEFAULT_AUDIO_DRAMA_PLAN.episodes && plan.minutes === DEFAULT_AUDIO_DRAMA_PLAN.minutes &&
     !plan.narrator && !plan.pilot && plan.keptFromListener.length === 0;
   // A number left empty or out of range keeps what was there; the schema's limits are the only ones.
@@ -85,7 +88,7 @@ export function AudioDramaPlanCard({ plan, disabled, onChange }: {
           ))}
         </div>
       )}
-      <div><Button size="sm" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? "Done" : "Change the plan"}</Button></div>
+      <div><Button size="sm" disabled={disabled} onClick={() => setEditing(open => !open)}>{editing ? "Done" : "Change"}</Button></div>
     </section>
   );
 }
