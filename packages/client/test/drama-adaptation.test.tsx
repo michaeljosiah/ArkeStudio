@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
 import { DramaAdaptationScreen } from "../src/screens/drama-adaptation.js";
-import { CUT, adaptationMap, layoutMap } from "../src/lib/adaptation.js";
+import { CUT, adaptationMap, layoutMap, pairChangedParagraphs, wordChanges } from "../src/lib/adaptation.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -127,6 +127,8 @@ describe("the Adaptation page (230m/n)", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     assert.match(container.textContent!, /1 line · 0 kept takes/, "the scene's line rests on the changed paragraph");
     assert.equal(container.querySelectorAll(".fy-ad-cmp__col").length, 3);
+    // Within the paragraph (issue 1882): only the word that changed is marked, on both sides.
+    assert.deepEqual([...container.querySelectorAll(".fy-ad-cmp__word")].map((word) => word.textContent), ["hated", "loved"]);
     await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Keep the script")!).onClick!({}));
     const save = sent.find((message) => message.kind === "save-episode-script") as Extract<ClientMessage, { kind: "save-episode-script" }>;
     assert.equal(save.baseHash, "sha256:e2");
@@ -134,5 +136,17 @@ describe("the Adaptation page (230m/n)", () => {
     assert.deepEqual([pin?.version, pin?.hash], [15, "sha256:low-v15"]);
     assert.deepEqual(save.blocks[1], state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.episodeScripts![1]!.script.blocks[1],
       "the line itself is untouched, so its take is too");
+  });
+});
+
+describe("issue 1882: a changed paragraph, word by word", () => {
+  it("marks only the words that differ, and pairs a paragraph with the one that took its place", () => {
+    const { before, after } = wordChanges("Your brother hated that tower.", "Your brother loved that old tower.");
+    assert.deepEqual(before.filter((word) => word.changed).map((word) => word.text), ["hated"]);
+    assert.deepEqual(after.filter((word) => word.changed).map((word) => word.text), ["loved", "old"]);
+    const adapted = ["Odile poured.", "Your brother hated that tower."];
+    const now = ["A new first paragraph.", "Odile poured.", "Your brother loved that tower."];
+    assert.deepEqual([...pairChangedParagraphs(adapted, now, [2], new Map([[1, 2]]))], [[2, 3]], "not the new first paragraph");
+    assert.equal(pairChangedParagraphs(["Nothing alike here."], ["Entirely different words now."], [1], new Map()).size, 0, "a paragraph rewritten whole stays marked whole");
   });
 });
