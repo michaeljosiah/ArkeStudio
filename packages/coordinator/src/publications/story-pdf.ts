@@ -8,7 +8,7 @@ import { type ManuscriptDocument, type ManuscriptRun, type StoryPdfSettings, isM
 
 /** SPEC-058: this identity is captured before rendering, and checked again on retry. */
 export const STORY_PDF_IDENTITY = {
-  compiler: "arke-story-pdf", version: 1, layout: 1, pdfkit: "0.20.2", fontkit: "2.0.4", validator: "pdfjs-5.4.624",
+  compiler: "arke-story-pdf", version: 1, layout: 2, pdfkit: "0.20.2", fontkit: "2.0.4", validator: "pdfjs-5.4.624",
   fonts: {
     "DejaVuSans-Bold.ttf": "e6476c1b80502924294eed40894c5b18e06c181444ca953e5334262df9c27724",
     "DejaVuSans-BoldOblique.ttf": "eb436dca0c2594b73d8b603b892e374fdfd8d885d25ffb4f18df4c4c0b49e50f",
@@ -49,6 +49,8 @@ type Face = keyof typeof STORY_PDF_IDENTITY.fonts;
 type Fonts = Map<Face, { bytes: Buffer; font: Font }>;
 const digest = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 const normalized = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
+const breakableSpace = (text: string) => /^[^\S\u00a0\u202f]+$/u.test(text);
+const sourceNormalized = (text: string) => text.normalize("NFC").replace(/[^\S\u00a0\u202f]+/gu, " ").replace(/^ +| +$/g, "");
 const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
 const fontNames: Record<"serif" | "sans", [Face, Face, Face, Face]> = {
   serif: ["DejaVuSerif.ttf", "DejaVuSerif-Italic.ttf", "DejaVuSerif-Bold.ttf", "DejaVuSerif-BoldItalic.ttf"],
@@ -101,7 +103,7 @@ class Typesetter {
       const style = (run.bold ? 2 : 0) + (run.italic ? 1 : 0);
       const preferred = fontNames[this.input.settings.font][style]!;
       const fallback = fontNames.sans[style]!;
-      for (const token of run.text.match(/\s+|\S+/gu) ?? []) {
+      for (const token of run.text.split(/([^\S\u00a0\u202f]+)/u).filter(Boolean)) {
         let text = ""; let face: Face | undefined;
         const flush = () => { if (text && face) result.push({ text, face, width: this.width(text, face, size) }); text = ""; };
         for (const { segment } of segmenter.segment(token)) {
@@ -123,19 +125,20 @@ class Typesetter {
   wrap(runs: ManuscriptRun[], width: number, size: number, indent: number, context: string): Line[] {
     const lines: Line[] = []; let current: Piece[] = []; let used = 0;
     const currentIndent = () => lines.length === 0 ? indent : 0;
-    const flush = () => { while (current.length && /^\s+$/u.test(current.at(-1)!.text)) used -= current.pop()!.width; lines.push({ pieces: current, width: used, indent: currentIndent() }); current = []; used = 0; };
+    const flush = () => { while (current.length && breakableSpace(current.at(-1)!.text)) used -= current.pop()!.width; lines.push({ pieces: current, width: used, indent: currentIndent() }); current = []; used = 0; };
     // An emphasis or fallback-font boundary is not a word boundary. Keep the
     // whole token together, including closing punctuation in a different face.
     const groups: Piece[][] = [];
     for (const piece of this.pieces(runs, size, context)) {
-      if (/^\s+$/u.test(piece.text) || !groups.length || /^\s+$/u.test(groups.at(-1)![0]!.text)) groups.push([piece]);
+      if (breakableSpace(piece.text) || !groups.length || breakableSpace(groups.at(-1)![0]!.text)) groups.push([piece]);
       else groups.at(-1)!.push(piece);
     }
     for (const group of groups) {
       const groupWidth = group.reduce((sum, piece) => sum + piece.width, 0);
-      if (/^\s+$/u.test(group[0]!.text)) { if (current.length) { current.push(...group); used += groupWidth; } continue; }
+      if (breakableSpace(group[0]!.text)) { if (current.length) { current.push(...group); used += groupWidth; } continue; }
       if (used + groupWidth > width - currentIndent() + 0.01 && current.length) flush();
       if (groupWidth <= width - currentIndent() + 0.01) { current.push(...group); used += groupWidth; continue; }
+      if (group.some(piece => /[\u00a0\u202f]/u.test(piece.text))) throw new Error(`${context}: a nonbreaking phrase is wider than the PDF text frame. Shorten it or replace its nonbreaking space.`);
       // No inserted hyphen or replacement glyph: split only at grapheme boundaries.
       for (const piece of group) for (const { segment } of segmenter.segment(piece.text)) {
         const part = { text: segment, face: piece.face, width: this.width(segment, piece.face, size) };
@@ -199,7 +202,10 @@ async function makePlan(doc: ManuscriptDocument, input: StoryPdfInput, typesette
     chapters.push({ id: input.chapterIds[chapterIndex]!, title: chapter.title, pageNumber: start, physicalPage: 0, destination: `chapter-${chapterIndex + 1}` });
     const heading = typesetter.wrap([{ text: chapter.title, bold: true }], frame.textWidth, size * 1.6, 0, chapter.title);
     const available = frame.bottom - frame.top;
-    if (heading.length * size * 1.6 * input.settings.lineSpacing + leading * 5 > available) throw new Error(`${chapter.title}: the chapter heading leaves no room for its opening. Shorten the heading.`);
+    const opening = chapter.blocks.find(block => block.kind === "paragraph");
+    const openingLines = opening?.kind === "paragraph" ? typesetter.wrap(opening.runs, frame.textWidth, size, 0, chapter.title).length : 0;
+    const openingKeep = openingLines === 3 ? 3 : Math.min(2, openingLines);
+    if (heading.length * size * 1.6 * input.settings.lineSpacing + leading * (3 + openingKeep) > available) throw new Error(`${chapter.title}: the chapter heading leaves no room for its opening. Shorten the heading.`);
     y += leading * 1.5;
     for (const line of heading) place(line, size * 1.6, `chapter-${chapterIndex}-heading`, "H1", chapter.title, true);
     y += leading * 1.5;
@@ -208,7 +214,10 @@ async function makePlan(doc: ManuscriptDocument, input: StoryPdfInput, typesette
       await checkpoint();
       const context = `${chapter.title}, paragraph ${blockIndex + 1}`;
       if (block.kind === "break") {
-        if (y + leading * 5 > frame.bottom) addPage(chapterIndex);
+        const following = chapter.blocks[blockIndex + 1];
+        const followingLines = following?.kind === "paragraph" ? typesetter.wrap(following.runs, frame.textWidth, size, 0, context).length : 0;
+        const keep = followingLines === 3 ? 3 : Math.min(2, followingLines);
+        if (y + leading * (3 + keep) > frame.bottom) addPage(chapterIndex);
         y += leading;
         for (const line of typesetter.wrap([{ text: "* * *" }], frame.textWidth, size, 0, context)) place(line, size, `break-${chapterIndex}-${blockIndex}`, "P", context, true);
         y += leading; first = true; continue;
@@ -222,6 +231,7 @@ async function makePlan(doc: ManuscriptDocument, input: StoryPdfInput, typesette
         if (availableLines < Math.min(2, remaining)) { addPage(chapterIndex); availableLines = Math.floor((frame.bottom - y) / leading); }
         let take = Math.min(availableLines, remaining);
         if (remaining > take && remaining - take === 1) take--;
+        if (remaining > take && take < 2) { addPage(chapterIndex); continue; }
         if (take < 1) throw new Error(`${context}: the paragraph cannot fit the PDF frame.`);
         for (const line of lines.slice(cursor, cursor + take)) place(line, size, `p-${chapterIndex}-${blockIndex}`, "P", context);
         cursor += take;
@@ -259,6 +269,18 @@ async function makePlan(doc: ManuscriptDocument, input: StoryPdfInput, typesette
   for (const [index, current] of pages.entries()) {
     current.label = index < frontPages + contents.length ? `Front matter ${index + 1}` : String(index - frontPages - contents.length + 1);
     if (current.opening && current.chapter !== undefined) chapters[current.chapter]!.physicalPage = index + 1;
+    if (input.settings.runningHeaders && current.chapter !== undefined && !current.opening) {
+      const graphemes = [...segmenter.segment(doc.title)].map(part => part.segment);
+      let pieces = typesetter.pieces([{ text: doc.title }], 8, "Running header");
+      let width = pieces.reduce((sum, piece) => sum + piece.width, 0);
+      while (width > frame.textWidth && graphemes.length) {
+        graphemes.pop();
+        pieces = typesetter.pieces([{ text: graphemes.join("") + "…" }], 8, "Running header");
+        width = pieces.reduce((sum, piece) => sum + piece.width, 0);
+      }
+      current.lines.push({ pieces, width, indent: 0, x: frame.left + (frame.textWidth - width) / 2,
+        y: frame.top / 2, size: 8, key: `header-${index}`, role: "Artifact", context: "Running header" });
+    }
   }
   return { pages, chapters, paragraphCount, contentsPasses: passes + 1 };
 }
@@ -309,13 +331,19 @@ export async function renderStoryPdf(document: ManuscriptDocument, input: StoryP
       }
       if (page.opening && page.chapter !== undefined) {
         const chapter = plan.chapters[page.chapter]!;
-        pdf.addNamedDestination(chapter.destination, "XYZ", frame.left, frame.height - page.lines[0]!.y, null);
-        pdf.outline.addItem(chapter.title, { expanded: false });
+        pdf.addNamedDestination(chapter.destination, "XYZ", frame.left, page.lines[0]!.y, null);
+        // PDFKit's outline API measures left from the right; both destinations must
+        // resolve to the same heading coordinates after its PDF-space conversion.
+        const outlineOptions = { expanded: false, top: page.lines[0]!.y, left: frame.width - frame.left };
+        pdf.outline.addItem(chapter.title, outlineOptions);
       }
       for (const line of page.lines) {
-        let structure = structures.get(line.key);
-        if (!structure) { structure = pdf.struct(line.role); root.add(structure); structures.set(line.key, structure); }
-        structure.add(pdf.markStructureContent(line.role));
+        if (line.role === "Artifact") pdf.markContent("Artifact", { type: "Pagination", attached: ["Top"] });
+        else {
+          let structure = structures.get(line.key);
+          if (!structure) { structure = pdf.struct(line.role); root.add(structure); structures.set(line.key, structure); }
+          structure.add(pdf.markStructureContent(line.role));
+        }
         let x = line.x;
         // A text operation per word needlessly multiplies PDF operators and font shaping
         // work on a novel. Coalesce the planned same-face runs without altering their text.
@@ -335,12 +363,6 @@ export async function renderStoryPdf(document: ManuscriptDocument, input: StoryP
       if (page.chapter !== undefined) {
         pdf.markContent("Artifact", { type: "Pagination", attached: ["Bottom"] });
         pdf.font(fontNames[input.settings.font][0]).fontSize(9).text(page.label, frame.left, frame.height - frame.top / 2, { width: frame.textWidth, align: "center", lineBreak: false }); pdf.endMarkedContent();
-        if (input.settings.runningHeaders && !page.opening) {
-          let header = document.title; const type = new Typesetter(fonts, input);
-          while (type.width(header, fontNames[input.settings.font][0], 8) > frame.textWidth && header.length) header = [...header].slice(0, -2).join("") + "…";
-          pdf.markContent("Artifact", { type: "Pagination", attached: ["Top"] });
-          pdf.font(fontNames[input.settings.font][0]).fontSize(8).text(header, frame.left, frame.top / 2, { width: frame.textWidth, align: "center", lineBreak: false }); pdf.endMarkedContent();
-        }
       }
       if (!page.cover && !page.lines.length) throw new Error(`PDF page ${index + 1} is unexpectedly empty.`);
     }
@@ -374,8 +396,9 @@ function verifyPlanSource(document: ManuscriptDocument, plan: Plan): void {
   for (const page of plan.pages) {
     if (page.chapter === undefined) continue;
     for (const line of page.lines) {
+      if (line.role === "Artifact") continue;
       if (groups.at(-1)?.key !== line.key) groups.push({ key: line.key, lines: [] });
-      groups.at(-1)!.lines.push(normalized(line.pieces.map(piece => piece.text).join("")));
+      groups.at(-1)!.lines.push(sourceNormalized(line.pieces.map(piece => piece.text).join("")));
     }
   }
   const nonempty = expected.filter(row => normalized(row.text));
@@ -383,7 +406,7 @@ function verifyPlanSource(document: ManuscriptDocument, plan: Plan): void {
   for (const [index, group] of groups.entries()) {
     const source = nonempty[index]!;
     if (group.key !== source.key) throw new Error(`${source.context}: PDF planning changed the reading order.`);
-    const text = normalized(source.text); let position = 0;
+    const text = sourceNormalized(source.text); let position = 0;
     for (const line of group.lines) {
       // A wrap can consume a source space, or split an unbreakable token without one.
       if (text[position] === " ") position++;
@@ -401,7 +424,7 @@ async function validatePdf(bytes: Uint8Array, plan: Plan, frame: ReturnType<type
   if (!("DOMMatrix" in globalThis)) Object.defineProperty(globalThis, "DOMMatrix", { configurable: true, value: function ExtractionOnlyMatrix(...args: unknown[]) {
     if (args.length) throw new Error("PDF canvas rendering is unavailable in the validation worker.");
   } });
-  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const { getDocument, OPS } = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, disableFontFace: true, isEvalSupported: false, useWorkerFetch: false });
   const parsed = await loading.promise;
   let checked = 0;
@@ -417,12 +440,25 @@ async function validatePdf(bytes: Uint8Array, plan: Plan, frame: ReturnType<type
       const bookmark = outline[index]!;
       const bookmarkDest = typeof bookmark.dest === "string" ? await parsed.getDestination(bookmark.dest) : bookmark.dest;
       if (!dest || await parsed.getPageIndex(dest[0]) !== chapter.physicalPage - 1 || bookmark.title !== chapter.title || !bookmarkDest || await parsed.getPageIndex(bookmarkDest[0]) !== chapter.physicalPage - 1) throw new Error("The generated PDF chapter navigation is damaged.");
+      const top = frame.height - plan.pages[chapter.physicalPage - 1]!.lines[0]!.y;
+      for (const target of [dest, bookmarkDest]) if (target[1]?.name !== "XYZ" || !Number.isFinite(target[2]) || !Number.isFinite(target[3]) || Math.abs(target[2] - frame.left) > 0.01 || Math.abs(target[3] - top) > 0.01) throw new Error("The generated PDF chapter destination misses its heading.");
     }
     for (let number = 1; number <= parsed.numPages; number++) {
       await checkpoint();
       const page = await parsed.getPage(number);
       const expected = plan.pages[number - 1]!;
       const content = await page.getTextContent({ disableNormalization: true });
+      const noBreaks = expected.lines.flatMap(line => line.pieces).map(piece => piece.text).join("").match(/[\u00a0\u202f]/gu) ?? [];
+      if (noBreaks.length) {
+        // PDF.js text extraction converts whitespace to ordinary spaces even with
+        // normalization disabled. Its decoded glyph operators retain the ToUnicode mapping.
+        const operators = await page.getOperatorList();
+        const mapped: string[] = [];
+        for (const [index, fn] of operators.fnArray.entries()) if (fn === OPS.showText) {
+          for (const glyph of operators.argsArray[index][0]) if (typeof glyph === "object" && typeof glyph.unicode === "string") mapped.push(...glyph.unicode.match(/[\u00a0\u202f]/gu) ?? []);
+        }
+        if (mapped.join("") !== noBreaks.join("")) throw new Error(`PDF page ${number} lost a nonbreaking space mapping.`);
+      }
       const items = content.items.filter((item): item is import("pdfjs-dist/types/src/display/api.js").TextItem => "str" in item && !!item.str.trim());
       const used = new Set<number>();
       for (const line of expected.lines) {
@@ -434,7 +470,8 @@ async function validatePdf(bytes: Uint8Array, plan: Plan, frame: ReturnType<type
         for (const { item, i } of selected) {
           if (spaced && item.transform[4]! - right > line.size * 0.15 && !/\s$/u.test(spaced) && !/^\s/u.test(item.str)) spaced += " ";
           spaced += item.str; right = item.transform[4]! + item.width; used.add(i);
-          if (item.transform[4]! < frame.left - 0.7 || right > frame.width - frame.left + 0.7 || baseline < frame.height - frame.bottom - 0.7 || baseline + item.height > frame.height - frame.top + line.size * 0.3) throw new Error(`${line.context}: text lies outside the PDF page frame.`);
+          const top = line.role === "Artifact" ? 0 : frame.top;
+          if (item.transform[4]! < frame.left - 0.7 || right > frame.width - frame.left + 0.7 || baseline < frame.height - frame.bottom - 0.7 || baseline + item.height > frame.height - top + line.size * 0.3) throw new Error(`${line.context}: text lies outside the PDF page frame.`);
         }
         const wanted = normalized(line.pieces.map(piece => piece.text).join(""));
         if (normalized(actual) !== wanted && normalized(spaced) !== wanted) throw new Error(`${line.context}: PDF text verification failed. Prepare again or change the unsupported text.`);

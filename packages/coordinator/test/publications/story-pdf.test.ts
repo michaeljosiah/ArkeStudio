@@ -107,3 +107,71 @@ test("a synthetic 24-chapter novel over 86,000 words has complete independent va
   assert.ok(result.pageCount > 200);
   assert.equal(result.receipt.checks.geometry, true);
 });
+
+test("running headers retain fallback glyphs and chapter links land at the heading", async () => {
+  const document = manuscript("The road continues through the rain. ".repeat(180), "A road 😀 home");
+  const result = await renderStoryPdf(document, input(document, { settings: { ...DEFAULT_STORY_PDF_SETTINGS, runningHeaders: true } }));
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(result.bytes), disableFontFace: true, useSystemFonts: false }).promise;
+  try {
+    const chapter = result.chapters[0]!, frame = storyPdfFrame("book");
+    const opening = await parsed.getPage(chapter.physicalPage);
+    const heading = (await opening.getTextContent()).items.find(item => "str" in item && item.str === "Opening");
+    assert.ok(heading && "str" in heading);
+    const dest = await parsed.getDestination(chapter.destination);
+    const outline = await parsed.getOutline();
+    const bookmark = outline![0]!.dest;
+    for (const target of [dest, typeof bookmark === "string" ? await parsed.getDestination(bookmark) : bookmark]) {
+      assert.equal(target![1].name, "XYZ");
+      assert.ok(Math.abs(target![2] - frame.left) < 0.01);
+      assert.ok(Math.abs(target![3] - (heading.transform[5] + DEFAULT_STORY_PDF_SETTINGS.bodySize * 1.6)) < 0.01);
+    }
+    for (let number = chapter.physicalPage + 1; number <= parsed.numPages; number++) {
+      const text = (await (await parsed.getPage(number)).getTextContent()).items.filter(item => "str" in item && item.transform[5] > frame.height - frame.top).map(item => "str" in item ? item.str : "").join("");
+      assert.equal(text, document.title, "pagination artifacts use the same Unicode fallback as prose");
+    }
+  } finally { await parsed.destroy(); }
+});
+
+test("nonbreaking spaces preserve their glyphs and keep styled phrases on one line", async () => {
+  const document = manuscript(Array.from({ length: 32 }, (_, i) => "Word ".repeat(i + 1) + "Dr.\u00a0*Ada* paid 1\u202f000 naira.").join("\n\n"));
+  const result = await renderStoryPdf(document, input(document));
+  const { getDocument, OPS } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(result.bytes), disableFontFace: true, useSystemFonts: false }).promise;
+  let glyphs = "", phrases = 0;
+  try {
+    for (let number = result.chapters[0]!.physicalPage; number <= parsed.numPages; number++) {
+      const page = await parsed.getPage(number), rows = new Map<number, string>();
+      for (const item of (await page.getTextContent()).items) if ("str" in item) rows.set(item.transform[5], (rows.get(item.transform[5]) ?? "") + item.str);
+      for (const row of rows.values()) if (row.includes("Dr.")) { assert.match(row, /Dr\.\s*Ada/); phrases++; }
+      for (const row of rows.values()) if (row.includes("000")) assert.match(row, /1\s*000/);
+      const operators = await page.getOperatorList();
+      for (const [index, fn] of operators.fnArray.entries()) if (fn === OPS.showText) {
+        for (const glyph of operators.argsArray[index][0]) if (typeof glyph === "object") glyphs += glyph.unicode;
+      }
+    }
+    assert.equal(phrases, 32);
+    assert.equal([...glyphs].filter(char => char === "\u00a0").length, 32);
+    assert.equal([...glyphs].filter(char => char === "\u202f").length, 32);
+  } finally { await parsed.destroy(); }
+  const tooWide = manuscript(Array.from({ length: 100 }, () => "word").join("\u00a0"));
+  await assert.rejects(renderStoryPdf(tooWide, input(tooWide)), /nonbreaking phrase.*wider/);
+});
+
+for (const sceneBreak of [false, true]) test(`a three-line paragraph moves whole with its scene break=${sceneBreak}`, async () => {
+  const fillers = sceneBreak ? 20 : 23;
+  const body = Array.from({ length: fillers }, (_, i) => `Filler ${i + 1}.`).join("\n\n") + (sceneBreak ? "\n\n***" : "") + "\n\n" + "Target passage walks along the river and returns home. ".repeat(2);
+  const document = manuscript(body);
+  const result = await renderStoryPdf(document, input(document, { settings: { ...DEFAULT_STORY_PDF_SETTINGS, bodySize: 12, lineSpacing: 1.5, contents: false } }));
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(result.bytes), disableFontFace: true, useSystemFonts: false }).promise;
+  try {
+    const first = (await (await parsed.getPage(2)).getTextContent()).items.map(item => "str" in item ? item.str : "").join(" ");
+    assert.ok(first.includes(`Filler ${fillers}.`));
+    assert.ok(!first.includes("Target"), "no isolated first line may remain at the page foot");
+    if (sceneBreak) assert.ok(!first.includes("* * *"), "the scene marker moves with the paragraph");
+    const next = (await (await parsed.getPage(3)).getTextContent()).items.filter(item => "str" in item && item.str.trim() && item.str !== "* * *" && item.transform[5] > 54);
+    assert.equal(next.length, 3, "the complete three-line paragraph belongs on the next page");
+    assert.match(next.map(item => "str" in item ? item.str : "").join(" "), /Target passage/);
+  } finally { await parsed.destroy(); }
+});

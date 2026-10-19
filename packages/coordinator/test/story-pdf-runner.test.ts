@@ -46,3 +46,27 @@ test("PDF progress persistence is serialized and rejection fails the operation",
   assert.deepEqual(calls, ["Formatting pages", "Checking PDF"]);
   await assert.rejects(render(document, options, { onPhase: async () => { throw new Error("storage failed"); } }), /report progress/);
 });
+
+for (const reason of ["cancel", "timeout", "error"] as const) test(`PDF ${reason} drains a phase write before the terminal receipt`, { timeout: 10_000 }, async () => {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const controller = new AbortController();
+  const source = `import {parentPort} from 'node:worker_threads'; parentPort.postMessage({kind:'phase',phase:'Formatting pages'}); parentPort.postMessage({kind:'phase',phase:'Checking PDF'}); ${reason === "error" ? "parentPort.postMessage({kind:'error',error:'worker failed'});" : "setInterval(()=>{},1000);"}`;
+  let receipt = "captured", settled = false, calls = 0;
+  const operation = createStoryPdfRunner({ workerPath: worker(source), timeoutMs: reason === "timeout" ? 2000 : 5000 })(document, options, {
+    signal: controller.signal, onPhase: async () => { calls++; enter(); await gate; receipt = "creating"; },
+  });
+  const observed = operation.then(() => { settled = true; receipt = "ready"; }, error => { settled = true; receipt = "terminal"; throw error; });
+  void observed.catch(() => {});
+  try {
+    await Promise.race([entered, observed]);
+    if (reason === "cancel") controller.abort();
+    await new Promise(resolve => setTimeout(resolve, reason === "timeout" ? 2100 : 100));
+    assert.equal(settled, false, "terminal handling must wait for the in-flight write");
+    release();
+    await assert.rejects(observed, /cancelled|resource limit|worker failed/);
+    assert.equal(calls, 1, "queued phases must not start after failure");
+    assert.equal(receipt, "terminal", "a late phase cannot overwrite the terminal receipt");
+  } finally { release(); controller.abort(); await observed.catch(() => {}); }
+});

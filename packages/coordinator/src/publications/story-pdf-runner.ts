@@ -40,8 +40,14 @@ export function createStoryPdfRunner(host: { workerPath?: string | URL; timeoutM
         settled = true;
         clearTimeout(timer);
         control.signal?.removeEventListener("abort", abort);
-        // Resolve only after termination so callers can safely drain jobs during shutdown.
-        void worker.terminate().then(() => error ? reject(error) : resolve(result!), () => reject(error ?? new Error("The PDF renderer could not stop.")));
+        // A phase callback may still be renaming its receipt. Drain it on every exit,
+        // before the service writes a terminal state or considers shutdown complete.
+        void Promise.allSettled([worker.terminate(), progress]).then(([terminated, reported]) => {
+          if (error) reject(error);
+          else if (terminated.status === "rejected") reject(new Error("The PDF renderer could not stop."));
+          else if (reported.status === "rejected") reject(new Error("PDF preparation could not report progress."));
+          else resolve(result!);
+        });
       };
       const abort = () => finish(new Error("PDF preparation cancelled."));
       const timeout = Math.max(1, Math.min(STORY_PDF_WORKER_LIMITS.timeoutMs, host.timeoutMs ?? STORY_PDF_WORKER_LIMITS.timeoutMs));

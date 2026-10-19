@@ -15,6 +15,12 @@ rendering and every-page visual inspection of a long book are separate acceptanc
 passing extraction or mocked UI tests does not establish them. Keep private manuscripts and
 their generated pages out of committed fixtures.
 
+PR #1886 review regressions also exercise running-header fallback glyphs, nonbreaking-space
+ToUnicode mappings, exact chapter destination coordinates, three-line paragraphs with scene
+breaks, and draining phase writes on cancellation/timeout/worker failure. Coordinator
+`test/remote-access.test.ts` checks the actual gateway's `.mjs` GET/HEAD MIME and nosniff headers,
+so the preview fixture's own static server cannot conceal an unsupported module-worker response.
+
 From `packages/client`, run `node --import tsx test/story-pdf-preview-smoke.mts` for the real
 Chrome preview, then repeat with `--electron` for a sandboxed Electron file page. These use
 synthetic Unicode content, the production content-security policy and the bundled PDF worker
