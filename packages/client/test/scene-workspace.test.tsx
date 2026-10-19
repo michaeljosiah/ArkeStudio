@@ -339,7 +339,7 @@ describe("scene detail owns the workspace", () => {
     const bar=()=>q(mounted,'[data-testid="stage-draft"]');
     assert.equal(bar()?.querySelector(".fy-swstage__who")?.textContent,"Arke’s blockout");
     const chips=[...bar()!.querySelectorAll(".fy-swstage__chip")].map(chip=>chip.textContent);
-    assert.deepEqual(chips.slice(0,1).map(chip=>chip?.replace(/ · .*/,"")),["~camera"],"the camera changed, in the warning colour");
+    assert.deepEqual(chips.map(chip=>chip?.replace(/ .*/,"")),["+room","+4kit","+5lights","+Maren","+bray-half-hitch","~camera"],"231b's order: the set, the lights, the cast, the camera");
     assert.ok(chips.includes("+Maren Kest sits"),String(chips));
     assert.ok(chips.some(chip=>/^\+\S+ walks · leans$/.test(chip??"")),String(chips));
     assert.ok(chips.includes("+room · 2 doors")&&chips.includes("+4kit")&&chips.includes("+5lights"),String(chips));

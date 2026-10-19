@@ -1532,7 +1532,8 @@ export function SceneStage({
   // the kept staging, the scene's lights and its plate. None of it is the model's words, and the
   // stage list marks the same lines + and ~, so the list's count is the chips' sum.
   const draftDiff = (() => {
-    const chips: DraftChip[] = [];
+    // In 231b's order: the set, the lights, the cast, then the camera and the rest.
+    const chips: DraftChip[] = [], cast: DraftChip[] = [], camera: DraftChip[] = [];
     const marks = { camera: undefined as "+" | "~" | undefined, cast: new Map<string, "+" | "~">(), sets: new Map<number, "+" | "~">(), lights: new Map<number, "+" | "~">() };
     if (!waiting || working === null) return { chips, marks, total: 0 };
     // Key order is not a change: two records are the same when their sorted fields are.
@@ -1544,7 +1545,7 @@ export function SceneStage({
       const word = stagingMotionWord(working, durationSec);
       const said = [size === undefined ? (word === "static" ? "locked off" : word) : size.charAt(0).toUpperCase() + size.slice(1), keyLensWords].filter(Boolean).join(" ");
       marks.camera = resolvedPersisted === null ? "+" : "~";
-      chips.push({ mark: marks.camera, count: 1, label: `camera · ${said}` });
+      camera.push({ mark: marks.camera, count: 1, label: `camera · ${said}` });
     }
     const keptCast = currentBlocking.cast;
     for (const figure of working.cast) {
@@ -1553,10 +1554,10 @@ export function SceneStage({
       const mark = before === undefined ? "+" : stable(before) !== stable(figure) || stable(track(resolvedPersisted)) !== stable(track(working)) ? "~" : null;
       if (mark === null) continue;
       marks.cast.set(figure.sheetId, mark);
-      chips.push({ mark, count: 1, label: `${nameOf(figure.sheetId)} ${figureState(figure, true)}` });
+      cast.push({ mark, count: 1, label: `${nameOf(figure.sheetId)} ${figureState(figure, true)}` });
     }
     for (const figure of keptCast) {
-      if (!working.cast.some((candidate) => candidate.sheetId === figure.sheetId)) chips.push({ mark: "−", count: 1, label: nameOf(figure.sheetId) });
+      if (!working.cast.some((candidate) => candidate.sheetId === figure.sheetId)) cast.push({ mark: "−", count: 1, label: nameOf(figure.sheetId) });
     }
     const keptSets = currentBlocking.sets;
     const kit: number[] = [], shapes: number[] = [], changed: number[] = [];
@@ -1593,6 +1594,7 @@ export function SceneStage({
       const dark = keptLights.filter((light) => !shownLights.some((candidate) => candidate.name === light.name));
       if (dark.length > 0) chips.push({ mark: "−", count: dark.length, label: dark.length === 1 ? `light · ${dark[0]!.name}` : "lights" });
     }
+    chips.push(...cast, ...camera);
     if (draftLook?.atmosphere !== undefined && stable(draftLook.atmosphere) !== stable(scene.blocking?.atmosphere)) {
       chips.push({ mark: scene.blocking?.atmosphere === undefined ? "+" : "~", count: 1, label: "atmosphere" });
     }
@@ -1659,7 +1661,7 @@ export function SceneStage({
             <span className="fy-swstage__version">
               {boardOn
                 ? `v${scene.version} · ${boardLines.length === 0 ? "180° clear" : `${boardLines.length} line ${boardLines.length === 1 ? "crossing" : "crossings"}`}`
-                : constructing ? `building · v${persisted?.version ?? 1}` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec) === "static" ? "locked off" : stagingMotionWord(working,durationSec)}`}
+                : constructing ? `building · v${persisted?.version ?? 1}` : waiting ? `draft · v${(persisted?.version ?? 0) + 1} · ${keys.length} keys` : `v${persisted?.version ?? 1} · ${keys.length} keys · ${stagingMotionWord(working,durationSec) === "static" ? "locked off" : stagingMotionWord(working,durationSec)}`}
             </span>
           )}
           {fullscreen === null ? (onFullscreen === undefined ? null : (
