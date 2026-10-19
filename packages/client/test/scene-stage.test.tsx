@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type SceneRecord, type Shot } from "@arke-studio/contracts";
-import { SceneStage } from "../src/screens/scene-workspace/stage.js";
+import { SceneStage, keysLensWords } from "../src/screens/scene-workspace/stage.js";
 import { sameLine } from "../src/screens/scene-workspace/stage-inspector.js";
 import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -396,6 +396,13 @@ it("names the lens the keys are drawn through on the camera's line, a key's own 
   assert.match(stageItem(q, "camera").textContent ?? "", /· 14 mm$/);
   const { q: zoom } = await mount((shot) => { shot.staging!.keys[2]!.focalMm = 50; });
   assert.match(stageItem(zoom, "camera").textContent ?? "", /· \d+–50 mm$/, "a zoom says its range, the other keys at the lens they are drawn through");
+});
+
+it("captions the picture with the lens the camera's line names (issue 1888)", () => {
+  assert.equal(keysLensWords([{}, {}], undefined, "16:9"), undefined, "nothing named: the caption says the lens is unset");
+  assert.equal(keysLensWords([{}, {}], "35mm", "16:9"), "35 mm");
+  assert.match(keysLensWords([{ focalMm: 50 }, {}], undefined, "16:9") ?? "", /^\d+–50 mm$/, "one key at 50 mm with the shot's unset: a range, not 'lens unset'");
+  assert.equal(keysLensWords([{ focalMm: 14 }, { focalMm: 14 }], "35mm", "16:9"), "14 mm");
 });
 
 it("lists what is on the stage with its state, and shows one form for the selection (turn 144)", async () => {
