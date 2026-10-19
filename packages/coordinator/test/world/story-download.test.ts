@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { ZipFile } from "yazl";
 import { cleanupStoryDownload, downloadStory, type StoryDownload } from "../../src/world/story-download.js";
-import { isStoryReleaseHistoryFile } from "../../src/world/story-release-history.js";
+import { isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../../src/world/story-release-history.js";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { installSampleWorld } from "../../src/world/sample-world.js";
 import { tempDir } from "../tmp.js";
@@ -79,7 +79,21 @@ it("follows only the release asset redirect without sending credentials", async 
 it("keeps authored versions while excluding operational and unselected history", () => {
   const selected = new Set(["novel"]);
   for (const p of ["bible/v1.md", "characters/maren/v2.md", "productions/novel/chapters/neap/v4.md", "productions/novel/story/v6.json"]) assert.equal(isStoryReleaseHistoryFile(p, selected), true, p);
+  for (const track of ["story", "prose-style", "routing", "season", "narrative"]) assert.equal(isStoryReleaseHistoryFile(`productions/novel/${track}/v2.json`, selected), true, track);
+  for (const track of ["chapters", "scenes", "episodes", "scripts"]) assert.equal(isStoryReleaseHistoryFile(`productions/novel/${track}/opening/v2.json`, selected), true, track);
   for (const p of ["bible/prepared/act.json", "bible/prepared/v1.json", "world/prepared/action.generation.json", "world/transcription/v1.json", "world/conversation-actions/v1.json", "productions/other/chapters/neap/v1.md", "productions/novel/prepared/v1.json", "../bible/v1.md"]) assert.equal(isStoryReleaseHistoryFile(p, selected), false, p);
+});
+
+it("retains scoped legacy activity without importing unrelated or operational records", () => {
+  const selected = new Set(["novel"]);
+  for (const entity of ["world", "canon/CANON-044", "characters/maren", "productions/novel", "productions/novel/chapters/old-name"]) assert.equal(isStoryReleaseLegacyChange(entity, selected), true, entity);
+  for (const entity of [undefined, ".proposals/private", "productions/other", "series/other", "../world", "C:/outside"]) assert.equal(isStoryReleaseLegacyChange(entity, selected), false);
+});
+
+it("finds media in normal Markdown links, encoded names and JSON references", () => {
+  for (const text of ["![portrait](artifacts/maren.png)", "[plate](<artifacts/maren.png>)", '{"file":"artifacts/maren.png"}']) assert.equal(referencesStoryArtifact(text, "maren.png"), true);
+  assert.equal(referencesStoryArtifact("[plate](artifacts/wide%20view.png)", "wide view.png"), true);
+  assert.equal(referencesStoryArtifact("ordinary prose", "maren.png"), false);
 });
 
 it("reports scratch cleanup failure separately from installation success", async () => {

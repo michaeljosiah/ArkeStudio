@@ -20,11 +20,12 @@ Arke Studio v0.5.61 also offers this download in **Settings → Sample world**, 
 and installs it under a fresh identity. Existing worlds are not updated or overwritten.
 The lightweight automated-test fixture is separate and is not included in this delivery.
 
-Archive: 1,600,743,020 bytes. Expanded files: 1,728,068,537 bytes. 1,396 files.
+Archive: 1,600,745,880 bytes. Expanded files: 1,728,090,295 bytes. 1,396 files.
 
-SHA-256: `0c4cc4e961e598e78c5da8cb265e0e093a7b18f1c5d322596710c82656cb7d31`
+SHA-256: `92adf6428526b33b90321539abc83b2242f454e94614944d0651e88ba30d08ba`
 
 This story-content release does not replace the Arke Studio application installer or update feed.
 
-Revision 2 excludes operational preparation records and carries only authored version history.
-The initial archive was withdrawn; use this revision.
+Revision 3 preserves scoped legacy activity records as well as authored version history.
+It includes all original media and excludes operational preparation records.
+The initial archive was withdrawn; use this latest revision.

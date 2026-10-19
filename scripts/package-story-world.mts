@@ -9,7 +9,7 @@ import { scanWorld } from "../packages/coordinator/src/world/scan.js";
 import { recordUploadedPropImage } from "../packages/coordinator/src/references/takes.js";
 import { acceptPropStateReference } from "../packages/coordinator/src/references/props.js";
 import { WORLD_EXPORT_EXCLUDED } from "../packages/coordinator/src/takes/export.js";
-import { isStoryReleaseHistoryFile } from "../packages/coordinator/src/world/story-release-history.js";
+import { isStoryReleaseHistoryFile, isStoryReleaseLegacyChange, referencesStoryArtifact } from "../packages/coordinator/src/world/story-release-history.js";
 
 // This assembles a new release directory; it never edits the author's live world.
 const [sourceArg, outputArg, configArg] = process.argv.slice(2);
@@ -54,7 +54,7 @@ for (const name of await fs.readdir(path.join(source, "artifacts"))) if (name.en
 const wanted = new Set<string>(config.artifactIds);
 function collect(text: string) {
   for (const m of text.matchAll(/\bar_[0-9A-HJKMNP-TV-Z]{26}\b/g)) if (artifacts.has(m[0])) wanted.add(m[0]);
-  for (const m of text.matchAll(/artifacts\/([^"\r\n<>]+)/g)) { const a = byFile.get(m[1]!); if (a) wanted.add(a.id); }
+  for (const [filename, artifact] of byFile) if (referencesStoryArtifact(text, filename)) wanted.add(artifact.id);
 }
 for (const file of await walk(target)) if (/\.(json|jsonl|md)$/.test(file)) collect(await fs.readFile(file, "utf8"));
 await fs.mkdir(path.join(target, "artifacts"));
@@ -68,7 +68,10 @@ while ([...wanted].some(id => !copied.has(id))) for (const id of [...wanted]) {
 const changes = [];
 for (const line of (await fs.readFile(path.join(source, "changes.jsonl"), "utf8")).trim().split("\n")) {
   const change = JSON.parse(line);
-  if (typeof change.path === "string" && !change.path.includes("..") && await exists(path.join(target, change.path))) changes.push(line);
+  if (typeof change.path === "string") {
+    const resolved = path.resolve(target, change.path);
+    if (resolved.startsWith(target + path.sep) && await exists(resolved)) changes.push(line);
+  } else if (isStoryReleaseLegacyChange(change.entity, selected)) changes.push(line);
 }
 await fs.writeFile(path.join(target, "changes.jsonl"), changes.join("\n") + "\n");
 for (const name of config.exports) {
