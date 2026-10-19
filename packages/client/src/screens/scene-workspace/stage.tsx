@@ -323,7 +323,8 @@ export function SceneStage({
   const [ghost, setGhost] = useState(false);
   const [constructing, setConstructing] = useState(false);
   const [instruction, setInstruction] = useState("");
-  const [preserve, setPreserve] = useState<"blocking" | "camera" | "none">("blocking");
+  // Start from (design turn 231e): what a build keeps. Null is the default for the stage as it is.
+  const [preserve, setPreserve] = useState<"blocking" | "camera" | "none" | null>(null);
   const [inspectionRound, setInspectionRound] = useState<number | null>(null);
   // Build with Arke's working log (issue 1823, design turn 229f): a line per step as it lands, the
   // pictures a render looked at, and the build's clock.
@@ -478,6 +479,8 @@ export function SceneStage({
     keyDrag.current = null;
     setNote(null);
     playStart.current = null;
+    // Start from is chosen for a shot: the next shot opens on its own default.
+    setPreserve(null);
   }, [shot?.id]);
   useEffect(() => {
     keyDrag.current = null;
@@ -969,13 +972,24 @@ export function SceneStage({
     construction.current = null; aiDraftVersion.current = null;
     setConstructing(false); setInspectionRound(null);
   }, [shot?.id, world.meta.worldId]);
-  // The preserve choice rides only when the bar shows it. An unstaged shot in a scene another shot
-  // had staged once sent "Keep blocking" unseen, and the build was refused every set it tried.
+  // What rides is what Start from shows. An unstaged shot in a scene another shot had staged once
+  // sent a blocking preserve it never showed, and the build was refused every set it tried (round 92).
+  // Start from (231e): Nothing builds the set, cast and camera fresh; This shot keeps the shot's own
+  // camera; The scene keeps the scene's shared blocking. The wire keeps its preserve values (none,
+  // camera, blocking). A choice with nothing to keep is drawn but cannot be chosen, and the default
+  // is the most there is to keep.
+  const startFromChoices = [
+    { value: "none" as const, label: "Nothing", missing: undefined },
+    { value: "camera" as const, label: "This shot", missing: persisted === null ? "no marks yet" : undefined },
+    { value: "blocking" as const, label: "The scene", missing: scene.blocking === undefined ? "no blocking yet" : undefined },
+  ];
+  const startFromDefault = scene.blocking !== undefined ? "blocking" : persisted !== null ? "camera" : "none";
+  const startFrom = startFromChoices.find((choice) => choice.value === preserve && choice.missing === undefined)?.value ?? startFromDefault;
   const construct = (request?: typeof constructionRequest) => {
     if (!shot || moved || frozen) return;
     stop();
     const id = crypto.randomUUID();
-    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? (persisted ? preserve : "none"), ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
+    if (send({ kind: "stage-construct", worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, shotId: shot.id, baseVersion: scene.version, requestId: id, instruction: request?.instruction ?? instruction, preserve: request?.preserve ?? startFrom, ...(request ? { actionId: request.actionId, conversationId: request.conversationId } : {}) })) {
       construction.current = { id, version: scene.version }; setConstructing(true); setNote(null);
       const started = Date.now();
       setBuildLog({ steps: [], calls: 0, round: 0, started }); setClockNow(started); renderThumb.current = null; buildRun.current = { started, calls: 0 };
@@ -1731,9 +1745,11 @@ export function SceneStage({
           {working === null || shot === null ? null : <PlateChip plate={scene.blocking?.plate} world={world} productionId={production.meta.id} disabled={frozen || locked || moved} disabledReason={sceneEditReason} onPick={pickPlate} />}
           <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />
           {/* Drawn as 229's line draws it, a bordered box with the app's chevron, not the platform's. */}
-          {persisted ? <Select label="Preserve Stage work" wrapClassName="fy-swstage__preserve" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
-            <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
-          </Select> : null}
+          <Select label="Start from" mark="start from" wrapClassName="fy-swstage__preserve" value={startFrom} onChange={e => setPreserve(e.target.value as typeof startFrom)} disabled={constructing}>
+            {startFromChoices.map((choice) => (
+              <option key={choice.value} value={choice.value} disabled={choice.missing !== undefined}>{choice.label}{choice.missing === undefined ? "" : ` · ${choice.missing}`}</option>
+            ))}
+          </Select>
           {constructing || working === null ? null : <Button size="sm" disabled={frozen || locked || moved} onClick={stage}>Quick layout</Button>}
           {constructing ? null : <Button size="sm" className="fy-tip--end" disabled={frozen || moved || stageModelReason !== undefined} hint="Uses the configured language model · builds with the Stage's tools" onClick={() => construct()}>Build with Arke</Button>}
           <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
@@ -2501,7 +2517,7 @@ export function SceneStage({
       </div>
       {touch && <div className="fy-stage-gestures"><span>1 finger · orbit</span><span>2 fingers · pan / pinch</span><span>Double-tap · follow figure</span></div>}
 
-      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep blocking</Button>{onRenderShot && <Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button>}</div>}
+      {(touch || inspectorSheet) && working !== null && <div className="fy-stage-touch-ways"><Button variant="outline" disabled={!moved || locked || frozen} onClick={keep}>Keep</Button>{onRenderShot && <Button variant="primary" disabled={generatorPending || frozen || moved || stale || filed === undefined} title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout from the inspector first" : undefined} onClick={() => onRenderShot(shot.id)}>Render with this</Button>}</div>}
       {working === null ? null : (
         <div className="fy-swstage__timeline">
           <div className="fy-swstage__transport">

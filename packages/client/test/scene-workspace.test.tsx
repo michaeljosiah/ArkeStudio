@@ -254,6 +254,34 @@ describe("scene detail owns the workspace", () => {
     assert.match(q(mounted, ".fy-swstage__version")?.textContent ?? "", /^v3 · 2 keys/);
   });
 
+  it("Start from defaults to the most there is to keep and sends it as the build's preserve (231e, issue 1895)", async () => {
+    const opened = async (configure: (scene: SceneRecord) => void) => {
+      const state = structuredClone(FIXTURE_STATE) as ClientState;
+      configure(state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!);
+      const sent: ClientMessage[] = [];
+      __setBridgeForTest(capture(sent));
+      const mounted = await mountState(state);
+      await openStage(mounted);
+      const from = q(mounted, 'select[aria-label="Start from"]') as HTMLSelectElement;
+      const choices = [...from.querySelectorAll("option")].map((option) => [option.textContent, option.hasAttribute("disabled")]);
+      await click(all(mounted, "button").find((button) => button.textContent === "Build with Arke")!);
+      const request = sent.find((message): message is Extract<ClientMessage, { kind: "stage-construct" }> => message.kind === "stage-construct");
+      await act(async () => mounted.root.unmount());
+      mounted.container.remove();
+      return { value: from.value, choices, preserve: request?.preserve };
+    };
+    const keys = [{ t: 0, p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] }, { t: 4, p: [0, 1.5, 2] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] }];
+    const shared = await opened((scene) => {
+      scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+      orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = { version: 1, keys };
+    });
+    assert.deepEqual(shared, { value: "blocking", choices: [["Nothing", false], ["This shot", false], ["The scene", false]], preserve: "blocking" }, "a scene with shared blocking starts from the scene");
+    const own = await opened((scene) => {
+      orderedShots(scene).find((candidate) => candidate.id === "sh_12")!.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [], keys };
+    });
+    assert.deepEqual(own, { value: "camera", choices: [["Nothing", false], ["This shot", false], ["The scene · no blocking yet", true]], preserve: "camera" }, "only the shot's own marks: it starts from this shot");
+  });
+
   it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
     await openStage(mounted);
@@ -325,14 +353,18 @@ describe("scene detail owns the workspace", () => {
     assert.equal(write.command.staging?.cast?.[0]?.sheetId,"maren-kest");
   });
 
-  it("reviews a build under its own lights, sends no hidden Keep blocking, and Discard takes the note (issue 1865)",async()=>{
+  it("reviews a build under its own lights, sends only what Start from shows, and Discard takes the note (issue 1865)",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
     await openStage(mounted);
-    assert.equal(q(mounted,'select[aria-label="Preserve Stage work"]'),null,"an unstaged shot shows no preserve choice");
+    // Start from on an empty stage (231e): every choice is drawn, and only Nothing can be chosen.
+    const from=q(mounted,'select[aria-label="Start from"]') as HTMLSelectElement;
+    assert.deepEqual([...from.querySelectorAll("option")].map(option=>[option.textContent,option.hasAttribute("disabled")]),[["Nothing",false],["This shot · no marks yet",true],["The scene · no blocking yet",true]]);
+    assert.equal(from.value,"none");
+    assert.equal(from.parentElement?.querySelector(".ui-select__mark")?.textContent,"start from");
     await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
     const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
     assert.ok(request);
-    assert.equal(request.preserve,"none","what the bar does not show is not sent: Keep blocking refused every set");
+    assert.equal(request.preserve,"none","what Start from does not show is not sent: a hidden blocking preserve refused every set");
     const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}]};
     const lights=[{name:"desk lamp",kind:"point" as const,colour:"#ffb867",kelvin:3000,strength:6,x:0,y:1.2,z:0}];
     await apply({type:"stage.construction",at:"2026-10-19T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:1,detail:"Blockout ready to review. Keep applies this shot's override.",draft:{staging,cast:[{sheetId:"maren-kest",x:0,z:0}],sets:[],lights,atmosphere:{time:"night"},assumptions:[],assessment:"A warm desk lamp at night.",inspected:[]} as never});
