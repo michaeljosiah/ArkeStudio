@@ -17,8 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { ImageDialog } from "../components/image-dialog.js";
-import { Portrait } from "../components/portrait.js";
-import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Button, Callout, cx } from "../components/ui.js";
 import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -219,7 +218,7 @@ export function LocationReferenceScreen() {
   return (
     <div data-screen="location-reference">
       <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} status={sheet.status} />
-      <main className="fy-locref">
+      <main className={cx("fy-locref", !sheetFile && "fy-locref--uncompiled")}>
         <section className="fy-locref__views">
           <div className="fy-locref__sechead">
             <h2>Accepted views</h2>
@@ -310,15 +309,21 @@ export function LocationReferenceScreen() {
                     {/* Unnamed until it is accepted, so a candidate saves under the take that
                         made it — deterministic, and it says which one it was. */}
                     <div className="fy-locref__candidateimage fy-imghost">
-                      <Portrait
+                      <ImageDialog
                         worldSlug={world.meta.slug}
                         path={candidate.path}
                         label={name || "Candidate view"}
-                        radius={6}
+                        title={sheet.name}
+                        subtitle={name || "Candidate view"}
+                        triggerLabel={`View larger candidate: ${name || "unnamed view"}`}
+                        closeLabel="Close candidate view"
+                        triggerClassName="fy-locref__zoom"
+                        triggerRadius={6}
                         download
                         downloadName={name.trim() || `${sheet.name} candidate view ${candidate.sourceId}`}
                       />
                     </div>
+                    <span className="fy-locref__note">Select the image to view larger</span>
                     <p className="fy-mono">
                       {candidate.model} · {candidate.anchored ? "anchored to the establishing view" : "unanchored"}
                     </p>
@@ -433,14 +438,15 @@ export function LocationReferenceScreen() {
             <Button ref={addRef} disabled={full} onClick={() => setAdding(true)}>
               {establishing ? "Generate" : "Add a view"}
             </Button>
-            {/* The glyph, for the same reason the character kit's is one (issue 1010, U1). */}
-            <IconButton
-              label={uploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
+            <Button
+              variant="outline"
+              title={!canUpload ? UPLOAD_UNAVAILABLE : undefined}
               disabled={!canUpload || uploading || full}
               onClick={() => importLocationViewCandidate(worldId, sheetId)}
             >
               {uploading ? <Loading inline size={13} /> : <Upload />}
-            </IconButton>
+              {uploading ? "Uploading…" : "Upload"}
+            </Button>
             {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
           </div>
           <GenerationDialog
@@ -518,38 +524,34 @@ export function LocationReferenceScreen() {
           )}
         </section>
 
-        <section className={cx("fy-locref__sheet", !sheetFile && "fy-locref__sheet--empty")}>
+        {sheetFile && <section className="fy-locref__sheet">
           <div className="fy-locref__sechead">
             <h2>Location sheet</h2>
             <span className="fy-mono">assembled here, not generated</span>
           </div>
-          {sheetFile ? (
-            <>
-              <div className="fy-imghost">
-                <ImageDialog
-                  worldSlug={world.meta.slug}
-                  path={`references/${sheetId}/${sheetFile}`}
-                  label={`${sheet.name} location sheet`}
-                  title={sheet.name}
-                  subtitle="location sheet"
-                  triggerLabel={`View larger location sheet for ${sheet.name}`}
-                  closeLabel="Close location sheet"
-                  triggerClassName="fy-locref__sheetimage"
-                  triggerRadius={6}
-                  download
-                  downloadName={`${sheet.name} location sheet`}
-                />
-              </div>
-              <p className="fy-mono">{sheetFile}</p>
-              {/* The same function dispatch composes the preamble from, so what this promises and
-                  what a request states cannot drift into disagreeing. */}
-              <div className="fy-locref__carries">
-                <span className="fy-mono">WHAT A SHOT CARRIES</span>
-                <p>{panelMapPhrase(views.map((view) => view.name))}</p>
-              </div>
-            </>
-          ) : null}
-        </section>
+          <div className="fy-imghost">
+            <ImageDialog
+              worldSlug={world.meta.slug}
+              path={`references/${sheetId}/${sheetFile}`}
+              label={`${sheet.name} location sheet`}
+              title={sheet.name}
+              subtitle="location sheet"
+              triggerLabel={`View larger location sheet for ${sheet.name}`}
+              closeLabel="Close location sheet"
+              triggerClassName="fy-locref__sheetimage"
+              triggerRadius={6}
+              download
+              downloadName={`${sheet.name} location sheet`}
+            />
+          </div>
+          <p className="fy-mono">{sheetFile}</p>
+          {/* The same function dispatch composes the preamble from, so what this promises and
+              what a request states cannot drift into disagreeing. */}
+          <div className="fy-locref__carries">
+            <span className="fy-mono">WHAT A SHOT CARRIES</span>
+            <p>{panelMapPhrase(views.map((view) => view.name))}</p>
+          </div>
+        </section>}
       </main>
     </div>
   );
