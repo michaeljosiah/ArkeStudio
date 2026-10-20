@@ -15,6 +15,8 @@ import {
   benchMentionsIn,
   benchSourceKey,
   benchSubjectTitle,
+  benchTimingChange,
+  orderedShots,
   aspectSupport,
   deriveCapabilityAvailability,
   dispatchDuration,
@@ -316,6 +318,8 @@ function BenchWorkspace({
   const productionAudio = session.subject?.kind === "production" ? session.subject : undefined;
   const unscopedSession = session.subject === undefined;
   const subject = session.subject?.kind === "production" ? undefined : session.subject;
+  const subjectScene = subject === undefined ? undefined : world?.productions.find(production => production.meta.id === subject.productionId)?.scenes.find(scene => scene.id === subject.sceneId);
+  const timingChange = subject !== undefined && subjectScene !== undefined && session.composer.mode === "video" ? benchTimingChange(subject, orderedShots(subjectScene)) : null;
   const globalChat = useGlobalChat();
   const [chatOpen, setChatOpen] = useState(false);
   const [chatOpened, setChatOpened] = useState(false);
@@ -1640,7 +1644,8 @@ function BenchWorkspace({
                 type="button"
                 className="fy-bench__clear"
                 data-testid="bench-rebuild"
-                title="Clear the bench — the prompt and references as the shot has them now"
+                title="Rebuild prompt and shot settings; keep manually attached references and takes"
+                aria-label="Rebuild from current shot"
                 disabled={pendingRebuild.current !== null}
                 onClick={rebuild}
               >
@@ -2320,6 +2325,7 @@ function BenchWorkspace({
               <span className="fy-bench__subjectnote">{rebuildNote ?? subjectOpen.note}</span>
             )}
           </div>
+          {timingChange !== null && <div className="fy-bench__refusal" data-testid="bench-timing-changed">Timing changed · Bench {timingChange.frozen}s · current {timingChange.current}s. <Button variant="outline" size="sm" disabled={pendingRebuild.current !== null} onClick={rebuild}>Rebuild</Button> replaces the prompt and shot settings; keeps added references and takes.</div>}
           {/* A voice the plan cannot honour is a refusal, and a refusal is one clause on the
               thing refused — under the chips, where Generate is held for it. */}
           {characterAudio !== null &&
@@ -2527,6 +2533,7 @@ function BenchWorkspace({
               variant="primary"
               data-testid="bench-generate"
               disabled={
+                timingChange !== null ||
                 (characterAudio?.problems.length ?? 0) > 0 ||
                 model === null ||
                 draft.brief.trim().length === 0 ||

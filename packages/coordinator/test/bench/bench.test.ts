@@ -382,6 +382,22 @@ describe("the bench store (issue 305 §6)", () => {
     assert.equal(session?.title, "Harbour night studies");
   });
 
+  it("derives an append after earlier queued writes, persists it and deduplicates before deriving again", async () => {
+    const dir = await makeTempWorld();
+    const opened = await freshBench(dir);
+    let derived = 0;
+    const [first, second] = await Promise.all([
+      opened.store.append({ type: "title-set", title: "Current" }),
+      opened.store.append(session => { derived++; return { type: "title-set", title: `${session.title} rebuilt` }; }, { at: CLOCK(), requestId: "derived" }),
+    ]);
+    assert.equal(second.envelope.seq, first.envelope.seq + 1);
+    const reopened = new BenchStore(opened.store.dir);
+    assert.equal((await reopened.fold())?.title, "Current rebuilt");
+    const again = await reopened.append(() => { derived++; throw new Error("must not derive twice"); }, { at: CLOCK(), requestId: "derived" });
+    assert.equal(again.deduplicated, true);
+    assert.equal(derived, 1);
+  });
+
   it("repairs a torn final line instead of extending it", async () => {
     const dir = await makeTempWorld();
     const opened = await freshBench(dir);

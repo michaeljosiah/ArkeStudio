@@ -107,7 +107,7 @@ describe("Production Chat Bench take filing (SPEC-051 R-7, R-13)", () => {
     const append = h.bench.append.bind(h.bench);
     let failed = false;
     t.mock.method(h.bench, "append", (...args: Parameters<BenchStore["append"]>) => {
-      if (!failed && args[0].type === "take-subject-filed") { failed = true; return Promise.reject(new Error("Interrupted Bench append")); }
+      if (!failed && typeof args[0] !== "function" && args[0].type === "take-subject-filed") { failed = true; return Promise.reject(new Error("Interrupted Bench append")); }
       return append(...args);
     });
     const committed = await h.service().file(h.action, id, () => null);
@@ -137,7 +137,7 @@ describe("Production Chat Bench take filing (SPEC-051 R-7, R-13)", () => {
     const append = h.bench.append.bind(h.bench);
     let interrupted = false;
     t.mock.method(h.bench, "append", (...args: Parameters<BenchStore["append"]>) => {
-      if (!interrupted && args[0].type === "take-subject-filed") { interrupted = true; return Promise.reject(new Error("Interrupted filing")); }
+      if (!interrupted && typeof args[0] !== "function" && args[0].type === "take-subject-filed") { interrupted = true; return Promise.reject(new Error("Interrupted filing")); }
       return append(...args);
     });
     const committed = await h.service().file(h.action, id, () => null);

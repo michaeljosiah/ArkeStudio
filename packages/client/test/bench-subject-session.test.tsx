@@ -531,11 +531,23 @@ describe("Image / Video (R-23; design 142a)", () => {
   it("the bin at the bar's end rebuilds the prompt and references from the shot", async () => {
     const bench = await openBench(shotSession());
     const bin = q(bench, '.fy-bench__composerbar [data-testid="bench-rebuild"]');
-    assert.match(bin.getAttribute("title") ?? "", /Clear the bench/);
+    assert.match(bin.getAttribute("title") ?? "", /Rebuild prompt and shot settings; keep manually attached references and takes/);
     await act(async () => bin.click());
     assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
     assert.doesNotMatch(bench.container.innerHTML, /fy-bench__eyebrow--refs/, "no PROMPT eyebrow to hold a link");
   });
+});
+
+it("shows frozen versus current timing and offers Rebuild before Generate can refuse it", async () => {
+  const bench = await openBench(shotSession("video"), SESSION_ID, state => {
+    const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+    const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+    shot.durationSec = 5;
+  });
+  assert.match(q(bench, '[data-testid="bench-timing-changed"]').textContent!, /Bench 4s · current 5s/);
+  assert.equal((q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement).disabled, true);
+  await act(async () => q(bench, '[data-testid="bench-timing-changed"] button').click());
+  assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
 });
 
 describe("references (R-23; design 142a)", () => {
