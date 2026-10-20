@@ -1516,7 +1516,7 @@ export function ProductionConversationBody({
         <div className="fy-chat__phonehead">
           <IconButton label="Conversations" onClick={() => {
             const path = `/w/${worldId}/chat`, page = chatSurfaceForPage(state, path);
-            if (page && presentation) presentation.owner.select(page);
+            if (page && presentation) presentation.owner.select({ ...page, showList: true });
             void navigate(path);
           }}><ChevronLeft size={22} /></IconButton>
           <h1>{historyPage.title}</h1>
@@ -1538,7 +1538,7 @@ export function ProductionConversationBody({
         <span>in context: {pageSummary}</span><ChevronDown size={16} />
       </button>}
       <div className="fy-story__log" ref={setLog}>{transcript}</div>
-      <HeldBar className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
+      <HeldBar studioThread className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
         {responsive && phone && rail && (!historyPage || points.length > 0 || side) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}

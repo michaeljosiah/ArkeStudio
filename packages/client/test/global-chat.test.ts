@@ -10,6 +10,19 @@ const cut = chatSurfaceForPage(state, `${root}/p/saltlight/cut`)!;
 const worldChat = chatSurfaceForPage(state, root)!;
 
 describe("global Chat keeps presentation separate from conversation authority (224)", () => {
+  it("returns to the list without restoring a remembered thread or deleting its draft", () => {
+    const owner = new GlobalChatController(); owner.select(worldChat);
+    owner.reportConversation(worldChat.key, CHAT_ID); owner.setValue(worldChat.key, "draft", "Keep the world draft");
+    owner.select(production); owner.phase("transcribing");
+    owner.select({ ...worldChat, showList: true });
+    assert.equal(owner.getSnapshot().selected?.key, production.key);
+    owner.phase("idle");
+    assert.equal(owner.getSnapshot().selected?.conversationId, undefined);
+    assert.equal(owner.getSnapshot().selected?.newThread, undefined);
+    assert.equal(owner.getSnapshot().open, false);
+    owner.select({ ...worldChat, conversationId: CHAT_ID });
+    assert.equal(owner.value(worldChat.key, "draft", ""), "Keep the world draft");
+  });
   it("resolves World, Builder, scene, shot, Stage, takes, Generate, Cut, Bench and setup contexts", () => {
     const scene = world.productions.find(p => p.meta.id === "saltlight")!.scenes[0]!;
     assert.equal(worldChat.entry.kind, "world"); assert.equal(production.entry.kind, "production");

@@ -38,6 +38,7 @@ import { App } from "./App";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
 import { chatArtifactsFixture, CHAT_ID } from "../test/chat-artifacts-fixture";
 import { productionHistoryLayoutFixture } from "../test/develop-layout-fixture";
+import { chatSurfaceForPage, GlobalChatController } from "./lib/global-chat";
 ${styles}
 let renderer;
 function Navigation() { window.go = useNavigate(); return null; }
@@ -52,6 +53,11 @@ window.mountLayout = async (route="chat", mode="normal", restore=false) => {
   if(!restore)sessionStorage.clear();
   __clearWorldChatHoldsForTest();
   const state=restore?window.fixture:mode==="production-history"?productionHistoryLayoutFixture():chatArtifactsFixture(), world=state.world;
+  if(!restore&&mode==="production-history") {
+    const owner=new GlobalChatController(sessionStorage),list=chatSurfaceForPage(state,"/w/"+world.meta.worldId+"/chat");
+    owner.select(list);owner.reportConversation(list.key,"cv_01J8F3K2QW9VZX4N7M0RTYB6HK");owner.setValue(list.key,"draft","Keep the remembered world draft");
+    owner.select(chatSurfaceForPage(state,"/w/"+world.meta.worldId+"/chat/"+CHAT_ID));
+  }
   if(mode==="long") {
     world.conversations[0].title="UnbrokenConversationTitle".repeat(20);
     state.worldChat.messages.push({...state.worldChat.messages[0],id:"msg_long",text:"UnbrokenTranscript".repeat(120)});
@@ -141,6 +147,22 @@ try {
       await js('window.mountLayout("conversation","production-history")');
       await check(name,"production-history");
       assert.ok(await js('!!document.querySelector(".fy-story__chat")'),name+" history uses the full-page conversation, not the compact dock");
+      if(width>=1100)assert.equal(await js('document.querySelector(".fy-chatnav a").textContent.includes("Older pending work")'),true,"history retains pending-consequence ordering");
+      if(width>=600&&width<1100){
+        await js('document.querySelector("[aria-label=\\"Show history\\"]").click();window.settleLayout()');
+        assert.equal(await js('document.querySelector(".fy-chatnav a").textContent.includes("Older pending work")'),true,"Fold history retains pending-consequence ordering");
+        await js('document.querySelector(".fy-chatnav a").click();window.settleLayout()');
+        assert.ok(await js('!document.querySelector(".fy-chatnav__drawer-scrim")'),"choosing a Fold history row closes its drawer");
+        await js('window.go("/w/"+window.worldId+"/chat/"+window.chatId);window.settleLayout()');
+      }
+      if(width<600){
+        assert.ok(await js('document.querySelector(".fy-chat__phonehead .fy-studio-canvas").getBoundingClientRect().height>=44'),"phone Canvas is a visible touch target");
+        await js('document.querySelector(".fy-chat__phonehead .fy-studio-canvas").click();window.settleLayout()');
+        assert.equal(await js('document.querySelector(".fy-production-studio").dataset.phoneView'),"canvas");
+        assert.ok(await js('!document.querySelector(".fy-held-bar")'),"the conversation composer does not cover the phone canvas");
+        await check(name,"production-history-canvas");
+        await js('[...document.querySelectorAll(".fy-production-studio__head button")].find(b=>b.textContent==="Close Studio").click();window.settleLayout()');
+      }
       assert.ok(await js('!!document.querySelector(".fy-actioncard[data-status=pending]")'),"pending decision is present");
       if(width<600){
         await js('document.querySelector(".fy-actioncard__actions").scrollIntoView({block:"center"});window.settleLayout()');

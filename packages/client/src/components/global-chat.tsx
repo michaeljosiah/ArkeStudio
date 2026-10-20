@@ -7,7 +7,7 @@ import { useDictation, useStore } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 import { ProductionConversationBody, type ProductionConversationProps } from "./conversation.js";
-import { HistoryRail, RowMenuPanel, WorldChatView } from "../screens/world-chat.js";
+import { byPendingConsequence, HistoryRail, RowMenuPanel, WorldChatView } from "../screens/world-chat.js";
 import { ProductionSetupView } from "../screens/production-setup.js";
 import { useClientRender } from "./production-studio-context.js";
 import { ConversationPresentationContext, GlobalChatContext, useGlobalChat } from "./global-chat-context.js";
@@ -68,6 +68,7 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
   const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), navigate = useNavigate(), host = useRef<HTMLDivElement>(null);
   const phone = useMediaQuery("(max-width: 599px)"), fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [historyOpen, setHistoryOpen] = useState(!fold);
+  useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
   const [menu, setMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
   const surface = chatSurfaceForPage(state, location.pathname + location.search);
   useEffect(() => {
@@ -84,7 +85,7 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
     if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
-  const rows = state?.world?.conversations ?? [], menuRow = rows.find(row => row.id === menu?.id);
+  const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
   return <div className="fy-global-chat-slot fy-global-chat-slot--world">
     {surface?.kind === "production" ? <div className="fy-chat__wrap fy-chat__wrap--embedded" data-screen="production-chat">
       <div className="fy-gate">

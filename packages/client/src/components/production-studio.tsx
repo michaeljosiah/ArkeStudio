@@ -105,7 +105,8 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   const close = () => { setActive(false); setFullCardId(null); setPhoneView("thread"); };
   const proposalPanel = proposal ?? (proposalDecisions.length ? <section><h2>Staged proposals</h2>{proposalDecisions.map(card =>
     <button key={card.id} type="button" onClick={() => controls.showDecision(card)}>{card.title} · Open review</button>)}</section> : null);
-  const controls: StudioControls = { active, canvasHost, fullCardId, toggle: () => active ? close() : setActive(true),
+  const controls: StudioControls = { active, phoneCanvasOpen: active && phoneView === "canvas", canvasHost, fullCardId, toggle: () => active ? close() : setActive(true),
+    openCanvas: () => { setPhoneView("canvas"); setActive(true); },
     // The server has no hosts to move, so the side draws what a closed Studio would put there.
     restingSide: client || active ? null : <>{!hasProposal && understanding}{proposalPanel}</>,
     widen: () => { setWide(value => !value); setWidth(560); }, show, back, sideHost: setSideInline,

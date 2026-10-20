@@ -5,6 +5,10 @@ export { CHAT_ID };
 /** A saved production conversation opened from World Chat, including its own pending authority. */
 export function productionHistoryLayoutFixture(): ClientState {
   const state = developLayoutFixture(), world = state.world!, workspace = state.worldChat!;
+  world.conversations.push(
+    { ...world.conversations[0]!, id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HJ", title: "Older pending work", updatedAt: "2026-01-01T00:00:00Z", openProposalCount: 3 },
+    { ...world.conversations[0]!, id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HK", title: "Remembered world conversation", entryContext: { kind: "world" } },
+  );
   workspace.points = [];
   const turnId = newId("turn"); workspace.messages.at(-1)!.turnId = turnId;
   workspace.actions = [{
