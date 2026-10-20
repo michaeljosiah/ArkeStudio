@@ -226,6 +226,33 @@ describe("parsing a turn result", () => {
     assert.equal(parsed.ok, false);
   });
 
+  it("directs misplaced executable kinds to actions without rewriting the result (#1924)", () => {
+    const draft = { classification: "production-chapter", title: "Chapter plan", rationale: "Requested plan", settledness: "settled", evidence: [], checkReceiptIds: [] };
+    for (const operation of [
+      { op: "create", temporaryId: "t1", candidate: draft },
+      { op: "split", candidateId: newId("cand"), expectedRevision: 1, replacements: [draft, draft] },
+    ]) {
+      const parsed = parseTurnResult(JSON.stringify({ reply: "Plan prepared", candidateOperations: [operation], groupOperations: [] }), true);
+      assert.equal(parsed.ok, false, "wrong placement is still rejected");
+      if (!parsed.ok) {
+        const correction = correctiveMessage(parsed.problems);
+        assert.match(correction, /production-chapter is an action kind/);
+        assert.match(correction, /actions with kind/);
+        assert.match(correction, /describe_action/);
+        assert.match(correction, /Keep the requested change/);
+        assert.ok(parsed.problems.every(p => p.safeMessage.length <= 300));
+      }
+    }
+    const corrected = parseTurnResult(turn({ actions: [WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-chapter"]] }), true);
+    assert.ok(corrected.ok, "the same operation uses its existing typed action schema");
+    const unknown = parseTurnResult(JSON.stringify({ reply: "Plan prepared", candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...draft, classification: "untrusted source text" } }], groupOperations: [] }), true);
+    assert.equal(unknown.ok, false);
+    if (!unknown.ok) {
+      assert.match(correctiveMessage(unknown.problems), /must be one of/);
+      assert.ok(!correctiveMessage(unknown.problems).includes("untrusted source text"));
+    }
+  });
+
   it("refuses more operations than one turn may carry", () => {
     const op = {
       op: "create",

@@ -26,6 +26,12 @@ import {
  */
 
 describe("the shape guide's examples satisfy the schemas they teach", () => {
+  it("distinguishes executable action kinds from candidate classifications (#1924)", () => {
+    const guide = worldChatResultShapeGuide();
+    assert.match(guide, /actions\[\]\.kind/);
+    assert.match(guide, /never a candidate classification/);
+    assert.match(guide, /production-chapter/);
+  });
   it("every evidence example parses", () => {
     for (const [kind, example] of Object.entries(WORLD_CHAT_SHAPE_EXAMPLES.evidence)) {
       const parsed = CandidateEvidenceSchema.safeParse(example);

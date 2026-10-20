@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   newId,
   TURN_RESULT_BOUNDS,
+  ModelWorldChatActionSchema,
   WorldChatEntityRefSchema,
   type BibleEdit,
   type ModelEditorRequest,
@@ -326,6 +327,18 @@ function replyTooLongProblem(json: unknown): TurnProblem {
   );
 }
 
+function misplacedActionLine(issue: z.ZodIssue, json: unknown): string | null {
+  if (issue.code !== z.ZodIssueCode.invalid_union_discriminator || issue.path[0] !== "candidateOperations" || issue.path.at(-1) !== "classification") return null;
+  let value: unknown = json;
+  for (const key of issue.path) {
+    if (value === null || typeof value !== "object") return null;
+    value = (value as Record<string, unknown>)[key];
+  }
+  // Only schema-owned vocabulary is reflected; unknown provider values keep the ordinary error.
+  const kind = ModelWorldChatActionSchema.options.find(option => option.shape.kind.value === value)?.shape.kind.value;
+  return kind ? `${kind} is an action kind, never a candidate classification. Put it in actions with kind, using describe_action for its fields and required reads. Keep the requested change when correcting the complete result; do not substitute advice.` : null;
+}
+
 /**
  * Parse the model's message as the strict turn-result schema.
  *
@@ -362,7 +375,7 @@ export function parseTurnResult(raw: string, productionThread = false): { ok: tr
         replyTooLong = replyTooLongProblem(json);
         continue;
       }
-      lines.add(truncate(schemaIssueLine(issue), MAX_PROBLEM_CHARS));
+      lines.add(truncate(misplacedActionLine(issue, json) ?? schemaIssueLine(issue), MAX_PROBLEM_CHARS));
       if (lines.size >= MAX_PROBLEMS) break;
     }
     return { ok: false, problems: [...(replyTooLong ? [replyTooLong] : []), ...[...lines].map((line) => problem("schema", line))] };
