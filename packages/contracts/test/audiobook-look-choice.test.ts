@@ -287,6 +287,15 @@ describe("the Mood line (design turn 193, rule 9)", () => {
     assert.match(fallback, /^Lagos at night/);
     assert.equal(pictureMood(null, undefined), undefined);
   });
+
+  it("keeps materials on objects while still cutting named clothing (#1942)", () => {
+    assert.deepEqual(cutMoodClothing("Light on leather bindings, velvet chairs, silk curtains, linen covers."), {
+      text: "Light on leather bindings, velvet chairs, silk curtains, linen covers.", cut: 0,
+    });
+    assert.deepEqual(cutMoodClothing("Amber lamplight, a leather coat, a silk dress."), {
+      text: "Amber lamplight.", cut: 2,
+    });
+  });
 });
 describe("the frame word (design turn 193, rule 11)", () => {
   it("reads the readable word from a frame's first clause, and the close view follows it", () => {

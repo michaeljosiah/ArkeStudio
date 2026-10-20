@@ -151,6 +151,16 @@ describe("expression named (check 7)", () => {
 });
 
 describe("the other checks", () => {
+  it("keeps prop materials distinct from invented garments (#1942)", () => {
+    const objects = "Beside her lies a leather-bound ledger on a linen cloth, a velvet chair, silk curtains and an embroidered cushion.";
+    const checks = checksOf({ ...EYES, prompt: `${EYES.prompt} ${objects}` }, EYES_BLOCK);
+    assert.equal(checks["garments"]!.ok, true, "materials and needlework on props are not garments");
+    const coat = checksOf({ ...EYES, prompt: `${EYES.prompt} She wears a leather coat. ${objects}` }, EYES_BLOCK);
+    assert.equal(coat["garments"]!.ok, false);
+    assert.match(coat["garments"]!.note!, /coat/);
+    assert.doesNotMatch(coat["garments"]!.note!, /leather/);
+  });
+
   it("does not turn a shared surname into an off-camera relative, and still recognises familiar names", () => {
     const mother = { name: "Lena Kest", aliases: ["Len"] };
     assert.equal(namedInText("Close-up on Maren Kest's eyes.", mother), false);

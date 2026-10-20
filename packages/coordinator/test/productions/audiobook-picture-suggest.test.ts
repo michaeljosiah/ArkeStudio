@@ -34,6 +34,27 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("keeps a leather ledger in the suggestion and makes the reviewed picture (#1942)", () => {
+    const prompt = "Medium shot, Maren Kest at the desk, eyes down on the page. On the far corner sits a broad, worn leather volume under a folded rag.";
+    return withHarness(async ({ events, send, enqueued, store }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.prompt, prompt);
+      assert.equal(picked.shot!.checks.find(check => check.id === "garments")!.ok, true);
+      assert.equal(enqueued.length, 0, "review alone does not make a picture");
+      await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", requestId: REQUEST, prompt: picked.prompt,
+        who: picked.who.map(person => person.key), frame: picked.shot!.frame,
+        shot: picked.shot!, confirmedMicroUsd: picked.estimatedMicroUsd });
+      assert.equal(madeEvents(events).at(-1)!.state, "made");
+      assert.equal(enqueued.length, 1);
+      const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(record !== null && record !== "unreadable" && record.pictures?.["p0.0"]);
+      assert.match(String(enqueued[0]!.params.prompt), /worn leather volume/);
+    }, { picture: async () => ({ frame: "Medium shot", inFrame: ["maren-kest"],
+      expressions: { "maren-kest": "eyes down on the page" }, prompt }) });
+  });
+
   it("returns long multi-character checks through the normal suggestion command without losing expressions (#1946)", () => {
     const expression = "eyes fixed on the doorway, mouth closed, brows raised with quiet concern, chin lifted toward the dim window, waiting for an answer without turning away";
     const prompt = `Medium shot. Maren Kest: ${expression}. Bray Half-Hitch: ${expression}.`;
