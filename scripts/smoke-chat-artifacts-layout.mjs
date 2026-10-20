@@ -34,23 +34,31 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MemoryRouter, useNavigate } from "react-router";
 import { App } from "./App";
-import { __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
 import { chatArtifactsFixture, CHAT_ID } from "../test/chat-artifacts-fixture";
 ${styles}
 let renderer;
 function Navigation() { window.go = useNavigate(); return null; }
 window.settleLayout = async () => { await new Promise(r => setTimeout(r, 700)); await document.fonts.ready; };
+window.feedbackForLayout = async () => {
+  const state=structuredClone(window.fixture);state.worldChat.points=[];__setStateForTest(state);
+  __applyEventForTest({type:"world-chat.ripples",at:new Date().toISOString(),worldId:state.world.meta.worldId,conversationId:CHAT_ID,requestId:"layout-final-point",items:[{kind:"gains-cross-reference",summary:"CANON-018 gains a cross-reference.",targets:["CANON-018"]}]});
+  await window.settleLayout();
+};
 window.mountLayout = async (route="chat", mode="normal") => {
   renderer?.unmount();
+  sessionStorage.clear();
+  __clearWorldChatHoldsForTest();
   const state=chatArtifactsFixture(), world=state.world;
   if(mode==="long") {
     world.conversations[0].title="UnbrokenConversationTitle".repeat(20);
     state.worldChat.messages.push({...state.worldChat.messages[0],id:"msg_long",text:"UnbrokenTranscript".repeat(120)});
     for(const item of world.artifacts) item.file="LongArtifactFilename".repeat(8)+".png";
   }
+  if(mode==="empty") state.worldChat.points=[];
   window.commands=[];window.worldId=world.meta.worldId;window.chatId=CHAT_ID;window.fixture=state;
   const bridge={connect(){},send(raw){const command=JSON.parse(raw);window.commands.push(command);
-    if(command.kind==="world-chat-create")setTimeout(()=>{const copy=structuredClone(state);copy.worldChat={...copy.worldChat,conversationId:"cv_01J8F3K2QW9VZX4N7M0RTYB6HN",messages:[],points:[]};copy.world.conversations.push({...copy.world.conversations[0],id:copy.worldChat.conversationId,title:"New conversation",pointCount:0});__setStateForTest(copy);},0);
+    if(command.kind==="world-chat-create")setTimeout(()=>{const copy=structuredClone(state);copy.worldChat={...copy.worldChat,conversationId:"cv_01J8F3K2QW9VZX4N7M0RTYB6HN",messages:[],points:[]};copy.world.conversations.push({...copy.world.conversations[0],id:copy.worldChat.conversationId,title:"New conversation",pointCount:0});__setStateForTest(copy);__applyEventForTest({type:"world-chat.create-result",at:new Date().toISOString(),worldId:world.meta.worldId,requestId:command.requestId,conversationId:copy.worldChat.conversationId});},0);
   },subscribe(){return ()=>{};},coordinatorHttpBase:()=>location.origin};
   window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state);__connectionStatusForTest("open");
   renderer=createRoot(document.getElementById("root"));
@@ -65,16 +73,22 @@ window.measureLayout=()=>{
     overflow:document.documentElement.scrollWidth>innerWidth || (page&&page.scrollWidth>page.clientWidth+1),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)])),
     bubbles:[...document.querySelectorAll(".fy-chat__bubble")].slice(0,4).map(e=>{const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};}),
     columns:document.querySelector(".fy-artifact-grid")&&getComputedStyle(document.querySelector(".fy-artifact-grid")).gridTemplateColumns.split(" ").length,
-    sideways:[...document.querySelectorAll(".fy-page-sheet__body,.fy-held-bar,.fy-artview__panel,.fy-gate__side")].filter(e=>e.clientWidth&&e.scrollWidth>e.clientWidth+1).map(e=>e.className)};
+    sideways:[...document.querySelectorAll(".fy-page-sheet__body,.fy-held-bar,.fy-artview__panel,.fy-gate__side,.fy-gate__body")].filter(e=>e.clientWidth&&e.scrollWidth>e.clientWidth+1).map(e=>e.className)};
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
+      return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/world.tsx","packages/client/src/screens/world-chat.tsx","packages/client/src/components/artifact-viewer.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Chat/Artifacts layout artifacts: " + dir);
@@ -113,17 +127,32 @@ try {
   const only=process.argv.includes("--viewport")?process.argv[process.argv.indexOf("--viewport")+1]:null;
   const escape=async()=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,nativeVirtualKeyCode:27});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27,nativeVirtualKeyCode:27});await js("window.settleLayout()");};
   const check=async(name,route)=>{const m=await js("window.measureLayout()");records.push({name,route,...m});await writeFile(join(dir,"measurements.json"),JSON.stringify(records,null,2));await capture(name+"-"+route);if(m.overflow)console.log(name,route,await js('({widths:[innerWidth,document.documentElement.scrollWidth,document.querySelector(".fy-content").clientWidth,document.querySelector(".fy-content").scrollWidth],offenders:[...document.querySelectorAll(".fy-content *")].filter(e=>{const r=e.getBoundingClientRect();return r.right>innerWidth+1}).map(e=>[e.className,e.getBoundingClientRect().right]).slice(0,20)})'));if(!baseline)assert.equal(m.overflow,false,name+" "+route+" overflow");assert.deepEqual(m.sideways,[],name+" "+route+" inner overflow");return m;};
-  for(const [name,width,height,touch] of (baseline?[["desktop",1360,850,false]]:[["desktop",1360,850,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true],["viewer860",860,900,true]]).filter(v=>!only||v[0]===only)) {
+  for(const [name,width,height,touch] of (baseline?[["desktop",1360,850,false]]:[["desktop",1360,850,false],["desktop1200",1200,790,false],["native-min",1024,790,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true],["viewer860",860,900,true]]).filter(v=>!only||v[0]===only)) {
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:touch});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom","'+(touch?20:0)+'px")');
     for(const route of ["chat","conversation","artifacts"]) {
       await js('window.mountLayout('+JSON.stringify(route)+')');const m=await check(name,route);
-      assert.equal(m.coarse,touch);assert.equal(m.hover,!touch);
+      assert.equal(m.coarse,touch);if(touch)assert.equal(m.hover,false);
       if(!baseline&&route==="artifacts")assert.equal(m.columns,width<600?2:width<1100?3:4);
-      if(!baseline&&width===984&&route==="conversation"){assert.equal(m.geometry[".fy-chatnav"].width,48);assert.equal(m.geometry[".fy-gate__side"].width,340);await js('[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")==="Show history").click();window.settleLayout()');await check(name,"history");assert.equal((await js("window.measureLayout()")).geometry[".fy-chatnav"].width,236);}
+      if(!baseline&&width>=600&&route!=="artifacts") {
+        const composer=m.geometry[".fy-chat__composer"],nav=m.geometry[".fy-pillnav"],gate=m.geometry[".fy-gate"];
+        assert.ok(composer.y+composer.height<=height+1,name+" composer fits the window");
+        assert.ok(gate.y>=nav.y+nav.height,name+" navigation stays above the conversation");
+        await js('[...document.querySelectorAll(".fy-gate__head button")].find(e=>/notes/.test(e.textContent)).click();window.settleLayout()');
+        await check(name,route+"-notes-toggled");
+        await js('[...document.querySelectorAll(".fy-gate__head button")].find(e=>/notes/.test(e.textContent)).click();window.settleLayout()');
+      }
+      if(!baseline&&width===984&&route==="conversation"){assert.equal(m.geometry[".fy-chatnav"].width,48);assert.ok(m.geometry[".fy-gate__side"].width<=360);await js('[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")==="Show history").click();window.settleLayout()');await check(name,"history");assert.equal((await js("window.measureLayout()")).geometry[".fy-chatnav"].width,236);}
+      if(!baseline&&width>=600&&route==="conversation") {
+        await js('[...document.querySelectorAll(".fy-gate__head button")].find(e=>e.textContent==="Hide notes").click();window.feedbackForLayout()');
+        await check(name,"final-point-feedback");
+        assert.ok(await js('!document.querySelector(".fy-gate__side").hidden'));
+        assert.ok(await js('(()=>{const b=[...document.querySelectorAll(".fy-gate__side button")].find(e=>e.textContent==="Dismiss");const r=b.getBoundingClientRect();return r.y>=0&&r.bottom<=innerHeight})()'));
+        await js('[...document.querySelectorAll(".fy-gate__side button")].find(e=>e.textContent==="Dismiss").click();window.settleLayout()');
+      }
       if(!baseline&&width<600&&route==="chat") {
         assert.equal(await js('!!document.querySelector(".fy-chatnav--screen")'),true);
-        await js('document.querySelector(".fy-chatnav__more").click();window.settleLayout()');await check(name,"row-menu");assert.ok(await js('document.querySelector(".fy-page-sheet").open'));await escape();
+        await js('document.querySelector(".fy-chatnav__more").click();window.settleLayout()');await check(name,"row-menu");assert.ok(await js('!!document.querySelector(".fy-page-sheet[open]")'));await escape();
         await js('document.querySelector(".fy-chatnav__phonehead button").click();window.settleLayout()');assert.ok(await js('window.commands.some(c=>c.kind==="world-chat-create")'));assert.ok(await js('!!document.querySelector("[data-screen=world-chat-conversation]")'));
       }
       if(!baseline&&width<600&&route==="conversation") {
@@ -131,7 +160,7 @@ try {
         await js('document.querySelector(".fy-thread-peek").click();window.settleLayout()');await check(name,"understood");
         await js('document.querySelector(".fy-page-sheet__foot button").click()');assert.ok(await js('window.commands.some(c=>c.kind==="world-chat-wrap-up")'));
         await escape();
-        await js('[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")==="Conversation options").click();window.settleLayout()');assert.ok(await js('document.querySelector(".fy-page-sheet").open'));await escape();
+        await js('[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")==="Conversation options").click();window.settleLayout()');assert.ok(await js('!!document.querySelector(".fy-page-sheet[open]")'));await escape();
       }
       if(route==="artifacts") {
         await js('[...document.querySelectorAll(".fy-filterchip")].find(e=>e.textContent.startsWith("Images")).click();window.settleLayout()');
@@ -153,7 +182,7 @@ try {
     for(const id of ["wc164a1", "wc164a2", "wc164a3", "wc164b1", "wc164b2", "wc164b3", "wc164c", "wc164d"]) {
       const fold=id==="wc164c"||id==="wc164d";
       await size(fold?984:390,fold?1060:797,true);await navigate("/"+id+".html");await capture(id);
-      measurements[id]=await js('Object.fromEntries([".head","h1",".chead",".csub",".conv",".wgate",".wnav",".wmain",".wside",".grid2a",".grid3",".acard",".fr",".sheet",".foot",".peek",".viewer",".vtop",".stage",".vfoot"].map(s=>{const b=document.querySelector(s)?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
+      measurements[id]=await js('Object.fromEntries([".bar",".head","h1",".chead",".csub",".conv",".wgate",".wnav",".wmain",".wside",".grid2a",".grid3",".acard",".fr",".sheet",".foot",".peek",".viewer",".vtop",".stage",".vfoot"].map(s=>{const b=document.querySelector(s)?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
     }
     await writeFile(join(dir,"master-measurements.json"),JSON.stringify(measurements,null,2));
     // Content counts and record names vary; the frame geometry comes directly from turn 164.
@@ -162,14 +191,23 @@ try {
       for (const key of keys) assert.ok(Math.abs(actual[key]-expected[key]) <= 1, label + " " + key + ": " + actual[key] + " vs " + expected[key]);
     };
     const find = (name, route) => records.find(row=>row.name===name && row.route===route)?.geometry;
-    const phoneChat=find("phone","conversation"), phoneShelf=find("phone","artifacts"), phoneViewer=find("phone","viewer"), foldChat=find("fold","conversation"), foldShelf=find("fold","artifacts");
+    const phoneChat=find("phone","conversation"), phoneShelf=find("phone","artifacts"), phoneViewer=find("phone","viewer"), foldShelf=find("fold","artifacts");
+    // The current phone shell's titlebar is shorter than turn 164's. In-flow shelf content
+    // follows it; viewport-owned dialogs and the held composer do not move with that header.
+    if(phoneShelf)measurements.wc164b1[".fr"].y+=phoneShelf[".fy-titlebar"].height-measurements.wc164b1[".bar"].height;
+    // Turn 224 added the in-flow shared Chat entry above this header. Its dimensions and
+    // contiguous rows still match turn 164; its absolute vertical position no longer does.
+    if(phoneChat) {
+      close(phoneChat[".fy-chat__phonehead"],measurements.wc164a2[".chead"],["x","width","height"],"phone conversation header");
+      close(phoneChat[".fy-chat__phonesub"],measurements.wc164a2[".csub"],["x","width","height"],"phone conversation context");
+      assert.equal(phoneChat[".fy-chat__phonesub"].y,phoneChat[".fy-chat__phonehead"].y+phoneChat[".fy-chat__phonehead"].height);
+    }
     for (const [actual, id, pairs] of [
-      [phoneChat,"wc164a2",[[".fy-chat__phonehead",".chead"],[".fy-chat__phonesub",".csub"],[".fy-thread-peek",".peek"]]],
+      [phoneChat,"wc164a2",[[".fy-thread-peek",".peek"]]],
       [phoneShelf,"wc164b1",[[".fy-artifact-frame",".fr"]]],
       [phoneViewer,"wc164b2",[[".fy-artview__panel",".viewer"],[".fy-artview__head",".vtop"],[".fy-artview__stage",".stage"],[".fy-artview__foot",".vfoot"]]],
       [find("phone","understood"),"wc164a3",[[".fy-page-sheet[open]",".sheet"]]],
       [find("phone","details"),"wc164b3",[[".fy-page-sheet[open]",".sheet"]]],
-      [foldChat,"wc164c",[[".fy-gate",".wgate"],[".fy-chatnav",".wnav"],[".fy-gate__main",".wmain"],[".fy-gate__side",".wside"]]],
       [foldShelf,"wc164d",[[".fy-artifact-frame",".fr"]]],
     ]) if(actual) for(const [app, master] of pairs) close(actual[app],measurements[id][master],["x","y","width","height"],id+" "+app);
 

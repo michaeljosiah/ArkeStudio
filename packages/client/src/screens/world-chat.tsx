@@ -2,7 +2,7 @@ import { GlobalWorldChatEntry } from "../components/global-chat.js";
 import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "../components/production-studio-context.js";
 import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "../components/global-chat-context.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
@@ -489,6 +489,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [understoodOpen, setUnderstoodOpen] = useState(false);
+  const [notesVisible, setNotesVisible] = useState<boolean | null>(null);
+  const notesId = useId();
+  useEffect(() => { setNotesVisible(null); }, [conversationId]);
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
   const [draft, setDraft] = useConversationState("draft", "");
   /**
@@ -510,6 +513,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const rippleNotice = useWorldChatRipples(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
   const [wrappingUp, setWrappingUp] = useConversationState("wrappingUp", false);
+  // Saving the last point can empty the notes before its result arrives. Reveal that news
+  // even if notes were collapsed, so a ripple waiting for Dismiss cannot strand navigation.
+  useEffect(() => {
+    if (rippleNotice || (wrapUpRefusal && !wrappingUp)) setNotesVisible(true);
+  }, [rippleNotice, wrapUpRefusal, wrappingUp]);
   /**
    * Points with a decision in flight.
    *
@@ -919,6 +927,10 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
               <h1 className="fy-story__h1">{row?.title ?? "New conversation"}</h1>
             </div>
+            {!inPanel && <Button variant="ghost" size="sm" aria-controls={notesId} aria-expanded={notesVisible ?? points.length > 0}
+              onClick={() => setNotesVisible(value => !(value ?? points.length > 0))}>
+              {(notesVisible ?? points.length > 0) ? "Hide notes" : `Show notes${points.length ? ` (${points.length})` : ""}`}
+            </Button>}
             {/* Beside the title rather than beneath it (41a): the head bottom-aligns the two so a
                 named subject reads as one line instead of a stack that grows. */}
             {row?.entryContext && row.entryContext.kind !== "world" && (
@@ -1060,7 +1072,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           </HeldBar>
         </div>
 
-        {!phone && <div className="fy-gate__side">
+        {!phone && <div id={notesId} className="fy-gate__side" hidden={!(notesVisible ?? points.length > 0)}>
           <div className="fy-panel__head">
             <div className="fy-panel__headline">
               <div className="fy-panel__title">What I&rsquo;ve understood</div>
@@ -1072,7 +1084,6 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           </div>
 
           {understoodBody}
-          {!fold && <div style={{ flex: 1, minHeight: 16 }} />}
           <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
         </div>}
         <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
