@@ -23,6 +23,37 @@ async function setup() {
   return { store, dir, root, productionId: production.meta.id, chapter, settings, service: new StoryPublicationService(root) };
 }
 describe("private story publication", () => {
+  it("previews only the captured cover, independently of its removed world source", async () => {
+    const h = await setup(), source = join(h.dir, "world-art.png");
+    const bytes = await readFile(source);
+    const settings = { ...h.settings, cover: "world-art.png" };
+    const review = await h.service.review(h.store, h.productionId, settings);
+    const cancelled = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, edition => {
+      if (edition.phase === "Capturing source") h.service.cancel(edition.id);
+    });
+    assert.equal(await h.service.previewMedia(cancelled.id, "cover"), null, "unfinished capture has no cover preview");
+    let duringPreparation: ReturnType<StoryPublicationService["previewMedia"]> | undefined;
+    const edition = await h.service.preview(h.store, h.productionId, settings, review.fingerprint, row => {
+      if (row.phase === "Preparing EPUB") duringPreparation = h.service.previewMedia(row.id, "cover");
+    });
+    assert.equal(edition.status, "preview", edition.error);
+    assert.ok(await duringPreparation, "the captured cover is available during preparation");
+    await rename(source, join(h.dir, "accepted-cover.png"));
+    const cover = await new StoryPublicationService(h.root).previewMedia(edition.id, "cover");
+    assert.equal(cover?.contentType, "image/png");
+    assert.deepEqual(await readFile(cover!.path), bytes);
+    assert.equal(await h.service.serve(edition.id, "cover"), null);
+    assert.equal(await h.service.previewMedia(edition.id, "inputs.json"), null);
+    assert.equal(await h.service.previewMedia(edition.id, "../inputs.json"), null);
+    await writeFile(cover!.path, "changed");
+    assert.equal(await h.service.previewMedia(edition.id, "cover"), null, "captured image bytes must match their receipt");
+    await writeFile(cover!.path, bytes);
+    const inputPath = join(h.root, edition.id, "inputs.json");
+    const frozen = JSON.parse(await readFile(inputPath, "utf8"));
+    frozen.cover.file = "../edition.json";
+    await writeFile(inputPath, JSON.stringify(frozen));
+    assert.equal(await h.service.previewMedia(edition.id, "cover"), null, "changed input inventory is refused");
+  });
   it("prepares a verified PDF without audio tools, creates the same bytes, and restores only its exact file", async () => {
     const h = await setup();
     const settings: StoryPublicationSettings = { ...h.settings, title: "A".repeat(99) + "😀 story", outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS }, subtitle: "A novel", editionLabel: "Reading copy" };

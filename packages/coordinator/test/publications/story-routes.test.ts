@@ -11,7 +11,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 it("authenticates actual PDF preview and ranges, and only delivers the same bytes after Create", async t => {
-  const { root } = await makeTempRoot();
+  const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root);
   await provider.loadWorld(WORLD_ID);
   const coordinator = new Coordinator({ provider, adapter: null, appRoot: root,
@@ -24,7 +24,7 @@ it("authenticates actual PDF preview and ranges, and only delivers the same byte
   const chapter = production.chapters[0]!;
   const opened = await openChapter(store, production.meta.id, chapter.id);
   await new ProseAuthoringService(store).save(production.meta.id, chapter.file, "Ọlamma found the letter. She read it twice.", { baseHash: opened.hash });
-  const settings: StoryPublicationSettings = { title: "The Letter", author: "A. Writer", language: "en", label: "Reading copy", description: "", cover: null,
+  const settings: StoryPublicationSettings = { title: "The Letter", author: "A. Writer", language: "en", label: "Reading copy", description: "", cover: "world-art.png",
     chapterIds: [chapter.id], outputs: ["pdf"], pdf: { ...DEFAULT_STORY_PDF_SETTINGS }, avoidEmDashes: false };
   const review = await service.review(store, production.meta.id, settings);
   const edition = await service.preview(store, production.meta.id, settings, review.fingerprint, () => {});
@@ -34,6 +34,14 @@ it("authenticates actual PDF preview and ranges, and only delivers the same byte
   const preview = `${base}/story-preview-media/${edition.id}/story.pdf`;
   const delivery = `${base}/story-edition-media/${edition.id}/story.pdf`;
   const headers = { Authorization: `Bearer ${token}`, Origin: "null" };
+  const coverUrl = `${base}/story-preview-media/${edition.id}/cover`;
+  assert.equal((await fetch(coverUrl)).status, 401);
+  assert.equal((await fetch(coverUrl, { headers: { ...headers, Origin: "https://foreign.example" } })).status, 401);
+  const cover = await fetch(coverUrl, { headers });
+  assert.equal(cover.status, 200);
+  assert.equal(cover.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await cover.arrayBuffer()), await readFile(join(worldDir, "world-art.png")));
+  assert.equal((await fetch(`${base}/story-preview-media/${edition.id}/inputs.json`, { headers })).status, 404);
   assert.equal((await fetch(preview)).status, 401);
   assert.equal((await fetch(delivery)).status, 401);
   assert.equal((await fetch(preview, { headers: { ...headers, Origin: "https://foreign.example" } })).status, 401);
