@@ -50,6 +50,7 @@ import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { WorldOpening } from "../components/world-opening.js";
+import { ReadOnlyMarkdown } from "../components/editor/read-only-markdown.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -2056,7 +2057,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             </Badge>
           )}
         </div>
-        {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
+        {essence && readableProse("Essence", essence.body, <div className="fy-sheet__lead"><ReadOnlyMarkdown value={essence.body} ariaLabel={`${sheet.name} · Essence`} /></div>)}
       </div>
       <div className="fy-sheet__actions">
         {/* Reference, More looks and Voice live in the tab row (design 54): a destination
@@ -2233,7 +2234,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           // it holds real text, not the empty-section placeholder. It used to be Appearance
           // alone, which meant a location sheet or a faction sheet had no readable block at all.
           const readable = s.body.trim() !== "" && s.body.trim() !== "—";
-          const body = <div className="fy-sheet__secbody">{s.body}</div>;
+          const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
           return (
             <div key={s.heading}>
               {/* Every heading on a location record used to carry the sheet's status as a dot —

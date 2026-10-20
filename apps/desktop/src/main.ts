@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { webWindowOpenHandler } from "./external-links.js";
 import { storyPublicationFileFilter } from "./story-publication-file.js";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
@@ -662,10 +663,7 @@ async function createWindow(): Promise<void> {
     const allowed = process.env.ARKE_DEV_SERVER_URL ?? `file://${clientIndex.replace(/\\/g, "/")}`;
     if (!url.startsWith(allowed)) event.preventDefault();
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: "deny" };
-  });
+  window.webContents.setWindowOpenHandler(webWindowOpenHandler((url) => shell.openExternal(url)));
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();

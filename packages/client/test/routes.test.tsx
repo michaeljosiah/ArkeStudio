@@ -394,12 +394,12 @@ describe("screen inventory", () => {
     const html = renderAt(`/w/${world.meta.worldId}/cast`).replace(/<!-- -->/g, "");
     assert.ok(html.includes("The cast · 1"));
     assert.ok(html.includes("Tide-caller · lead — She hears the verse under the harbour."));
-    assert.ok(html.includes("14 refs · 3 productions"));
+    assert.ok(html.includes("2 refs · 3 productions"));
     assert.ok(html.includes("Open sheet"));
     assert.ok(html.includes("More looks"));
     assert.ok(html.includes("ui-btn--primary ui-btn--sm"));
     assert.ok(html.includes("ui-btn--outline ui-btn--sm"));
-    assert.ok(html.includes("canon locked, 14 refs · 3 productions, featured. Open sheet"));
+    assert.ok(html.includes("canon locked, 2 refs · 3 productions, 1 main photo · 1 sheet, featured. Open sheet"));
     assert.ok(!html.includes("Generate looks"));
   });
 

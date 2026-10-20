@@ -43,6 +43,7 @@ window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await docu
 window.mountLayout=async(route="cast",mode="normal")=>{
  renderer?.unmount();const state=castLayoutFixture(),world=state.world;
  if(mode==="empty")world.sheets=world.sheets.filter(s=>s.type!=="character");
+ if(mode==="markdown")world.sheets[0].sections=[{heading:"Essence",body:"A **tide-caller** with *quiet resolve*."},{heading:"Appearance",body:["> Keep the passage clear.","","- Oilskin coat","- Work boots","","A \`ledger\` stays dry."].join(String.fromCharCode(10))}];
  if(mode==="long")for(const sheet of world.sheets){sheet.name="UnbrokenCharacterName".repeat(12);sheet.role="UnbrokenRole".repeat(20);}
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
@@ -55,12 +56,18 @@ window.measureLayout=()=>{
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
+      return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/App.tsx","packages/client/src/screens/world.tsx","packages/client/src/screens/props.tsx","packages/client/src/screens/fidelity.css","packages/client/src/components/wave.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Cast layout artifacts: " + dir);
@@ -87,13 +94,13 @@ try {
   socket=new WebSocket(targets.find(t=>t.type === "page").webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
   let seq=0;const pending=new Map();
-  socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}};
+  socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(m.method==="Runtime.exceptionThrown")console.error("Browser error",m.params.exceptionDetails.exception?.description??m.params.exceptionDetails.text);if(p){pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}};
   const cdp=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const js=async expression=>{const r=await cdp("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   const size=(width,height,mobile)=>cdp("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile});
   const navigate=async path=>{await cdp("Page.navigate",{url:origin+path});await until(()=>js('document.readyState === "complete"'));};
   const capture=async name=>{await js("document.fonts.ready");await settle();const {data}=await cdp("Page.captureScreenshot",{format:"png",captureBeyondViewport:false});await writeFile(join(dir,name+".png"),Buffer.from(data,"base64"));};
-  await cdp("Page.enable");await cdp("Emulation.setEmulatedMedia",{features:[{name:"prefers-reduced-motion",value:"reduce"}]});
+  await cdp("Page.enable");await cdp("Runtime.enable");await cdp("Emulation.setEmulatedMedia",{features:[{name:"prefers-reduced-motion",value:"reduce"}]});
   await navigate("/");await until(()=>js('typeof window.mountLayout === "function"'));
   const records=[];
   const only=process.argv.includes("--viewport")?process.argv[process.argv.indexOf("--viewport")+1]:null;
@@ -118,9 +125,19 @@ try {
    if(!baseline&&width<1100){await js('window.mountLayout("props")');assert.equal(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height'),0);await click('.fy-kind-new');assert.ok(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height>0'));await check(name+'-new-prop');}
    if(!baseline&&width<1100){await js('window.mountLayout("cast","empty")');await check(name+"-empty-cast");assert.ok(await js('document.querySelector(".fy-cast-mobile-head .fy-kind-new").getBoundingClientRect().height>=44'));}
    if(!baseline&&width<1100){await js('window.mountLayout("cast/maren-kest","long")');await check(name+'-long-character');}
+   if(!baseline){
+    await js('window.mountLayout("cast/maren-kest","markdown")');
+    assert.equal(await js('document.querySelector(".fy-sheet__lead strong")?.textContent'),"tide-caller");
+    assert.equal(await js('document.querySelector(".fy-sheet__secbody blockquote")?.textContent'),"Keep the passage clear.");
+    assert.equal(await js('document.querySelectorAll(".fy-sheet__secbody li").length'),2);
+    assert.equal(await js('document.querySelectorAll(".fy-sheet [contenteditable]").length'),0);
+    await js('document.querySelector(".fy-sheet__secbody").scrollIntoView({block:"center"})');
+    assert.equal(await js('(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector(".fy-sheet__secbody blockquote"));const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return selection.toString();})()'),"Keep the passage clear.");
+    await check(name+'-sheet-markdown');
+   }
   }
   const masterRecords=[];
-  for(const id of ["cs161a1","cs161a2","cs161a3","cs161b","cs161c1","cs161c2","cs161c3","cs161d"]){const fold=["cs161b","cs161d"].includes(id);await size(fold?984:390,fold?1060:797,true);await navigate('/'+id+'.html');await capture(id);masterRecords.push({id,geometry:await js('Object.fromEntries([".kinds",".lhead",".feat",".feat img",".ledger",".ledger .row",".pcard",".pcard img",".hero",".tabs",".design",".design img",".sheetrow",".voice",".sheet",".secgrid"].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return[s,r?{x:r.x,y:r.y,width:r.width,height:r.height}:null]}))')});}
+  for(const id of ["cs161a1","cs161a2","cs161a3","cs161b","cs161c1","cs161c2","cs161c3","cs161d"]){const fold=["cs161b","cs161d"].includes(id);await size(fold?984:390,fold?1060:797,true);await navigate('/'+id+'.html');await capture(id);masterRecords.push({id,chromeHeight:await js('document.querySelector(".cs161 > .bar").getBoundingClientRect().height'),geometry:await js('Object.fromEntries([".kinds",".lhead",".feat",".feat img",".ledger",".ledger .row",".pcard",".pcard img",".hero",".tabs",".design",".design img",".sheetrow",".voice",".sheet",".secgrid"].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return[s,r?{x:r.x,y:r.y,width:r.width,height:r.height}:null]}))')});}
   await writeFile(join(dir,'master-measurements.json'),JSON.stringify(masterRecords,null,2));
   if (!baseline) for (const [name,id,pairs] of [
     ["phone-cast","cs161a1",[[".fy-feature",".feat"],[".fy-feature__frame",".feat img"],[".fy-ledger .fy-row",".ledger .row"]]],
@@ -129,7 +146,8 @@ try {
   ]) {
     const actual=records.find(r=>r.name===name),expected=masterRecords.find(r=>r.id===id);
     if(actual) for(const [app,master] of pairs) for(const key of ["x","y","width","height"])
-      assert.ok(Math.abs(actual.geometry[app][key]-expected.geometry[master][key])<.1,`${name} ${app} ${key} differs from master`);
+      // The current shared app titlebar is 48px; turn 161's is 52px. Compare the cast beneath it.
+      assert.ok(Math.abs(actual.geometry[app][key]-expected.geometry[master][key]-(key==="y"?actual.geometry[".fy-titlebar"].height-expected.chromeHeight:0))<.1,`${name} ${app} ${key} differs from master`);
   }
   console.log(JSON.stringify({directory:dir,checks:records.length,baseline:baselineRef}));
 }finally{socket?.close();child.kill();await new Promise(r=>server.close(r));}
