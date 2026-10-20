@@ -12,6 +12,7 @@ import { parseHTML } from "linkedom";
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const baseline = process.argv.includes("--baseline");
+const productionHistory = process.argv.includes("--production-history");
 const baselineRef = baseline ? process.argv[process.argv.indexOf("--baseline") + 1] : null;
 if (baseline) assert.ok(baselineRef, "--baseline requires a revision");
 const dir = await mkdtemp(join(tmpdir(), "arke-chat-artifacts-"));
@@ -36,6 +37,7 @@ import { MemoryRouter, useNavigate } from "react-router";
 import { App } from "./App";
 import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
 import { chatArtifactsFixture, CHAT_ID } from "../test/chat-artifacts-fixture";
+import { productionHistoryLayoutFixture } from "../test/develop-layout-fixture";
 ${styles}
 let renderer;
 function Navigation() { window.go = useNavigate(); return null; }
@@ -45,11 +47,11 @@ window.feedbackForLayout = async () => {
   __applyEventForTest({type:"world-chat.ripples",at:new Date().toISOString(),worldId:state.world.meta.worldId,conversationId:CHAT_ID,requestId:"layout-final-point",items:[{kind:"gains-cross-reference",summary:"CANON-018 gains a cross-reference.",targets:["CANON-018"]}]});
   await window.settleLayout();
 };
-window.mountLayout = async (route="chat", mode="normal") => {
+window.mountLayout = async (route="chat", mode="normal", restore=false) => {
   renderer?.unmount();
-  sessionStorage.clear();
+  if(!restore)sessionStorage.clear();
   __clearWorldChatHoldsForTest();
-  const state=chatArtifactsFixture(), world=state.world;
+  const state=restore?window.fixture:mode==="production-history"?productionHistoryLayoutFixture():chatArtifactsFixture(), world=state.world;
   if(mode==="long") {
     world.conversations[0].title="UnbrokenConversationTitle".repeat(20);
     state.worldChat.messages.push({...state.worldChat.messages[0],id:"msg_long",text:"UnbrokenTranscript".repeat(120)});
@@ -74,6 +76,11 @@ window.measureLayout=()=>{
     bubbles:[...document.querySelectorAll(".fy-chat__bubble")].slice(0,4).map(e=>{const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};}),
     columns:document.querySelector(".fy-artifact-grid")&&getComputedStyle(document.querySelector(".fy-artifact-grid")).gridTemplateColumns.split(" ").length,
     sideways:[...document.querySelectorAll(".fy-page-sheet__body,.fy-held-bar,.fy-artview__panel,.fy-gate__side,.fy-gate__body")].filter(e=>e.clientWidth&&e.scrollWidth>e.clientWidth+1).map(e=>e.className)};
+};
+window.completeHistory=async()=>{
+ const state=structuredClone(window.fixture),action=state.worldChat.actions[0];
+ action.status="completed";action.availableDecisions=[];action.receipt={kind:"world-record",id:action.actionId,summary:"The reviewed change was accepted."};
+ state.worldChat.seq++;window.fixture=state;__setStateForTest(state);await window.settleLayout();
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
@@ -105,14 +112,14 @@ const server=createServer(async (req,res) => {
 });
 await new Promise(r=>server.listen(0,"127.0.0.1",r));
 const origin="http://127.0.0.1:"+server.address().port;
-const child=spawn(chrome,["--headless=new","--disable-gpu","--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2","--no-first-run","--no-default-browser-check","--remote-debugging-port=0","--user-data-dir="+join(dir,"profile"),"about:blank"],{windowsHide:true,stdio:"ignore"});
+const child=spawn(chrome,["--headless=new","--disable-gpu","--disable-extensions","--disable-sync","--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2","--no-first-run","--no-default-browser-check","--remote-debugging-port=0","--user-data-dir="+join(dir,"profile"),"about:blank"],{windowsHide:true,stdio:"ignore"});
 let socket;
 const settle=()=>new Promise(r=>setTimeout(r,150));
 const until=async f=>{const deadline=Date.now()+20000;while(Date.now()<deadline){try{const v=await f();if(v)return v;}catch{}await settle();}throw new Error("Timed out waiting for Chrome");};
 try {
   const port=await until(async ()=>(await readFile(join(dir,"profile/DevToolsActivePort"),"utf8")).split("\n")[0]);
   const targets=await(await fetch("http://127.0.0.1:"+port+"/json/list")).json();
-  socket=new WebSocket(targets.find(t=>t.type === "page").webSocketDebuggerUrl);
+  socket=new WebSocket(targets.find(t=>t.type === "page" && t.url === "about:blank").webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
   let seq=0;const pending=new Map();
   socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}};
@@ -130,6 +137,44 @@ try {
   for(const [name,width,height,touch] of (baseline?[["desktop",1360,850,false]]:[["desktop",1360,850,false],["desktop1200",1200,790,false],["native-min",1024,790,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true],["viewer860",860,900,true]]).filter(v=>!only||v[0]===only)) {
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:touch});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom","'+(touch?20:0)+'px")');
+    if(productionHistory) {
+      await js('window.mountLayout("conversation","production-history")');
+      await check(name,"production-history");
+      assert.ok(await js('!!document.querySelector(".fy-story__chat")'),name+" history uses the full-page conversation, not the compact dock");
+      assert.ok(await js('!!document.querySelector(".fy-actioncard[data-status=pending]")'),"pending decision is present");
+      if(width<600){
+        await js('document.querySelector(".fy-actioncard__actions").scrollIntoView({block:"center"});window.settleLayout()');
+        await check(name,"production-history-decision");
+        assert.ok(await js('(()=>{const a=document.querySelector(".fy-actioncard__actions").getBoundingClientRect(),c=document.querySelector(".fy-held-bar").getBoundingClientRect();return a.top>=0&&a.bottom<=c.top})()'),"phone decision remains above the held composer");
+      }
+      assert.ok(await js('![...document.querySelectorAll("button")].some(e=>e.textContent==="Widen dock" && e.getBoundingClientRect().width)'),name+" has no dock-only control");
+      await js('document.querySelector("[contenteditable=true]").textContent="Keep this history draft";document.querySelector("[contenteditable=true]").dispatchEvent(new InputEvent("input",{bubbles:true}));window.settleLayout()');
+      await js('window.historyTranscript=document.querySelector(".fy-chat__transcript");document.querySelector("[data-global-chat-trigger]").click();window.settleLayout()');
+      await check(name,"production-history-panel");
+      assert.ok(await js('document.querySelector(".fy-global-chat .fy-chat__transcript")===window.historyTranscript'),"panel keeps the same transcript instance");
+      assert.equal(await js('document.querySelector(".fy-global-chat [contenteditable=true]").textContent'),"Keep this history draft");
+      assert.equal(await js('document.querySelectorAll("[contenteditable=true]").length'),1,"only one composer exists");
+      await js('document.querySelector("[aria-label=\\"Close Chat\\"]").click();window.settleLayout()');
+      await check(name,"production-history-returned");
+      assert.equal(await js('document.querySelector("[contenteditable=true]").textContent'),"Keep this history draft");
+      assert.ok(await js('!window.commands.some(c=>["world-chat-send","conversation-action-decide","world-chat-create"].includes(c.kind))'),"presentation sends and decides nothing");
+      await js('window.completeHistory()');await check(name,"production-history-completed");
+      assert.ok(await js('!!document.querySelector(".fy-actioncard[data-status=completed]") && !document.querySelector(".fy-actioncard__actions")'),"receipt replaces approval controls");
+      await js('window.mountLayout("conversation","production-history",true)');await check(name,"production-history-restored");
+      assert.equal(await js('document.querySelector("[contenteditable=true]").textContent'),"Keep this history draft","window recovery retains the draft");
+      assert.ok(await js('window.commands.filter(c=>c.kind==="world-chat-open" && c.conversationId).every(c=>c.conversationId===window.chatId)'),"history opens its exact conversation");
+      if(width<600){
+        await js('document.querySelector(".fy-chat__phonehead [aria-label=Conversations]").click();window.settleLayout()');
+        assert.ok(await js('!!document.querySelector(".fy-chatnav--screen")'),"Back opens the conversation list");
+        await js('[...document.querySelectorAll(".fy-chatnav a")].find(a=>a.href.endsWith(window.chatId)).click();window.settleLayout()');
+        assert.equal(await js('document.querySelector("[contenteditable=true]").textContent'),"Keep this history draft","history returns to the same draft");
+      }
+      if(name==="desktop"||name==="phone"){
+        await js('document.documentElement.classList.add("dark");window.settleLayout()');await check(name,"production-history-dark");
+        await js('document.documentElement.classList.remove("dark")');
+      }
+      continue;
+    }
     for(const route of ["chat","conversation","artifacts"]) {
       await js('window.mountLayout('+JSON.stringify(route)+')');const m=await check(name,route);
       assert.equal(m.coarse,touch);if(touch)assert.equal(m.hover,false);
@@ -177,7 +222,7 @@ try {
     }
     if(!baseline&&width<600)for(const route of ["chat","conversation","artifacts"]){await js('window.mountLayout('+JSON.stringify(route)+',"long")');await check(name,"long-"+route);}
   }
-  if(!baseline) {
+  if(!baseline && !productionHistory) {
     const measurements={};
     for(const id of ["wc164a1", "wc164a2", "wc164a3", "wc164b1", "wc164b2", "wc164b3", "wc164c", "wc164d"]) {
       const fold=id==="wc164c"||id==="wc164d";

@@ -1,5 +1,6 @@
 import { GlobalConversationEntry } from "./global-chat.js";
 import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "./global-chat-context.js";
+import { chatSurfaceForPage } from "../lib/global-chat.js";
 import { useClientRender } from "./production-studio-context.js";
 import { ProductionStudio } from "./production-studio.js";
 import { StudioCanvasPress, StudioCard, StudioShow, StudioSidebar, StudioToggle } from "./production-studio-context.js";
@@ -68,7 +69,7 @@ import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Film, Pin, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
+import { Film, Pin, ChevronLeft, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
 import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
@@ -782,6 +783,7 @@ export function ProductionConversationBody({
   const navigate = useNavigate();
   useEffectReviewNavigation(worldId, productionId);
   const presentation = useConversationPresentation();
+  const historyPage = presentation?.historyPage;
   const mediaNavigation = useConversationNavigationGuard();
   const [message, setMessage] = useConversationState("draft", "");
   const [languageModelId, setLanguageModelId] = useConversationState<string | undefined>("languageModel", undefined);
@@ -826,11 +828,12 @@ export function ProductionConversationBody({
   /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
   const [pointsOpen, setPointsOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 899px)");
+  const phoneHeader = useMediaQuery("(max-width: 599px)");
   const half = useMediaQuery(ARKE_HALF_QUERY);
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
-  const [notesCollapsed, setNotesCollapsed] = useState(false);
+  const [notesCollapsed, setNotesCollapsed] = useState<boolean | undefined>(undefined);
   const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
@@ -1343,7 +1346,10 @@ export function ProductionConversationBody({
     />
   );
 
-  const responsive = contextSummary !== undefined;
+  const responsive = contextSummary !== undefined || historyPage !== undefined;
+  const pageHeading = historyPage?.title ?? heading, pageEyebrow = historyPage?.subject ?? eyebrow;
+  const pageSummary = contextSummary ?? historyPage?.subject;
+  const notesHidden = notesCollapsed ?? (!!historyPage && points.length === 0 && !side);
   const pointCount = points.filter(point => point.kind === "point").length;
   const groups = groupPointsBySubject(points);
   const openCount = points.filter(point => point.kind === "question").length;
@@ -1371,7 +1377,7 @@ export function ProductionConversationBody({
       carried={carriedPoints} status={loaded?.status ?? null} subjectKey={contextKey}
       wrapping={wrapping} onWrappingChange={setWrapping} brief={responsive && compact} />
   </>;
-  if (dock) {
+  if (dock && !historyPage) {
     // The dock keeps its own, narrower understanding: put away rather than dropped, because a
     // column this narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
     // the only way a conversation becomes anything (turn 92). A conversation-first dock shows
@@ -1504,42 +1510,53 @@ export function ProductionConversationBody({
     );
   }
 
-  return <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked={false} understanding={rail} proposal={side}>
+  return <ProductionStudio world={state?.world} productionId={productionId} entry={context} workspace={loaded} docked={false} conversationFirst={!!historyPage} understanding={rail} proposal={side}>
     <div className="fy-story__chat">
-      {(eyebrow || heading) && <div className="fy-story__chathead">
-        {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
+      {historyPage && phoneHeader ? <>
+        <div className="fy-chat__phonehead">
+          <IconButton label="Conversations" onClick={() => {
+            const path = `/w/${worldId}/chat`, page = chatSurfaceForPage(state, path);
+            if (page && presentation) presentation.owner.select(page);
+            void navigate(path);
+          }}><ChevronLeft size={22} /></IconButton>
+          <h1>{historyPage.title}</h1>
+          <StudioCanvasPress />
+        </div>
+        <div className="fy-chat__phonesub"><span className="fy-chat__about">{historyPage.subject}</span></div>
+      </> : (pageEyebrow || pageHeading) && <div className="fy-story__chathead">
+        {pageEyebrow && <div className="fy-eyebrow-sm">{pageEyebrow}</div>}
         <div className="fy-story__heading">
-          {heading && <h1 className="fy-story__h1">{heading}</h1>}
-          {responsive && !phone && <Button variant="ghost" size="sm" aria-expanded={!notesCollapsed} onClick={() => setNotesCollapsed(value => !value)}>
-            {notesCollapsed ? "Show notes" : "Hide notes"}
+          {pageHeading && <h1 className="fy-story__h1">{pageHeading}</h1>}
+          {responsive && !phone && <Button variant="ghost" size="sm" aria-expanded={!notesHidden} onClick={() => setNotesCollapsed(!notesHidden)}>
+            {notesHidden ? "Show notes" : "Hide notes"}
           </Button>}
         </div>
         {responsive && <StudioCanvasPress />}
       </div>}
-      {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
+      {responsive && compact && !historyPage && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>
-        <span>in context: {contextSummary}</span><ChevronDown size={16} />
+        <span>in context: {pageSummary}</span><ChevronDown size={16} />
       </button>}
       <div className="fy-story__log" ref={setLog}>{transcript}</div>
       <HeldBar className={responsive ? "fy-develop-composer" : "fy-story-composer"} query={responsive ? "(max-width: 599px)" : "(max-width: 0px)"}>
-        {responsive && phone && rail && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
+        {responsive && phone && rail && (!historyPage || points.length > 0 || side) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setSideOpen(true)}>
           <span><b>{sideTitle}{!side && " · " + pointCount + " so far"}</b><span>{side ? "Open the proposed changes" : [...groups.map(group => group.subject), ...(openCount ? [openCount + " still open"] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
         </button>}
         {modelStatus}
-        <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact ? "Keep shaping the story…" : placeholder}
+        <Composer value={message} onChange={setMessage} onSubmit={submit} placeholder={responsive && compact && !historyPage ? "Keep shaping the story…" : placeholder}
           agentLabel="story author" busy={running} busyLabel="reading the world…" disabledReason={presentation?.scopeMissing ? "Choose this page to restore the saved subject before sending." : languageUnavailableReason}
           onDictate={text => setMessage(prev => prev ? prev + " " + text : text)} readReplies={readReplies.composer}
           {...(modelChip !== null ? { modelControl: modelChip } : {})} {...attachProps} />
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>
-    <div className="fy-story__side" hidden={responsive && !phone && notesCollapsed}>
+    <div className="fy-story__side" hidden={responsive && !phone && notesHidden}>
       <ResponsiveSheet sheet={responsive && phone} open={sideOpen} onClose={() => setSideOpen(false)} title={sideTitle} className="fy-develop-sheet">
         <StudioSidebar />
       </ResponsiveSheet>
     </div>
     <PageSheet open={responsive && compact && modelsOpen} onClose={() => setModelsOpen(false)} title="Story author" className="fy-develop-model-sheet">
-      <p>In context: {contextSummary}</p>
+      <p>In context: {pageSummary}</p>
     </PageSheet>
   </ProductionStudio>;
 }

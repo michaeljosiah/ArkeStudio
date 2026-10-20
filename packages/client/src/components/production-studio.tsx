@@ -16,9 +16,9 @@ const VIEW_NAMES: Partial<Record<StudioFocus["view"], string>> = {
 };
 
 /** A presentation owner. The same conversation and each full-size card keep one portal instance. */
-export function ProductionStudio({ world, productionId, entry, workspace, docked: originalDocked, understanding, proposal, children }: {
+export function ProductionStudio({ world, productionId, entry, workspace, docked: originalDocked, conversationFirst = false, understanding, proposal, children }: {
   world: WorldBundle | null | undefined; productionId?: string; entry: WorldChatContext; workspace: WorldChatWorkspace | null;
-  docked: boolean; understanding: ReactNode; proposal?: ReactNode; children: ReactNode;
+  docked: boolean; conversationFirst?: boolean; understanding: ReactNode; proposal?: ReactNode; children: ReactNode;
 }) {
   const presentation = useConversationPresentation();
   const docked = originalDocked || (presentation?.inPanel === true && !presentation.hasHome);
@@ -30,7 +30,7 @@ export function ProductionStudio({ world, productionId, entry, workspace, docked
   // Show or the Canvas press, and then takes the right half. It opened standing at 380 beside a
   // canvas that was mostly empty (installed 0.5.69).
   const half = useMediaQuery(ARKE_HALF_QUERY);
-  const [active, setActive] = useState(!docked && !half), [wide, setWide] = useState(false), [width, setWidth] = useState(420);
+  const [active, setActive] = useState(!conversationFirst && !docked && !half), [wide, setWide] = useState(false), [width, setWidth] = useState(420);
   const [focus, setFocus] = useState<StudioFocus>(resting);
   const [pinned, setPinned] = useState(false), [phoneView, setPhoneView] = useState("thread");
   const [fullCardId, setFullCardId] = useState<string | null>(null), [canvasHost, setCanvasHost] = useState<HTMLDivElement | null>(null);
