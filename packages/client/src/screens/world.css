@@ -80,6 +80,7 @@
   .fy-worldapp .fy-titlebar__side:first-child { padding-right: 0; }
   .fy-worldapp .fy-titlebar__side--right { flex: none; }
   .fy-worldapp .fy-titlebar .fy-iconbtn { flex-shrink: 0; color: var(--muted-foreground); }
+  .fy-worldapp .fy-titlebar .fy-iconbtn--wide { min-width: 44px; max-width: 100%; flex-shrink: 1; }
   .fy-worldnav { display: block; flex: none; position: sticky; top: 0; z-index: 20; background: var(--background); border-bottom: 1px solid transparent; }
   .fy-worldnav--stuck { border-bottom-color: var(--border); box-shadow: 0 6px 16px -12px color-mix(in srgb, var(--neutral-950) 35%, transparent); }
   /* The fade belongs to the stationary wrapper, not the scrolling strip. */

@@ -63,6 +63,8 @@
    phone's at every width, while the lockup keeps its place (design turn 159). */
 @media (pointer: coarse) {
   .fy-titlebar { height: 52px; }
+  .fy-titlebar .fy-iconbtn--wide, .fy-titlebar button.fy-titlebar__context { min-height: 44px; }
+  .fy-titlebar__brand { padding-block: 12px; min-height: 44px; }
   .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) { width: 44px; height: 44px; border-radius: 10px; }
   .fy-titlebar .fy-iconbtn:not(.fy-iconbtn--wide) > svg { width: 20px; height: 20px; }
   .fy-titlebar .fy-iconbtn__dot { top: 11px; right: 11px; width: 7px; height: 7px; border: 2px solid var(--background); }

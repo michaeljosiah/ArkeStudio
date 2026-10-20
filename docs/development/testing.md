@@ -1,5 +1,15 @@
 # Running and validating changes
 
+Audiobook header layout (#2041, SPEC-001 R-7) is measured by client
+`test/audiobook-show-layout.test.tsx` using the full stylesheet cascade and a long production
+title. Set `CHROME_PATH` if Chrome is not in a standard location. It checks touch browser widths
+640/820 and desktop caption clearance at 1024/1440 (requested window sizes; assertions use
+the measured viewport, which excludes platform decorations). Separately review the hydrated App at
+320/390, tablet and desktop in light/dark, including keyboard activation and enlarged text.
+A phone browser has no `.is-desktop` class: shrinking Electron's renderer below its native
+1024px minimum retains 138px for Windows captions and is not a phone-browser test. Compare
+master turns 159 and 225 for shared chrome, alongside 199 for the audiobook composition.
+
 Character sheet layout (SPEC-001 R-7, master turn 161) uses
 `node scripts/smoke-cast-layout.mjs` and the same command with `--reading`.
 The first compares the prose column with the approved Fold frame; the second checks short and
