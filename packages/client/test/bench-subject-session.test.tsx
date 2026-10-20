@@ -345,8 +345,9 @@ it("Keep names and sends the reviewed take while later results arrive", async ()
   assert.match(text(bench), /View latest/);
 });
 
-it("clears requested image dimensions when a world Bench switches to Codex", async () => {
-  const { subject: _subject, ...session } = shotSession();
+for (const scoped of [false, true]) it(`clears requested image size on Codex while retaining shot intent (${scoped})`, async () => {
+  const { subject, ...unscoped } = shotSession();
+  const session = scoped ? { ...unscoped, subject } : unscoped;
   session.composer.params = { kind: "image", count: 1, tier: "2K", aspect: "16:9" };
   const bench = await openBench(session, SESSION_ID, state => {
     state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex", displayName: "Codex Image",
@@ -361,7 +362,28 @@ it("clears requested image dimensions when a world Bench switches to Codex", asy
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
   const sent = bench.sent.findLast(message => message.kind === "bench-compose");
   assert.equal(sent?.kind, "bench-compose");
-  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1 });
+  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1, ...(scoped ? { aspect: "16:9" } : {}) });
+  assert.equal(select.querySelector('option[value="codex/codex-image"]')?.hasAttribute("disabled"), false);
+  if (scoped) assert.match(text(bench), /Composition · 16:9.*Image size chosen by provider/);
+});
+
+it("previews a provider-sized shot crop without changing its source or dispatching", async () => {
+  const session = shotSession();
+  const selected = session.takes[0]!;
+  selected.request.provider = "codex"; selected.request.model = "codex-image";
+  const bench = await openBench(session, SESSION_ID, state => {
+    state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex",
+      limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } });
+  });
+  const image = q(bench, '.fy-bench__image'), source = image.getAttribute("src");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  await pressLabelled(bench, "Preview 16:9 crop");
+  assert.equal(image.getAttribute("data-crop"), "true");
+  assert.equal(image.getAttribute("src"), source);
+  await pressLabelled(bench, "Full image");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  assert.equal(bench.sent.some(m => m.kind === "bench-dispatch" || m.kind === "bench-accept"), false);
+  assert.match(text(bench), /composition 16:9/);
 });
 
 it("opens Arke from a world Bench and sends into that session's conversation without a production", async () => {
