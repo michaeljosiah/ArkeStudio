@@ -1437,7 +1437,7 @@ function BenchWorkspace({
         back={back}
         aside={
           <>
-            <button type="button" className="fy-bench__chip" onClick={() => globalChat ? globalChat.open() : (() => { setChatOpened(true); setChatOpen(true); })()}>Ask Arke</button>
+            <button type="button" className={cx("fy-bench__chip", globalChat && "fy-bench__shared-chat")} onClick={() => globalChat ? globalChat.open() : (() => { setChatOpened(true); setChatOpen(true); })()}>Ask Arke</button>
             {/* The subject on a pill at the right (design 142a): the crumb on the left says
                 "Bench" and stops, so it can never run under the wordmark the way a chain of
                 five parts did. */}
