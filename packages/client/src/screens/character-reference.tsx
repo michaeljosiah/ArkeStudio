@@ -295,7 +295,7 @@ export function CharacterReferenceScreen() {
               downloadName={`${sheet.name} main photo`}
             />
             <span className="fy-reference-card__status" data-accepted={photo ? true : undefined}>
-              {photo ? "ACCEPTED · IDENTITY ANCHOR" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "OUTSTANDING"}
+              {photo ? "ACCEPTED · IDENTITY ANCHOR" : sheet.neverDepicted ? "NEVER DEPICTED" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "OUTSTANDING"}
             </span>
           </div>
           <div className="fy-reference-card__foot">
@@ -339,7 +339,7 @@ export function CharacterReferenceScreen() {
             ) : sheetPath ? (
               <CharacterSheetPreview worldSlug={world.meta.slug} path={sheetPath} characterName={sheet.name} />
             ) : (
-              <Portrait worldSlug={world.meta.slug} path="" label="Character sheet outstanding" radius={0} />
+              <Portrait worldSlug={world.meta.slug} path="" label={sheet.neverDepicted ? "Never depicted" : "Character sheet outstanding"} radius={0} />
             )}
             <span className={cx("fy-reference-card__status", stale && !showTake && "fy-reference-card__status--warn")} data-accepted={!runningSheet && !showTake && !stale && compilation ? true : undefined}>
               {runningSheet
@@ -350,6 +350,8 @@ export function CharacterReferenceScreen() {
                   ? "MAIN PHOTO CHANGED · REGENERATE"
                   : compilation
                     ? "ACCEPTED · CURRENT"
+                    : sheet.neverDepicted
+                      ? "NEVER DEPICTED"
                     : photo
                       ? "READY TO GENERATE"
                       : "WAITING ON MAIN PHOTO"}
