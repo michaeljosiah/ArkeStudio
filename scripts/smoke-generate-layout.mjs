@@ -48,18 +48,23 @@ window.mountLayout=async(route="cast",mode="normal")=>{
  renderer=createRoot(document.getElementById("root"));flushSync(()=>renderer.render(<MemoryRouter initialEntries={["/w/"+world.meta.worldId+"/"+route]}><Navigation/><App/></MemoryRouter>));await window.settleLayout();
 };
 window.measureLayout=()=>{
- const selectors=[".fy-takegrid",".fy-take--on",".fy-takes__verdict",".fy-gen__left",".fy-gen__center",".fy-gen__strip",".fy-gen__phone-foot",".fy-swrun",".fy-swlightbox",".fy-scene-back",".fy-sw__centre",".fy-sw__context",".fy-sw__toolbar",".fy-swrow__band",".fy-swrow__frame",".fy-swrow__body",".fy-swrow__actions",".fy-shot__strip",".fy-shot__frame",".fy-shot__body",".fy-shot__section",".fy-shot__camera",".fy-swstage__viewport",".fy-swstage__timeline",".fy-sw__rail",".fy-ledger .fy-row",".fy-row__thumb","dialog[open]"];
+ const selectors=[".fy-takegrid",".fy-take--on",".fy-takes__verdict",".fy-gen",".fy-gen__left",".fy-gen__center",".fy-gen__center .fy-bench__media",".fy-gen__center .fy-bench__wallactions",".fy-gen__strip",".fy-gen__phone-foot",".fy-swrun",".fy-swlightbox",".fy-scene-back",".fy-sw__centre",".fy-sw__context",".fy-sw__toolbar",".fy-swrow__band",".fy-swrow__frame",".fy-swrow__body",".fy-swrow__actions",".fy-shot__strip",".fy-shot__frame",".fy-shot__body",".fy-shot__section",".fy-shot__camera",".fy-swstage__viewport",".fy-swstage__timeline",".fy-sw__rail",".fy-ledger .fy-row",".fy-row__thumb","dialog[open]"];
  const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};const page=document.querySelector(".fy-sw__centre,.fy-prodmain");
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || !!(page&&page.scrollWidth>page.clientWidth+1),sideways:[...document.querySelectorAll('.fy-sw__centre,.fy-prodmain,.fy-shot__body')].filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/production-generate.tsx","packages/client/src/screens/production-takes.tsx","packages/client/src/components/take-dialogue-feedback.tsx","packages/client/src/screens/scene-workspace/frame-run.tsx","packages/client/src/screens/scene-workspace/lightbox.tsx","packages/client/src/screens/scene-workspace/workspace.tsx","packages/client/src/screens/scene-workspace/rows.tsx","packages/client/src/screens/scene-workspace/shot-page.tsx","packages/client/src/screens/scene-workspace/preview.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Generate artifacts: " + dir);
@@ -106,12 +111,32 @@ try {
 
 
   const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["fold",984,1092,true],["desktop",1360,850,false]]) {
+  for(const [name,width,height,touch,benchOnly=false] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["narrow",600,960,true,true],["tablet",820,1180,true,true],["fold",984,1092,true],["native-min",1024,790,false,true],["desktop",1360,850,false]]) {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');
     for(const [label,route,mode] of [["takes","p/saltlight/generate?shot=sh_12","normal"],["bench","p/saltlight/generate?view=bench&shot=sh_12","normal"],["contact","p/saltlight/generate?view=stills","stills"],["frames","p/saltlight/scenes/sc_04","normal"],["unavailable","p/saltlight/scenes/sc_04","unavailable"],["running","p/saltlight/scenes/sc_04","running"],["completed","p/saltlight/scenes/sc_04","completed"]]) {
+      if(benchOnly&&label!=='bench')continue;
       await js('window.mountLayout('+JSON.stringify(route)+','+JSON.stringify(mode)+')');await check(name+'-'+label);
+      if(label==='bench'&&!baseline&&width>=600&&width<1100) {
+        const geometry=(await js('window.measureLayout()')).geometry;
+        const brief=geometry['.fy-gen__left'],preview=geometry['.fy-gen__center'],strip=geometry['.fy-gen__strip'];
+        const workspaceWidth=await js('document.querySelector(".fy-gen").clientWidth');
+        assert.ok(preview.width>=200,name+': preview remains large enough to inspect');
+        if(width>=768) {
+          assert.ok(Math.abs(preview.width-(workspaceWidth-brief.width))<=1,name+': preview fills the remaining column');
+          assert.ok(Math.abs(preview.x-(brief.x+brief.width))<=1,name+': preview follows the brief');
+        } else {
+          assert.ok(Math.abs(preview.width-workspaceWidth)<=1,name+': narrow preview uses the page width');
+          assert.ok(brief.y>=strip.y+strip.height-1,name+': narrow brief follows the preview and take strip');
+        }
+        assert.ok(Math.abs(strip.x-preview.x)<=1&&Math.abs(strip.width-preview.width)<=1,name+': take strip is under the preview column');
+        const media=geometry['.fy-gen__center .fy-bench__media'];
+        assert.ok(media.width>=preview.width-30&&media.height>=150,name+': media occupies the preview');
+        assert.ok(strip.y>=preview.y+preview.height-1,name+': take strip follows the preview');
+        const decisions=await js('[...document.querySelectorAll(".fy-gen__center .fy-bench__wallactions button")].map(e=>e.getBoundingClientRect().toJSON())');
+        assert.ok(decisions.every(b=>b.left>=preview.x&&b.right<=preview.x+preview.width+1&&b.bottom<=strip.y+1),name+': decisions fit the preview column');
+      }
       if(label==='takes'&&!baseline) {
         await click('.fy-takes__verdict > button:last-child');await check(name+'-reject');
         await click('.fy-reject-take__citations button:last-child');
