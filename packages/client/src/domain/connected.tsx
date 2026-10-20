@@ -71,11 +71,14 @@ export function ConnectedProposalPanel({
             )}
           </div>
           {activity.lines.length > 0 && (
-            <ul className="dom-authoring__lines">
-              {activity.lines.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
+            <details className="dom-authoring__activity">
+              <summary>Drafting activity</summary>
+              <ul className="dom-authoring__lines">
+                {activity.lines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
       )}

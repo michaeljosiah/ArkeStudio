@@ -513,3 +513,34 @@ describe("undrafted briefs (#1916)", () => {
     } finally { await unmount(root, container); }
   });
 });
+
+describe("proposal reading order (#1982)", () => {
+  for (const folder of ["locations", "characters", "factions"]) it(`keeps ${folder} prose first and setup details available`, async () => {
+    const proposal = staged(`${folder}/review.md`, "sheet-edit");
+    const target = proposal.review!.targets[0]!;
+    target.action = "create";
+    target.fields = [{ field: "Region", before: null, proposed: "None", metadata: true }, { field: "Look", before: null, proposed: "A clear public passage." }];
+    __setStateForTest(stateWith([proposal]), { authoring: { [PROPOSAL_ID]: { status: "completed", lines: ["Read 12 files", "Wrote sheet"] } } });
+    const messages: ClientMessage[] = []; __setBridgeForTest(bridge(messages));
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+    try {
+      await act(async () => root.render(<ConnectedProposalPanel staged={proposal} />));
+      assert.equal(container.querySelector(".dom-review__field .dom-review__name")?.textContent, "Look");
+      const metadata = container.querySelector("details.dom-review__metadata")!;
+      assert.ok(metadata); assert.equal(metadata.hasAttribute("open"), false);
+      assert.match(metadata.textContent ?? "", /Region.*None/);
+      assert.equal(container.querySelector(".dom-authoring__activity")?.hasAttribute("open"), false);
+      assert.match(container.querySelector(".dom-authoring__activity")?.textContent ?? "", /Read 12 files/);
+      assert.match(container.textContent ?? "", /drafting completed/);
+      assert.match(container.textContent ?? "", /Two citations may need review/);
+      await act(async () => button(container, "Accept").click());
+      assert.ok(messages.some(m => m.kind === "proposal-accept"));
+      target.action = "amend";
+      target.fields = [{ field: "Role", before: "Keeper", proposed: "", metadata: true }, { field: "Old section", before: "Old prose", proposed: null }];
+      await act(async () => root.render(<ConnectedProposalPanel staged={{ ...proposal }} />));
+      assert.equal(container.querySelector(".dom-review__metadata"), null, "edits and cleared metadata stay visible");
+      assert.match(container.textContent ?? "", /Keeper/);
+      assert.match(container.textContent ?? "", /removed/);
+    } finally { await unmount(root, container); }
+  });
+});
