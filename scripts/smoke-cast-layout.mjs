@@ -115,18 +115,23 @@ try {
    await size(width,850,width<1100);await cdp("Emulation.setTouchEmulationEnabled",{enabled:width<1100});
    await js('document.documentElement.style.zoom="";window.mountLayout("cast/maren-kest",'+JSON.stringify(mode)+')');
    const original=await js('document.querySelector(".fy-sheet").textContent');
-   const identity=await js('(()=>{const sheet=document.querySelector(".fy-sheet"),side=sheet.querySelector(".fy-sheet__side"),details=sheet.querySelector(".fy-sheet__details"),nav=document.querySelector(".fy-pillnav"),style=getComputedStyle(sheet);return{sheet:sheet.getBoundingClientRect().toJSON(),contentWidth:sheet.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),side:side.getBoundingClientRect().toJSON(),details:details.getBoundingClientRect().toJSON(),nav:nav.getBoundingClientRect().toJSON()}})()');
+   const identity=await js('(()=>{const sheet=document.querySelector(".fy-sheet"),side=sheet.querySelector(".fy-sheet__side"),main=sheet.querySelector(".fy-sheet__main"),details=sheet.querySelector(".fy-sheet__details"),nav=document.querySelector(".fy-pillnav");return{sheet:sheet.getBoundingClientRect().toJSON(),main:main.getBoundingClientRect().toJSON(),side:side.getBoundingClientRect().toJSON(),details:details.getBoundingClientRect().toJSON(),nav:nav.getBoundingClientRect().toJSON()}})()');
    assert.ok(identity.sheet.y>=identity.nav.bottom,"navigation sits outside the reading scroll area");
-   assert.ok(identity.details.width>=identity.contentWidth-1,"details use the available page width");
+   assert.ok(Math.abs(identity.details.x-identity.main.x)<=1 && identity.details.right<=identity.main.right+1,"turn 161: prose stays in the identity column beside the portrait");
+   if(width>=1100&&mode==="normal")assert.ok(identity.details.y<identity.side.bottom,"short prose starts beside the reference images, not below them");
    await js('document.querySelector(".fy-sheet__grid > div:last-child").scrollIntoView({block:"start"});window.settleLayout()');
    await check('reading-'+width+'-'+mode);
    assert.equal(await js('document.querySelector(".fy-sheet").textContent'),original,"scrolling retains every section and control");
    assert.ok(await js('(()=>{const section=document.querySelector(".fy-sheet__grid > div:last-child"),sheet=document.querySelector(".fy-sheet");return section.getBoundingClientRect().top>=sheet.getBoundingClientRect().top-1})()'),"reached heading remains below navigation");
-   // Enlarged prose exercises text scaling; narrow CSS widths also cover browser zoom reflow.
-   await js('document.querySelector(".fy-sheet__details").style.fontSize="125%";document.querySelectorAll(".fy-sheet__secbody").forEach(e=>e.style.fontSize="125%");window.settleLayout()');
+   // Text scaling retains the viewport. Browser zoom halves the CSS viewport so media
+   // queries reflow too; CSS zoom would enlarge desktop columns without changing them.
+   await js('document.querySelectorAll(".fy-sheet__secbody").forEach(e=>e.style.fontSize=parseFloat(getComputedStyle(e).fontSize)*2+"px");window.settleLayout()');
    await check('reading-'+width+'-'+mode+'-large-text');
-   await js('document.documentElement.style.zoom="125%";window.settleLayout()');
-   await check('reading-'+width+'-'+mode+'-zoom');
+   if(width>=640) {
+    await size(Math.round(width/2),425,false);
+    await js('window.mountLayout("cast/maren-kest",'+JSON.stringify(mode)+')');
+    await check('reading-'+width+'-'+mode+'-zoom');
+   }
   }
   for(const [name,width,height,touch] of reading?[]:[["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
    if(only&&only!==name)continue;
@@ -171,13 +176,21 @@ try {
   if (!baseline) for (const [name,id,pairs] of [
     ["phone-cast","cs161a1",[[".fy-feature",".feat"],[".fy-feature__frame",".feat img"],[".fy-ledger .fy-row",".ledger .row"]]],
     ["phone-locations","cs161a3",[[".fy-kind-grid .fy-gridcard",".pcard"]]],
-    // Character detail now owns a scrollbar below navigation (#1996), so its available
-    // width differs from turn 161. The reading matrix checks its bounds and prose instead.
   ]) {
     const actual=records.find(r=>r.name===name),expected=masterRecords.find(r=>r.id===id);
     if(actual) for(const [app,master] of pairs) for(const key of ["x","y","width","height"])
       // The current shared app titlebar is 48px; turn 161's is 52px. Compare the cast beneath it.
       assert.ok(Math.abs(actual.geometry[app][key]-expected.geometry[master][key]-(key==="y"?actual.geometry[".fy-titlebar"].height-expected.chromeHeight:0))<.1,`${name} ${app} ${key} differs from master`);
+  }
+  if(!baseline) {
+    const actual=records.find(r=>r.name==="fold-cast-maren-kest")?.geometry[".fy-sheet__grid"];
+    const expected=masterRecords.find(r=>r.id==="cs161d")?.geometry[".secgrid"];
+    // The live sheet has a scrollbar and authored text of different lengths. Its prose must
+    // still occupy the master's identity column; comparing only overflow missed #2020.
+    if(actual&&expected) {
+      assert.ok(Math.abs(actual.x-expected.x)<=1,"character prose starts in the master column");
+      assert.ok(actual.width<=expected.width+1&&actual.width>=expected.width-18,"character prose keeps the master width, allowing its scrollbar");
+    }
   }
   console.log(JSON.stringify({directory:dir,checks:records.length,baseline:baselineRef}));
 }finally{socket?.close();child.kill();await new Promise(r=>server.close(r));}

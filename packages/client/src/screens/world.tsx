@@ -2344,7 +2344,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         }
         onUndo={lifecycle.undo}
       />
-      {!isCharacter && details}
+      {isCharacter ? <div className="fy-sheet__details">{details}</div> : details}
     </div>
   );
   if (isCharacter) {
@@ -2353,7 +2353,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {phone && header}
         {side}
         {main}
-        <div className="fy-sheet__details">{details}</div>
       </div>
     );
   }
