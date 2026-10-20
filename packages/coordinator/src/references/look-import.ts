@@ -29,7 +29,8 @@ export async function importCharacterLook(
   const existing = store.getBundle().referenceTakes.find(take => take.params["requestId"] === input.requestId);
   if (existing) {
     if (existing.kind !== "look" || existing.reference?.sheetId !== input.sheetId ||
-      existing.params["uploadedHash"] !== sha256(data) || existing.params["lookKind"] !== input.lookKind || existing.params["lookPrompt"] !== input.name)
+      existing.params["uploadedHash"] !== sha256(data) || existing.params["sourceFilename"] !== file.name ||
+      existing.params["lookKind"] !== input.lookKind || existing.params["lookPrompt"] !== input.name)
       throw new Error("This import request changed. Choose the image again.");
     return existing;
   }

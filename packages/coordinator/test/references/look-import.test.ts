@@ -36,6 +36,7 @@ describe("finished character look import", () => {
       const replay = await importCharacterLook(store, input(), () => true);
       assert.equal(replay.id, take.id);
       await assert.rejects(importCharacterLook(store, { ...input(), name: "Different" }, () => true), /request changed/);
+      await assert.rejects(importCharacterLook(store, { ...input(), files: [{ ...input().files[0]!, name: "renamed.png" }] }, () => true), /request changed/);
       await store.close();
       const reopened = await WorldStore.open(dir);
       try { assert.ok(reopened.getBundle().referenceTakes.some(row => row.id === take.id)); }
