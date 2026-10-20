@@ -6236,6 +6236,8 @@ const doorAsked = new Map<string, { key: string; seq: number; stamp: string }>()
 const doorInFlight = new Map<string, { requestId: string; stamp: string; sentAt: number }>();
 const doorWanted = new Map<string, string>();
 const doorLanded = new Map<string, { seq: number; stamp: string }>();
+/** Shared by the page and rail, including route remounts during a read. */
+const doorSources = new Map<string, string>();
 let doorSeq = 0;
 /**
  * An ask out longer than this is presumed lost: the coordinator says nothing to an ask for a
@@ -6253,6 +6255,7 @@ function forgetDoorAsks(): void {
   doorInFlight.clear();
   doorWanted.clear();
   doorLanded.clear();
+  doorSources.clear();
 }
 
 /**
@@ -6260,9 +6263,13 @@ function forgetDoorAsks(): void {
  * `audiobook.door`. `stamp` is what the answer depends on, as `useAudiobookDoorStamp` says it:
  * an ask for the stamp already out, or already answered, sends nothing.
  */
-export function openAudiobook(worldId: string, productionId: string, stamp = ""): string | null {
+export function openAudiobook(worldId: string, productionId: string, stamp = "", manuscript?: { source: string; reading: boolean }): string | null {
   const key = `${worldId}/${productionId}`;
   const flying = doorInFlight.get(key);
+  if (manuscript !== undefined) {
+    if (manuscript.reading && current.audiobookDoor[productionId]?.door != null && doorSources.get(key) === manuscript.source && (flying === undefined || Date.now() - flying.sentAt < DOOR_LOST_MS)) return null;
+    doorSources.set(key, manuscript.source);
+  }
   if (flying !== undefined && Date.now() - flying.sentAt < DOOR_LOST_MS) {
     if (flying.stamp === stamp) doorWanted.delete(key);
     else doorWanted.set(key, stamp);

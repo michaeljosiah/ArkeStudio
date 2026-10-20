@@ -497,6 +497,20 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(asks(), before + 2, "the final take state is refreshed when the read stops");
   });
 
+  it("does not reprepare the book when the page remounts during unchanged narration", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const count = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = count();
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 26 }));
+    for (let visit = 0; visit < 2; visit++) {
+      await act(async () => m.root.render(null));
+      await act(async () => m.root.render(<MemoryRouter initialEntries={[ROUTE]}><Routes><Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}><Route path="story/audiobook" element={<AudiobookScreen />} /></Route></Routes></MemoryRouter>));
+      assert.equal(count(), before, "both consumers reuse the observed manuscript after remounting");
+      assert.match(all(m, '[data-testid="audiobook-row"]')[1]!.textContent ?? "", /reading/);
+    }
+  });
+
   it("a window that joins a run going elsewhere still asks for the door it has none of (codex on PR 1187)", async () => {
     const m = await mount(inkbound());
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };

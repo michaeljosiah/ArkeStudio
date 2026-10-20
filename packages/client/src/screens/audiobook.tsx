@@ -135,11 +135,9 @@ export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string 
   const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const chapterReading = useChapterReading(worldId, prodId);
   const source = JSON.stringify([worldId, prodId, chapterSources(production)]);
-  const askedSource = useRef<string | null>(null);
   useEffect(() => {
-    if (!enabled || !worldId || !prodId || production === null || connection !== "open" || (chapterReading && door !== null && askedSource.current === source)) return;
-    openAudiobook(worldId, prodId, stamp);
-    askedSource.current = source;
+    if (!enabled || !worldId || !prodId || production === null || connection !== "open") return;
+    openAudiobook(worldId, prodId, stamp, { source, reading: chapterReading });
   }, [enabled, worldId, prodId, production === null, connection, chapterReading, door === null, stamp, source]);
 }
 
