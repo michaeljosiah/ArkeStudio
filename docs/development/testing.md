@@ -822,17 +822,21 @@ pointing to it). The full React app and client cascade run against a local fixtu
 coordinator or provider. The script captures all eight turn 164 frames and exercises the phone
 list/New flow, row and conversation sheets, understood/Accept all, the Fold history drawer,
 filtered viewer navigation, swipe, Details/Escape, long text, overflow and a simulated bottom
-safe area. Widths include 360, 375, 390, 600, 860, 984 and 1360; the requested Fold viewport is
+safe area. Widths include 360, 375, 390, 600, 860, 984, 1024, 1200 and 1360; the requested Fold viewport is
 also checked at 984×1092. OS status bars are omitted from the matching master crops.
 
 The printed temporary directory contains PNGs, `measurements.json` and
 `master-measurements.json`. `--viewport phone` selects the 390px pass; `--baseline <revision>`
 captures desktop with the original screens for comparison. Fixture counts, record names and
-available commands stay truthful to app data; the master is the geometry reference.
+available commands stay truthful to app data. Turn 164 remains the phone/artifact geometry
+reference; World Chat's desktop split now carries the available height through its shared
+portal host and lets the author collapse notes (#1993). The smoke checks navigation/composer
+bounds, notes toggling and inner overflow. For native acceptance, prepare a disposable pending
+review and verify the unsent draft and action survive collapse/reload at 1024/1200/1536px.
 
 Run `test/chat-artifacts-layout.test.tsx` from the client package alongside `world-chat`,
 `artifact-viewers`, `artifacts` and `production-artifacts`. It covers command revision binding,
-phone New, menu confirmation, reply read/copy controls and filtered navigation that retains the selected artifact across
+empty/nonempty desktop notes, phone New, menu confirmation, reply read/copy controls and filtered navigation that retains the selected artifact across
 live insertions. Typecheck after test edits.
 
 ## Productions on phones and Fold7

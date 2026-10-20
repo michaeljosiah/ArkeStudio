@@ -81,7 +81,7 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
     if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
-  return <div className="fy-global-chat-slot">{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></div>;
+  return <div className="fy-global-chat-slot fy-global-chat-slot--world">{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></div>;
 }
 
 export function GlobalChatProvider({ children }: { children: ReactNode }) {

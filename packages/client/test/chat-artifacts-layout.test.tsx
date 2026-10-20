@@ -14,7 +14,10 @@ import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, {
   innerWidth: 390, innerHeight: 797,
-  matchMedia: (query: string) => ({ matches: !query.includes("min-width") && query.includes("max-width"), addEventListener() {}, removeEventListener() {} }),
+  matchMedia: (query: string) => {
+    const min = query.match(/min-width:\s*(\d+)/)?.[1], max = query.match(/max-width:\s*(\d+)/)?.[1];
+    return { matches: !!(min || max) && (!min || dom.window.innerWidth >= Number(min)) && (!max || dom.window.innerWidth <= Number(max)), addEventListener() {}, removeEventListener() {} };
+  },
   getComputedStyle: () => ({ direction: "ltr" }),
 });
 Object.assign(dom.HTMLElement.prototype, {
@@ -29,11 +32,11 @@ afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined; dom.document.body.replaceChildren(); sent.length = 0;
   __setBridgeForTest(null); __setStateForTest(chatArtifactsFixture());
+  dom.window.innerWidth = 390;
 });
 const button = (text: string, within = dom.document as unknown as ParentNode) => [...within.querySelectorAll<HTMLButtonElement>("button")].find(node => node.textContent === text)!;
 const click = async (node: Element | null) => { assert.ok(node); await act(async () => (node as HTMLButtonElement).click()); };
-async function mount(route: string) {
-  const state = chatArtifactsFixture();
+async function mount(route: string, state = chatArtifactsFixture()) {
   __setStateForTest(state);
   __setBridgeForTest({ connect() {}, subscribe() { return () => {}; }, send(raw: string) { sent.push(JSON.parse(raw)); } } as unknown as ArkeBridge);
   __connectionStatusForTest("open");
@@ -46,6 +49,35 @@ async function mount(route: string) {
   </Routes></MemoryRouter>));
   return state;
 }
+
+it("collapses empty desktop notes and keeps current notes and the composer mounted while toggling", async () => {
+  dom.window.innerWidth = 1200;
+  const state = chatArtifactsFixture(); state.worldChat!.points = [];
+  await mount(`chat/${CHAT_ID}`, state);
+  const side = dom.document.querySelector(".fy-gate__side")!;
+  const composer = dom.document.querySelector(".fy-cx")!;
+  assert.ok(side.hasAttribute("hidden"));
+  await click(button("Show notes"));
+  assert.equal(side.hasAttribute("hidden"), false);
+  assert.equal(button("Hide notes").getAttribute("aria-controls"), side.id);
+  await click(button("Hide notes"));
+  assert.ok(side.hasAttribute("hidden"));
+  assert.equal(dom.document.querySelector(".fy-cx"), composer);
+  assert.ok(!sent.some(command => command.kind === "world-chat-send" || command.kind === "world-chat-wrap-up"));
+});
+
+it("shows existing notes by default and lets the author reopen them without changing their revision", async () => {
+  dom.window.innerWidth = 1200;
+  const state = await mount(`chat/${CHAT_ID}`);
+  assert.equal(dom.document.querySelector(".fy-gate__side")!.hasAttribute("hidden"), false);
+  await click(button("Hide notes"));
+  assert.equal(button("Show notes (5)").getAttribute("aria-expanded"), "false");
+  await click(button("Show notes (5)"));
+  await click(button("Save"));
+  const saved = sent.find(command => command.kind === "world-chat-save-point");
+  assert.ok(saved?.kind === "world-chat-save-point");
+  assert.equal(saved.expectedCandidateRevision, state.worldChat!.points[0]!.revision);
+});
 
 it("lists phone conversations, keeps row actions in a sheet, and creates only on New", async () => {
   const state = await mount("chat");

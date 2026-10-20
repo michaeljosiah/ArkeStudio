@@ -1,6 +1,22 @@
 /* Turn 164 / SPEC-001 R-7. Commands and desktop composition retain their existing owners. */
 .fy-chatnav__age { display: none; }
 .fy-chat__accept { display: grid; gap: 8px; }
+.fy-chat__wrap .fy-gate__side[hidden] { display: none; }
+.fy-chat__wrap .fy-gate__head { flex-wrap: wrap; }
+.fy-chat__wrap .fy-gate__head > div:first-child { min-width: min(100%, 200px); }
+/* The shared conversation now sits inside a portal host. Carry the existing split's height
+   through that host so the transcript scrolls beneath the navigation and above its composer. */
+@media (min-width: 600px) {
+  .fy-content--fill > .fy-global-chat-slot--world { flex: 1; height: auto; min-width: 0; }
+  .fy-global-chat-slot--world > div, .fy-global-chat-slot--world .fy-global-chat-owner-body { flex: 1; min-width: 0; min-height: 0; }
+  .fy-global-chat-slot--world .fy-chat__wrap { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+  .fy-global-chat-slot--world .fy-chat__wrap > .fy-gate { flex: 1; flex-direction: row; min-width: 0; min-height: 0; }
+  .fy-global-chat-slot--world .fy-chat__wrap .fy-gate__side { width: clamp(260px, 32%, 360px); gap: 16px; overflow: hidden; }
+  .fy-global-chat-slot--world .fy-panel__body { flex: 1; min-height: 0; overflow-y: auto; }
+  .fy-global-chat-slot--world .fy-panel__group { flex: none; }
+  .fy-chat__wrap .fy-chat__turn.fy-chat__turn--action { width: 100%; max-width: 100%; min-width: 0; }
+  .fy-chat__wrap .fy-actioncard { min-width: 0; overflow-wrap: anywhere; }
+}
 .fy-artifacts-head { display: contents; }
 .fy-artifacts-title { font-size: 52px; }
 .fy-artifact-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); padding-top: 24px; }
