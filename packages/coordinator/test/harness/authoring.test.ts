@@ -524,6 +524,34 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     } finally { await store.close(); }
   });
 
+  it("retries a failed Stop while sharing an in-flight attempt (#1989)", async () => {
+    const { store, gate, proposal } = await setup();
+    const adapter = neverendingAdapter(), events: DomainEvent[] = [];
+    let started!: () => void, rejectStop!: (error: Error) => void, attempts = 0;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const dispatch = adapter.dispatchAsync!.bind(adapter), interrupt = adapter.interrupt!.bind(adapter);
+    adapter.dispatchAsync = async input => { const receipt = await dispatch(input); started(); return receipt; };
+    adapter.interrupt = async id => {
+      attempts++;
+      if (attempts === 1) await new Promise<void>((_resolve, reject) => { rejectStop = reject; });
+      else await interrupt(id);
+    };
+    const authoring = service(adapter, events);
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await ready;
+      const first = authoring.cancel(proposal.id), concurrent = authoring.cancel(proposal.id);
+      assert.equal(attempts, 1);
+      rejectStop(new Error("writer temporarily unreachable")); await Promise.all([first, concurrent]);
+      assert.equal(authoring.isRunning(proposal.id), true);
+      await authoring.cancel(proposal.id); await run;
+      assert.equal(attempts, 2);
+      assert.equal(authoring.isRunning(proposal.id), false);
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "cancelled");
+    } finally { await store.close(); }
+  });
+
   it("cancellation is immediate, stated, and costs nothing (R-13, D8)", async () => {
     const { store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];
