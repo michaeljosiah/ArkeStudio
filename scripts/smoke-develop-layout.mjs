@@ -112,7 +112,7 @@ try {
 
   const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
+  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",768,1024,true],["fold-narrow",852,1092,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');
@@ -144,13 +144,22 @@ try {
         }
       }
       if(label==='develop') {
+        if(width>=600) {
+          assert.ok(await js('document.querySelector(".fy-studio-canvas")?.getBoundingClientRect().height>=44'),name+' Canvas is reachable');
+          await click('.fy-studio-canvas');
+          assert.ok(await js('!!document.querySelector(".fy-production-studio__head")'));
+          await check(name+'-canvas-reopened');
+          await click('.fy-production-studio__head button:last-child');
+          assert.ok(await js('document.querySelector(".fy-studio-canvas")?.getBoundingClientRect().height>=44'));
+        }
         if(width<1100){await click('.fy-develop-model');await check(name+'-model');await escape();}
         if(width<600){
           assert.ok(await js('document.querySelector(".fy-develop-composer").getBoundingClientRect().bottom<=innerHeight+1'));
           await click('.fy-develop-composer .fy-thread-peek');await check(name+'-understood');
           assert.ok(await js('document.querySelector(".fy-develop-sheet[open] .fy-wrapup button").getBoundingClientRect().height>=44'));
           await escape();
-        }else if(width<1100)assert.equal(await js('document.querySelector(".fy-story__side").getBoundingClientRect().width'),340);
+        }else if(width<900)assert.equal(await js('getComputedStyle(document.querySelector(".fy-story__side")).display'),'contents');
+        else if(width<1100)assert.equal(await js('document.querySelector(".fy-story__side").getBoundingClientRect().width'),340);
         await js('(()=>{const e=document.querySelector(".fy-cx__editor");e.innerText="The harbour keeps its silence";e.dispatchEvent(new Event("input",{bubbles:true}));e.focus();})()');
         await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
         await js('window.settleLayout()');
