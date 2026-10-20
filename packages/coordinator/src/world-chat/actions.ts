@@ -1352,7 +1352,7 @@ function worldActionTargets(
     case "chapter-review": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
     case "production-chapter-order": {
       const titles = new Map(store.getBundle().productions.find(p => p.meta.id === action.productionId)?.chapters.map(c => [c.id, c.title]));
-      return action.orderedIds.map((id) => ({ kind: "chapter", id, label: titles.get(id) ?? id }));
+      return action.orderedIds.map((id) => ({ kind: "chapter", id, label: clipped(titles.get(id) ?? id, 200) ?? id }));
     }
     case "production-scene-order": return action.orderedIds.map((id) => ({ kind: "scene", id, label: id }));
     case "production-scene-delete":
@@ -2914,7 +2914,7 @@ async function sharedResourceProjection(
         permissionReason: "authored-change",
         body: {
           family: "command",
-          commands: payload.action.orderedIds.map((id, index) => ({ label: `${index + 1}. ${intent.targets.find(target => target.id === id)?.label ?? id}` })),
+          commands: payload.action.orderedIds.map((id, index) => ({ label: clipped(`${index + 1}. ${intent.targets.find(target => target.id === id)?.label ?? id}`, 200) ?? id })),
           expectedResult: `${label} appear in exactly this order.`,
           undoAvailable: true,
         },
