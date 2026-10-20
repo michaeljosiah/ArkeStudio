@@ -20,6 +20,7 @@ import {
   speechPlanLabel,
   formatSeconds,
   mainPhotoFor,
+  referenceKitCounts,
   pendingSheets,
   pendingWorldSheets,
   proposalDecisionOf,
@@ -33,6 +34,7 @@ import {
   type PendingSheet,
   type RippleItem,
   type Sheet,
+  type ReferenceKit,
   type WorldBundle,
   legacyVoiceModel,
   narratorLabelFor,
@@ -687,6 +689,14 @@ function SectionHead({ eyebrow, title, aside }: { eyebrow: string; title: string
  * Figures, not buttons: the tab row above already reaches all seven screens, and a second set of
  * doors to the same places is the inventory this page has twice been cleared of.
  */
+function referenceSummary(kit: ReferenceKit | null | undefined) {
+  const counts = referenceKitCounts(kit);
+  const parts = [[counts.photos, "main photo"], [counts.sheets, "sheet"], [counts.looks, "look"],
+    [counts.views, "view"], [counts.tiles, "tile"]] as const;
+  return { total: counts.total, detail: parts.filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`).join(" · ") || "No accepted references" };
+}
+
 function WorldGlance({ world }: { world: WorldBundle }) {
   const owned = worldSheets(world.sheets).filter((s) => s.retired !== true);
   const characters = owned.filter((s) => s.type === "character");
@@ -1227,8 +1237,9 @@ function SheetGrid({
   };
   const reachOf = (sheet: Sheet): string => {
     const refs = sheetRefs[sheet.id];
-    if (!refs) return "… refs · … productions";
-    return `${refs.tiles} ref${refs.tiles === 1 ? "" : "s"} · ${refs.productions.length} production${refs.productions.length === 1 ? "" : "s"}`;
+    const { total } = referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id));
+    const productions = refs ? `${refs.productions.length} production${refs.productions.length === 1 ? "" : "s"}` : "… productions";
+    return `${total} ref${total === 1 ? "" : "s"} · ${productions}`;
   };
   useEffect(() => {
     if (!worldId) return;
@@ -1324,7 +1335,7 @@ function SheetGrid({
                   key={sheet.id}
                   type="button"
                   className={cx("fy-row", featured?.id === sheet.id && "fy-row--selected")}
-                  aria-label={`${sheet.name}, ${sheet.status === "locked" ? "canon locked" : "sketch"}, ${reachOf(sheet)}${featured?.id === sheet.id ? ", featured" : ""}. Open sheet`}
+                  aria-label={`${sheet.name}, ${sheet.status === "locked" ? "canon locked" : "sketch"}, ${reachOf(sheet)}, ${referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id)).detail}${featured?.id === sheet.id ? ", featured" : ""}. Open sheet`}
                   onClick={() => navigate(detailPath(sheet.id))}
                 >
                   <div className="fy-row__thumb">
@@ -1351,7 +1362,7 @@ function SheetGrid({
                     reads as decoration; the head above already counts the two states, and the
                     row's own strip is where the rest of its facts are.
                   */}
-                  <span className="fy-row__meta">
+                  <span className="fy-row__meta" title={referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id)).detail}>
                     {sheet.status === "locked" ? "locked" : "sketch"} · {reachOf(sheet)}
                   </span>
                   <span className="fy-row__chev">
@@ -1862,6 +1873,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
@@ -2293,8 +2305,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <Section title="From this sheet">
           <div className="lay-stats">
             <div className="lay-stats__item">
-              <div className="lay-stats__value">{refs.tiles}</div>
-              <div className="lay-stats__label">reference tiles</div>
+              <div className="lay-stats__value">{references.total}</div>
+              <div className="lay-stats__label" title={references.detail}>accepted references</div>
             </div>
             <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>

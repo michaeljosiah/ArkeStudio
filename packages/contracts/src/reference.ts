@@ -506,6 +506,20 @@ export function lockedTiles(kit: ReferenceKit): ReferenceTile[] {
   return kit.tiles.filter((t) => t.status === "locked" && t.file !== undefined);
 }
 
+/** Accepted kit entries, including modern identity and looks rather than only legacy tiles. */
+export function referenceKitCounts(kit: ReferenceKit | null | undefined) {
+  const photo = kit ? mainPhotoFor(kit) : null;
+  const counts = {
+    photos: photo ? 1 : 0,
+    sheets: kit && designatedCompilation(kit) ? 1 : 0,
+    looks: kit?.looks?.length ?? 0,
+    views: kit ? orderedLocationViews(kit).length : 0,
+    // A legacy anchor is already the main photo; do not count its locked tile twice.
+    tiles: kit ? lockedTiles(kit).filter(tile => tile.file !== photo?.file).length : 0,
+  };
+  return { ...counts, total: Object.values(counts).reduce((sum, count) => sum + count, 0) };
+}
+
 /** The head-before-body gate (R-7, D4, D5): names what is outstanding, never just "no". */
 export function headGate(kit: ReferenceKit): { ready: boolean; outstanding: ReferenceAngle[] } {
   const locked = new Set(kit.tiles.filter((t) => t.status === "locked").map((t) => t.angle));
