@@ -11,6 +11,7 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { chatArtifactsFixture, CHAT_ID } from "./chat-artifacts-fixture.js";
 
 /**
  * The generation session (SPEC-036 R-23..R-25) is the Bench that design 142a draws, with the
@@ -461,6 +462,22 @@ describe("voice references (design 142: an option chip, not a disclosure)", () =
 });
 
 describe("the generation session's chrome and frame (design 142a)", () => {
+  it("opens the shot Bench conversation from the shared Chat control without sending or selecting a take", async () => {
+    const bench = await openBench(shotSession(), SESSION_ID, state => {
+      const chat = chatArtifactsFixture();
+      state.world!.conversations = [{ ...chat.world!.conversations[0]!, entryContext: { kind: "bench", sessionId: SESSION_ID } }];
+      state.worldChat = chat.worldChat;
+    });
+    const panel = () => dom.document.querySelector('.fy-global-chat');
+    await act(async () => q(bench, '[data-global-chat-trigger]').click());
+    assert.equal(panel()?.querySelector('header h2')?.textContent, "Bench Chat");
+    assert.ok(bench.sent.some(message => message.kind === "world-chat-open" && message.conversationId === CHAT_ID));
+    assert.ok(!bench.sent.some(message => ["world-chat-send", "bench-select-take", "bench-dispatch"].includes(message.kind)));
+    await act(async () => (panel()!.querySelector('[aria-label="Close Chat"]') as HTMLElement).click());
+    await act(async () => q(bench, '[data-global-chat-trigger]').click());
+    assert.equal(panel()?.querySelector('header h2')?.textContent, "Bench Chat");
+  });
+
   it("names the subject on a pill at the right, says Bench on the left, and keeps the world bench's switcher off", async () => {
     const bench = await openBench(shotSession());
     assert.equal(q(bench, '[data-testid="bench-subject-pill"]').textContent, "Shot 12 · Maren at the rail");

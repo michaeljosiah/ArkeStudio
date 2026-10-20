@@ -310,6 +310,7 @@
   .fy-bench__dispatch .ui-btn { min-height: 44px; }
   /* The crumb on one line: the back is its chevron, the session's name ends in an ellipsis
      (four lines of "Na Love or Juju / Untitled session" sat over the bar's icons). */
+  [data-screen="bench"] .fy-bench__shared-chat { display: none; }
   [data-screen="bench"] .fy-titlebar__side:first-child { flex-wrap: nowrap; }
   [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide { flex: none; width: 44px; height: 44px; padding: 0; justify-content: center; font-size: 0; }
   [data-screen="bench"] .fy-titlebar .fy-iconbtn--wide > svg { width: 20px; height: 20px; }
