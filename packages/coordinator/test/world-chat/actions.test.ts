@@ -2685,7 +2685,16 @@ it("verifies a fresh optional Bible receipt when preparing and approving a chapt
   }] });
   const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
   await appendTurn(w.log, one, prepared);await bindAll(w.lifecycle, prepared);
-  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.consequence, "Reorders the chapters shown below.");
+  assert.equal(card.shown.body.family, "command");
+  if (card.shown.body.family === "command") {
+    assert.deepEqual(card.shown.body.commands.map(command => command.label), orderedIds.map((id, index) =>
+      `${index + 1}. ${production.chapters.find(chapter => chapter.id === id)!.title}`), "#2013: show titles in the proposed order");
+  }
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.id), orderedIds, "#2013: labels do not replace stable identities");
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.label), orderedIds.map(id => production.chapters.find(chapter => chapter.id === id)!.title));
+  assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
   assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters].sort((a,b)=>a.order-b.order).map(c=>c.id), orderedIds);
   assert.equal(bibleFence(w.store.getBundle()), bible.observedRevisionOrDigest, "ordering leaves the Bible unchanged");
 });
