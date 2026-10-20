@@ -18,6 +18,13 @@
 .fy-sheet-inline-form__actions { display: flex; gap: var(--space-2); }
 .fy-sheet-links { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .fy-gridcard__foot--spaced { margin-top: 9px; }
+/* The portrait accompanies identity, not every paragraph. Details continue across the page
+   below that row; the sheet scrolls below navigation so a reached heading stays readable. */
+.fy-content:has(> .fy-sheet) { display: flex; flex-direction: column; overflow: hidden; }
+.fy-content > .fy-sheet { flex: 1; min-height: 0; overflow: auto; align-content: flex-start; flex-wrap: wrap; }
+.fy-sheet__details { flex: none; width: 100%; min-width: 0; display: grid; gap: var(--stack-loose); }
+.fy-sheet__details > .fy-sheet__grid { max-width: none; }
+.fy-sheet__details .fy-sheet__secbody { font-size: var(--text-sm); line-height: 1.6; }
 
 @media (max-width: 1099px) {
   .fy-cast-mobile-head { padding: 26px 48px 0; }
@@ -174,6 +181,7 @@
   .fy-props-card > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fy-props-create .ui-btn, .fy-props-create .ui-input { min-height: 44px; }
   .fy-sheet { flex-direction: column; gap: 20px; padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .fy-content > .fy-sheet { flex-wrap: nowrap; }
   .fy-sheet__header { display: block; width: 100%; }
   .fy-sheet__eyebrow { font: var(--type-label); letter-spacing: .16em; }
   .fy-sheet__heading { display: block; margin: 0; }
