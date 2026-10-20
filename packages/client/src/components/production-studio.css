@@ -83,7 +83,7 @@
 .fy-story__side :is(.dom-connected-proposal, .dom-proposal) { min-width: 0; grid-template-columns: minmax(0,1fr); }
 .fy-story__side :is(.dom-proposal__head, .dom-proposal__actions, .fy-develop-side__head) { flex-wrap: wrap; }
 .fy-story__side :is(.dom-proposal__actions, .fy-wrapup) .ui-btn { max-width: 100%; white-space: normal; }
-@media(max-width:599px) { .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0,1fr); } }
+@media(max-width:899px) { .fy-production-studio-owner[data-dock-owner="false"] .fy-production-studio-inline > div { grid-template-columns: minmax(0,1fr); } }
 
 /* The Canvas press (design turn 202c): with the Studio closed, the page's way back to its canvas,
    at the head's right. Closed, there was none but a card's Show. */
