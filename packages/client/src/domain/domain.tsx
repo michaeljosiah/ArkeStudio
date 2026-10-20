@@ -279,6 +279,7 @@ export function ProposalPanel({
   const openChoices = proposal.openChoices ?? [];
   return (
     <Card className="dom-proposal">
+      <div className="dom-proposal__content">
       <div className="dom-proposal__head">
         <Badge tone="warning">proposal</Badge>
         <span className="dom-proposal__kind mono">{proposal.kind}</span>
@@ -404,6 +405,7 @@ export function ProposalPanel({
       <div className="dom-proposal__touch-reasons">
         {(openChoices.length > 0 || acceptBlocked || unresolved.length > 0) && <p>{openChoices.length > 0 ? "Answer the question above before accepting." : acceptBlocked ?? "Resolve the conflicts above before accepting."}</p>}
         {onSendBack && <p>Send back reopens the conversation this came from.</p>}
+      </div>
       </div>
       <div className="dom-proposal__actions">
         {proposal.pendingReview ? (

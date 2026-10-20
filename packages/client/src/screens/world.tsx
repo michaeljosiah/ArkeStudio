@@ -1092,11 +1092,14 @@ function PendingSheetCards({
         );
       })}
       {selectedProposal && (
-        <ConnectedProposalPanel
-          key={selectedProposal.proposal.id}
-          staged={selectedProposal}
-          conversationPath={selectedProposal.proposal.targets[0]?.path}
-        />
+        <PageSheet open title={`Review ${selectedProposal.review?.targets[0]?.label ?? selectedProposal.proposal.summary}`} onClose={() => setSelected(null)} className="fy-sheet-proposal-review">
+          <ConnectedProposalPanel
+            key={selectedProposal.proposal.id}
+            staged={selectedProposal}
+            conversationPath={selectedProposal.proposal.targets[0]?.path}
+            onAccepted={() => setSelected(null)}
+          />
+        </PageSheet>
       )}
     </>
   );
@@ -1154,11 +1157,14 @@ function PendingSheetRows({
         );
       })}
       {selectedProposal && (
-        <ConnectedProposalPanel
-          key={selectedProposal.proposal.id}
-          staged={selectedProposal}
-          conversationPath={selectedProposal.proposal.targets[0]?.path}
-        />
+        <PageSheet open title={`Review ${selectedProposal.review?.targets[0]?.label ?? selectedProposal.proposal.summary}`} onClose={() => setSelected(null)} className="fy-sheet-proposal-review">
+          <ConnectedProposalPanel
+            key={selectedProposal.proposal.id}
+            staged={selectedProposal}
+            conversationPath={selectedProposal.proposal.targets[0]?.path}
+            onAccepted={() => setSelected(null)}
+          />
+        </PageSheet>
       )}
     </>
   );

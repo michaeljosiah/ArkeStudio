@@ -757,3 +757,4 @@ interpretations and every consolidated source. See the chapter-review guide for 
 Chapter review v3: contracts `effectiveReviewVerdict` enforces visibility limits and `validateReviewConflicts` bounds conservative reconciliation. The coordinator retains original verdicts and conflict members; the report exposes both reasons without restoring rejected claims (issue #1787).
 
 Untrusted reading links and the desktop new-window handler share contracts `external-links.ts` (absolute HTTP(S) only). Desktop `external-links.ts` enforces that boundary before the OS shell.
+Sheet-list proposals open the shared `PageSheet` from `world.tsx`; the existing connected proposal owns gate and revision commands. `cast.css` constrains only this review surface so its decision controls remain visible while content scrolls.
