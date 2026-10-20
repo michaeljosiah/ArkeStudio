@@ -1434,12 +1434,12 @@ function BenchWorkspace({
                 "Bench" and stops, so it can never run under the wordmark the way a chain of
                 five parts did. */}
             {provenance !== null && (
-              <span className="fy-bench__pill" data-testid="bench-subject-pill">
+              <span className="fy-bench__pill" data-testid="bench-subject-pill" title={`${provenance.title} · ${provenance.sub}`}>
                 {`${provenance.title} · ${provenance.sub}`}
               </span>
             )}
             {sessionSpend > 0 && (
-              <span className="fy-bench__pill" data-testid="bench-session-spend">
+              <span className="fy-bench__pill" data-testid="bench-session-spend" title={`${formatMicroUsd(sessionSpend)} this session`}>
                 {`${formatMicroUsd(sessionSpend)} this session`}
               </span>
             )}

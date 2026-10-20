@@ -252,13 +252,21 @@
    are fixed widths, so at 820 the take had 230 px between the composer and the strip and at 390
    the composer ran 410 px off the right edge. */
 .fy-bench__sessiontitle { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@media (min-width: 600px) {
+  /* The brand is centred on the window. Bound this side by its half-width and the native
+     caption reservation; only context pills may shrink, never the app controls (issue 1971). */
+  [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 48px); }
+  .is-desktop [data-screen="bench"] .fy-titlebar__side--right { max-width: calc(50% - 186px); }
+  [data-screen="bench"] .fy-titlebar__side--right > button { flex: none; white-space: nowrap; }
+  [data-screen="bench"] .fy-bench__pill { min-width: 0; }
+}
 @media (max-width: 899px) {
   /* The subject and spend pills cannot fit beside a centred wordmark here: on the desktop
      shell, whose right side gives 138 px to the window controls, they ran over "Arke Studio". */
   .fy-bench__pill { display: none; }
 }
 @media (max-width: 1099px) {
-  /* Under the wordmark's half-width even beside the desktop shell's 138 px of window controls. */
+  /* Keep context compact while the composer takes its narrower desktop width. */
   .fy-bench__pill { max-width: 160px; }
   /* Production Generate's grid at this width: a 340 composer, the take, the takes under it. */
   .fy-bench { grid-template-columns: 46px 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
