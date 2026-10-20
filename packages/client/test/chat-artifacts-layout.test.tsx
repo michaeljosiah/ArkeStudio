@@ -8,7 +8,7 @@ import type { ClientMessage } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { ArtifactsScreen } from "../src/screens/world.js";
 import { WorldChatScreen } from "../src/screens/world-chat.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -77,6 +77,31 @@ it("shows existing notes by default and lets the author reopen them without chan
   const saved = sent.find(command => command.kind === "world-chat-save-point");
   assert.ok(saved?.kind === "world-chat-save-point");
   assert.equal(saved.expectedCandidateRevision, state.worldChat!.points[0]!.revision);
+});
+
+it("keeps final-point ripple feedback visible, including after the author collapsed notes", async () => {
+  dom.window.innerWidth = 1200;
+  const state = await mount(`chat/${CHAT_ID}`);
+  await click(button("Hide notes"));
+  await act(async () => {
+    __setStateForTest({ ...state, worldChat: { ...state.worldChat!, points: [] } });
+    __applyEventForTest({ type: "world-chat.ripples", at: "2026-10-20T06:00:00Z", worldId: state.world!.meta.worldId,
+      conversationId: CHAT_ID, requestId: "final-point", items: [{ kind: "gains-cross-reference", summary: "CANON-018 gains a cross-reference.", targets: ["CANON-018"] }] });
+  });
+  assert.equal(dom.document.querySelector(".fy-gate__side")!.hasAttribute("hidden"), false);
+  assert.match(dom.document.querySelector(".fy-chat__accept")!.textContent!, /CANON-018 gains a cross-reference/);
+  await click(button("Dismiss"));
+  assert.equal(dom.document.querySelector(".fy-panel__refused"), null);
+});
+
+it("reveals an Accept all refusal even when the notes pane was empty", async () => {
+  dom.window.innerWidth = 1200;
+  const state = chatArtifactsFixture(); state.worldChat!.points = [];
+  await mount(`chat/${CHAT_ID}`, state);
+  await act(async () => __applyEventForTest({ type: "world-chat.wrap-up-refused", at: "2026-10-20T06:00:00Z",
+    conversationId: CHAT_ID, requestId: "wrap-refused", reason: "stale", detail: "A choice still needs your answer." }));
+  assert.equal(dom.document.querySelector(".fy-gate__side")!.hasAttribute("hidden"), false);
+  assert.match(dom.document.querySelector(".fy-panel__refused")!.textContent!, /A choice still needs your answer/);
 });
 
 it("lists phone conversations, keeps row actions in a sheet, and creates only on New", async () => {

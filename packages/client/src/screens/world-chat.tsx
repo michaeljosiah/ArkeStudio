@@ -513,6 +513,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const rippleNotice = useWorldChatRipples(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
   const [wrappingUp, setWrappingUp] = useConversationState("wrappingUp", false);
+  // Saving the last point can empty the notes before its result arrives. Reveal that news
+  // even if notes were collapsed, so a ripple waiting for Dismiss cannot strand navigation.
+  useEffect(() => {
+    if (rippleNotice || (wrapUpRefusal && !wrappingUp)) setNotesVisible(true);
+  }, [rippleNotice, wrapUpRefusal, wrappingUp]);
   /**
    * Points with a decision in flight.
    *

@@ -40,6 +40,11 @@ ${styles}
 let renderer;
 function Navigation() { window.go = useNavigate(); return null; }
 window.settleLayout = async () => { await new Promise(r => setTimeout(r, 700)); await document.fonts.ready; };
+window.feedbackForLayout = async () => {
+  const state=structuredClone(window.fixture);state.worldChat.points=[];__setStateForTest(state);
+  __applyEventForTest({type:"world-chat.ripples",at:new Date().toISOString(),worldId:state.world.meta.worldId,conversationId:CHAT_ID,requestId:"layout-final-point",items:[{kind:"gains-cross-reference",summary:"CANON-018 gains a cross-reference.",targets:["CANON-018"]}]});
+  await window.settleLayout();
+};
 window.mountLayout = async (route="chat", mode="normal") => {
   renderer?.unmount();
   sessionStorage.clear();
@@ -138,6 +143,13 @@ try {
         await js('[...document.querySelectorAll(".fy-gate__head button")].find(e=>/notes/.test(e.textContent)).click();window.settleLayout()');
       }
       if(!baseline&&width===984&&route==="conversation"){assert.equal(m.geometry[".fy-chatnav"].width,48);assert.ok(m.geometry[".fy-gate__side"].width<=360);await js('[...document.querySelectorAll("button")].find(e=>e.getAttribute("aria-label")==="Show history").click();window.settleLayout()');await check(name,"history");assert.equal((await js("window.measureLayout()")).geometry[".fy-chatnav"].width,236);}
+      if(!baseline&&width>=600&&route==="conversation") {
+        await js('[...document.querySelectorAll(".fy-gate__head button")].find(e=>e.textContent==="Hide notes").click();window.feedbackForLayout()');
+        await check(name,"final-point-feedback");
+        assert.ok(await js('!document.querySelector(".fy-gate__side").hidden'));
+        assert.ok(await js('(()=>{const b=[...document.querySelectorAll(".fy-gate__side button")].find(e=>e.textContent==="Dismiss");const r=b.getBoundingClientRect();return r.y>=0&&r.bottom<=innerHeight})()'));
+        await js('[...document.querySelectorAll(".fy-gate__side button")].find(e=>e.textContent==="Dismiss").click();window.settleLayout()');
+      }
       if(!baseline&&width<600&&route==="chat") {
         assert.equal(await js('!!document.querySelector(".fy-chatnav--screen")'),true);
         await js('document.querySelector(".fy-chatnav__more").click();window.settleLayout()');await check(name,"row-menu");assert.ok(await js('!!document.querySelector(".fy-page-sheet[open]")'));await escape();
