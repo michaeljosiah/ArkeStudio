@@ -3135,6 +3135,8 @@ ${JSON.stringify(exampleTurnResult, null, 1)}
 
 ### Candidate operations
 
+An executable kind such as production-chapter belongs in actions[].kind, never a candidate classification. Correct a requested change in its typed action; do not replace it with advice.
+
 op is one of create | update | withdraw | split.
 
 - update: ${JSON.stringify(exampleOperations.update)}
@@ -3239,7 +3241,7 @@ Where the bible and Canon disagree, Canon is what the world has decided. Say so 
 
 ### World actions
 
-actions holds operations on the world or a production that the person decides on a card. The actions you can prepare this turn, with their fields and an example of each, are listed in this turn's context under "Actions you can prepare"; when an entry there is only a line, call describe_action through arke-world for its fields before you prepare it. Never send an action that is not listed there.
+actions holds operations reviewed on permission cards. Use only kinds listed under "Actions you can prepare" in this turn's context. For a compact entry, call describe_action through arke-world for fields, reads and an example.
 
 - Every action waits for Approve. Nothing you write in reply makes it happen, so never say it has happened.
 - checkReceiptIds carries the final complete receipts of the reads the action names; a partial or earlier-turn read is refused.
