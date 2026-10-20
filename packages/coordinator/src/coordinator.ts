@@ -144,6 +144,7 @@ import {
   type ConversationActionCard,
   type WorldChatContext,
   type Job,
+  type Take,
   type FrameRunQuote,
   type FrameRunState,
   voiceJobFormat,
@@ -556,6 +557,7 @@ import {
   recordUploadedPropImage,
 } from "./references/takes.js";
 import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
+import { importCharacterLook } from "./references/look-import.js";
 import { acceptPropStateReference, addPropState, createProp } from "./references/props.js";
 import {
   acceptMainPhoto,
@@ -19355,6 +19357,23 @@ export class Coordinator {
         );
         return;
       }
+      case "import-character-look": {
+        const store = this.opts.provider.openStore?.();
+        const report = (status: "landed" | "failed", takeId?: Take["id"], reason?: string) => this.emit({
+          type: "character-look.imported", at: this.nowIso(), worldId: msg.worldId, sheetId: msg.sheetId,
+          requestId: msg.requestId, status, ...(takeId ? { takeId } : {}), ...(reason ? { reason } : {}),
+        });
+        if (!store || store.worldId !== msg.worldId) {
+          report("failed", undefined, "Open this world before importing a look.");
+          return;
+        }
+        try {
+          const take = await importCharacterLook(store, msg, () => this.stillOpen(store) && !this.stopping);
+          await this.refreshIfStillOpen(store);
+          report("landed", take.id);
+        } catch (error) { report("failed", undefined, error instanceof Error ? error.message : "The look could not be imported."); }
+        return;
+      }
       case "accept-character-look": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -19372,6 +19391,7 @@ export class Coordinator {
           : undefined;
         const lookKind = take.params["lookKind"] ?? producingJob?.params["lookKind"];
         const lookPrompt = take.params["lookPrompt"] ?? producingJob?.params["lookPrompt"];
+        const lookName = msg.name?.trim() || (typeof take.params["lookName"] === "string" ? take.params["lookName"] : undefined);
         if (
           (lookKind !== "costume" && lookKind !== "pose-expression" && lookKind !== "condition-age") ||
           typeof lookPrompt !== "string" ||
@@ -19401,7 +19421,7 @@ export class Coordinator {
           file: `takes/${take.id}/${take.media}`,
           kind: lookKind,
           prompt: lookPrompt.trim(),
-          ...(msg.name?.trim() ? { name: msg.name.trim() } : {}),
+          ...(lookName ? { name: lookName } : {}),
           ...(take.jobId ? { jobId: take.jobId } : {}),
           takeId: take.id,
           artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,

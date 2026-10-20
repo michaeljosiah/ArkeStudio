@@ -790,6 +790,8 @@ area. `--baseline <revision>` captures the desktop before the change; `--viewpor
 and `--pages-only` help iterate on a bounded visual failure.
 Combine `--pages-only --route kit` to check Reference and portrait adoption without the other
 character surfaces; `--route` also accepts `looks` or `voice`.
+Add `--import-look` to `--pages-only --route looks` to check the file/name/type form, correlated
+failure and success receipts, and that import leaves acceptance to the existing gallery.
 
 The master's sheet starts 84px below the page area's top, after the 52px bar and 57px pill strip
 (193px in the app viewport). Character generation routes retain that phone backdrop while

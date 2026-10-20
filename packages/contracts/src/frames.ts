@@ -1830,6 +1830,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       choose: z.object({ productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), name: z.string().min(1).max(120).optional(), sheet: SlugSchema.optional() }).strict().optional(),
     })
     .strict(),
+  /** A finished image lands for the ordinary look review; no identity is accepted by import. */
+  z.object({
+    kind: z.literal("import-character-look"), worldId: UlidSchema, requestId: UlidSchema,
+    sheetId: SlugSchema, name: z.string().trim().min(1).max(60),
+    lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
+    files: BrowserMediaFilesSchema.refine(files => files.length === 1, "Choose one image for this look."),
+  }).strict(),
   z
     .object({
       kind: z.literal("rename-character-look"),

@@ -22,6 +22,7 @@ import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
+import { CharacterLookImport } from "../components/character-look-import.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -987,6 +988,7 @@ export function CharacterLooksScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [showOlder, setShowOlder] = useState(false);
   const [exploring, setExploring] = useState(false);
+  const [importing, setImporting] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const exploreRef = useRef<HTMLButtonElement>(null);
   // The scene dialog's `Add a look` door lands here with the scene named (SPEC-044 R-12): one
@@ -1031,10 +1033,13 @@ export function CharacterLooksScreen() {
           <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
             Explore more looks
           </Button>
+          <Button disabled={sheet.neverDepicted === true} title={sheet.neverDepicted ? "This character is never depicted" : undefined} onClick={() => setImporting(true)}>Import a look</Button>
           <p className="fy-looks-composer__mobile-note">Starts from the main photo. Looks never carry to a production by default.</p>
           {/* Only the refusal. What the anchor does for a look is the rule's to say. */}
           {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
+        {importing && <CharacterLookImport key={`${world.meta.worldId}/${sheetId}`} worldId={world.meta.worldId} sheetId={sheetId} characterName={sheet.name}
+          onClose={() => setImporting(false)} onImported={takeId => { setSelected(`take:${takeId}`); setImporting(false); }} />}
         <GenerationDialog
           characterDialog
           open={exploring}

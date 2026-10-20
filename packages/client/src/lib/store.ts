@@ -788,6 +788,12 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
 
 /** The audiobook's package, and the world's packages (design turn 186e): answered to the ask that named them. */
 export type AudiobookExported = Extract<DomainEvent, { type: "audiobook.exported" }>;
+export type CharacterLookImported = Extract<DomainEvent, { type: "character-look.imported" }>;
+const characterLookImportListeners = new Set<(answer: CharacterLookImported) => void>();
+export function subscribeCharacterLookImport(listener: (answer: CharacterLookImported) => void): () => void {
+  characterLookImportListeners.add(listener);
+  return () => { characterLookImportListeners.delete(listener); };
+}
 const audiobookExportedListeners = new Set<(answer: AudiobookExported) => void>();
 export function subscribeAudiobookExported(listener: (answer: AudiobookExported) => void): () => void {
   audiobookExportedListeners.add(listener);
@@ -1913,6 +1919,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
+    }
+    if (event.type === "character-look.imported") {
+      for (const listener of characterLookImportListeners) listener(event);
     }
     if (event.type === "audiobook.video-exported") {
       for (const listener of audiobookVideoExportedListeners) listener(event);
