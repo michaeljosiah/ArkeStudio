@@ -995,12 +995,16 @@ From the repository root, run `node scripts/smoke-scenes-layout.mjs`. It bundles
 
 Run `node scripts/smoke-generate-layout.mjs` from the repository root. It renders the actual
 takes, Advanced lens, contact sheet, generation dialog, run bar and Review at 360, 375, 390,
-984 and 1360 pixels, alongside all eight master frames. It exercises explicit rejection
+984 and 1360 pixels, alongside all eight master frames. Advanced lens also runs at 600, 820
+and the 1024px native minimum: the preview must fill its column, the take strip must follow
+it, and decision buttons must fit without overlap. At 600px the preview, strip and brief
+stack in the phone's order with in-flow tablet controls. It exercises explicit rejection
 citations, model availability, touch targets, native sheets, arrow navigation and a real touch
 swipe. The printed temporary directory keeps the PNGs and geometry. The fixture uses FFmpeg
 to make a local landscape clip; no provider is contacted. Set `ARKE_CHROME` if needed.
 
-Use `--viewport phone`, `--viewport fold`, or `--viewport desktop --hover` to narrow the run,
+Use `--viewport phone`, `--viewport narrow`, `--viewport tablet`, `--viewport fold`,
+`--viewport native-min`, or `--viewport desktop --hover` to narrow the run,
 and `--baseline <git-ref> --viewport desktop --hover` to compare the previous implementation.
 The `generate-layout.test.tsx` renderer suite covers payloads, offline rejection, variants
 acceptance and run commands; retain takes-view, frame-run and scene-workspace-preview tests.

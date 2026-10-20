@@ -43,6 +43,7 @@
   .fy-gen { display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-width: 0; overflow: auto; }
   .fy-gen__left { width: 340px; grid-column: 1; grid-row: 1 / 3; }
   .fy-gen__center { grid-column: 2; min-width: 0; }
+  .fy-gen__center .fy-bench__wallactions { flex-wrap: wrap; }
   .fy-gen__strip { grid-column: 2; width: 100%; display: flex; flex-direction: row; overflow-x: auto; border-left: 0; padding: 10px; gap: 8px; }
   .fy-gen__strip .fy-bench__take { flex: none; flex-direction: column; align-items: stretch; gap: 0; width: 84px; min-width: 84px; padding: 0; }
   .fy-gen__strip .fy-bench__taken { display: none; }
@@ -67,8 +68,18 @@
   .fy-swgen__panel { max-height: calc(100dvh - 32px); }
 }
 @media (pointer: coarse) {
+  .fy-gen__center .fy-bench__wallactions .ui-btn { min-height: 44px; height: auto; }
   .fy-swrun button, .fy-swrow__run button, .fy-swboard__failure button, .fy-swgen__scope button, .fy-swgen__models button, .fy-swgen__foot button, .fy-swgen__acknowledge { min-width: 44px; min-height: 44px; }
   .fy-swvariants__grid button { min-height: 44px; font: var(--type-ui); }
+}
+/* Below the two-column fit, reuse the phone's preview, strip, brief order while retaining
+   the tablet's in-flow decision controls and generation controls. */
+@media (min-width: 600px) and (max-width: 767px) {
+  .fy-gen { grid-template-columns: minmax(0, 1fr); grid-template-rows: max-content max-content max-content; align-content: start; }
+  .fy-gen__center { grid-column: 1; grid-row: 1; }
+  .fy-gen__center .fy-bench__media { min-height: 240px; }
+  .fy-gen__strip { grid-column: 1; grid-row: 2; }
+  .fy-gen__left { grid-column: 1; grid-row: 3; width: 100%; overflow: visible; }
 }
 @media (max-width: 599px) {
   .fy-generate-wrap { display: block; overflow: auto; scrollbar-width: none; }
@@ -268,11 +279,12 @@
 @media (max-width: 1099px) {
   /* Keep context compact while the composer takes its narrower desktop width. */
   .fy-bench__pill { max-width: 160px; }
-  /* Production Generate's grid at this width: a 340 composer, the take, the takes under it. */
+  /* Standalone Bench has a rail before its composer. Its third-column strip must not
+     create an implicit column in Production Generate's two-column grid (issue 2024). */
   .fy-bench { grid-template-columns: 46px 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   .fy-bench__rail, .fy-bench__composer { grid-row: 1 / 3; }
   .fy-bench__wall { grid-column: 3; grid-row: 1; }
-  .fy-bench__strip { grid-column: 3; grid-row: 2; flex-direction: row; gap: 8px; padding: 8px 14px 10px; overflow-x: auto; overflow-y: hidden; border-left: 0; border-top: 1px solid var(--border); background: var(--muted); }
+  .fy-bench > .fy-bench__strip { grid-column: 3; grid-row: 2; flex-direction: row; gap: 8px; padding: 8px 14px 10px; overflow-x: auto; overflow-y: hidden; border-left: 0; border-top: 1px solid var(--border); background: var(--muted); }
   .fy-bench__take { flex: none; flex-direction: column; align-items: stretch; gap: 3px; width: 84px; }
   .fy-bench__takeframe { flex: none; width: 84px; height: auto; aspect-ratio: 16 / 9; }
   .fy-bench__taken { order: 1; width: auto; text-align: left; }
