@@ -174,6 +174,7 @@ describe("the Audiobook door (turn 146)", () => {
     );
     assert.equal(q(m, '[data-testid="audiobook-bar"]'), null, "no read bar (199)");
     assert.equal(q(m, '[data-testid="read-book"]')?.textContent, "Read the book · 1 chapter", "a local narrator costs nothing, so no price rides on the press");
+    assert.equal(q(m, '[data-testid="audiobook-planned"]')?.textContent, "1 planned chapter excluded from book narration");
     assert.ok(!/\bis\b.*\bbecause\b/.test(text(m)), "no sentence explains the door");
     // The door is asked again as the book moves, and only the latest ask's answer stands: an
     // older answer arriving late, or one for another world, changes nothing (codex on PR 1187).
@@ -218,6 +219,11 @@ describe("the Audiobook door (turn 146)", () => {
     voiced.world = { ...voiced.world!, sheets: voiced.world!.sheets.map((sheet, index) => (index === 0 ? { ...sheet, voice: { provider: "elevenlabs", voiceId: "v_8Kq2", label: "Low tide", assignedAtVersion: 1 } } : sheet)) };
     await act(async () => __setStateForTest(voiced, kept()));
     assert.equal(asks(), asked + 3, "a sheet's voice asks the door again");
+    await answerDoor(m, door("narrator"));
+    const outlined = structuredClone(voiced);
+    outlined.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    await act(async () => __setStateForTest(outlined, kept()));
+    assert.equal(asks(), asked + 4, "a status-only outline change refreshes book eligibility");
     await answerDoor(m, door("narrator"));
     await act(async () => all(m, '[data-testid="audiobook-row-open"]')[1]!.click());
     assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row's chevron opens the chapter in its Audiobook view");

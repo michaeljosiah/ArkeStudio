@@ -238,6 +238,25 @@ async function narrate(h: Awaited<ReturnType<typeof setup>>, measured = true) {
   return { plan, takes };
 }
 describe("publication narration identity", () => {
+  it("refuses an outlined M4B selection even when its saved narration is current", async () => {
+    const h = await setup();
+    await narrate(h);
+    const settings = { ...h.settings, outputs: ["m4b"] as ("epub" | "m4b")[] };
+    const ready = await h.service.review(h.store, h.productionId, settings);
+    assert.deepEqual(ready.chapters[0]!.audioProblems, []);
+    const path = join(h.dir, "productions", h.productionId, "chapters", h.chapter.file + ".md");
+    const original = await readFile(path, "utf8");
+    const outlined = original.replace(/^status:.*$/m, "status: outlined");
+    assert.notEqual(outlined, original);
+    await writeFile(path, outlined);
+    await assert.rejects(h.service.review(h.store, h.productionId, settings), /Outlined chapters cannot be included/);
+    const preview = await h.service.preview(h.store, h.productionId, settings, ready.fingerprint, () => {});
+    assert.equal(preview.status, "failed");
+    assert.match(preview.error!, /Outlined chapters cannot be included/);
+    assert.deepEqual(preview.files, []);
+    assert.equal(await readFile(path, "utf8"), outlined, "refusal preserves the notes");
+  });
+
   it("checks source catalogue scope even when a saved source has no artifactId", async () => {
     const h = await setup(); await narrate(h);
     const { openAudioStudio, editAudioStudio } = await import("../../src/productions/audio-studio.js");

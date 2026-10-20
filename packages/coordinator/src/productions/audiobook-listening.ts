@@ -145,7 +145,7 @@ export async function audiobookListening(store: WorldStore, productionId: string
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const scope = options.scope ?? { kind: "book" };
-  const selected = production.chapters.filter((chapter) => !chapter.retired && (scope.kind === "book" || chapter.id === scope.chapterId));
+  const selected = production.chapters.filter((chapter) => !chapter.retired && (scope.kind === "book" ? chapter.status !== "outlined" : chapter.id === scope.chapterId));
   if (scope.kind === "chapter" && selected.length === 0) throw new Error("That chapter is no longer in this production.");
   const cover = await bookCover(store);
   const narrator = await anyNarrator(store, productionId);

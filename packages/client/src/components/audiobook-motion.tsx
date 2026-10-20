@@ -539,13 +539,13 @@ function MotionReadingPreview({
   const [plan, setPlan] = useState<AudiobookListening | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
-    const request = openAudiobookListening(worldId, productionId);
+    const request = openAudiobookListening(worldId, productionId, { kind: "chapter", chapterId });
     return subscribeAudiobookListening((answer) => {
       if (answer.requestId !== request) return;
       if (answer.listening === null) setProblem(answer.refused ?? "The reading could not open");
       else setPlan(answer.listening);
     });
-  }, [worldId, productionId]);
+  }, [worldId, productionId, chapterId]);
   useEffect(() => {
     if (host.current === null || plan === null) return;
     const chapter = plan.chapters.find((c) => c.chapterId === chapterId);

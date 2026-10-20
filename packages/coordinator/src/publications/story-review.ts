@@ -37,6 +37,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
   view.getBundle = () => scan.bundle;
   const selected = production.chapters.filter(chapter => !chapter.retired && settings.chapterIds.includes(chapter.id)).sort((a, b) => a.order - b.order);
   if (selected.length !== settings.chapterIds.length) throw new Error("The chapter selection changed. Choose the chapters again.");
+  if (settings.outputs.includes("m4b") && selected.some(chapter => chapter.status === "outlined")) throw new Error("Outlined chapters cannot be included in an audiobook edition. Finish their manuscript or leave them out of the selection.");
   const blockers: string[] = [], warnings: string[] = [];
   const rights = settings.outputs.includes("m4b") ? await readAudioRights(store) : [];
   const chapterPaths = new Set(selected.map(chapter => "productions/" + productionId + "/chapters/" + chapter.file + ".md"));

@@ -72,7 +72,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const records = useAudiobookRecords();
   const prefix = `${worldId}/${production.meta.id}/`;
   const planStamp = JSON.stringify([
-    production.chapters.filter((chapter) => scope.kind === "book" || chapter.id === scope.chapterId).map((chapter) => [chapter.id, chapter.version, chapter.audiobook]),
+    production.chapters.filter((chapter) => scope.kind === "book" || chapter.id === scope.chapterId).map((chapter) => [chapter.id, chapter.version, chapter.status, chapter.retired ?? false, chapter.bodyHash, chapter.audiobook]),
     Object.entries(records).filter(([key]) => scope.kind === "chapter" ? key === prefix + scope.chapterId : key.startsWith(prefix)).map(([key, record]) => [key, record.seq]),
   ]);
   const [subtitlesChosen, setSubtitlesChosen] = useState(false);

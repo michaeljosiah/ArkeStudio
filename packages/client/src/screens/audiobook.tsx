@@ -68,7 +68,7 @@ import {
  * book changes under it (turn 146).
  */
 
-type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
+type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; status?: string; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
 type DoorWorld = { sheets: readonly { id: string; narration?: string; retired?: boolean; voice?: { provider: string; voiceId: string } }[] };
 
 /**
@@ -100,7 +100,7 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
   );
   return JSON.stringify([
     production.audiobook ?? null,
-    production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
+    production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.status ?? "", c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
     narrator,
     sheets.map((sheet) => [sheet.id, sheet.voice ?? null, sheet.narration ?? null, sheet.retired === true]),
     catalogue === null
@@ -379,6 +379,7 @@ export function AudiobookScreen() {
     return { row: settled, reading: run?.state === "reading", run };
   });
   const bookSeconds = shown.reduce((sum, { row }) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  const plannedChapters = rows.filter(row => row.planned).length;
   // One meta line (rule 3): every chapter, planned ones included; the length; who reads it.
   const meta = [
     "Audiobook",
@@ -517,6 +518,7 @@ export function AudiobookScreen() {
             <div className="fy-abshow__acts" data-testid="audiobook-presses">
               {presses.map((press, index) => (press === null ? null : <Fragment key={index}>{press}</Fragment>))}
             </div>
+            {plannedChapters > 0 && <div className="fy-abshow__note" data-testid="audiobook-planned">{plannedChapters} planned chapter{plannedChapters === 1 ? "" : "s"} excluded from book narration</div>}
             {(bookNote !== null || note !== undefined) && (
               <div className="fy-abshow__note" data-testid="audiobook-note">
                 {bookNote !== null && (
