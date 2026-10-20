@@ -509,6 +509,10 @@ export const DRAMA_CAST_SCHEMA_VERSION = 94;
 export const DRAMA_ADAPTATION_SCHEMA_VERSION = 95;
 /** An audio drama episode's arrangement in Audio Studio (SPEC-057 R-67): `drama-mix/`, unknown before it. */
 export const DRAMA_MIX_SCHEMA_VERSION = 96;
+/** The narrator question's samples on the strict setup draft (230c, issue 1882): unreadable before it. */
+export const NARRATOR_SAMPLES_SCHEMA_VERSION = 97;
+/** What of an episode's mix was heard, with its notes (230o, issue 1882): a strict drama-mix field. */
+export const DRAMA_HEARD_SCHEMA_VERSION = 98;
 /** Optional look names are strict kit fields; older readers must refuse instead of dropping the kit. */
 export const LOOK_NAMES_SCHEMA_VERSION = 72;
 /**
@@ -993,6 +997,7 @@ export class Committer {
       files.some((f) => !!f.newContent && ((/^productions\/[^/]+\/audio-drama\.json$/.test(f.path) && "verdicts" in JsonFile.parse(f.newContent).value) ||
         (classify(f.path).track === "episode-script" && f.newContent.includes('"keptReason"')))) ? DRAMA_ADAPTATION_SCHEMA_VERSION : 0,
       files.some((f) => /^productions\/[^/]+\/drama-mix\//.test(f.path) && f.newContent != null) ? DRAMA_MIX_SCHEMA_VERSION : 0,
+      files.some((f) => /^productions\/[^/]+\/drama-mix\//.test(f.path) && !!f.newContent && "heard" in JsonFile.parse(f.newContent).value) ? DRAMA_HEARD_SCHEMA_VERSION : 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,

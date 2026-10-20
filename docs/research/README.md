@@ -13,6 +13,7 @@ in the design master or in a spec in the private specification set, and cites th
 | [The vertical microdrama format](microdrama-format.md) | 2026-10-08 | Microdrama defaults: episode length and count, paywall, episode template |
 | [Short drama for African audiences](african-short-drama.md) | 2026-10-08 | Defaults and presets for an African audience |
 | [From research to the agent: the adaptation method](adaptation-method.md) | 2026-10-08 | What Arke's agent does when a microdrama is adapted from a story in the world |
+| [AI tells](ai-tells.md) | 2026-10-19 | The chapter review's AI tells check: the six patterns, and density as the signal |
 
 ## How a note is written
 

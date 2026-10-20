@@ -452,3 +452,95 @@ describe("remaining single-act controls own their result", () => {
     }
   });
 });
+
+
+describe("sheet-list review stays outside the gallery (#1915)", () => {
+  for (const [route, path] of [["locations", "locations/review-room.md"], ["cast", "characters/review-keeper.md"], ["factions", "factions/review-watch.md"]]) {
+    it(`reviews and revises an attended ${route} proposal in the shared sheet`, async () => {
+      const proposal = staged(path!, "sheet-edit");
+      proposal.proposal.kind = "new-sheet";
+      proposal.proposal.summary = "New sheet: Review fixture";
+      proposal.proposal.targets[0]!.baseVersion = null;
+      proposal.proposal.targets[0]!.baseHash = null;
+      proposal.proposal.decision = { mode: "attended", owner: { kind: "surface", surface: "sheet-list", targetPath: path! } };
+      proposal.review!.targets[0]!.label = "Review fixture";
+      proposal.review!.targets[0]!.action = "create";
+      const mounted = await mount(`/w/${WORLD_ID}/${route}`, stateWith([proposal]));
+      try {
+        const opener = mounted.container.querySelector<HTMLButtonElement>(".fy-gridcard--pending, .fy-row--pending")!;
+        assert.ok(opener);
+        await act(async () => opener.click());
+        const dialog = document.querySelector<HTMLElement>("dialog.fy-sheet-proposal-review")!;
+        assert.ok(dialog);
+        assert.equal(mounted.container.querySelector(".dom-proposal"), null, "long review is outside the gallery");
+        assert.match(dialog.textContent ?? "", /Review fixture/);
+        await act(async () => button(dialog, "Accept").click());
+        assert.ok(document.contains(dialog), "click is not an acceptance receipt");
+        assert.ok(mounted.messages.some(m => m.kind === "proposal-accept" && m.proposalId === PROPOSAL_ID));
+        const composer = dialog.querySelector<HTMLTextAreaElement>("textarea")!;
+        await typeInto(composer, "Keep the public passage clear.");
+        await act(async () => button(dialog, "Revise").click());
+        assert.ok(mounted.messages.some(m => m.kind === "draft-with-studio" && m.proposalId === PROPOSAL_ID && m.path === path));
+        await act(async () => button(dialog, "Discard").click());
+        assert.ok(mounted.messages.some(m => m.kind === "proposal-discard" && m.proposalId === PROPOSAL_ID));
+        await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+        assert.equal(document.querySelector("dialog.fy-sheet-proposal-review"), null);
+        assert.ok(mounted.container.contains(opener), "closing review keeps the list card");
+      } finally { await unmount(mounted.root, mounted.container); }
+    });
+  }
+});
+
+
+describe("undrafted briefs (#1916)", () => {
+  for (const failed of [true, false]) it(`keeps the brief for retry ${failed ? "after failure" : "after reopening"}`, async () => {
+    const proposal = staged("locations/review-room.md", "sheet-edit");
+    proposal.review!.requiresDraft = true;
+    __setStateForTest(stateWith([proposal]), failed ? { authoring: { [PROPOSAL_ID]: { status: "failed", detail: "The configured model is unavailable.", lines: [] } } } : {});
+    const messages: ClientMessage[] = []; __setBridgeForTest(bridge(messages));
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+    try {
+      await act(async () => root.render(<ConnectedProposalPanel staged={proposal} conversationPath="locations/review-room.md" />));
+      assert.equal(button(container, "Accept").disabled, true);
+      assert.match(container.textContent ?? "", /saved brief/);
+      assert.equal(button(container, "Discard").disabled, false);
+      assert.equal(button(container, "Draft sheet").disabled, false);
+      await act(async () => button(container, "Draft sheet").click());
+      const request = messages.find(m => m.kind === "draft-with-studio");
+      assert.ok(request && request.kind === "draft-with-studio");
+      assert.equal(request.proposalId, PROPOSAL_ID);
+      assert.equal(request.path, "locations/review-room.md");
+    } finally { await unmount(root, container); }
+  });
+});
+
+describe("proposal reading order (#1982)", () => {
+  for (const folder of ["locations", "characters", "factions"]) it(`keeps ${folder} prose first and setup details available`, async () => {
+    const proposal = staged(`${folder}/review.md`, "sheet-edit");
+    const target = proposal.review!.targets[0]!;
+    target.action = "create";
+    target.fields = [{ field: "Region", before: null, proposed: "None", metadata: true }, { field: "Look", before: null, proposed: "A clear public passage." }];
+    __setStateForTest(stateWith([proposal]), { authoring: { [PROPOSAL_ID]: { status: "completed", lines: ["Read 12 files", "Wrote sheet"] } } });
+    const messages: ClientMessage[] = []; __setBridgeForTest(bridge(messages));
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+    try {
+      await act(async () => root.render(<ConnectedProposalPanel staged={proposal} />));
+      assert.equal(container.querySelector(".dom-review__field .dom-review__name")?.textContent, "Look");
+      const metadata = container.querySelector("details.dom-review__metadata")!;
+      assert.ok(metadata); assert.equal(metadata.hasAttribute("open"), false);
+      assert.match(metadata.textContent ?? "", /Region.*None/);
+      assert.equal(container.querySelector(".dom-authoring__activity")?.hasAttribute("open"), false);
+      assert.match(container.querySelector(".dom-authoring__activity")?.textContent ?? "", /Read 12 files/);
+      assert.match(container.textContent ?? "", /drafting completed/);
+      assert.match(container.textContent ?? "", /Two citations may need review/);
+      await act(async () => button(container, "Accept").click());
+      assert.ok(messages.some(m => m.kind === "proposal-accept"));
+      target.action = "amend";
+      target.fields = [{ field: "Role", before: "Keeper", proposed: "", metadata: true }, { field: "Old section", before: "Old prose", proposed: null }];
+      await act(async () => root.render(<ConnectedProposalPanel staged={{ ...proposal }} />));
+      assert.equal(container.querySelector(".dom-review__metadata"), null, "edits and cleared metadata stay visible");
+      assert.match(container.textContent ?? "", /Keeper/);
+      assert.match(container.textContent ?? "", /removed/);
+    } finally { await unmount(root, container); }
+  });
+});

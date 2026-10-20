@@ -1,4 +1,5 @@
 import { ChapterReviewControl } from "../components/chapter-review.js";
+import { parkedDrafts, parkedKey, type ParkedDraft } from "../lib/chapter-drafts.js";
 import { AudioStudioWorkspace } from "./audio-studio-workspace.js";
 import { AudioStudioPassagePanel } from "./audio-studio-passage-panel.js";
 import { Composer } from "../components/composer.js";
@@ -12,6 +13,7 @@ import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
   chapterParagraphs,
   countWords,
+  chapterManuscriptWords,
   paragraphSpans,
   passageOf,
   passageDiff,
@@ -194,6 +196,8 @@ const DRAWS_ON_LINE = "This chapter draws on ";
 
 type OpenedRecord = {
   body: string;
+  /** A successful outline replacement, retained until the authoritative summary is refreshed. */
+  drafted?: boolean;
   version: number;
   hash: string;
   versions: number[];
@@ -252,9 +256,7 @@ function flushAfter(
  * older save of the same screen carried, `landedBody`, if that is what is on disk — and says so
  * if the record has genuinely moved.
  */
-type ParkedDraft = { value: string; baseHash: string; landedBody: string | null; conflict?: boolean; cancel?: () => void };
-const parkedDrafts = new Map<string, ParkedDraft>();
-const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
+// Shared with Publish, which waits for these editor-owned saves before capturing the manuscript.
 
 /**
  * Asks from the passage menu, by chapter, until the dock is done with them (codex on PR 1232).
@@ -827,6 +829,8 @@ export function ChapterWorkspace({
         const savedBody = savedText.current;
         const saved = {
           body: savedBody ?? recordRef.current?.body ?? "",
+          drafted: recordRef.current?.drafted === true || (chapter.status === "outlined" && savedBody !== null &&
+            savedBody.trim() !== "" && savedBody.trim() !== recordRef.current?.body.trim()),
           version: result.version,
           hash: result.hash,
           versions: recordRef.current?.versions ?? [],
@@ -895,7 +899,7 @@ export function ChapterWorkspace({
         setReopen((n) => n + 1);
       }
     });
-  }, [flushSave]);
+  }, [flushSave, chapter.status]);
 
   /*
    * A save in flight when the transport drops never answers: the connection coming back brings
@@ -1317,8 +1321,13 @@ export function ChapterWorkspace({
   };
   const closeChapterExport = () => {
     setChapterExportOpen(false);
-    // A menu item is gone by the time a modal opens; return to its stable chapter action press.
-    requestAnimationFrame(() => chapterExportOpener.current?.isConnected && chapterExportOpener.current.focus({ preventScroll: true }));
+    // A menu item or the toolbar that opened it can be replaced as takes arrive under the sheet.
+    // Resolve the current chapter action when that original control is gone.
+    requestAnimationFrame(() => {
+      const opener = chapterExportOpener.current;
+      const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+      current?.focus({ preventScroll: true });
+    });
   };
   useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
@@ -1424,11 +1433,14 @@ export function ChapterWorkspace({
     },
   };
 
-  // The words of the text on screen once it is here; the summary's count only while it is not.
-  const words = record === null ? (chapter.words ?? 0) : countWords(text);
+  // Loaded outlines are planning text. A changed manuscript replacement counts while being
+  // typed, matching the status transition its normal save will make (issue 1960).
+  const savedStatus = record?.drafted === true ? "drafted" : chapter.status;
+  const manuscriptStatus = savedStatus === "outlined" && text.trim() !== "" && text.trim() !== live.trim() ? "drafted" : savedStatus;
+  const words = record === null ? (chapter.words ?? 0) : chapterManuscriptWords(text, manuscriptStatus);
   // A chapter is drafted once it has words, as the Chapters list counts it (issue 1827): the stored
   // status stays "planned" until the author sets one, which read as a chapter not yet written.
-  const shownStatus = chapter.status === "planned" && words > 0 ? "drafted" : chapter.status;
+  const shownStatus = manuscriptStatus === "planned" && words > 0 ? "drafted" : manuscriptStatus;
   const activeChapters = production.chapters.filter((c) => !c.retired);
   const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength, activeChapters.length);

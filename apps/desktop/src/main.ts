@@ -1,4 +1,6 @@
 import { pathToFileURL } from "node:url";
+import { webWindowOpenHandler } from "./external-links.js";
+import { storyPublicationFileFilter } from "./story-publication-file.js";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
@@ -29,6 +31,7 @@ import {
   ChildSupervisor,
   ComfyUiEngineService,
   Coordinator,
+  UNDERSONG_RELEASE,
   createStudioHost,
   localAudioListenerOptions,
   createNodeEffectRasterHost,
@@ -423,10 +426,12 @@ function registerHostIpc(): void {
     if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !coordinator ||
         !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
         typeof input.editionId !== "string" || typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
     const hit = await coordinator.storyPublicationFile(input.editionId, input.file);
     if (!hit || parent !== window || shuttingDown) return { ok: false };
     const chosen = await dialog.showSaveDialog(parent, { title: "Save edition", defaultPath: join(app.getPath("downloads"), hit.downloadName),
-      filters: [{ name: input.file.endsWith(".epub") ? "EPUB book" : "M4B audiobook", extensions: [input.file.endsWith(".epub") ? "epub" : "m4b"] }],
+      filters: [filter],
       properties: ["createDirectory", "showOverwriteConfirmation"] });
     if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true };
     const current = await coordinator?.storyPublicationFile(input.editionId, input.file);
@@ -438,9 +443,11 @@ function registerHostIpc(): void {
     if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !host ||
         !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
         typeof input.editionId !== "string" || !/^[a-f0-9-]{36}$/.test(input.editionId) ||
-        (input.file !== "story.epub" && input.file !== "story.m4b")) return { ok: false };
+        typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
     const chosen = await dialog.showOpenDialog(parent, { title: "Locate the same edition file", properties: ["openFile"],
-      filters: [{ name: "Edition file", extensions: [input.file === "story.epub" ? "epub" : "m4b"] }] });
+      filters: [filter] });
     if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true };
     if (parent !== window || host !== coordinator || shuttingDown) return { ok: false };
     try { await host.restoreStoryPublicationFile(input.editionId, input.file, chosen.filePaths[0]); return { ok: true }; }
@@ -656,10 +663,7 @@ async function createWindow(): Promise<void> {
     const allowed = process.env.ARKE_DEV_SERVER_URL ?? `file://${clientIndex.replace(/\\/g, "/")}`;
     if (!url.startsWith(allowed)) event.preventDefault();
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: "deny" };
-  });
+  window.webContents.setWindowOpenHandler(webWindowOpenHandler((url) => shell.openExternal(url)));
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();
@@ -1252,11 +1256,9 @@ async function initialize(): Promise<{ port: number }> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
-    // The sample world ships beside the other resources (SPEC-016 R-6, R-8), the same way
-    // ffmpeg and the harness binary do. Unpackaged there is no resources directory to read, so
-    // this build honestly has none; the dev coordinator points at the repo fixture instead, and
-    // that is where the feature is exercised from source.
-    sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
+    // The full story is an explicit, integrity-pinned download (SPEC-016 R-6, R-8).
+    // Test fixtures are never installer resources.
+    sampleWorldDownload: UNDERSONG_RELEASE,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     harnessLaunchEngine: chosenHarness,

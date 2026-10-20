@@ -2,25 +2,15 @@ import { WorldChatAudioStudioProposalActionSchema, type AudioStudioProposal, typ
 import type { WorldStore } from "../world/store.js";
 import type { FfmpegRunner } from "../takes/export.js";
 import type { ConversationActionAuthorityAdapter, PreparedConversationActionAuthority } from "../arke-actions/lifecycle.js";
-import { readAudiobook } from "../productions/audiobook.js";
-import { stageAudioStudioProposal } from "../productions/audio-studio.js";
+import { findAudioStudioProposal, stageAudioStudioProposal } from "../productions/audio-studio.js";
 
 const reviewRequired = "Open Audio Studio to compare Current and Suggested, then Keep Current or Apply Suggested.";
 
 /** Chat stages a command batch; only the editor's exact-version decision can apply it. */
 export function audioStudioProposalConversationAdapter(store: WorldStore, options: { ffmpeg?: FfmpegRunner } = {},
   changed?: (productionId: string, chapterId: string) => Promise<void>): ConversationActionAuthorityAdapter {
-  const find = async (actionId: string, productionId?: string) => {
-    const production = store.getBundle().productions.find(entry => entry.meta.id === productionId);
-    for (const chapter of production?.chapters ?? []) {
-      const record = await readAudiobook(store, productionId!, chapter.file);
-      if (record && record !== "unreadable") {
-        const family = record.audioStudioProposals?.find(entry => entry.versions.some(version => version.actionId === actionId));
-        if (family) return family;
-      }
-    }
-    return null;
-  };
+  // A chapter's record or an episode's mix (issue 1882): an episode's card no longer reads stale.
+  const find = async (actionId: string, productionId?: string) => productionId === undefined ? null : findAudioStudioProposal(store, productionId, actionId);
   const projection = (intent: ConversationActionPrepareIntent, family: AudioStudioProposal): PreparedConversationActionAuthority => {
     const version = family.versions.find(entry => entry.actionId === intent.actionId)!;
     return { authority: { kind: "voice", id: family.id }, authorityRevision: version.number, approvalBlockedReason: reviewRequired,

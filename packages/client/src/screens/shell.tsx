@@ -242,7 +242,7 @@ export function FirstRunScreen() {
                 className="fy-createcard fy-createcard--filled"
                 onClick={() => {
                   if (sample.installing) return;
-                  installSampleWorld();
+                  if (sample.download) navigate("/settings/sample-world"); else installSampleWorld();
                 }}
               >
                 <div className="fy-createcard__ring">
@@ -250,12 +250,11 @@ export function FirstRunScreen() {
                 </div>
                 <div className="fy-createcard__title">Or start from ours</div>
                 <div className="fy-createcard__sub">
-                  The Undersong: a cast, its canon, and a production part-way through. Yours to
-                  take apart.
+                  {sample.download ? "The Undersong: an illustrated novel and editable world. Audiobook and video unfinished. Download separately." : "The Undersong: a cast, its canon, and a production part-way through. Yours to take apart."}
                 </div>
                 <div style={{ marginTop: 4 }}>
                   <Button disabled={sample.installing}>
-                    {sample.installing ? "Installing…" : "Install the sample world"}
+                    {sample.installing ? "Installing…" : sample.download ? "Explore the story download" : "Install the sample world"}
                   </Button>
                 </div>
                 {sample.note?.refused === true && (
@@ -462,8 +461,8 @@ export function WorldPickerScreen() {
         </div>
         {worlds.length === 0 && sample?.available === true && (
           <div className="fy-home-sample">
-            <Button variant="ghost" disabled={sample.installing} onClick={() => installSampleWorld()}>
-              {sample.installing ? "Installing…" : "Install the sample world"}
+            <Button variant="ghost" disabled={sample.installing} onClick={() => sample.download ? navigate("/settings/sample-world") : installSampleWorld()}>
+              {sample.installing ? "Installing…" : sample.download ? "Explore the story download" : "Install the sample world"}
             </Button>
           </div>
         )}
@@ -2551,20 +2550,23 @@ export function SettingsSampleWorldScreen() {
         <span className="fy-set__aboutname">The Undersong</span>
         <span className="fy-set__aboutmeta">coastal fantasy · quiet dread</span>
       </div>
-      <div className="fy-set__aboutline">A drowned god still sings beneath the harbour.</div>
+      <div className="fy-set__aboutline">A harbour, its records, and the cost of calling it back.</div>
+      {sample?.download && <div className="fy-set__why" style={{ marginTop: 14, maxWidth: 720 }}>
+        <div><p>{sample.download.summary}</p><p>Release {sample.download.version} · {(sample.download.bytes / 1048576).toFixed(0)} MiB download. Internet required. Installs an editable copy in your library; existing worlds are never replaced.</p></div>
+      </div>}
 
       <div className="fy-set__row" style={{ marginTop: 14 }}>
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">Install a copy</div>
+          <div className="fy-set__title">{sample?.download ? "Download a copy" : "Install a copy"}</div>
           <div className="fy-set__caps">
-            {available ? "cast · canon · a production · a proposal" : "not in this build"}
+            {available ? sample?.download ? "Novel illustrated · audiobook and video unfinished" : "cast · canon · a production · a proposal" : "not available in this build"}
           </div>
         </div>
-        {available && (
+        {available && (isRemoteSession() ? <OnYourPC>download and install the story</OnYourPC> : (
           <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
-            {installing ? "Installing…" : "Install"}
+            {installing ? "Downloading / installing…" : sample?.download ? "Download and install" : "Install"}
           </Button>
-        )}
+        ))}
       </div>
 
       {sample?.note && (

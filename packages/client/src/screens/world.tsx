@@ -20,6 +20,7 @@ import {
   speechPlanLabel,
   formatSeconds,
   mainPhotoFor,
+  referenceKitCounts,
   pendingSheets,
   pendingWorldSheets,
   proposalDecisionOf,
@@ -33,6 +34,7 @@ import {
   type PendingSheet,
   type RippleItem,
   type Sheet,
+  type ReferenceKit,
   type WorldBundle,
   legacyVoiceModel,
   narratorLabelFor,
@@ -48,6 +50,7 @@ import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { WorldOpening } from "../components/world-opening.js";
+import { ReadOnlyMarkdown } from "../components/editor/read-only-markdown.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -462,6 +465,7 @@ export function WorldOverviewScreen() {
   const proposals = unattendedProposalsOf(world.proposals, world.conversations);
   const production = world.productions[0];
   const cut = production ? deriveCut(production) : null;
+  const hasChapters = production && productionShape(production.meta).hasChapters;
   // The prototype's fan: per-slot offset, rotation and drift, centre card forward.
   const FAN = [
     { left: -410, top: 30, rotate: -9, z: 1, dur: 7.4, delay: 0 },
@@ -572,7 +576,7 @@ export function WorldOverviewScreen() {
         {pendingCast.map((sheet, i) => {
           const slot = FAN[characters.length + i] ?? FAN[2]!;
           const destination = pendingSheetDestination(sheet);
-          const state = pendingSheetState(authoring[sheet.proposalId], destination);
+          const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
           return (
             <div
               key={sheet.proposalId}
@@ -612,7 +616,7 @@ export function WorldOverviewScreen() {
             <div className="fy-cta__frame">
               <Portrait
                 worldSlug={slug}
-                path={`productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
+                path={hasChapters ? (world.keyArt ?? "") : `productions/${production.meta.id}/${production.scenes[0]?.board?.image ?? "board-v2.png"}`}
                 label={production.meta.title}
                 radius={8}
               />
@@ -620,10 +624,11 @@ export function WorldOverviewScreen() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-cta__title">Continue {production.meta.title}</div>
               <div className="fy-cta__sub">
-                {cut.covered} of {cut.entries.length} shots covered
-                {cut.gaps > 0
-                  ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.`
-                  : " · the boards are ready."}
+                {hasChapters ? `${chapterCountLabel(production)} · ${production.meta.status}`
+                  : cut.entries.length === 0 ? "No shots yet."
+                  : `${cut.covered} of ${cut.entries.length} shots covered${cut.gaps > 0
+                    ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.`
+                    : " · the boards are ready."}`}
               </div>
             </div>
             <Button>Open</Button>
@@ -685,6 +690,14 @@ function SectionHead({ eyebrow, title, aside }: { eyebrow: string; title: string
  * Figures, not buttons: the tab row above already reaches all seven screens, and a second set of
  * doors to the same places is the inventory this page has twice been cleared of.
  */
+function referenceSummary(kit: ReferenceKit | null | undefined) {
+  const counts = referenceKitCounts(kit);
+  const parts = [[counts.photos, "main photo"], [counts.sheets, "sheet"], [counts.looks, "look"],
+    [counts.views, "view"], [counts.tiles, "tile"]] as const;
+  return { total: counts.total, detail: parts.filter(([count]) => count > 0)
+    .map(([count, label]) => `${count} ${label}${count === 1 ? "" : "s"}`).join(" · ") || "No accepted references" };
+}
+
 function WorldGlance({ world }: { world: WorldBundle }) {
   const owned = worldSheets(world.sheets).filter((s) => s.retired !== true);
   const characters = owned.filter((s) => s.type === "character");
@@ -759,12 +772,14 @@ function WorldGlance({ world }: { world: WorldBundle }) {
   );
 }
 
+function chapterCountLabel(production: WorldBundle["productions"][number]): string {
+  const count = production.chapters.filter(chapter => !chapter.retired).length;
+  return `${count} chapter${count === 1 ? "" : "s"}`;
+}
+
 /**
  * What the world has been made into (design 63b).
- *
- * The same tiles the Productions tab draws at full size, in a row that fits under the glance.
- * A percentage is shown only where there are shots to divide: a story production carries its
- * scenes and chapters instead, because a completion figure over nothing countable is invented.
+ * A story names its live chapters and saved status; a film keeps its shot coverage.
  */
 function WorldProductions({ worldId, world }: { worldId: string; world: WorldBundle }) {
   const navigate = useNavigate();
@@ -794,6 +809,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           } as CSSProperties}
         >
           {productions.map((p) => {
+            const hasChapters = productionShape(p.meta).hasChapters;
             const shots = p.scenes.flatMap((s) => orderedShots(s));
             const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
             const board = p.scenes.find((s) => s.board)?.board;
@@ -823,11 +839,11 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
                 <div className="fy-prodtile__name">{p.meta.title}</div>
                 <div className="fy-prodtile__foot">
                   <span className="fy-prodtile__meta">
-                    {shots.length > 0
+                    {hasChapters ? `${chapterCountLabel(p)} · ${p.meta.status}` : shots.length > 0
                       ? `${shots.length} shot${shots.length === 1 ? "" : "s"} · ${covered} accepted`
                       : `${p.scenes.length} scene${p.scenes.length === 1 ? "" : "s"} · ${p.meta.status}`}
                   </span>
-                  {shots.length > 0 && (
+                  {!hasChapters && shots.length > 0 && (
                     <span className="fy-prodtile__pct">{Math.round((covered / shots.length) * 100)}%</span>
                   )}
                 </div>
@@ -987,11 +1003,14 @@ function pendingSheetRoute(worldId: string | undefined, sheet: PendingSheet): st
   return null;
 }
 
-function pendingSheetState(activity: AuthoringActivity | undefined, destination: PendingSheetDestination): {
+function pendingSheetState(activity: AuthoringActivity | undefined, destination: PendingSheetDestination, requiresDraft = false): {
   foot: string;
   body: string;
   tone: "live" | "sketch" | "warn";
 } {
+  if (requiresDraft && activity?.status !== "running") {
+    return { foot: "not drafted", body: "your brief is saved — open it to draft the sheet", tone: "warn" };
+  }
   if (activity === undefined) {
     return destination === "here"
       ? { foot: "decision here", body: "open this draft to see where it got to", tone: "sketch" }
@@ -1040,7 +1059,7 @@ function PendingSheetCards({
     <>
       {pending.map((sheet) => {
         const destination = pendingSheetDestination(sheet);
-        const state = pendingSheetState(authoring[sheet.proposalId], destination);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
         return (
           <button
             key={sheet.proposalId}
@@ -1076,11 +1095,14 @@ function PendingSheetCards({
         );
       })}
       {selectedProposal && (
-        <ConnectedProposalPanel
-          key={selectedProposal.proposal.id}
-          staged={selectedProposal}
-          conversationPath={selectedProposal.proposal.targets[0]?.path}
-        />
+        <PageSheet open title={`Review ${selectedProposal.review?.targets[0]?.label ?? selectedProposal.proposal.summary}`} onClose={() => setSelected(null)} className="fy-sheet-proposal-review">
+          <ConnectedProposalPanel
+            key={selectedProposal.proposal.id}
+            staged={selectedProposal}
+            conversationPath={selectedProposal.proposal.targets[0]?.path}
+            onAccepted={() => setSelected(null)}
+          />
+        </PageSheet>
       )}
     </>
   );
@@ -1103,7 +1125,7 @@ function PendingSheetRows({
     <>
       {pending.map((sheet) => {
         const destination = pendingSheetDestination(sheet);
-        const state = pendingSheetState(authoring[sheet.proposalId], destination);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
         return (
           <button
             key={sheet.proposalId}
@@ -1138,11 +1160,14 @@ function PendingSheetRows({
         );
       })}
       {selectedProposal && (
-        <ConnectedProposalPanel
-          key={selectedProposal.proposal.id}
-          staged={selectedProposal}
-          conversationPath={selectedProposal.proposal.targets[0]?.path}
-        />
+        <PageSheet open title={`Review ${selectedProposal.review?.targets[0]?.label ?? selectedProposal.proposal.summary}`} onClose={() => setSelected(null)} className="fy-sheet-proposal-review">
+          <ConnectedProposalPanel
+            key={selectedProposal.proposal.id}
+            staged={selectedProposal}
+            conversationPath={selectedProposal.proposal.targets[0]?.path}
+            onAccepted={() => setSelected(null)}
+          />
+        </PageSheet>
       )}
     </>
   );
@@ -1222,8 +1247,9 @@ function SheetGrid({
   };
   const reachOf = (sheet: Sheet): string => {
     const refs = sheetRefs[sheet.id];
-    if (!refs) return "… refs · … productions";
-    return `${refs.tiles} ref${refs.tiles === 1 ? "" : "s"} · ${refs.productions.length} production${refs.productions.length === 1 ? "" : "s"}`;
+    const { total } = referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id));
+    const productions = refs ? `${refs.productions.length} production${refs.productions.length === 1 ? "" : "s"}` : "… productions";
+    return `${total} ref${total === 1 ? "" : "s"} · ${productions}`;
   };
   useEffect(() => {
     if (!worldId) return;
@@ -1319,7 +1345,7 @@ function SheetGrid({
                   key={sheet.id}
                   type="button"
                   className={cx("fy-row", featured?.id === sheet.id && "fy-row--selected")}
-                  aria-label={`${sheet.name}, ${sheet.status === "locked" ? "canon locked" : "sketch"}, ${reachOf(sheet)}${featured?.id === sheet.id ? ", featured" : ""}. Open sheet`}
+                  aria-label={`${sheet.name}, ${sheet.status === "locked" ? "canon locked" : "sketch"}, ${reachOf(sheet)}, ${referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id)).detail}${featured?.id === sheet.id ? ", featured" : ""}. Open sheet`}
                   onClick={() => navigate(detailPath(sheet.id))}
                 >
                   <div className="fy-row__thumb">
@@ -1346,7 +1372,7 @@ function SheetGrid({
                     reads as decoration; the head above already counts the two states, and the
                     row's own strip is where the rest of its facts are.
                   */}
-                  <span className="fy-row__meta">
+                  <span className="fy-row__meta" title={referenceSummary(world?.referenceKits.find(kit => kit.sheetId === sheet.id)).detail}>
                     {sheet.status === "locked" ? "locked" : "sketch"} · {reachOf(sheet)}
                   </span>
                   <span className="fy-row__chev">
@@ -1857,6 +1883,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
+  const references = referenceSummary(kit);
   const isCharacter = sheet.type === "character";
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
@@ -2039,7 +2066,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             </Badge>
           )}
         </div>
-        {essence && readableProse("Essence", essence.body, <p className="fy-sheet__lead">{essence.body}</p>)}
+        {essence && readableProse("Essence", essence.body, <div className="fy-sheet__lead"><ReadOnlyMarkdown value={essence.body} ariaLabel={`${sheet.name} · Essence`} /></div>)}
       </div>
       <div className="fy-sheet__actions">
         {/* Reference, More looks and Voice live in the tab row (design 54): a destination
@@ -2216,7 +2243,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           // it holds real text, not the empty-section placeholder. It used to be Appearance
           // alone, which meant a location sheet or a faction sheet had no readable block at all.
           const readable = s.body.trim() !== "" && s.body.trim() !== "—";
-          const body = <div className="fy-sheet__secbody">{s.body}</div>;
+          const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
           return (
             <div key={s.heading}>
               {/* Every heading on a location record used to carry the sheet's status as a dot —
@@ -2284,13 +2311,13 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-      {refs && (
-        <Section title="From this sheet">
-          <div className="lay-stats">
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">{refs.tiles}</div>
-              <div className="lay-stats__label">reference tiles</div>
-            </div>
+      <Section title="From this sheet">
+        <div className="lay-stats">
+          <div className="lay-stats__item">
+            <div className="lay-stats__value">{references.total}</div>
+            <div className="lay-stats__label" title={references.detail}>accepted references</div>
+          </div>
+          {refs && <>
             <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>
               <div className="lay-stats__label">productions</div>
@@ -2310,9 +2337,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   : ""}
               </div>
             </div>
-          </div>
-        </Section>
-      )}
+          </>}
+        </div>
+      </Section>
     </div>
   );
   if (isCharacter) {

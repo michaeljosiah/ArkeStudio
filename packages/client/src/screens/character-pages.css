@@ -106,6 +106,7 @@
   .fy-character-generation__backdrop { display: block; position: fixed; inset: 0; }
   .fy-character-generation__backdrop .fy-worldnav__sentinel { display: none; }
   .fy-character-head { padding: 16px 20px 0; display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; row-gap: 14px; }
+  [data-screen="location-reference"] .fy-character-head { grid-template-columns: minmax(0, 1fr); }
   .fy-character-head__push { display: none; }
   .fy-character-tabs { grid-column: 1 / -1; justify-self: start; }
   .fy-reference-grid { padding: 14px 20px calc(24px + env(safe-area-inset-bottom, 0px)); grid-template-columns: 1fr; gap: 14px; }

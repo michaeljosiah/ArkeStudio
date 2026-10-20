@@ -14,6 +14,7 @@ import {
   type Proposal,
 } from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
+import { undraftedSheetProblem } from "./sheet-seed.js";
 
 /**
  * What a proposal would actually change, field by field (#70 §11.5).
@@ -32,6 +33,7 @@ export interface ReviewField {
   field: string;
   before: string | null;
   proposed: string | null;
+  metadata?: boolean;
 }
 
 export interface ReviewTarget {
@@ -45,11 +47,12 @@ export interface ReviewTarget {
 }
 
 export interface ReviewProjection {
+  requiresDraft?: boolean;
   targets: ReviewTarget[];
 }
 
 /** Parse a sheet or canon file into comparable fields, or null when it is neither. */
-function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string> } | null {
+function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string>; metadata?: Set<string> } | null {
   /*
    * The world look is JSON, and the only proposal target that is not Markdown.
    *
@@ -262,7 +265,10 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
         : null;
   if (!type) return null;
 
-  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections: doc.sections() });
+  let sections: ReturnType<MarkdownFile["sections"]>;
+  try { sections = doc.sections(); }
+  catch { return null; }
+  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections });
   if (!parsed.success) return null;
   const sheet = parsed.data;
   const fields = new Map<string, string>([
@@ -278,8 +284,12 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     ["Voice", sheet.voice ? JSON.stringify(sheet.voice) : "None"],
     ["Retired", sheet.retired ? "Yes" : "No"],
   ]);
-  for (const section of sheet.sections) fields.set(section.heading, section.body);
-  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields };
+  const metadata = new Set(fields.keys());
+  for (const section of sheet.sections) {
+    fields.set(section.heading, section.body);
+    metadata.delete(section.heading);
+  }
+  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields, metadata };
 }
 
 export interface ReviewInput {
@@ -379,7 +389,7 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     for (const [field, value] of proposed.fields) {
       const before = base?.fields.get(field) ?? null;
       if (before === value) continue;
-      fields.push({ field, before, proposed: value });
+      fields.push({ field, before, proposed: value, ...(proposed.metadata?.has(field) ? { metadata: true } : {}) });
     }
     // A field the proposal removes is a change too, and one a reviewer would want to see.
     if (base) {
@@ -397,7 +407,9 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     });
   }
 
-  return { targets };
+  const seed = input.proposal.sheetSeed;
+  const requiresDraft = seed && undraftedSheetProblem(input.proposal, input.proposed(seed.path)) !== null;
+  return { targets, ...(requiresDraft ? { requiresDraft: true } : {}) };
 }
 
 /** A create has no version to show, and "new" is the thing the reviewer needs to notice. */

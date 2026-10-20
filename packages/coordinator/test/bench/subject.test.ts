@@ -252,6 +252,32 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     assert.deepEqual(incompatible, { ok: false, reason: "Square Image cannot make the production aspect 16:9." });
   });
 
+  it("keeps a provider-sized shot's composition intent without promising image dimensions", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const codex: ManifestModel = { ...IMAGE_MODEL, id: "codex-image", provider: "codex",
+      displayName: "Codex Image", limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } };
+    const manifest = { ...MANIFEST, models: [codex] };
+    world.productions.find(p => p.meta.id === "saltlight")!.meta.models = { image: codex.id };
+    const prepared = await prepareBenchSubject(world, { productionId: "saltlight", sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" }, settings: null, manifest, sources: sourceReader });
+    assert.ok(prepared.ok);
+    const session = { id: newId("sess"), ...prepared.prefill, tokenRegistry: prepared.prefill.references,
+      subjectTokens: prepared.prefill.references.map(r => r.token), nextTake: 1, takes: [] } as unknown as BenchSession;
+    // References have their own existing tests; isolate shape admission here.
+    session.composer.activeTokens = []; session.composer.keyframeTokens = []; session.composer.brief = "A rainy harbour.";
+    const plan = () => planBenchDispatch(session, world, manifest, { worldId: world.meta.worldId, requestId: "provider-sized-shot", at: CLOCK() });
+    const accepted = plan(); assert.ok(accepted.ok, accepted.ok ? undefined : accepted.reason);
+    assert.match(String(accepted.inputs[0]!.params.prompt), /Compose for the production's 16:9 frame/);
+    assert.equal(accepted.reserved[0]!.request.params.kind, "image");
+    assert.equal(accepted.reserved[0]!.request.params.aspect, "16:9");
+    assert.equal(accepted.reserved[0]!.request.filing?.kind, "shot");
+    session.composer.params = { kind: "image", count: 1, aspect: "1:1" };
+    assert.deepEqual(plan(), { ok: false, reason: "This shot must use the production aspect 16:9." });
+    session.composer.params = { kind: "image", count: 1, aspect: "16:9", tier: "2K" };
+    const sized = plan(); assert.ok(!sized.ok); assert.match(sized.reason, /Clear the requested size before/);
+  });
+
   it("attaches a shot's filed storyboard frame and routes it as a start frame where supported", async () => {
     const { store } = await openWorld();
     const world = store.getBundle();

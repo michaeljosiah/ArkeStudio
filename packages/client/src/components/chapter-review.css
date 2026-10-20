@@ -8,3 +8,31 @@
 .fy-chreview__notice { padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .fy-chreview details { padding: 12px 0; border-bottom: 1px solid var(--border); }
 @media (max-width: 700px) { .fy-chreview__evidence { grid-template-columns: 1fr; } .fy-chreview { padding: 12px; } }
+
+/* AI tells (design turn 232h): the chapter's figures, the strip against the line, by kind, crowded passages. */
+.fy-tells { display: flex; flex-direction: column; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.fy-tells h3 { margin: 0; font: var(--type-title); }
+.fy-tells h4 { margin: 0 0 8px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-tells__facts { display: flex; flex-wrap: wrap; gap: 20px; margin: -6px 0 0; color: var(--muted-foreground); }
+.fy-tells__facts b { color: var(--foreground); font-weight: var(--weight-semibold); }
+.fy-tells__strip { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.fy-tells__bars { position: relative; height: 96px; display: flex; align-items: flex-end; gap: 6px; border-bottom: 1px solid var(--border); }
+.fy-tells__bar { position: relative; flex: 1; min-height: 2px; border-radius: 4px 4px 0 0; background: color-mix(in srgb, var(--foreground) 24%, transparent); }
+.fy-tells__bar small { position: absolute; top: -18px; left: 0; right: 0; text-align: center; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-tells__bar--crowded { background: var(--warning); }
+.fy-tells__bar--crowded small { color: var(--foreground); font-weight: var(--weight-semibold); }
+.fy-tells__line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed color-mix(in srgb, var(--foreground) 55%, transparent); }
+.fy-tells__line small { position: absolute; right: 0; top: -17px; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-tells__ends { display: flex; justify-content: space-between; font: var(--type-meta); color: var(--muted-foreground); }
+.fy-tells__two { display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 32px; }
+.fy-tells__kind { display: grid; grid-template-columns: 140px 1fr 24px; align-items: center; gap: 10px; min-height: 28px; }
+.fy-tells__kind i { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--foreground) 34%, transparent); }
+.fy-tells__kind b { text-align: right; font-weight: var(--weight-semibold); }
+.fy-tells__passage { display: grid; grid-template-columns: 24px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+.fy-tells__passage:first-of-type { border-top: 0; }
+.fy-tells__passage > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fy-tells__passage q { quotes: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-tells__passage small, .fy-tells__cover, .fy-tells__none { color: var(--muted-foreground); }
+.fy-tells__n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--warning); color: var(--background); font: var(--type-meta); font-weight: var(--weight-semibold); }
+.fy-tells__cover { margin: 0; font: var(--type-meta); }
+@media (max-width: 700px) { .fy-tells__two { grid-template-columns: 1fr; } }

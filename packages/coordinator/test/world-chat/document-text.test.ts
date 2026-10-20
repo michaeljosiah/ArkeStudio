@@ -33,9 +33,11 @@ function textOf(result: ReturnType<typeof extractPdfText>): string {
 // ---------------------------------------------------------------------------
 
 describe("which files are read by extraction", () => {
-  it("names the two formats and nothing else", () => {
+  it("names extracted formats without treating plain text or legacy Word as one", () => {
     assert.equal(isExtractable("brief.pdf"), true);
     assert.equal(isExtractable("Treatment.DOCX"), true, "the extension is the file's, not the writer's");
+    assert.equal(isExtractable("Lore.HTML"), true);
+    assert.equal(isExtractable("lore.htm"), true);
     // Plain text is read by decoding it; a .doc is a different format wearing a similar name.
     assert.equal(isExtractable("notes.txt"), false);
     assert.equal(isExtractable("old-treatment.doc"), false);
@@ -43,6 +45,22 @@ describe("which files are read by extraction", () => {
 
   it("has nothing to say about a format it does not read", () => {
     assert.equal(extractDocumentText("notes.txt", ascii("the bells again")), null);
+  });
+});
+
+describe("HTML lore", () => {
+  it("keeps readable prose and structure without scripts, styling or remote resources", () => {
+    const html = '<html><head><title>Metadata</title><style>secret style</style></head><body><h1>Echoes</h1><p title="a > b">Maren &amp; Ines &#x2014; the harbour.</p><script src="https://example.invalid/code.js">secret code</script><template>hidden template</template><iframe src="https://example.invalid/frame">hidden frame</iframe><img src="https://example.invalid/image"><ul><li>Keep the bells.</li><li>Ask first.</li></ul></body></html>';
+    assert.equal(textOf(extractDocumentText("lore.html", ascii(html))!), 'Echoes\nMaren & Ines — the harbour.\nKeep the bells.\nAsk first.');
+  });
+
+  it("decodes entities once and leaves invalid code points readable without throwing", () => {
+    assert.equal(textOf(extractDocumentText("lore.htm", ascii('<p>&#38;lt; stays escaped. &#x110000; &#55296;</p>'))!), '&lt; stays escaped. &#x110000; &#55296;');
+  });
+
+  it("refuses a document with only code or invalid UTF-8", () => {
+    assert.deepEqual(extractDocumentText("lore.html", ascii('<script>never run this')), { ok: false, reason: "no-text" });
+    assert.deepEqual(extractDocumentText("lore.htm", new Uint8Array([0xff, 0xfe, 0xfd])), { ok: false, reason: "damaged" });
   });
 });
 

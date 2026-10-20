@@ -156,6 +156,9 @@
 }
 
 /* ---- ProposalPanel / RippleList ---------------------------- */
+.dom-connected-proposal { display: grid; gap: var(--space-2); }
+.dom-connected-proposal__revise { display: flex; gap: var(--space-2); align-items: flex-end; }
+.dom-proposal__content { display: contents; }
 .dom-proposal {
   display: grid;
   gap: var(--space-3);
@@ -394,8 +397,19 @@
   color: var(--muted-foreground); margin-top: 4px;
 }
 .dom-review__was, .dom-review__now { display: flex; gap: 8px; font: 400 12.5px/1.6 var(--font-sans); }
+.dom-review__was > span:last-child, .dom-review__now > span:last-child { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* The old value is legible but plainly past: struck through would make it hard to read, and the
    reviewer still needs to read it to judge the change. */
 .dom-review__was { color: var(--muted-foreground); }
 .dom-review__tag { flex: none; width: 30px; font-size: 10px; color: var(--muted-foreground); padding-top: 2px; }
 .dom-review__removed { color: var(--muted-foreground); font-style: italic; }
+
+/* Keep authored prose first without removing editable sheet fields or progress evidence. */
+.dom-review__metadata > summary, .dom-authoring__activity > summary {
+  cursor: pointer;
+  font: var(--type-label);
+  color: var(--muted-foreground);
+  padding-block: var(--space-2);
+}
+.dom-review__metadata[open] > .dom-review__field { margin-top: var(--space-2); }
+.dom-authoring__activity[open] > .dom-authoring__lines { max-height: 140px; overflow: auto; }

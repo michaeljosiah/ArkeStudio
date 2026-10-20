@@ -14,6 +14,7 @@ import {
 } from "@arke-studio/contracts";
 import type { CommitResult } from "../world/commit.js";
 import type { ProposalManager } from "../gate/proposals.js";
+import { sheetProseHash } from "../gate/sheet-seed.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { uniqueSlug } from "../world/slug.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
@@ -51,8 +52,15 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
 }
 
 /** The prose of a sheet, sections ordered per the schema and the empty optional ones dropped (D2). */
-function sheetBody(type: SheetKind, sections: Record<string, string>): string {
-  return SHEET_SHAPES[type].sections
+function sheetBody(type: SheetKind, sections: Record<string, string>, preserveLegacy = false): string {
+  const shape = SHEET_SHAPES[type].sections;
+  const headings = new Set(shape.map(section => section.heading));
+  return [
+    ...shape,
+    // Older sheets have Wants, Fears and Truth outside today's shape. An edit of Essence must
+    // not discard that prose merely because the form no longer offers its heading (#1910).
+    ...(preserveLegacy ? Object.keys(sections).filter(heading => !headings.has(heading)).map(heading => ({ heading, required: true })) : []),
+  ]
     .map((section) => {
       const text = (sections[section.heading] ?? "").trim();
       if (text === "" && !section.required) return null;
@@ -131,7 +139,7 @@ export function editSheetContent(input: {
       created: sheet.created,
       updated: input.date,
     },
-    sheetBody(sheet.type, input.sections),
+    sheetBody(sheet.type, input.sections, true),
   );
   return doc.serialize();
 }
@@ -195,6 +203,7 @@ export async function createSheetFromSentence(
     production?: string;
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
+    requiresDraft?: boolean;
   },
   precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
@@ -237,6 +246,7 @@ export async function createSheetFromSentence(
         }
       : {}),
     targets: [{ path, content }],
+    ...(input.attendedSurface && input.requiresDraft ? { sheetSeed: { path, bodyHash: sheetProseHash(content) } } : {}),
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),

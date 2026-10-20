@@ -11,9 +11,15 @@ import { audioGestureCommand } from "../lib/audio-studio-gesture.js";
 import { ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND } from "./editor-audio.js";
 
 export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSelect, onTrack, at, onSeek, disabled,
-  undo, redo, onHistory, onEdit, solo, onSolo, onDrop, onFiles, waveform,
+  undo, redo, onHistory, onEdit, solo, onSolo, onDrop, onFiles, waveform, regions, marks, onView,
 }: {
   waveform?: WaveformRequest;
+  /** An episode's scenes as named regions on the ruler (230o, issue 1882), in samples. */
+  regions?: ReadonlyArray<{ key: string; label: string; at: number; samples: number; on?: boolean }>;
+  /** A review note's heard interval on the ruler (230o), in samples. */
+  marks?: ReadonlyArray<{ key: string; title: string; at: number; samples: number }>;
+  /** The span of the arrangement in view, in samples, as the canvas scrolls and zooms (230o's window). */
+  onView?: (from: number, to: number) => void;
   state: AudioArrangementState; plan: ResolvedAudioArrangement; selected: string | null; selectedTrack: string | null;
   onSelect: (id: string) => void; onTrack: (id: string) => void; at: number; onSeek: (samples: number) => void; disabled: boolean;
   undo: string | null; redo: string | null; onHistory: (kind: "undo" | "redo") => void;
@@ -25,6 +31,14 @@ export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSe
   const canvas = useRef<HTMLDivElement>(null), controller = useRef<AbortController | null>(null);
   useEffect(() => { controller.current?.abort(); setGesture(null); return () => controller.current?.abort(); }, [state, disabled]);
   const span = Math.max(audioSamples(10), plan.samples + audioSamples(2)), percent = (samples: number) => `${samples / span * 100}%`;
+  // The window in view, said as the canvas moves, so a review strip can draw it over the whole.
+  const viewed = useRef(onView); viewed.current = onView;
+  const report = () => {
+    const element = canvas.current;
+    if (!element || !viewed.current || element.scrollWidth <= 0) return;
+    viewed.current(Math.round(element.scrollLeft / element.scrollWidth * span), Math.round(Math.min(1, (element.scrollLeft + element.clientWidth) / element.scrollWidth) * span));
+  };
+  useEffect(report, [zoom, span]);
   const picked = plan.clips.find(entry => entry.clip.id === selected);
   const canEdit = !disabled && picked !== undefined && !picked.clip.protected;
   const canSplit = canEdit && at > picked.at && at < picked.at + picked.samples;
@@ -78,8 +92,11 @@ export function AudioStudioTimeline({ state, plan, selected, selectedTrack, onSe
       <button type="button" className="fy-tlbtn fy-tip" aria-label="Zoom out" data-tip="Zoom out" disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value / 1.5))}><Minus size={12} /></button><button type="button" className="fy-tlbtn fy-tip" aria-label="Zoom in" data-tip="Zoom in" disabled={zoom >= 32} onClick={() => setZoom(value => Math.min(32, value * 1.5))}><Plus size={12} /></button>
     </div>
     <div className="fy-audio-timeline__position"><label>Playhead <input aria-label="Playhead seconds" type="number" min={0} step={0.001} value={Number(audioSeconds(at).toFixed(5))} onChange={event => { const value = event.target.valueAsNumber; if (Number.isFinite(value)) onSeek(Math.max(0, audioSamples(value))); }} /> s</label><span>{formatTimingSeconds(audioSeconds(plan.samples))} · 48 kHz stereo</span></div>
-    <div className="fy-timeline__canvas" ref={canvas}><div className="fy-audio-timeline__tracks" style={{ width: `${zoom * 100}%`, minWidth: "100%" }}>
-      <div className="fy-track fy-audio-timeline__ruler"><span className="fy-track__label">Seconds</span><div className="fy-track__lane" onClick={event => onSeek(point(event.currentTarget, event.clientX))}>{Array.from({ length: 11 }, (_, i) => <span key={i} style={{ left: `${i * 10}%` }}>{formatTimingSeconds(audioSeconds(span * i / 10))}</span>)}</div></div>
+    <div className="fy-timeline__canvas" ref={canvas} onScroll={report}><div className="fy-audio-timeline__tracks" style={{ width: `${zoom * 100}%`, minWidth: "100%" }}>
+      <div className="fy-track fy-audio-timeline__ruler"><span className="fy-track__label">Seconds</span><div className="fy-track__lane" onClick={event => onSeek(point(event.currentTarget, event.clientX))}>{Array.from({ length: 11 }, (_, i) => <span key={i} style={{ left: `${i * 10}%` }}>{formatTimingSeconds(audioSeconds(span * i / 10))}</span>)}
+        {regions?.map(region => <b key={region.key} className={cx("fy-audio-timeline__region", region.on && "fy-audio-timeline__region--on")} style={{ left: percent(region.at), width: percent(region.samples) }} title={region.label}>{region.label}</b>)}
+        {marks?.map(mark => <i key={mark.key} className="fy-audio-timeline__mark" style={{ left: percent(mark.at), width: `${Math.max(mark.samples / span * 100, 0.3)}%` }} title={mark.title} />)}
+      </div></div>
       {state.tracks.map(track => <div className={cx("fy-track", track.muted && "fy-track--silent")} data-track="music" data-track-id={track.id} key={track.id}>
         <div className="fy-track__label fy-track__label--typed"><Waveform size={12} /><button type="button" className="fy-track__name" aria-pressed={selectedTrack === track.id} onClick={() => onTrack(track.id)}>{track.name}</button><span className="fy-trackbtns"><button type="button" aria-label={`Mute ${track.name} in mix`} aria-pressed={track.muted} disabled={disabled} onClick={() => onEdit("Set track mute", [{ kind: "set-track", id: track.id, changes: { muted: !track.muted } }])}>M</button><button type="button" aria-label={`Solo ${track.name} for audition`} aria-pressed={solo.includes(track.id)} onClick={() => onSolo(track.id)}>S</button></span></div>
         <div className={cx("fy-track__lane", "fy-typedlane", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")} onPointerDown={pan}

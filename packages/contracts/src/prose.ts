@@ -665,6 +665,11 @@ export function countWords(body: string): number {
   return trimmed === "" ? 0 : trimmed.split(/\s+/).length;
 }
 
+/** An explicitly outlined chapter holds planning text, not completed manuscript words (#1922). */
+export function chapterManuscriptWords(body: string, status?: string): number {
+  return status === "outlined" ? 0 : countWords(body);
+}
+
 /**
  * The number of words a target names, or null when it names none (turn 126: "the band draws
  * only when it parses to a number of words"). `targetLength` is a free string the overview

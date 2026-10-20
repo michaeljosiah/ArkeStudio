@@ -17,6 +17,7 @@ import type { ProposalManager } from "../gate/proposals.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import { uniqueSlug } from "../world/slug.js";
+import { extractDocumentText as extractReadingText } from "../world-chat/document-text.js";
 import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
@@ -32,7 +33,7 @@ import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 // ---------------------------------------------------------------------------
 
 export async function extractText(store: WorldStore, artifact: ArtifactSidecar): Promise<string | null> {
-  if (!/\.(md|txt|pdf)$/i.test(artifact.file)) return null;
+  if (!/\.(md|txt|pdf|html|htm)$/i.test(artifact.file)) return null;
   const path = toExtendedLength(join(store.dir, "artifacts", artifact.file));
   return extractDocumentText(artifact.file, await readFile(path));
 }
@@ -40,6 +41,10 @@ export async function extractText(store: WorldStore, artifact: ArtifactSidecar):
 /** Shared supported-document reader for filed artifacts and pre-world uploads. */
 export function extractDocumentText(name: string, bytes: Buffer): string | null {
   if (/\.(md|txt)$/i.test(name)) return bytes.toString("utf8");
+  if (/\.html?$/i.test(name)) {
+    const result = extractReadingText(name, bytes);
+    return result?.ok ? result.text : null;
+  }
   if (/\.pdf$/i.test(name)) {
     // Uncompressed text operators only: honest partial support, reported when it yields nothing.
     const latin = bytes.toString("latin1");

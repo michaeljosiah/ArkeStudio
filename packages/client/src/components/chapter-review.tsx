@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ChapterReview } from "@arke-studio/contracts";
 import { EditorDialog } from "./editor-dialog.js";
+import { ChapterTellsReport } from "./chapter-tells.js";
 import { Button } from "./ui.js";
 import { acceptChapterReviewUpdate, readChapterReviewImage } from "../lib/chapter-review.js";
 import { mediaUrl } from "../lib/media.js";
@@ -39,6 +40,7 @@ export function ChapterReviewReport({ review, slug, disabled, onDecision }: {
     <p role="status"><strong>{review.status}</strong> · {completed}/{review.tasks.length} tasks complete · {supplied.size}/{review.images.length} pictures supplied to completed reviews</p>
     <p>Audio delivery not listened to. Narration coverage is a saved-record audit, not an exact provider-request review.</p>
     {review.stale && <div role="alert" className="fy-chreview__notice"><strong>Source check needed — refresh or review again.</strong><ul>{review.staleReasons.map(reason => <li key={reason}>{reason}</li>)}</ul></div>}
+    <ChapterTellsReport review={review} />
     <details><summary>Coverage, models and task results</summary>
       <ul>{review.checks.map((check, i) => <li key={i}>{check}</li>)}</ul>
       {review.tasks.map(task => <p key={task.id}><strong>{task.id}: {task.state}</strong> · {task.skill}{task.model ? ` · ${task.model}` : ""}<br />{task.disclosure}<br />{task.detail}</p>)}
@@ -97,8 +99,8 @@ export function ChapterReviewControl({ worldId, productionId, chapterId, slug, h
     <Button onClick={() => setOpen(true)}>Review chapter{busy ? " · running" : ""}</Button>
     <EditorDialog open={open} onClose={() => setOpen(false)} title="Chapter review" width={1050}>
       <div className="fy-chreview">
-        <p>Review saved prose and selected pictures using Arke’s script and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
-        <p>Up to 60,000 characters and 60 pictures. One script task, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
+        <p>Review saved prose and selected pictures using Arke’s script, AI tells and visual specialists. Findings are advisory. This uses your configured writing models; cloud image settings apply.</p>
+        <p>Up to 60,000 characters and 60 pictures. One script task, one AI tells task over the whole chapter, visual tasks with up to five neighboring pictures, separate evidence checks, then duplicate consolidation. You can leave this chapter while review continues.</p>
         <div className="fy-chreview__controls"><Button disabled={held || busy || connection !== "open"} onClick={() => {
           setError(null); setStarting(true);
           if (!requestChapterReview("chapter-review-start", worldId, productionId, chapterId)) { setStarting(false); setError("Not connected."); }

@@ -1114,7 +1114,7 @@ export function subscribeDramaEditions(listener: (answer: DramaEditionAnswer) =>
   dramaEditionListeners.add(listener);
   return () => dramaEditionListeners.delete(listener);
 }
-export function publishDramaEdition(worldId: string, productionId: string, input: { name: string; delivery: "podcast" | "archive"; episodes: number[] }): string | null {
+export function publishDramaEdition(worldId: string, productionId: string, input: { name: string; delivery: "podcast" | "archive"; episodes: number[]; stems?: boolean }): string | null {
   const requestId = ulid();
   return send({ kind: "publish-drama-edition", requestId, worldId, productionId, ...input }) ? requestId : null;
 }
@@ -1929,6 +1929,7 @@ function handleFrame(json: string): void {
       for (const listener of audiobookMixListeners) listener(event);
     }
     if (event.type === "audio-studio.state") for (const listener of audioStudioListeners) listener(event);
+    if (event.type === "audio-studio.heard") for (const listener of audioHeardListeners) listener(event);
     if (event.type === "audiobook.timing-proposal") {
       for (const listener of audiobookTimingProposalListeners) listener(event);
     }
@@ -3316,6 +3317,7 @@ export function reconcileExternalEdit(worldId: string, path: string): void {
 
 // ---- the accept gate (SPEC-004) -------------------------------------------
 
+/** Save only dirtyHeadings; sections may be the full form or that subset. Omitted prose stays. */
 export function stageSheetEdit(
   worldId: string,
   path: string,
@@ -5988,6 +5990,20 @@ export function readAudioStudio(worldId: string, productionId: string, chapterFi
   const requestId = ulid();
   return send({ kind: "read-audio-studio", worldId, productionId, chapterFile, requestId }) ? requestId : null;
 }
+/** Spans of an episode's saved mix that just played whole, on the base heard (design turn 230o, issue 1882). */
+export function recordAudioHeard(worldId: string, productionId: string, chapterFile: string, base: string, spans: Array<[number, number]>): boolean {
+  return send({ kind: "record-audio-heard", worldId, productionId, chapterFile, base, spans });
+}
+const audioHeardListeners = new Set<(event: Extract<DomainEvent, { type: "audio-studio.heard" }>) => void>();
+/** What of an episode's mix has been heard, for the script's Review (issue 1882). */
+export function readAudioHeard(worldId: string, productionId: string, chapterFile: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "read-audio-heard", worldId, productionId, chapterFile, requestId }) ? requestId : null;
+}
+export function subscribeAudioHeard(listener: (event: Extract<DomainEvent, { type: "audio-studio.heard" }>) => void): () => void {
+  audioHeardListeners.add(listener);
+  return () => audioHeardListeners.delete(listener);
+}
 export function editAudioStudio(worldId: string, productionId: string, chapterFile: string, base: string, edit: import("@arke-studio/contracts").AudioArrangementEdit): string | null {
   const requestId = ulid();
   return send({ kind: "edit-audio-studio", worldId, productionId, chapterFile, base, edit, requestId }) ? requestId : null;
@@ -6221,6 +6237,8 @@ const doorAsked = new Map<string, { key: string; seq: number; stamp: string }>()
 const doorInFlight = new Map<string, { requestId: string; stamp: string; sentAt: number }>();
 const doorWanted = new Map<string, string>();
 const doorLanded = new Map<string, { seq: number; stamp: string }>();
+/** Shared by the page and rail, including route remounts during a read. */
+const doorSources = new Map<string, string>();
 let doorSeq = 0;
 /**
  * An ask out longer than this is presumed lost: the coordinator says nothing to an ask for a
@@ -6238,6 +6256,7 @@ function forgetDoorAsks(): void {
   doorInFlight.clear();
   doorWanted.clear();
   doorLanded.clear();
+  doorSources.clear();
 }
 
 /**
@@ -6245,9 +6264,13 @@ function forgetDoorAsks(): void {
  * `audiobook.door`. `stamp` is what the answer depends on, as `useAudiobookDoorStamp` says it:
  * an ask for the stamp already out, or already answered, sends nothing.
  */
-export function openAudiobook(worldId: string, productionId: string, stamp = ""): string | null {
+export function openAudiobook(worldId: string, productionId: string, stamp = "", manuscript?: { source: string; reading: boolean }): string | null {
   const key = `${worldId}/${productionId}`;
   const flying = doorInFlight.get(key);
+  if (manuscript !== undefined) {
+    if (manuscript.reading && current.audiobookDoor[productionId]?.door != null && doorSources.get(key) === manuscript.source && (flying === undefined || Date.now() - flying.sentAt < DOOR_LOST_MS)) return null;
+    doorSources.set(key, manuscript.source);
+  }
   if (flying !== undefined && Date.now() - flying.sentAt < DOOR_LOST_MS) {
     if (flying.stamp === stamp) doorWanted.delete(key);
     else doorWanted.set(key, stamp);

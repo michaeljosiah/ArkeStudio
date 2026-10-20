@@ -297,6 +297,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  audioStudioSubjectFence,
   chapterFence,
   spineFence,
   timelineFence,
@@ -615,7 +616,8 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" || section === "audio-studio" ? `:${section}` : ""}`,
+          fence: section === "audio-studio" ? audioStudioSubjectFence(production, canonical) : chapterFence(production, canonical) };
       }
       return { target: targetId, fence: chaptersFence(production) };
     }
@@ -850,7 +852,8 @@ function worldActionObservations(
   action: ModelWorldChatAction,
   deps: WorldChatActionAdapterDeps = {},
 ): ArkeReadObservation[] {
-  const observations = action.checkReceiptIds.map((id) => {
+  const receiptProblems: string[] = [];
+  const observations = action.checkReceiptIds.flatMap((id): ArkeReadObservation[] => {
     const receipt = receipts.find((entry) => entry.id === id);
     if (
       !receipt ||
@@ -874,32 +877,43 @@ function worldActionObservations(
       // Which reads would do (issue 1888): told only that a drama's get_production receipt was a
       // search or draw, Arke cited it again; the read this action needs is named, not guessed.
       const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(WORLD_ACTION_REQUIREMENTS[action.kind] ?? []) : [];
-      throw new Error(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
+      receiptProblems.push(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
+      return [];
     }
     const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
       !current ||
       current.target !== receipt.target.id ||
       current.fence !== receipt.observedRevisionOrDigest
-    ) throw new Error(`The complete ${receipt.target.requirement} read is no longer current.`);
-    return {
+    ) {
+      receiptProblems.push(`The complete ${receipt.target.requirement} read is no longer current.`);
+      return [];
+    }
+    return [{
       requirement: receipt.target.requirement,
       target: receipt.target.id,
       revisionOrDigest: receipt.observedRevisionOrDigest,
       complete: true as const,
       receiptId: receipt.id,
-    };
+    }];
   });
   const observed = new Set(observations.map((observation) => observation.requirement));
-  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].find((requirement) => !observed.has(requirement));
-  if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
-  const wrongTarget = productionActionTargets(store, action).find((required) =>
+  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].filter((requirement) => !observed.has(requirement));
+  const wrongTargets = productionActionTargets(store, action).filter((required) =>
+    !missing.includes(required.requirement) &&
     !observations.some((observation) =>
       observation.requirement === required.requirement &&
       (observation.target === required.target ||
         (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
-  if (wrongTarget) {
-    throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
+  // One corrective turn should discover every prerequisite, not spend a full draft learning
+  // about sheets and then another learning about canon. Invalid receipts never count as reads.
+  const problems = [
+    ...missing.map(requirement => `A ${action.kind} action requires a complete current ${requirement} read.`),
+    ...wrongTargets.map(required => `A ${action.kind} action requires the complete current ${required.requirement} read for ${required.target}.`),
+    ...receiptProblems,
+  ];
+  if (problems.length) {
+    throw new Error([...new Set(problems)].join(" "));
   }
   return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
 }
@@ -2866,9 +2880,9 @@ async function sharedResourceProjection(
       authority = { kind: "production-store", id: intent.actionId };
       const chapter = bundle.productions.find(p => p.meta.id === payload.action.productionId)?.chapters.find(c => c.id === payload.action.chapterId && !c.retired);
       if (!chapter) throw new Error("The chapter is no longer available.");
-      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script and visual specialists. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
+      shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script, AI tells and visual specialists: the saved chapter goes to the script and AI tells reviewers in one model call each. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
         affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
-        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+        body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
       break;
     }
     case "world-chat-production-episode-order":

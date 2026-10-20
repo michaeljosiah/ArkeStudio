@@ -701,8 +701,12 @@ export function planBenchDispatch(
   // upscale goes back through Upscale, never through here.
   if (model.upscale !== undefined) return { ok: false, reason: `${model.displayName} upscales a take — choose it from the take's tools.` };
   const params = composer.params;
-  if (params.kind === "image" && model.limits.providerSelectedSize && (params.aspect !== undefined || params.tier !== undefined)) {
-    return { ok: false, reason: `${model.displayName} chooses the image dimensions. Clear the requested size and aspect before generating.` };
+  // A shot's aspect is composition intent on a provider-sized image, never a size guarantee.
+  // World Bench size requests still refuse, and video keeps its exact production contract.
+  const providerSizedShot = session.subject?.kind === "shot" && params.kind === "image" &&
+    model.capability === "image" && model.limits.providerSelectedSize === true;
+  if (params.kind === "image" && model.limits.providerSelectedSize && (params.tier !== undefined || (params.aspect !== undefined && !providerSizedShot))) {
+    return { ok: false, reason: `${model.displayName} chooses the image dimensions. Clear the requested ${providerSizedShot ? "size" : "size and aspect"} before generating.` };
   }
   // Through the map, not compared: `voice` dispatches against `voice-tts` (design 70).
   if (model.capability !== modeCapability(composer.mode)) {
@@ -737,7 +741,7 @@ export function planBenchDispatch(
     if (params.sound !== true) return { ok: false, reason: "A board subject must keep sound on." };
   }
   if (session.subject?.kind === "production" && (composer.mode !== "music" || !bundle.productions.some(p => p.meta.id === session.subject!.productionId))) return { ok: false, reason: "This production audio Bench requires music mode and its owning production." };
-  if (session.subject !== undefined && session.subject.kind !== "production" && !aspectSupport(model, session.subject.aspect).ok) {
+  if (session.subject !== undefined && session.subject.kind !== "production" && !providerSizedShot && !aspectSupport(model, session.subject.aspect).ok) {
     return { ok: false, reason: `${model.displayName} cannot make the production aspect ${session.subject.aspect}.` };
   }
   if (composer.brief.trim().length === 0) return { ok: false, reason: "An empty brief is not a brief." };
@@ -943,7 +947,8 @@ export function planBenchDispatch(
   // citations; nothing else in the brief is rewritten (design turn 179).
   const wirePrompt = referenceRoute !== undefined
     ? [...referenceSubjectLines(referenceRoute.pictures.map((picture) => picture.who)), referencePrompt(body, laneModel)].join("\n")
-    : [motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+    : [providerSizedShot ? `Compose for the production's ${params.kind === "image" ? params.aspect : ""} frame. Keep the main action inside a centred crop of that shape; the image dimensions are chosen by the provider.` : null,
+      motionBindings || null, preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
       referencePrompt(body, model, videoPaths.length),
       audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
   if (referenceRoute !== undefined) referenceRoute.prompt = wirePrompt;

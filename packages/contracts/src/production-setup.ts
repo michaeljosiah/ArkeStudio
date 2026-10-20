@@ -64,6 +64,22 @@ export function adaptableStories(productions: ReadonlyArray<{ meta: Production; 
   }).sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
 }
 
+/** One line of a narrator sample (230c, R-6): who is heard and what; a cue is a sound, not a speaker. */
+const NarratorSampleLineSchema = z.object({
+  speaker: z.string().trim().min(1).max(60),
+  words: z.string().trim().min(1).max(400),
+  cue: z.literal(true).optional(),
+}).strict();
+/**
+ * The narrator question answered by example (230c, R-6, issue 1882): one moment written both ways,
+ * drawn side by side for the author to choose between. Setup's alone; the production never has it.
+ */
+export const NarratorSamplesSchema = z.object({
+  narrated: z.array(NarratorSampleLineSchema).min(2).max(6),
+  inTheRoom: z.array(NarratorSampleLineSchema).min(2).max(6),
+}).strict();
+export type NarratorSamples = z.infer<typeof NarratorSamplesSchema>;
+
 const SetupFieldsSchema = z.object({
   title: z.string().trim().max(PRODUCTION_SETUP_BOUNDS.title),
   logline: Prose.optional(),
@@ -87,6 +103,8 @@ const SetupFieldsSchema = z.object({
   target: ProductionTargetSchema.optional(),
   /** An audio drama's one plan (SPEC-057 R-7): episodes, narrator, what is kept, the pilot. */
   audioDrama: AudioDramaPlanSchema.optional(),
+  /** The narrator question's two samples, while it is asked (230c). */
+  narratorSamples: NarratorSamplesSchema.optional(),
 }).strict();
 export const ProductionSetupDraftSchema = SetupFieldsSchema.extend({
   schemaVersion: z.literal(1),
@@ -118,6 +136,7 @@ export const ProductionSetupUpdateSchema = z.object({
     source: SetupSourceSchema.nullable().optional(),
     target: ProductionTargetSchema.nullable().optional(),
     audioDrama: AudioDramaPlanSchema.nullable().optional(),
+    narratorSamples: NarratorSamplesSchema.nullable().optional(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   scenes: z.array(SetupSceneSchema.partial().extend({
@@ -173,6 +192,9 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     source: update.fields?.source === null ? undefined : update.fields?.source ?? draft.source,
     target: update.fields?.target === null ? undefined : update.fields?.target ?? seeded?.target ?? draft.target,
     audioDrama: audioPlan,
+    // Samples of one story are no question about another, nor of any other kind (issue 1882).
+    narratorSamples: update.fields?.narratorSamples !== undefined ? update.fields.narratorSamples ?? undefined
+      : sourceChanged || (update.fields?.kind ?? draft.kind) !== AUDIO_DRAMA_KIND ? undefined : draft.narratorSamples,
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults

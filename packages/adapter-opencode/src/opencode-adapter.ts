@@ -38,6 +38,8 @@ export interface OpenCodeAdapterOptions {
   baseUrl: () => string;
   /** Overridable so a test can prove the watchdog without waiting a minute and a half. */
   streamSilenceMs?: number;
+  /** Prompt admission and each stop request; overridable for transport regressions. */
+  requestTimeoutMs?: number;
   /**
    * One line per adapter-lifecycle fact — connects, stalls, resyncs, dispatch outcomes. The
    * host appends them to logs/harness.jsonl. Diagnosing "the chat is stuck" from outside the
@@ -55,6 +57,7 @@ interface TrackedSession {
    */
   agent?: string;
   permissionPolicy: SessionPermissionPolicy | null;
+  admissionFailure?: string;
 }
 
 /**
@@ -70,6 +73,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
   private caps = new Set<HarnessCapability>();
   private ready: Readiness = { ready: false, reason: "not probed yet" };
   serverVersion: string | null = null;
+  private readonly pendingDispatches = new Map<string, Set<Promise<void>>>();
   private readonly sessions = new Map<string, TrackedSession>();
   private readonly normalizeState: NormalizeState = createNormalizeState();
   /** Bounded record of dropped frames — contained, never silently lost (R-14). */
@@ -265,21 +269,39 @@ export class OpenCodeAdapter implements HarnessAdapter {
 
   /** Fire-and-watch (the only mode authoring uses): completion arrives on the event stream. */
   async dispatchAsync(input: SendMessageInput): Promise<SendReceipt> {
+    const body = this.turnBody(input);
     const correlationId = input.correlationId ?? `corr_${Date.now().toString(36)}`;
     const session = this.sessions.get(input.sessionId);
     const directory = session?.cwd;
+    if (session) delete session.admissionFailure;
+    let terminalSeen = false;
+    const observeEnding = (event: HarnessEvent) => {
+      if ((event.type === "session.ended" || event.type === "session.error" || event.type === "message.completed") && event.sessionId === input.sessionId) terminalSeen = true;
+    };
+    this.turnListeners.add(observeEnding);
     // prompt_async answers 204 and runs the turn; progress arrives on the stream (R-13, D7).
-    void (async () => {
+    const pending = this.pendingDispatches.get(input.sessionId) ?? new Set<Promise<void>>();
+    this.pendingDispatches.set(input.sessionId, pending);
+    const dispatched = (async () => {
       try {
         await this.http.req(
           "POST",
           `/session/${input.sessionId}/prompt_async`,
-          this.turnBody(input),
-          directory ? { directory } : {},
+          body,
+          { ...(directory ? { directory } : {}), signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? 30_000) },
         );
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
         this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
+        if (terminalSeen) return;
+        if (!(err instanceof OpenCodeError && err.status >= 400 && err.status < 500 && err.status !== 408)) {
+          // A lost admission response can leave a writer running. Request its stop, but let
+          // the stream establish the ending; an HTTP response alone is not terminal evidence.
+          if (session) session.admissionFailure = "The writing request was not confirmed. " + (err instanceof Error ? err.message : String(err));
+          this.push({ type: "tool.activity", sessionId: input.sessionId, tool: "interrupt", summary: "The writing request was not confirmed — waiting for the writer to stop." });
+          await this.abortSession(input.sessionId).catch(error => this.trace("dispatch.stop-unconfirmed", { sessionId: input.sessionId, error: String(error) }));
+          return;
+        }
         this.push({
           type: "session.error",
           sessionId: input.sessionId,
@@ -287,6 +309,12 @@ export class OpenCodeAdapter implements HarnessAdapter {
         });
       }
     })();
+    pending.add(dispatched);
+    void dispatched.finally(() => {
+      this.turnListeners.delete(observeEnding);
+      pending.delete(dispatched);
+      if (pending.size === 0) this.pendingDispatches.delete(input.sessionId);
+    });
     return { sessionId: input.sessionId, correlationId };
   }
 
@@ -347,10 +375,19 @@ export class OpenCodeAdapter implements HarnessAdapter {
 
   /** Interrupt a running turn; the proposal keeps whatever the agent had written (R-12, R-13). */
   async interrupt(sessionId: string): Promise<void> {
+    // A stop must not overtake a prompt still being admitted by the server.
+    await Promise.all(this.pendingDispatches.get(sessionId) ?? []);
+    await this.abortSession(sessionId);
+  }
+
+  private async abortSession(sessionId: string): Promise<void> {
+    const directory = this.sessions.get(sessionId)?.cwd;
+    const scope = () => ({ ...(directory ? { directory } : {}), signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? 30_000) });
     try {
-      await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {});
+      // Match prompt_async's execution owner; the /api family can coexist with another loop.
+      await this.http.req("POST", `/session/${sessionId}/abort`, {}, scope());
     } catch {
-      await this.http.req("POST", `/session/${sessionId}/abort`, {}).catch(() => {});
+      await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {}, scope());
     }
   }
 
@@ -464,6 +501,13 @@ export class OpenCodeAdapter implements HarnessAdapter {
   // ---- the event pump ------------------------------------------------------
 
   private push(event: HarnessEvent): void {
+    if (event.type === "session.ended" || event.type === "session.error" || event.type === "message.completed") {
+      const session = event.sessionId ? this.sessions.get(event.sessionId) : undefined;
+      if (event.type === "session.ended" && event.reason === "cancelled" && session?.admissionFailure) {
+        event = { ...event, reason: "error", detail: session.admissionFailure };
+      }
+      if (session) delete session.admissionFailure;
+    }
     const parsed = HarnessEventSchema.parse(event);
     if (parsed.type === "permission.requested") {
       this.permissionSessions.set(parsed.permissionId, parsed.sessionId);

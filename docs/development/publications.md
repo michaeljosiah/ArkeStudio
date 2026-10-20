@@ -10,7 +10,7 @@ fixtures and reader evidence; it does not add supported application profiles.
 
 The [private story publishing design review](../../design-system/publish-private-review.html)
 records approved turn 224 (revision 2, 2026-10-13). Story and Audiobook now share a Publish sheet
-for standalone EPUB and AAC M4B files. This is separate from the video-v1 manifest/player protocol;
+for standalone EPUB and AAC M4B files. SPEC-058 extends this flow with a typeset PDF. This is separate from the video-v1 manifest/player protocol;
 the protocol still refuses unsupported book/audio profiles.
 
 The coordinator's publications/story.ts owns host-local editions under
@@ -53,6 +53,44 @@ testing; encoder and layout checks alone do not establish these.
 portable asset path rules and dependency receipt/fingerprint helpers. The owning tests are
 `packages/contracts/test/publication.test.ts`. These are new output contracts; no existing world
 schema, production record or timeline is migrated by importing them.
+
+## Story PDF editions
+
+PDF uses the same explicit chapter selection, review, captured preview and Create boundary as
+EPUB/M4B. Select PDF in Publish and choose Book (6 × 9 in), A4 or Letter, bundled serif/sans,
+10–14 pt body text, 1.25–1.6 line spacing, contents and running headers. PDF-only preparation
+needs no narration or FFmpeg. The authoritative prose supplies paragraphs, emphasis and scene
+breaks; metadata supplies the title page and optional subtitle/edition label. Unsupported text
+or layout refuses rather than silently dropping words. The old Word/EPUB export is unchanged.
+
+`publications/story-pdf.ts` plans pages explicitly, renders with PDFKit/fontkit and independently
+parses the bytes with PDF.js. Bundled DejaVu faces, Noto Emoji fallback and their hashes travel in compiler identity;
+the system font collection is not used. Validation checks source-to-plan paragraph fidelity,
+parsed text, navigation, embedded fonts, page bounds and reading structure. The private
+`pdf-validation.json` receipt stays beside the edition, outside the PDF. PDF captures use story
+compiler version 3; existing EPUB/M4B identities and supported old captured inputs remain readable.
+
+`story-pdf-runner.ts` runs the compiler in a worker and waits for termination on cancellation,
+failure or timeout. The limits are 200 chapters, two million text code points, 5,000 pages,
+100 MiB PDF, 20 MiB/40-megapixel cover and 120 seconds. V8 heap limits and sampled heap plus
+external allocation enforce a 512 MiB worker budget; this is not an operating-system RSS cap.
+Large inputs can refuse before the page ceiling. The coordinator does not hold the world gate
+while formatting. Retry checks the frozen renderer/font identity; it cannot silently use a
+new renderer to reinterpret an old edition.
+
+Client `story-pdf-preview.tsx` displays the actual authenticated candidate PDF with canvas and
+selectable text, page/zoom/chapter controls and no native download/annotation actions. Only a
+ready edition offers Save PDF. Desktop resolves the inventoried `story.pdf` through the same
+digest checks as other formats; Locate must restore matching bytes. The standalone file needs
+neither Arke nor the original world. This is a reading PDF with tagged text and bookmarks, not
+a claim of PDF/UA, PDF/X, print-house or retailer certification. V1 accepts Latin prose,
+including Igbo/Yoruba diacritics, plus supported symbols and emoji. Non-Latin letters and
+unsupported glyphs are refused with their location; a language tag alone does not establish coverage.
+
+Desktop builds bundle the worker and font assets. Headless development uses the source worker
+through tsx. See [maintenance](maintenance.md) for asset ownership and [testing](testing.md)
+for focused checks and the isolated built-worker smoke. Native packaging, browser preview
+and full-length rendered-page acceptance remain distinct evidence from schema/unit checks.
 
 ## Manifest boundary
 

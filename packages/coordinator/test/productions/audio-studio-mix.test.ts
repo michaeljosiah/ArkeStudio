@@ -122,6 +122,13 @@ describe("Audio Studio canonical stereo rendering", () => {
     assert.ok(Math.abs(mixed.left[7]! - 0.4) < 1e-6);
     assert.equal(mixed.left[8], pcm.left[2]); assert.equal(mixed.left[14], pcm.left[2]);
   });
+  it("refuses a stem that would clip at the mix's level, by its lane (codex on PR 1945)", async () => {
+    const { dir, arranged } = await fixture();
+    const trackId = arranged.clips.find(clip => clip.source)!.trackId;
+    await assert.rejects(renderAudioStudioMix(dir, arranged, script, { stem: { trackId, gainDb: 60, label: "Bray" } }), /Bray would clip as a stem at the episode's level/);
+    const mix = await renderAudioStudioMix(dir, arranged, script);
+    await renderAudioStudioMix(dir, arranged, script, { stem: { trackId, gainDb: mix.gainDb, label: "Bray" } });
+  });
   it("track solo is an audition option and does not change the saved state", async () => {
     const { dir, arranged } = await fixture(), before = structuredClone(arranged);
     const solo = await renderAudioStudioMix(dir, arranged, script, { solo: ["other"] });

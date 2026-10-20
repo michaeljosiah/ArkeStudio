@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { emDashSuggestions, publicationTextProblems, StoryPublicationSettingsSchema } from "../src/story-publication.js";
+import { emDashSuggestions, publicationTextProblems, StoryPublicationSettingsSchema, StoryPdfMetadataSchema, DEFAULT_STORY_PDF_SETTINGS } from "../src/story-publication.js";
 
 describe("private publication formatting review", () => {
   it("finds em dashes without treating hyphens or en dashes as errors", () => {
@@ -31,5 +31,23 @@ describe("private publication formatting review", () => {
     assert.equal(StoryPublicationSettingsSchema.safeParse({ ...base, chapterIds: [] }).success, false);
     assert.equal(StoryPublicationSettingsSchema.safeParse({ ...base, chapterIds: ["one", "one"] }).success, false);
     assert.equal(StoryPublicationSettingsSchema.safeParse({ ...base, language: "English" }).success, false);
+  });
+  it("keeps legacy settings unchanged and requires resolved PDF settings without lossy defaults", () => {
+    const legacy = { title: "Story", author: "", language: "en", description: "", label: "", cover: null, chapterIds: ["one"], outputs: ["epub"], avoidEmDashes: false };
+    assert.deepEqual(StoryPublicationSettingsSchema.parse(legacy), legacy);
+    assert.equal(StoryPublicationSettingsSchema.safeParse({ ...legacy, outputs: ["pdf"] }).success, false);
+    const pdf = { ...legacy, outputs: ["pdf", "epub", "m4b"], pdf: DEFAULT_STORY_PDF_SETTINGS, subtitle: "A story", editionLabel: "Second draft" };
+    assert.ok(StoryPublicationSettingsSchema.safeParse(pdf).success);
+    for (const changes of [{ bodySize: 9 }, { lineSpacing: Infinity }, { lineSpacing: 1.7 }, { preset: "screen" }, { version: 2 }, { font: "C:/private/font.ttf" }])
+      assert.equal(StoryPublicationSettingsSchema.safeParse({ ...pdf, pdf: { ...pdf.pdf, ...changes } }).success, false);
+    assert.equal(StoryPublicationSettingsSchema.safeParse({ ...pdf, outputs: ["pdf", "pdf"] }).success, false);
+  });
+  it("refuses navigation outside PDF pages and duplicated chapter destinations", () => {
+    const chapter = { id: "one", title: "One", pageNumber: 1, physicalPage: 3, destination: "chapter-1" };
+    const base = { pageCount: 3, pageLabels: ["Title", "Contents", "1"], chapters: [chapter] };
+    assert.ok(StoryPdfMetadataSchema.safeParse(base).success);
+    assert.equal(StoryPdfMetadataSchema.safeParse({ ...base, pageLabels: ["1"] }).success, false);
+    assert.equal(StoryPdfMetadataSchema.safeParse({ ...base, chapters: [{ ...chapter, physicalPage: 4 }] }).success, false);
+    assert.equal(StoryPdfMetadataSchema.safeParse({ ...base, chapters: [chapter, { ...chapter, id: "two" }] }).success, false);
   });
 });

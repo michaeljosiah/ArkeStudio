@@ -113,7 +113,7 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.match(html, /class="fy-app" data-screen="bench"/);
     assert.match(html, /role="status"/);
     assert.match(html, /Opening the bench/);
-    assert.match(html, />Artifacts<\/button>/);
+    assert.match(html, /class="fy-titlebar__back-label">Artifacts<\/span>/);
   });
 
   it("restores the session whole: title, brief, token, numbered take, selection", () => {

@@ -8,6 +8,15 @@
 .fy-production-setup__log { min-height: 0; overflow: auto; flex: 1; padding: 20px 20px 20px 0; }
 /* Under Arke's plan (230c): Start the pilot, or Change the plan first. */
 .fy-production-setup__choices { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
+/* The narrator question's two samples (230c): side by side, each card the answer. */
+.fy-setup-samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; max-width: 620px; margin: 8px 0 0; }
+.fy-setup-sample { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fy-setup-sample:hover:not(:disabled), .fy-setup-sample:focus-visible { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
+.fy-setup-sample:disabled { cursor: default; opacity: 0.7; }
+.fy-setup-sample__head { font-weight: 600; }
+.fy-setup-sample__line { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; line-height: 1.45; }
+.fy-setup-sample__line small { color: var(--muted-foreground); text-align: right; padding-top: 2px; }
+.fy-setup-sample__line--cue > span { color: var(--muted-foreground); }
 .fy-production-setup__welcome { padding: 32px 24px; max-width: 460px; line-height: 1.7; }
 .fy-production-setup__welcome h2 { font-weight: 500; font-size: 25px; }
 .fy-production-setup__composer { flex: none; padding: 12px 24px 0 0; }

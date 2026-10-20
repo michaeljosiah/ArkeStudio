@@ -2,7 +2,7 @@ import {
   DRAMA_NARRATOR, dramaRoleVoice, narrationQuotes, sheetSound,
   type AudiobookReader, type DramaRole, type EpisodeScriptBlock, type ProductionBundle, type Sheet, type WorldBundle,
 } from "@arke-studio/contracts";
-import { speakerLabel } from "./episode-script.js";
+import { isCrowdSpeaker, speakerLabel } from "./episode-script.js";
 
 /**
  * An audio drama's speaking roles (SPEC-057 R-55..R-58, design turn 230k): the narrator when the
@@ -109,4 +109,24 @@ export function takesOutOfDate(production: ProductionBundle, key: string, voice:
     }
   }
   return out;
+}
+
+/** A row of Cast (230k, issue 1882): one role, or a crowd of two or more voices as one row. */
+export type DramaCastRow = { kind: "role"; role: DramaCastRole } | { kind: "crowd"; members: DramaCastRole[] };
+
+/**
+ * Cast's rows: each role in its order, except that the crowd's voices — `crowd`, `crowd-2` and on —
+ * are one row where the first of them stood, each line still named to its own speaker. One crowd
+ * voice alone is an ordinary role.
+ */
+export function dramaCastRows(roles: readonly DramaCastRole[]): DramaCastRow[] {
+  const crowd = roles.filter((role) => isCrowdSpeaker(role.key));
+  if (crowd.length < 2) return roles.map((role) => ({ kind: "role", role }));
+  const order = (key: string) => Number(/-(\d+)$/u.exec(key)?.[1] ?? 1);
+  const rows: DramaCastRow[] = [];
+  for (const role of roles) {
+    if (!isCrowdSpeaker(role.key)) rows.push({ kind: "role", role });
+    else if (!rows.some((row) => row.kind === "crowd")) rows.push({ kind: "crowd", members: [...crowd].sort((a, b) => order(a.key) - order(b.key)) });
+  }
+  return rows;
 }

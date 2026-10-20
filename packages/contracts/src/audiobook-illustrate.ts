@@ -97,12 +97,13 @@ export type PictureDetail = z.infer<typeof PictureDetailSchema>;
  * One of the seven checks the coordinator runs on a drafted picture (rule 14, R-121): a line on
  * the card, ticked or marked. A mark never blocks Generate.
  */
+export const PICTURE_CHECK_NOTE_MAX = 240;
 export const PictureCheckSchema = z
   .object({
     id: z.enum(["reference", "not-in-frame", "frame", "garments", "mood", "closing", "expression"]),
     ok: z.boolean(),
     label: z.string().min(1).max(80),
-    note: z.string().min(1).max(240).optional(),
+    note: z.string().min(1).max(PICTURE_CHECK_NOTE_MAX).optional(),
   })
   .strict();
 export type PictureCheck = z.infer<typeof PictureCheckSchema>;

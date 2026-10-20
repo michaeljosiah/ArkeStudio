@@ -19,6 +19,11 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | qrcode.react / QR Code Generator | ISC / MIT | Renderer QR generation; both licence texts retained below. |
 | Electron | MIT | Attribution here; Chromium/Node notices ship inside Electron's own LICENSES file, included in the installer. |
 | Geist / Geist Mono fonts | OFL-1.1 | Font files unmodified; OFL text retained at `licenses/LICENSE.Geist.txt`. The desktop redistributes Geist Regular v1.7.2 as `resources/fonts/Geist-Regular.ttf` so ffmpeg slates never depend on host font discovery. Not sold separately. |
+| PDFKit 0.20.2 / fontkit 2.0.4 | MIT | Unmodified JavaScript book typesetting and embedded font subsets. Their attribution, MIT text and transitive dependency notices are retained in `licenses/story-pdf/`, copied beside the installed worker in `dist/story-pdf-licenses/`. |
+| PDF.js 5.4.624 | Apache-2.0 | Unmodified parser and controlled preview renderer. Full Apache licence retained in `licenses/story-pdf/pdfjs-dist-LICENSE.txt` and shipped with the PDF worker; no upstream NOTICE is present in this npm distribution. |
+| DejaVu Serif / Sans 2.37 | Bitstream Vera licence; DejaVu changes public domain | Eight unmodified TTF faces are bundled for offline books and embedded as subsets. Exact upstream licence and copyright notices ship beside the font files in `dist/fonts/LICENSE`. Fonts are not sold separately. |
+| Noto Emoji Regular 3.002 | OFL-1.1 | Unmodified monochrome fallback font, pinned to Google Fonts commit `47d54ca1ebb14fd864695f1d39dc734f39017c33`. The font is embedded as a subset; the original licence and attribution ship in `dist/fonts/NotoEmoji-OFL.txt`. Not sold separately. |
+| brotli.js decoder | MIT / Apache-2.0 | Devon Govett's JavaScript port and Google's decoder code, used by fontkit. Upstream declarations, Google copyright notice and Apache text are retained in `licenses/story-pdf/`. No encoder or remote font service is used. |
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
 

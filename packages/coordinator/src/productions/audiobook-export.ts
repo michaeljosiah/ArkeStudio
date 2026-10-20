@@ -284,6 +284,12 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   return problems;
 }
 
+/** Only a completed audiobook package's player can be opened by the native host. */
+export async function audiobookPlayerFile(store: WorldStore, folder: string): Promise<string | null> {
+  if (!(await listWebPackages(store)).some(entry => entry.kind === "audiobook" && entry.dir === `exports/${folder}`)) return null;
+  return containedWorldFile(store.dir, `exports/${folder}/player.html`);
+}
+
 /** The world's web packages, newest first (turn 186e): the interactive, the visual novel and the audiobook, each by its manifest. */
 export async function listWebPackages(store: WorldStore): Promise<WebPackagesListed["packages"]> {
   const exportsDir = join(store.dir, "exports");

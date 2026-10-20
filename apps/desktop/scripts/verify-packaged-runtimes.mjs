@@ -9,6 +9,7 @@ export default async function verifyPackagedRuntimes(context) {
   if (!arch) throw new Error(`unsupported Electron package architecture ${context.arch}`);
   const resources = join(context.appOutDir, "resources");
   assertAudioListenerWorker(resources);
+  assertStoryPdfAssets(resources);
   const voxa = join(resources, "voxa");
   const espeak = join(resources, "espeak-ng");
   assertPeArchitecture(join(voxa, "voxa.exe"), arch);
@@ -22,19 +23,9 @@ export default async function verifyPackagedRuntimes(context) {
   ]) {
     if (!existsSync(join(voxa, runtime))) throw new Error(`packaged Voxa lacks ${runtime}`);
   }
-  // The sample world (SPEC-016 R-6, R-8). An extraResources entry that quietly fails to copy
-  // does not fail the build — the application simply reports having no sample world, which is
-  // indistinguishable from a build that never carried one. This is the only place that tells
-  // the difference before a user does.
+  // SPEC-016 R-6, R-8: the story downloads separately; the test fixture must stay out of builds.
   const sampleWorld = join(resources, "sample-world");
-  if (!existsSync(join(sampleWorld, "world.json"))) {
-    throw new Error("the sample world is missing from the installer (resources/sample-world/world.json)");
-  }
-  for (const expected of ["characters", "canon", "references", "productions", "world-art.png"]) {
-    if (!existsSync(join(sampleWorld, expected))) {
-      throw new Error(`the packaged sample world is incomplete — ${expected} did not copy`);
-    }
-  }
+  if (existsSync(sampleWorld)) throw new Error("The test fixture must not ship in the installer; The Undersong downloads on demand.");
 
   /*
    * ffmpeg and ffprobe are one runtime, verified together (#253, Codex round 1).
@@ -117,6 +108,22 @@ export function assertAudioListenerWorker(resources) {
   const installed = join(resources, "audio-listener", "local-audio-listener.py");
   const digest = path => createHash("sha256").update(readFileSync(path)).digest("hex");
   if (!existsSync(installed) || digest(installed) !== digest(source)) throw new Error("Packaged audio listener worker is missing or differs from source; check electron-builder.yml extraResources");
+}
+
+/** PDF support must run offline from the installed worker and the exact reviewed font faces. */
+export function assertStoryPdfAssets(resources, source = fileURLToPath(new URL("../dist/", import.meta.url))) {
+  const installed = join(resources, "app.asar.unpacked", "dist");
+  const verify = (relative) => {
+    const expected = join(source, relative), actual = join(installed, relative);
+    if (!existsSync(expected) || !existsSync(actual) ||
+        createHash("sha256").update(readFileSync(actual)).digest("hex") !== createHash("sha256").update(readFileSync(expected)).digest("hex"))
+      throw new Error(`Packaged story PDF asset is missing or changed: ${relative}`);
+  };
+  verify("story-pdf-worker.mjs");
+  for (const folder of ["fonts", "story-pdf-licenses"]) {
+    if (!existsSync(join(source, folder))) throw new Error(`Build story PDF assets before packaging: ${folder}`);
+    for (const file of readdirSync(join(source, folder))) verify(join(folder, file));
+  }
 }
 
 /**

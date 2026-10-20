@@ -15,7 +15,7 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
 
 /**
  * An audio drama's plan rests on the whole story (SPEC-057 R-5, codex on PR 1866): a plan
@@ -63,6 +63,7 @@ export async function fenceAdaptableSource(world: WorldStore, update: Production
   if (update.fields?.target || update.fields?.kind === "microdrama") await world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
   // The audio-drama kind and its plan are strict draft fields older builds cannot read (SPEC-057).
   if (update.fields?.kind === AUDIO_DRAMA_KIND || update.fields?.audioDrama) await world.ensureSchemaVersion(AUDIO_DRAMA_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.narratorSamples) await world.ensureSchemaVersion(NARRATOR_SAMPLES_SCHEMA_VERSION, "production-setup");
 }
 
 function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {

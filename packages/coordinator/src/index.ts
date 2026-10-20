@@ -304,6 +304,7 @@ export {
 export { WorldLock, WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 export { checkPathBudget, defaultAppRoot, fsPath, toExtendedLength, toPortable } from "./world/paths.js";
 export { FsWorldProvider, type CreateWorldInput } from "./world/provider.js";
+export { UNDERSONG_RELEASE } from "./world/undersong-release.js";
 export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } from "./world/scan.js";
 export { fallbackSlug, slugify, uniqueSlug } from "./world/slug.js";
 export { deleteScanState, WorldStore } from "./world/store.js";

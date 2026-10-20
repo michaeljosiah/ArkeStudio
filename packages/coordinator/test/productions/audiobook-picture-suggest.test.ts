@@ -34,6 +34,35 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("returns long multi-character checks through the normal suggestion command without losing expressions (#1946)", () => {
+    const expression = "eyes fixed on the doorway, mouth closed, brows raised with quiet concern, chin lifted toward the dim window, waiting for an answer without turning away";
+    const prompt = `Medium shot. Maren Kest: ${expression}. Bray Half-Hitch: ${expression}.`;
+    return withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const answer = suggestion(events);
+      assert.equal(answer.refused, undefined);
+      assert.equal(answer.requestId, REQUEST);
+      assert.equal(answer.suggestion!.prompt, prompt);
+      assert.equal(answer.suggestion!.shot!.expressions["maren-kest"], expression);
+      assert.equal(answer.suggestion!.shot!.expressions["bray-half-hitch"], expression);
+      assert.ok(answer.suggestion!.shot!.checks.find(c => c.id === "expression")!.note!.endsWith("…"));
+      assert.equal(enqueued.length, 0);
+    }, { picture: async () => ({ frame: "Medium shot", inFrame: ["maren-kest", "bray-half-hitch"], expressions: { "maren-kest": expression, "bray-half-hitch": expression }, prompt }) });
+  });
+
+  it("keeps a failed suggestion correlated and permits a targeted retry without generating an image (#1946)", () => {
+    let calls = 0;
+    return withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      assert.equal(suggestion(events).requestId, REQUEST);
+      assert.match(suggestion(events).refused!, /gave no picture/);
+      await suggest(send);
+      assert.equal(suggestion(events).refused, undefined);
+      assert.equal(suggestion(events).suggestion!.block, "p0.0");
+      assert.equal(enqueued.length, 0);
+    }, { picture: async () => ({ prompt: calls++ === 0 ? "" : "Wide shot of the harbour at dawn.", inFrame: [] }) });
+  });
+
   it("carries the included-plan identity into a zero-dollar picture authorization", () =>
     withHarness(async ({ events, send, enqueued }) => {
       await suggest(send);

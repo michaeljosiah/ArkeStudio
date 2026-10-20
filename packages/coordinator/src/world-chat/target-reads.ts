@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   migrateLegacyCut,
   deriveProductionReadiness,
+  episodeScriptFile,
+  productionShape,
   FrameRunIdSchema,
   orderedShots,
   canonicalSceneFlow,
@@ -203,6 +205,25 @@ export function chaptersFence(production: ProductionBundle | undefined): string 
 export function chapterFence(production: ProductionBundle | undefined, chapterId: string): string {
   const chapter = production?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId) ?? null;
   return fence(chapter, chapter === null ? "absent" : `${chapter.version}:${chapter.hash ?? "unhashed"}`);
+}
+
+/**
+ * The episode Audio Studio arranges (issue 1882), named `episode-NNN` where a chapter id would be,
+ * when this production is an audio drama with that episode's script; otherwise none.
+ */
+export function studioEpisode(production: ProductionBundle | undefined, id: string): string | undefined {
+  if (!production || !productionShape(production.meta).isAudioDrama || !/^episode-\d{3}$/.test(id)) return undefined;
+  return production.episodeScripts?.some((entry) => episodeScriptFile(entry.script.episode) === `${id}.json`) ? id : undefined;
+}
+
+/**
+ * The fence of what Audio Studio arranges: a chapter's summary, or an episode's script by version
+ * and hash, as a chapter's summary carries its own (issue 1882).
+ */
+export function audioStudioSubjectFence(production: ProductionBundle | undefined, id: string): string {
+  if (!studioEpisode(production, id)) return chapterFence(production, id);
+  const entry = production!.episodeScripts!.find((candidate) => episodeScriptFile(candidate.script.episode) === `${id}.json`)!;
+  return fence({ file: entry.file, hash: entry.hash }, `${entry.script.version}:${entry.hash}`);
 }
 
 export function scenesFence(production: ProductionBundle | undefined): string {
@@ -749,17 +770,20 @@ export class WorldChatTargetReads {
         const section = args["section"];
         if (section !== undefined && section !== "plan" && section !== "ending" && section !== "beats" && section !== "audio-studio") throw new TargetReadError("section must be plan, ending, beats or audio-studio");
         if (section === "audio-studio") {
-          if (!chapter || !this.deps.getAudioStudio) throw new TargetReadError("Audio Studio is unavailable for this chapter");
-          const studio = await this.deps.getAudioStudio(productionId, chapter.file);
-          readTarget = target("chapters", `${productionId}:${chapter.id}:audio-studio`);
+          // An audio drama's episode is arranged as a chapter is, by its stem (issue 1882).
+          const episode = chapter ? undefined : studioEpisode(productionOf(bundle, productionId), chapterId);
+          if (!chapter && !episode || !this.deps.getAudioStudio) throw new TargetReadError("Audio Studio is unavailable for this chapter or episode");
+          const subject = chapter?.id ?? episode!;
+          const studio = await this.deps.getAudioStudio(productionId, chapter?.file ?? episode!);
+          readTarget = target("chapters", `${productionId}:${subject}:audio-studio`);
           cursorFence = fence({ base: studio.base, proposals: studio.proposals, unavailable: studio.unavailable });
-          rows = [{ key: "metadata", value: { chapterId: chapter.id, base: studio.base, revision: studio.revision, sampleRate: 48000, manuscriptHash: studio.state.manuscriptHash, master: studio.state.master } },
+          rows = [{ key: "metadata", value: { chapterId: subject, base: studio.base, revision: studio.revision, sampleRate: 48000, manuscriptHash: studio.state.manuscriptHash, master: studio.state.master } },
             ...studio.state.tracks.map(track => ({ key: `track:${track.id}`, value: track })),
             ...studio.state.clips.map(clip => ({ key: `clip:${clip.id}`, value: clip })),
             ...studio.state.passages.map(passage => ({ key: `passage:${passage.id}`, value: { ...passage, text: studio.passages.find(entry => entry.key === passage.key)?.text } })),
             ...studio.state.omissions.map(omission => ({ key: `omission:${omission.id}`, value: omission })),
             ...(studio.proposals ?? []).flatMap(proposal => [{ key: `proposal:${proposal.id}`, value: { id: proposal.id, status: proposal.status, resultRevision: proposal.resultRevision, versions: proposal.versions.map(({ commands, ...version }) => ({ ...version, commandCount: commands.length })) } }, ...proposal.versions.flatMap(version => version.commands.map((command, index) => ({ key: `proposal:${proposal.id}:${padded(version.number)}:${padded(index)}`, value: command })))])];
-          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          revisionOrDigest = chapter ? chapterFence(productionOf(bundle, productionId), chapterId) : audioStudioSubjectFence(productionOf(bundle, productionId), subject);
           break;
         }
         if (section === "plan") {

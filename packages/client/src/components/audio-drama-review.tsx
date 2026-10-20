@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  DRAMA_NARRATOR, reviewDramaScript,
-  type DramaReviewCheck, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
+  DRAMA_NARRATOR, episodeScriptFile, reviewDramaScript,
+  type AudioHeard, type DramaReviewCheck, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { ChevronLeft, ChevronRight, X } from "./icons.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { decideDramaNote } from "../lib/store.js";
+import { decideDramaNote, readAudioHeard, subscribeAudioHeard, useAudiobookRecords } from "../lib/store.js";
 import { useGlobalChat } from "./global-chat-context.js";
+import { heardClock } from "../screens/audio-studio-review-strip.js";
 
 const CHECK: Record<DramaReviewCheck, string> = {
   fidelity: "Fidelity", clarity: "Clarity", pacing: "Pacing", emotion: "Emotion", mystery: "Mystery", intelligibility: "Intelligibility",
@@ -18,40 +19,23 @@ const CHECK: Record<DramaReviewCheck, string> = {
  * Intentional or Dismiss. Checks with nothing to say are listed closed; intelligibility waits for
  * heard audio and never reads as passed.
  */
-export function ReviewColumn({ world, production, episode, version, blocks, onPick, onClose }: {
+export function ReviewColumn({ world, production, episode, version, blocks, onPick, onClose, onStudio }: {
   world: WorldBundle; production: ProductionBundle; episode: number; version: number;
   blocks: readonly EpisodeScriptBlock[]; onPick: (block: string) => void; onClose: () => void;
+  /** Audio is reviewed where it is heard (230j): its notes' fixes, and the rest of the listening, are there. */
+  onStudio?: () => void;
 }) {
   const record = production.audioDrama;
+  const heard = useAudioHeard(world, production, episode);
+  const scripted = useDramaScriptReview(world, production, episode, version, blocks, heard);
+  // The heard audio's own notes, beside the script's, each resting on the interval it was heard on.
   const review = useMemo(() => {
-    const cast = record?.cast ?? {};
-    const names: Record<string, string> = {};
-    const voices: Record<string, string> = {};
-    for (const block of blocks) {
-      if (block.kind !== "dialogue" || names[block.speaker] !== undefined) continue;
-      const sheet = world.sheets.find((candidate) => candidate.id === block.speaker);
-      names[block.speaker] = sheet?.name ?? block.speaker;
-      const voice = cast[block.speaker]?.voice ?? sheet?.voice;
-      if (voice) voices[block.speaker] = `${voice.provider}/${voice.voiceId}`;
-    }
-    // The narrator's voice is told apart from the characters' too (codex on PR 1873).
-    const narrator = cast[DRAMA_NARRATOR]?.voice;
-    if (narrator) voices[DRAMA_NARRATOR] = `${narrator.provider}/${narrator.voiceId}`;
-    for (const key of Object.keys(cast)) {
-      if (key === DRAMA_NARRATOR || names[key] !== undefined) continue;
-      names[key] = world.sheets.find((sheet) => sheet.id === key)?.name ?? key;
-    }
-    const chapters = blocks.flatMap((block) => {
-      if (block.kind !== "heading" || !block.source) return [];
-      const pin = block.source;
-      const chapter = world.productions.find((candidate) => candidate.meta.id === pin.story)?.chapters.find((candidate) => candidate.id === pin.chapter);
-      return chapter ? [{ story: pin.story, chapter: pin.chapter, version: chapter.version ?? 1, hash: chapter.hash }] : [];
-    });
-    return reviewDramaScript({
-      episode, version, blocks, names, voices, cast, chapters,
-      ...(record?.plan ? { plan: { minutes: record.plan.minutes, keptFromListener: record.plan.keptFromListener } } : {}),
-    });
-  }, [blocks, version, episode, record, world.sheets, world.productions]);
+    const index = new Map(blocks.map((block, i) => [block.id, i]));
+    const audio = (heard?.notes ?? []).map((note) => ({ key: note.key, check: note.check, evidence: `heard ${heardClock(note.from)}–${heardClock(note.to)}`,
+      blocks: [note.block], quote: note.quote.replace(/^[^:]{1,80}:\s*/u, ""), says: note.observed, audio: true as const }));
+    const at = (note: { blocks: readonly string[] }) => index.get(note.blocks[0] ?? "") ?? Number.MAX_SAFE_INTEGER;
+    return { ...scripted, notes: [...scripted.notes, ...audio].sort((a, b) => at(a) - at(b)) };
+  }, [scripted, heard, blocks]);
   const decided = record?.review ?? {};
   const open = review.notes.filter((note) => decided[note.key] === undefined);
   // Decided notes stay to be read, with how they were decided, and can be opened again (codex on PR 1873).
@@ -90,6 +74,7 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
       <ol className="fy-ad-review__notes">
         {open.map((note, index) => {
           const on = note.key === (current ?? open[0]?.key);
+          const audio = "audio" in note;
           return (
             <li key={note.key} className={cx("fy-ad-review__note", on && "fy-ad-review__note--open")}
               onClick={() => { setCurrent(note.key); if (note.blocks[0]) onPick(note.blocks[0]); }}>
@@ -98,7 +83,9 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
               {on && note.quote && <q>{note.quote.length > 140 ? `${note.quote.slice(0, 140)}…` : note.quote}</q>}
               {on && (
                 <span className="fy-ad-review__acts" onClick={(event) => event.stopPropagation()}>
-                  {surface && <Button size="sm" variant="primary" onClick={() => fix(note, index + 1)}>Fix</Button>}
+                  {/* A heard note is fixed where it was heard, as Current and Suggested (230o). */}
+                  {audio ? onStudio && <Button size="sm" variant="primary" onClick={onStudio}>Fix in Audio Studio</Button>
+                    : surface && <Button size="sm" variant="primary" onClick={() => fix(note, index + 1)}>Fix</Button>}
                   <Button size="sm" variant="secondary" onClick={() => decide(note.key, "intentional")}>Intentional</Button>
                   <Button size="sm" variant="ghost" onClick={() => decide(note.key, "dismissed")}>Dismiss</Button>
                 </span>
@@ -115,11 +102,70 @@ export function ReviewColumn({ world, production, episode, version, blocks, onPi
         ))}
         {review.checked.map((entry, index) => (
           <li key={`${entry.check}-${index}`} className="fy-ad-review__note fy-ad-review__note--closed">
-            <span className="fy-ad-review__kind">{CHECK[entry.check]} · {entry.check === "intelligibility" ? "audio · not heard" : `script v${version} · checked`}</span>
+            <span className="fy-ad-review__kind">{CHECK[entry.check]} · {entry.check === "intelligibility" ? heard?.spans.length ? "audio · heard" : "audio · not heard" : `script v${version} · checked`}</span>
             <p>{entry.says}</p>
           </li>
         ))}
       </ol>
+      {onStudio && <Button size="sm" variant="secondary" onClick={onStudio}>Review audio in Audio Studio</Button>}
     </aside>
   );
+}
+
+/**
+ * What of the episode's mix as it is now has been heard (issue 1882), read again whenever its
+ * studio says it changed, or the script or its takes do; null until something has been.
+ */
+export function useAudioHeard(world: WorldBundle, production: ProductionBundle, episode: number): AudioHeard | null {
+  const stem = episodeScriptFile(episode).replace(/\.json$/u, "");
+  const signal = useAudiobookRecords()[`${world.meta.worldId}/${production.meta.id}/${stem}`]?.seq ?? 0;
+  const script = production.episodeScripts?.find((entry) => entry.script.episode === episode)?.hash ?? "";
+  const takes = JSON.stringify(production.episodeTakes?.find((entry) => entry.episode === episode) ?? null);
+  const subject = `${world.meta.worldId}/${production.meta.id}/${stem}`;
+  const [heard, setHeard] = useState<{ subject: string; heard: AudioHeard | null } | null>(null);
+  const asked = useRef<string | null>(null);
+  useEffect(() => subscribeAudioHeard((event) => { if (event.requestId === asked.current) setHeard({ subject: `${event.worldId}/${event.productionId}/${event.chapterId}`, heard: event.heard }); }), []);
+  useEffect(() => {
+    asked.current = readAudioHeard(world.meta.worldId, production.meta.id, stem);
+    // Unsent, nothing is known of what was heard (codex on PR 1945): the last answer is not kept.
+    if (asked.current === null) setHeard(null);
+  }, [world.meta.worldId, production.meta.id, stem, signal, script, takes]);
+  // Another episode's listening is never shown while this one's is read (codex on PR 1945).
+  return heard?.subject === subject ? heard.heard : null;
+}
+
+/** The script's review (230j, R-52), on what the page holds: its names, voices, cast and pinned chapters. */
+export function useDramaScriptReview(world: WorldBundle, production: ProductionBundle, episode: number, version: number,
+  blocks: readonly EpisodeScriptBlock[], heard?: AudioHeard | null) {
+  const record = production.audioDrama;
+  return useMemo(() => {
+    const cast = record?.cast ?? {};
+    const names: Record<string, string> = {};
+    const voices: Record<string, string> = {};
+    for (const block of blocks) {
+      if (block.kind !== "dialogue" || names[block.speaker] !== undefined) continue;
+      const sheet = world.sheets.find((candidate) => candidate.id === block.speaker);
+      names[block.speaker] = sheet?.name ?? block.speaker;
+      const voice = cast[block.speaker]?.voice ?? sheet?.voice;
+      if (voice) voices[block.speaker] = `${voice.provider}/${voice.voiceId}`;
+    }
+    // The narrator's voice is told apart from the characters' too (codex on PR 1873).
+    const narrator = cast[DRAMA_NARRATOR]?.voice;
+    if (narrator) voices[DRAMA_NARRATOR] = `${narrator.provider}/${narrator.voiceId}`;
+    for (const key of Object.keys(cast)) {
+      if (key === DRAMA_NARRATOR || names[key] !== undefined) continue;
+      names[key] = world.sheets.find((sheet) => sheet.id === key)?.name ?? key;
+    }
+    const chapters = blocks.flatMap((block) => {
+      if (block.kind !== "heading" || !block.source) return [];
+      const pin = block.source;
+      const chapter = world.productions.find((candidate) => candidate.meta.id === pin.story)?.chapters.find((candidate) => candidate.id === pin.chapter);
+      return chapter ? [{ story: pin.story, chapter: pin.chapter, version: chapter.version ?? 1, hash: chapter.hash }] : [];
+    });
+    return reviewDramaScript({
+      episode, version, blocks, names, voices, cast, chapters,
+      ...(record?.plan ? { plan: { minutes: record.plan.minutes, keptFromListener: record.plan.keptFromListener } } : {}),
+      ...(heard ? { heard: heard.spans, heardOf: heard.seconds } : {}),
+    });
+  }, [blocks, version, episode, record, world.sheets, world.productions, heard]);
 }

@@ -20,7 +20,7 @@ import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
-import { AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
+import { AudioHeardSchema, AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";
 import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX } from "./cadence.js";
 import { FreePlanShortSchema } from "./provider-plans.js";
 import { z } from "zod";
@@ -478,7 +478,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
    * (issue 1882): the show page's Mixed agrees with Publish, which checks the same sources live.
    */
   z.object({ ...base, type: z.literal("drama.editions"), requestId: UlidSchema, editions: z.array(DramaEditionSchema),
-    mixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20) }).strict()).optional() }).strict(),
+    mixes: z.array(z.object({ episode: z.number().int().min(1).max(200), issues: z.array(z.string().max(300)).max(20),
+      /** The lanes the saved arrangement plays, so Publish counts its stems (issue 1882). */
+      lanes: z.number().int().min(0).max(128).optional() }).strict()).optional() }).strict(),
   /** `read-drama-source` answered: the text, or why it is not kept. */
   z
     .object({
@@ -1707,6 +1709,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       refused: z.string().min(1).optional(),
     })
     .strict(),
+  /** What of an episode's mix has been heard (issue 1882), or null while nothing of the mix as it is has been. */
+  z.object({ ...base, type: z.literal("audio-studio.heard"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema,
+    heard: AudioHeardSchema.nullable() }).strict(),
   z.object({ ...base, type: z.literal("audio-studio.state"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema,
     studio: AudioStudioSnapshotSchema.nullable(), source: AudioSourceSchema.nullable(), waveform: AudioWaveformSchema.optional(), refused: z.string().optional() }).strict(),
   /**

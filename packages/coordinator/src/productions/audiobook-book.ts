@@ -46,7 +46,7 @@ import { chapterPriceToken, firstReadNotices, groupIdentity, missIdentity, prepa
  */
 
 export interface PreparedBook {
-  chapters: Array<{ summary: ChapterSummary; preparation: ChapterPreparation }>;
+  chapters: Array<{ summary: ChapterSummary; preparation: ChapterPreparation | { kind: "planned" } }>;
 }
 
 /** Every chapter of the production, in order, retired ones left out, prepared as a press would. */
@@ -55,7 +55,8 @@ export async function prepareBook(store: WorldStore, productionId: string, room:
   if (!production) throw new Error("That production is no longer in this world.");
   const chapters: PreparedBook["chapters"] = [];
   for (const summary of [...production.chapters].filter((c) => !c.retired).sort((a, b) => a.order - b.order)) {
-    chapters.push({ summary, preparation: await prepareChapter(store, productionId, summary.id, room, now) });
+    // Outline notes stay visible on the door, but a book read must not purchase their narration.
+    chapters.push({ summary, preparation: summary.status === "outlined" ? { kind: "planned" } : await prepareChapter(store, productionId, summary.id, room, now) });
   }
   return { chapters };
 }
@@ -167,6 +168,10 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
   for (const { summary, preparation } of book.chapters) {
     const base: Pick<AudiobookRow, "chapterId" | "file" | "order" | "title" | "version" | "picture"> = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
+    if (preparation.kind === "planned") {
+      rows.push({ ...base, planned: true, total: 0, made: 0, stale: 0, flagged: 0, notMade: 0, seconds: 0 });
+      continue;
+    }
     if (preparation.kind === "unavailable") {
       rows.push({ ...base, planned: false, total: 0, made: 0, stale: 0, flagged: 0, notMade: 0, seconds: null, castTrouble: preparation.reason });
       continue;
@@ -321,6 +326,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   let refused = 0;
   const toRead: Array<{ summary: ChapterSummary; prepared: Extract<ChapterPreparation, { kind: "ready" }>["prepared"] }> = [];
   for (const { summary, preparation } of book.chapters) {
+    if (preparation.kind === "planned") continue;
     if (preparation.kind === "unavailable") {
       emit({ type: "started", chapters: 0, blocks: 0 });
       emit({ type: "finished", outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0, reason: preparation.reason });

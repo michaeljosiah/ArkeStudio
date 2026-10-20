@@ -830,6 +830,7 @@ export function ProductionConversationBody({
   const compact = useMediaQuery("(max-width: 1099px)");
   const [modelsOpen, setModelsOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
+  const [notesCollapsed, setNotesCollapsed] = useState(false);
   const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   const [attachmentTrouble, setAttachmentTrouble] = useConversationState<readonly { name: string; reason: string }[]>("attachmentTrouble", []);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string; path: string } | null>(null);
@@ -1507,7 +1508,12 @@ export function ProductionConversationBody({
     <div className="fy-story__chat">
       {(eyebrow || heading) && <div className="fy-story__chathead">
         {eyebrow && <div className="fy-eyebrow-sm">{eyebrow}</div>}
-        {heading && <h1 className="fy-story__h1">{heading}</h1>}
+        <div className="fy-story__heading">
+          {heading && <h1 className="fy-story__h1">{heading}</h1>}
+          {responsive && !phone && <Button variant="ghost" size="sm" aria-expanded={!notesCollapsed} onClick={() => setNotesCollapsed(value => !value)}>
+            {notesCollapsed ? "Show notes" : "Hide notes"}
+          </Button>}
+        </div>
         {responsive && compact && <StudioCanvasPress />}
       </div>}
       {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
@@ -1527,7 +1533,7 @@ export function ProductionConversationBody({
         {(!responsive || !compact) && footer}
       </HeldBar>
     </div>
-    <div className="fy-story__side">
+    <div className="fy-story__side" hidden={responsive && !phone && notesCollapsed}>
       <ResponsiveSheet sheet={responsive && phone} open={sideOpen} onClose={() => setSideOpen(false)} title={sideTitle} className="fy-develop-sheet">
         <StudioSidebar />
       </ResponsiveSheet>

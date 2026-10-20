@@ -15,6 +15,15 @@ import { normalizeSoftBreaks } from "./normalize.js";
  * headless editor. Every caller treats null as "cannot be proved" and takes the safe branch.
  */
 export function serializeMarkdown(markdown: string): string | null {
+  return readMarkdown(markdown, documentMarkdown);
+}
+
+/** Schema-generated HTML for reading, using the editor's exact Markdown parser and extensions. */
+export function markdownHTML(markdown: string): string | null {
+  return readMarkdown(markdown, editor => editor.getHTML());
+}
+
+function readMarkdown(markdown: string, read: (editor: Editor) => string): string | null {
   let editor: Editor | null = null;
   try {
     editor = new Editor({
@@ -26,7 +35,7 @@ export function serializeMarkdown(markdown: string): string | null {
     // The mounted editor reflows on load too. If this one did not, its canonical form would differ
     // from the live one for every hand-wrapped document, and the proof would reject them all.
     normalizeSoftBreaks(editor);
-    return documentMarkdown(editor);
+    return read(editor);
   } catch {
     return null;
   } finally {

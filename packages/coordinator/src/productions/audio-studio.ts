@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaSpeakerLabel, dramaTakePlays,
+  AUDIO_STUDIO_RATE, AudioArrangementRefusal, audiobookTextHash, DEFAULT_NARRATOR, DramaMixRecordSchema, deriveEpisodeArrangement, dramaRoleVoice, dramaSpeakerLabel, dramaTakePlays,
   editAudioArrangement, episodeAudioScript, episodeScriptFile, initialAudioArrangement, migrateAudioArrangement, productionShape,
   resolveAudioArrangement, validateAudioArrangement,
   type AudioArrangement, type AudioArrangementEdit, type AudioArrangementState, type AudioScript,
   AudioStudioProposalInputSchema, type AudioStudioProposalInput, type AudioStudioProposal,
-  type AudioSource, type AudioStudioSnapshot, type ChapterAudiobook, type DramaMixRecord, type EpisodeScriptBlock,
+  type AudioHeard, type AudioSource, type AudioStudioSnapshot, type ChapterAudiobook, type DramaMixRecord, type EpisodeScriptBlock,
 } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -20,6 +20,7 @@ import { readAudioStudioSource } from "./audio-studio-source.js";
 import { AUDIO_STUDIO_SOURCE_BYTES } from "./audio-studio-source.js";
 import { readContainedMediaBytes } from "../world/reference-files.js";
 import { effectiveAudioRights, readAudioRights } from "../audio/rights.js";
+import { heardIntelligibility, mergeHeardSpans } from "./audio-studio-heard.js";
 
 type Options = { ffmpeg?: FfmpegRunner; signal?: AbortSignal };
 const scopedOptions = (store: WorldStore, options: Options): Options => ({ ...options, signal: options.signal ? AbortSignal.any([store.closingSignal, options.signal]) : store.closingSignal });
@@ -96,7 +97,7 @@ async function derivedState(store: WorldStore, productionId: string, plan: Audio
  * named `episode-NNN` where a chapter file would be. Both are one arrangement on the same mixer,
  * proposals and review; only where the passages come from, and where the record is kept, differ.
  */
-type StudioRecord = { arrangement?: AudioArrangement | undefined; audioStudioProposals?: AudioStudioProposal[] | undefined; updatedAt?: string | undefined };
+type StudioRecord = { arrangement?: AudioArrangement | undefined; audioStudioProposals?: AudioStudioProposal[] | undefined; heard?: AudioHeard | undefined; updatedAt?: string | undefined };
 interface Subject {
   script: AudioScript;
   base: string;
@@ -147,7 +148,8 @@ async function episodeSubject(store: WorldStore, productionId: string, episode: 
   // A role's voice now, as Hear and Cast read it (codex on PR 1879): a recast puts its old takes out.
   const voice = (block: Extract<EpisodeScriptBlock, { kind: "dialogue" | "narration" }>) => dramaRoleVoice(production.audioDrama?.cast, bundle.sheets, block);
   const voices = Object.fromEntries(entry.script.blocks.flatMap((block) => block.kind === "dialogue" || block.kind === "narration" ? [[block.id, voice(block) ?? null]] : []));
-  const baseWith = (held: StudioRecord) => digest({ script: entry.hash, takes: takes ?? null, voices, record: { ...held, audioStudioProposals: undefined } });
+  // Hearing the mix is never a change to it (issue 1882): what was heard stays out of its base.
+  const baseWith = (held: StudioRecord) => digest({ script: entry.hash, takes: takes ?? null, voices, record: { ...held, audioStudioProposals: undefined, heard: undefined } });
   const soundFile = (artifactId: string) => {
     const artifact = bundle.artifacts.find((candidate) => candidate.id === artifactId);
     return artifact ? `artifacts/${artifact.file}` : undefined;
@@ -205,6 +207,8 @@ export async function openAudioStudio(store: WorldStore, productionId: string, c
   const saved = subject.record?.arrangement;
   const state = saved ? validateAudioArrangement(saved.current) : await subject.derive(options);
   return { base: subject.base, saved: saved ?? null, state, script: subject.script,
+    // What was heard of this mix, while it is still the mix heard (issue 1882).
+    heard: subject.record?.heard?.base === subject.base ? subject.record.heard : undefined,
     unplaced: saved ? new Map<string, string>() : subject.unplaced ?? new Map<string, string>(),
     proposals: subject.record?.audioStudioProposals ?? [],
     passages: subject.passages,
@@ -219,7 +223,49 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
   }));
   return { base: opened.base, revision: opened.saved?.revision ?? 0, undo: opened.saved?.undo.at(-1)?.label ?? null,
     redo: opened.saved?.redo.at(-1)?.label ?? null, state: opened.state, script: { hash: opened.script.hash, passages: [...opened.script.passages] }, passages: opened.passages, library, proposals: opened.proposals,
-    unavailable: [...new Map([...opened.unplaced, ...await audioStudioSourceProblems(store, productionId, opened.state, true)])].map(([file, message]) => ({ file, message })) };
+    unavailable: [...new Map([...opened.unplaced, ...await audioStudioSourceProblems(store, productionId, opened.state, true)])].map(([file, message]) => ({ file, message })),
+    ...(opened.heard ? { heard: opened.heard } : {}) };
+}
+
+/**
+ * What of an episode's mix has been heard (design turn 230o, issue 1882), when the mix is still
+ * the one heard; read from its record without deriving, so the script's Review can say it too.
+ */
+export async function readAudioHeard(store: WorldStore, productionId: string, chapterId: string): Promise<AudioHeard | null> {
+  const subject = await subjectOf(store, productionId, chapterId);
+  return subject.record?.heard?.base === subject.base ? subject.record.heard : null;
+}
+
+/**
+ * Spans of an episode's saved mix that played whole, recorded against the base they were heard on
+ * (issue 1882), with the notes the newly heard lines earn. A listen to a mix that has since
+ * changed records nothing: what was heard no longer exists. Only an episode keeps a heard record.
+ */
+export async function recordAudioHeard(store: WorldStore, productionId: string, chapterId: string,
+  input: { base: string; spans: ReadonlyArray<readonly [number, number]> }, options: Options = {}): Promise<boolean> {
+  options = scopedOptions(store, options);
+  if (!EPISODE.test(chapterId)) throw new AudioArrangementRefusal("Only an episode keeps what was heard");
+  const subject = await subjectOf(store, productionId, chapterId);
+  if (subject.base !== input.base) return false;
+  const saved = subject.record?.arrangement;
+  const state = saved ? validateAudioArrangement(saved.current) : await subject.derive(options);
+  const plan = resolveAudioArrangement(state, subject.script);
+  const seconds = plan.samples / AUDIO_STUDIO_RATE;
+  let recorded = false;
+  await subject.update(async (current) => {
+    // The mix moved while it was measured: a later listen records the new one.
+    if (subject.baseWith(current) !== input.base) return null;
+    const prior = current.heard?.base === input.base ? current.heard : null;
+    const spans = mergeHeardSpans([...prior?.spans ?? [], ...input.spans], seconds);
+    if (prior && JSON.stringify(spans) === JSON.stringify(prior.spans)) return null;
+    // A line heard whole before keeps its note, or its want of one; only the newly heard are measured.
+    const before = prior?.spans ?? [];
+    const notes = [...(prior?.notes ?? []), ...await heardIntelligibility(store.dir, { state, plan, base: input.base, passages: subject.passages, spans,
+      skip: (entry) => before.some(([from, to]) => from <= entry.at / AUDIO_STUDIO_RATE + 0.1 && to >= (entry.at + entry.samples) / AUDIO_STUDIO_RATE - 0.1) }, options)];
+    recorded = true;
+    return { ...current, heard: { base: input.base, seconds: Math.round(seconds * 10) / 10, spans, notes: notes.slice(0, 200) } };
+  });
+  return recorded;
 }
 /**
  * What each saved episode arrangement would be refused for (issue 1882): the show page said Mixed
@@ -228,10 +274,10 @@ export async function audioStudioSnapshot(store: WorldStore, productionId: strin
  * when the page opens rather than on every scan. An episode never arranged by hand is derived from
  * its kept takes, which the page's readiness already reads.
  */
-export async function savedEpisodeMixProblems(store: WorldStore, productionId: string): Promise<Array<{ episode: number; issues: string[] }>> {
+export async function savedEpisodeMixProblems(store: WorldStore, productionId: string): Promise<Array<{ episode: number; issues: string[]; lanes?: number }>> {
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production || !productionShape(production.meta).isAudioDrama) return [];
-  const mixes: Array<{ episode: number; issues: string[] }> = [];
+  const mixes: Array<{ episode: number; issues: string[]; lanes?: number }> = [];
   for (const { script } of [...production.episodeScripts ?? []].sort((a, b) => a.script.episode - b.script.episode)) {
     store.closingSignal.throwIfAborted();
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/drama-mix/${episodeScriptFile(script.episode)}`))), "utf8").catch(() => null);
@@ -245,16 +291,46 @@ export async function savedEpisodeMixProblems(store: WorldStore, productionId: s
     // Only a hand-made arrangement is opened here: opening without one derives it, decoding every take.
     if (!parsed.data.arrangement) continue;
     let issues: string[];
+    let lanes: number | undefined;
     try {
       const opened = await openAudioStudio(store, productionId, episodeScriptFile(script.episode).replace(/\.json$/, ""));
       issues = [...opened.resolved.issues.map((issue) => issue.message), ...(await audioStudioSourceProblems(store, productionId, opened.state, true)).values()];
+      // The lanes Publish would deliver as stems: each track with a clip the mix plays.
+      lanes = new Set(opened.resolved.clips.filter((entry) => !entry.muted && entry.clip.source).map((entry) => entry.clip.trackId)).size;
     } catch (error) {
       store.closingSignal.throwIfAborted();
       issues = [error instanceof Error ? error.message : "The arrangement cannot be resolved."];
     }
-    mixes.push({ episode: script.episode, issues: issues.slice(0, 20).map((issue) => issue.slice(0, 300)) });
+    mixes.push({ episode: script.episode, issues: issues.slice(0, 20).map((issue) => issue.slice(0, 300)), ...(lanes !== undefined ? { lanes } : {}) });
   }
   return mixes;
+}
+
+/**
+ * The suggestion a chat action staged, a chapter's or an episode's (issue 1882), read from the
+ * records alone: finding a card's family never derives an arrangement or decodes a take.
+ */
+export async function findAudioStudioProposal(store: WorldStore, productionId: string, actionId: string): Promise<AudioStudioProposal | null> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) return null;
+  const made = (family: AudioStudioProposal) => family.versions.some((version) => version.actionId === actionId);
+  if (productionShape(production.meta).isAudioDrama) {
+    for (const { script } of production.episodeScripts ?? []) {
+      const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/drama-mix/${episodeScriptFile(script.episode)}`))), "utf8").catch(() => null);
+      if (raw === null) continue;
+      let parsed: ReturnType<typeof DramaMixRecordSchema.safeParse> | null = null;
+      try { parsed = DramaMixRecordSchema.safeParse(JSON.parse(raw)); } catch { parsed = null; }
+      const family = parsed?.success ? parsed.data.audioStudioProposals?.find(made) : undefined;
+      if (family) return family;
+    }
+    return null;
+  }
+  for (const chapter of production.chapters) {
+    const record = await readAudiobook(store, productionId, chapter.file);
+    const family = record && record !== "unreadable" ? record.audioStudioProposals?.find(made) : undefined;
+    if (family) return family;
+  }
+  return null;
 }
 
 async function validateEditSources(store: WorldStore, productionId: string, script: AudioScript, edit: AudioArrangementEdit, options: Options): Promise<Map<string, AudioSource>> {
@@ -342,7 +418,7 @@ export async function stageAudioStudioProposal(store: WorldStore, productionId: 
     if (fresh.base !== proposal.base) throw new AudioArrangementRefusal("The arrangement changed; read Audio Studio again before proposing");
     const family = proposal.family ? families.find(entry => entry.id === proposal.family!.id) : undefined;
     if (proposal.family && (!family || family.status !== "pending" || family.versions.at(-1)?.number !== proposal.family.version)) throw new AudioArrangementRefusal("This proposal was revised or decided. Keep Current remains in force");
-    if (family && family.versions.length >= 20 || !family && families.length >= 100) throw new AudioArrangementRefusal("This chapter has reached its proposal history limit");
+    if (family && family.versions.length >= 20 || !family && families.length >= 100) throw new AudioArrangementRefusal("This arrangement has reached its proposal history limit");
     const edit: AudioArrangementEdit = { kind: "commands", label: proposal.summary, commands: proposal.commands };
     editAudioArrangement(fresh.saved ?? initialAudioArrangement(fresh.state, "{}"), edit);
     await validateEditSources(store, productionId, fresh.script, edit, scopedOptions(store, options));

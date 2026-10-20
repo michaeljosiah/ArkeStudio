@@ -26,6 +26,7 @@ import {
   ChangeRecordSchema,
   ChapterFrontmatterSchema,
   type ChapterFrontmatter,
+  chapterManuscriptWords,
   EpisodeSchema,
   ProductionNarrativeSchema,
   AudioDramaRecordSchema,
@@ -194,7 +195,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 94: an audio drama's cast notes and review decisions in audio-drama.json (SPEC-057 R-85, issue 1861).
 // 95: an audio drama's adaptation — chapter verdicts and kept reasons (SPEC-057 R-61, issue 1862).
 // 96: an audio drama episode's Audio Studio arrangement — drama-mix (SPEC-057 R-67, issue 1863).
-export const SUPPORTED_SCHEMA_VERSION = 96;
+// 97: setup's narrator samples on the draft (SPEC-057 R-6, issue 1882).
+// 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
+export const SUPPORTED_SCHEMA_VERSION = 98;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -801,7 +804,13 @@ export async function scanWorld(
         // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
         // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
         // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
-        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
+        // Imported chapters can carry planned or stale counts. Summaries measure saved prose
+        // without rewriting the file or treating an explicit outline as a draft (#1922).
+        const fm = ChapterFrontmatterSchema.parse(doc.data);
+        return {
+          fm: { ...fm, words: chapterManuscriptWords(doc.body, fm.status) },
+          bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body),
+        };
       });
       if (!parsed) continue;
       const { fm, bodyHash } = parsed;
@@ -1271,7 +1280,7 @@ export async function scanWorld(
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),
-      ...(review.targets.length > 0 ? { review } : {}),
+      ...(review.targets.length > 0 || review.requiresDraft ? { review } : {}),
     });
   }
   // Proposals are operational staging, not committed entities. Keep parsing and reporting them,

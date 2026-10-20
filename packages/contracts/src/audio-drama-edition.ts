@@ -30,12 +30,16 @@ export const DramaEditionSchema = z.object({
     scriptVersion: z.number().int().min(1),
     scriptHash: z.string().min(1),
     file: z.string().min(1),
+    /** One file per separable track, named by its lane (issue 1882): the stems sum to the episode. */
+    stems: z.array(z.object({ track: z.string().max(160), file: z.string().min(1) }).strict()).max(128).optional(),
   }).strict()).min(1),
   files: z.array(z.object({ name: z.string().min(1), bytes: z.number().int().nonnegative(), sha256: z.string().min(1) }).strict()),
   frozen: z.object({
     source: z.object({ productionId: SlugSchema, title: z.string(), version: z.number().int().optional() }).strict().optional(),
     voices: z.array(z.string()),
     sounds: z.array(z.string()),
+    /** The encoder a Podcast edition's MP3 was made with (issue 1882), as a story edition records its own. */
+    encoder: z.string().max(400).optional(),
   }).strict(),
 }).strict();
 export type DramaEdition = z.infer<typeof DramaEditionSchema>;

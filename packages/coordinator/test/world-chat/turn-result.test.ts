@@ -265,6 +265,16 @@ describe("parsing a turn result", () => {
     assert.match(preparationProblem("thrown string").safeMessage, /^The requested change could not be prepared\. If a read/);
   });
 
+  it("keeps the complete missing-read list in the bounded corrective prompt (#1911)", () => {
+    const reason = ["chapters", "story", "sheets", "canon"].map(read =>
+      `A production-chapter action requires the complete current ${read} read for the-ledger-of-nights.`).join(" ");
+    assert.ok(reason.length > 300);
+    const correction = correctiveMessage([preparationProblem(new Error(reason))]);
+    for (const read of ["chapters", "story", "sheets", "canon"]) assert.ok(correction.includes(`${read} read`));
+    assert.match(correction, /read it again and return the complete result/);
+    assert.ok(correctiveMessage(Array.from({ length: 20 }, () => preparationProblem(new Error("x".repeat(20_000))))).length <= 4_000);
+  });
+
   it("names the fields at fault without echoing their values", () => {
     const parsed = parseTurnResult(JSON.stringify({ reply: 42, candidateOperations: [], groupOperations: [] }));
     assert.equal(parsed.ok, false);

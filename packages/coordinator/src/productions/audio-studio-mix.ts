@@ -49,8 +49,12 @@ async function verifySource(dir: string, source: AudioSource, signal: AbortSigna
   const bytes = await readContainedMediaBytes(dir, source.file, signal, AUDIO_STUDIO_SOURCE_BYTES);
   if (`sha256:${createHash("sha256").update(bytes).digest("hex")}` !== source.hash) throw new AudioArrangementRefusal(`${source.label}: audio changed; review its replacement`);
 }
-/** Accumulate sources on disk, measure the sum, then apply one master gain. */
-export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { cacheRoot?: string; ffmpeg?: FfmpegRunner; signal?: AbortSignal; retainUntil?: AbortSignal; final?: boolean; solo?: string[]; unavailable?: ReadonlyMap<string, string> } = {}) {
+/**
+ * Accumulate sources on disk, measure the sum, then apply one master gain. A stem is one track of
+ * the mix as the mix plays it (issue 1882): ducked under all of the mix's speech, at the mix's own
+ * master gain, so an edition's stems sum back to its episode. Solo is an audition and does neither.
+ */
+export async function renderAudioStudioMix(dir: string, input: AudioArrangementState, script: AudioScript, options: { cacheRoot?: string; ffmpeg?: FfmpegRunner; signal?: AbortSignal; retainUntil?: AbortSignal; final?: boolean; solo?: string[]; stem?: { trackId: string; gainDb: number; label?: string }; unavailable?: ReadonlyMap<string, string> } = {}) {
   const cacheRoot = options.cacheRoot ?? dir;
   const state = validateAudioArrangement(input), signal = options.signal ?? new AbortController().signal;
   signal.throwIfAborted();
@@ -72,10 +76,11 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
   const header = stereoWavHeader(plan.samples);
   const playable = plan.clips.filter(entry => entry.clip.source && !unavailable.has(entry.clip.source.file) && !entry.muted && (!options.solo?.length || options.solo.includes(entry.clip.trackId)));
   const speech = playable.filter(entry => entry.clip.role === "speech").map(entry => ({ at: entry.at, samples: entry.samples }));
+  const summed = options.stem ? playable.filter(entry => entry.clip.trackId === options.stem!.trackId) : playable;
   const folder = await audioStudioCache(cacheRoot, "mix"), id = ulid();
   const rawPath = join(folder, `${id}.f32`), wavPath = join(folder, `${id}.wav`);
   const decoder = options.ffmpeg?.identity ? await options.ffmpeg.identity(signal) : "native-or-injected";
-  const hash = createHash("sha256").update(JSON.stringify({ renderer: 3, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [] })).digest("hex");
+  const hash = createHash("sha256").update(JSON.stringify({ renderer: 3, decoder, state, script, unavailable: [...unavailable], solo: options.solo ?? [], ...(options.stem ? { stem: options.stem } : {}) })).digest("hex");
   const file = `.cache/audio-studio/mix/${hash}.wav`, finalPath = join(folder, `${hash}.wav`);
   const receiptFile = `.cache/audio-studio/mix/${hash}.json`;
   const releaseCached = holdAudioStudioCache(cacheRoot, file);
@@ -109,9 +114,9 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     await raw.truncate(plan.samples * 8);
     // Finish every placement of a source before releasing its decode. Chunk-first eviction
     // redecoded whole long files once per output second when overlapping sources exceeded RAM.
-    for (const sourceFile of new Set(playable.map(entry => entry.clip.source!.file))) {
+    for (const sourceFile of new Set(summed.map(entry => entry.clip.source!.file))) {
       signal.throwIfAborted();
-      const source = files.get(sourceFile)!, entries = playable.filter(entry => entry.clip.source!.file === sourceFile);
+      const source = files.get(sourceFile)!, entries = summed.filter(entry => entry.clip.source!.file === sourceFile);
       const decoded = await readAudioStudioSource(dir, sourceFile, { ...options, signal, expectedHash: source.hash });
       if (decoded.source.samples !== source.samples) throw new AudioArrangementRefusal(`${source.label}: decoded duration changed`);
       const sources = new Map([[sourceFile, decoded.pcm]]);
@@ -142,7 +147,12 @@ export async function renderAudioStudioMix(dir: string, input: AudioArrangementS
     }
     const measured = meter.measure();
     const wanted = measured.lufs === null ? 0 : state.master.targetLufs - measured.lufs;
-    const gainDb = Math.min(wanted, measured.peakDb === null ? wanted : state.master.ceilingDb - measured.peakDb);
+    const gainDb = options.stem ? options.stem.gainDb : Math.min(wanted, measured.peakDb === null ? wanted : state.master.ceilingDb - measured.peakDb);
+    // A lane can peak above the mix it is part of, where it and another cancel (codex on PR 1945):
+    // at the mix's gain it would clip, and no longer sum back to the episode. Refused by name.
+    if (options.stem && measured.peakDb !== null && measured.peakDb + gainDb > 0) {
+      throw new AudioArrangementRefusal(`${options.stem.label ?? "A lane"} would clip as a stem at the episode's level; lower it, or publish without stems`);
+    }
     output = await open(wavPath, "wx"); await output.writeFile(header);
     for (let from = 0; from < plan.samples; from += CHUNK) {
       signal.throwIfAborted();

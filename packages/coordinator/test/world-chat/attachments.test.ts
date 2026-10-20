@@ -110,7 +110,7 @@ describe("refusing what a conversation could not read", () => {
 
   it("offers all known attachment kinds in the picker", () => {
     assert.deepEqual([...CHAT_ATTACHMENT_EXTENSIONS].sort(), [
-      "docx", "flac", "gif", "jpeg", "jpg", "m4a", "md", "mkv", "mov", "mp3", "mp4",
+      "docx", "flac", "gif", "htm", "html", "jpeg", "jpg", "m4a", "md", "mkv", "mov", "mp3", "mp4",
       "ogg", "pdf", "png", "txt", "wav", "webm", "webp",
     ]);
   });
@@ -254,6 +254,19 @@ describe("ingesting an attachment", () => {
     });
     assert.equal(attachment.readability, "extracted-text-available");
     assert.equal(await store.readWholeText(attachment), "She hears it under the harbour.");
+  });
+
+  it("retains HTML bytes while exposing only extracted prose after reopening (#1907)", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    const original = bytes('<h1>Echoes lore</h1><p>The harbour &amp; the bells.</p><script>unread code</script>');
+    const attachment = await store.ingest(conversationId, { fileName: "echoes.html", bytes: original });
+    assert.ok(CHAT_ATTACHMENT_EXTENSIONS.includes("html") && CHAT_ATTACHMENT_EXTENSIONS.includes("htm"));
+    assert.equal(attachment.kind, "document");
+    assert.equal(attachment.readability, "extracted-text-available");
+    const reopened = new WorldChatAttachmentStore(worldPath, NOW);
+    assert.equal(await reopened.readWholeText(attachment), 'Echoes lore\nThe harbour & the bells.');
+    assert.deepEqual(new Uint8Array(await reopened.readBytes(attachment)), original);
+    assert.equal(await readFile(join(attachmentDir(worldPath, conversationId, attachment.id), ".extracted.txt"), "utf8"), 'Echoes lore\nThe harbour & the bells.');
   });
 
   /**

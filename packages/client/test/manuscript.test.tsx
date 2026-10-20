@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
+import { DEFAULT_STORY_PDF_SETTINGS, type ChapterSummary, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { ChapterTreeScreen } from "../src/screens/production-story.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -265,6 +265,29 @@ describe("a manuscript in (turn 131)", () => {
 });
 
 describe("Publish review (turn 224)", () => {
+  it("offers PDF alone or all three outputs with resolved formatting and optional title-page metadata", async () => {
+    const m = await mount(inkbound()); await press(m, "export-manuscript");
+    const toggle = async (label: string, checked: boolean) => {
+      const input = [...m.container.querySelectorAll("label")].find(row => row.textContent?.includes(label))!.querySelector("input")!;
+      input.checked = checked; await act(async () => input.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    };
+    await toggle("PDF — fixed pages", true);
+    assert.match(text(m), /PDF formatting/); assert.match(text(m), /Subtitle · optional/); assert.match(text(m), /Title-page edition label · optional/);
+    await toggle("Listen · M4B", true);
+    await act(async () => button(m, /^Review chapters$/)!.click());
+    await act(async () => button(m, /^Formatting & style$/)!.click());
+    const request = m.sent.find(message => message.kind === "publish-story" && message.input.action === "review");
+    assert.ok(request && request.kind === "publish-story" && request.input.action === "review");
+    assert.deepEqual(request.input.settings.outputs, ["epub", "pdf", "m4b"]);
+    assert.deepEqual(request.input.settings.pdf, DEFAULT_STORY_PDF_SETTINGS);
+    await act(async () => __applyEventForTest({ at: "2026-10-19T12:00:00Z", type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: request.requestId,
+      result: { review: { fingerprint: "b".repeat(64), settings: request.input.action === "review" ? request.input.settings : {} as never, chapters: [], findings: [], warnings: [], blockers: [] } } }));
+    await act(async () => button(m, /^Without audiobook$/)!.click());
+    const withoutAudio = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "review");
+    assert.ok(withoutAudio && withoutAudio.kind === "publish-story" && withoutAudio.input.action === "review");
+    assert.deepEqual(withoutAudio.input.settings.outputs, ["epub", "pdf"], "removing audio preserves PDF selection");
+    assert.equal(m.sent.some(message => message.kind === "read-audiobook-chapter"), false);
+  });
   it("opens private reading and listening with the optional dash rule off, then sends a read-only review", async () => {
     const m = await mount(inkbound());
     await press(m, "export-manuscript");

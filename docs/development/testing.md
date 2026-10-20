@@ -1,5 +1,34 @@
 # Running and validating changes
 
+Story PDF publishing (SPEC-058) uses contracts `test/story-publication.test.ts`, coordinator
+`test/publications/story-pdf.test.ts`, `test/publications/story.test.ts`, `test/publications/story-routes.test.ts` and
+`test/story-pdf-runner.test.ts`, client `test/story-pdf.test.tsx`, `test/manuscript.test.tsx`
+and `test/chapter-workspace.test.tsx`, plus desktop `test/story-publication-file.test.ts`.
+Run these with `node --import tsx --test` from their respective workspace directories.
+After `npm run build`, run `node apps/desktop/scripts/smoke-story-pdf.mjs`: it copies the built
+worker/fonts outside the checkout and creates a real Unicode PDF without resolving development
+dependencies from the repository. Run desktop `npm run smoke:main --workspace @arke-studio/desktop`
+and `npm run verify:licenses --workspace @arke-studio/desktop` for packaging/asset changes.
+The focused cases cover exact preview/create bytes, old formats, damage/Locate, cancellation,
+timeout, captured-input retry and font/navigation/text fidelity. Actual browser worker/text-layer
+rendering and every-page visual inspection of a long book are separate acceptance evidence;
+passing extraction or mocked UI tests does not establish them. Keep private manuscripts and
+their generated pages out of committed fixtures.
+
+PR #1886 review regressions also exercise running-header fallback glyphs, nonbreaking-space
+ToUnicode mappings, exact chapter destination coordinates, three-line paragraphs with scene
+breaks, and draining phase writes on cancellation/timeout/worker failure. Coordinator
+`test/remote-access.test.ts` checks the actual gateway's `.mjs` GET/HEAD MIME and nosniff headers,
+so the preview fixture's own static server cannot conceal an unsupported module-worker response.
+
+From `packages/client`, run `node --import tsx test/story-pdf-preview-smoke.mts` for the real
+Chrome preview, then repeat with `--electron` for a sandboxed Electron file page. These use
+synthetic Unicode content, the production content-security policy and the bundled PDF worker
+at 1100, 390 and 320 px. They check authenticated loading, selectable text, keyboard navigation,
+zoom and rapid page changes. The harness prints its evidence directory; Electron captures the
+rendered page canvas, while Chrome captures the full preview controls. Neither attaches to the
+installed app or opens a private world.
+
 Shared media evidence: from `packages/coordinator`, run
 `node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/world-chat/media-inspection.test.ts`.
 The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`
@@ -362,7 +391,7 @@ Desktop composition changes still require the desktop checks below.
 
 Client `test/fixture-state.ts` provides fixture state; navigation samples are in `src/screens/registry.ts`. Read an adjacent screen test for DOM/store setup. Coordinator tests commonly copy world fixtures into temporary directories and inject providers or clocks. Reuse `test/queue/fake-provider.ts` for suitable queue scenarios and adjacent domain helpers rather than calling paid providers in ordinary regression tests.
 
-Close stores, sockets, watchers, timers and supervisors in test cleanup before deleting temporary files. A leaked watcher can leave the runner alive after assertions finish. Fixture data under [fixtures](../../fixtures) also supplies the development/sample world: edit it intentionally and check its consumers, not as disposable test output.
+Close stores, sockets, watchers, timers and supervisors in test cleanup before deleting temporary files. A leaked watcher can leave the runner alive after assertions finish. Fixture data under [fixtures](../../fixtures) supplies tests and development seeding only; it is not the downloadable story or an installer resource. Edit it intentionally and keep its size budget. Story-download tests use small in-memory ZIPs and never fetch the full release; see [story releases](story-releases.md) for release validation.
 
 ## Boundary-specific checks
 
@@ -643,7 +672,12 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
 (or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
-wide, plus 200% text at 1440. Listen covers the window; Export is a native modal on the body,
+wide, plus 200% text at 1440 and desktop chrome at the native 1024px minimum. Titlebar controls
+must not overlap or enter the native window-button area. Use `--viewport desktop-min`, `phone`
+or `small-phone` for a focused check. Phone cases use browser chrome: shrinking an Electron
+CDP viewport to 390px retains its 138px native-button reservation and does not establish a phone
+browser defect. Verify the host mode as well as viewport size when assessing screenshots.
+Listen covers the window; Export is a native modal on the body,
 within the viewport, with no transformed ancestor or horizontal overflow. The chapter export
 starts at This chapter, blocks an incomplete reading, keeps its options under the missing-block
 read quote, refreshes readiness when saved takes arrive, and returns focus to its stable opener.
@@ -946,9 +980,12 @@ Library, export and undo suites when changing these paths.
 ### Develop, Overview and the composer on touch (turn 171)
 
 Run `node scripts/smoke-develop-layout.mjs` to render the actual Develop conversation, understood
-and staged sheets, story Overview, acts, style and film Narrative at 360, 375, 390, 984 and 1360
+and staged sheets, story Overview, acts, style and film Narrative at 360, 375, 390, 984, 1200, 1360 and 2040
 pixels. It captures all eight master frames for visual comparison, checks overflow and held
 controls, and exercises coarse-pointer Return, model sheets, read sources and narrative saves.
+Develop also checks empty notes, timeout retry, elapsed time and Stop, plus collapsing and
+reopening notes without losing staged proposals. It closes Studio through its normal control
+to exercise the resting conversation. `--viewport desktop-small --hover` reproduces #1926.
 Use `--viewport phone`, `--viewport fold` or `--viewport desktop --hover` to narrow the run;
 `--baseline <git-ref> --viewport desktop --hover` supplies the previous mouse layout.
 

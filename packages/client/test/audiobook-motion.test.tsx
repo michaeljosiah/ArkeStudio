@@ -155,6 +155,19 @@ it("requires a current quote to generate, then an explicit choice to adopt the d
   assert.equal(choose.artifactId, candidate.artifactId);
   assert.equal(choose.choice, "candidate");
 });
+it("requests the explicit chapter when previewing a clip with its saved reading", async () => {
+  await mount(control({ ...still, motionCandidate: {
+    artifactId: "ar_01J00000000000000000000001", file: "artifacts/clip.mp4", seconds: 5,
+    width: 864, height: 480, sourceHash: `sha256:${"a".repeat(64)}`, sourceAt: at,
+    behavior: "repeat", active: false,
+  } }));
+  await press("Review clip");
+  await press("▶ Preview with reading");
+  const request = sent.findLast((message) => message.kind === "open-audiobook-listening");
+  assert.ok(request?.kind === "open-audiobook-listening");
+  assert.deepEqual(request.scope, { kind: "chapter", chapterId: "neap" });
+});
+
 it("ignores a quote that arrives after its starting picture changed", async () => {
   await mount(control(still));
   await press("Animate");

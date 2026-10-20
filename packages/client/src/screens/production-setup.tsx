@@ -10,10 +10,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   ADAPTATION_KINDS, AUDIO_DRAMA_KIND, ConversationIdSchema, adaptableStories, productionSetupProblems, ulid,
-  type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
+  type NarratorSamples as NarratorSamplesValue, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
+import { listHarnessModels, openWorldChat, send, sendWorldChat, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
 import { ConversationTranscript, useReadsFromEnd } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
@@ -23,7 +23,7 @@ import { Button } from "../components/ui.js";
 import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from "../components/harness-models.js";
 import { ModelChip } from "../components/model-chip.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES, withModelChoice } from "../components/models-card.js";
-import { AudioDramaPlanCard, NARRATOR_LABEL, pilotChapters } from "../components/audio-drama-plan-card.js";
+import { AudioDramaPlanCard, NARRATOR_LABEL, pilotAsk, pilotChapters } from "../components/audio-drama-plan-card.js";
 
 type SetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 
@@ -79,6 +79,20 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   // Change the plan opens the plan card to edit (230c); Start the pilot reviews, then creates.
   const [planEdit, setPlanEdit] = useState(0);
   const startingPilot = useRef(false);
+  /*
+   * The pilot drafts on creation (R-9, 230c to 230d): Start the pilot, or Create, for an audio
+   * drama with a pilot asks Arke for it once, in the same conversation, which carries on as the
+   * production's. Only a press on this page asks; reopening a created setup never asks again.
+   */
+  const draftPilot = useRef<string | null>(null);
+  const modelRef = useRef(modelId); modelRef.current = modelId;
+  const askForPilot = (created: ProductionSetupState) => {
+    const pilot = created.draft.kind === AUDIO_DRAMA_KIND ? created.draft.audioDrama?.pilot : undefined;
+    if (!worldId || !setupId || draftPilot.current !== setupId || !pilot) return;
+    // Held until the ask is sent (codex on PR 1945): a setup still open here asks again on
+    // reconnect; one left for the pilot's page has its empty page's Draft the pilot with Arke.
+    if (sendWorldChat(worldId, setupId, pilotAsk(pilot), [], undefined, modelRef.current || undefined) !== null) draftPilot.current = null;
+  };
   useEffect(() => {
     if (!startingPilot.current || !setup?.review || pending) return;
     startingPilot.current = false;
@@ -115,6 +129,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
     }
     setFailure(result.detail ?? null);
     if (onSetupPage && result.state?.status === "discarded") navigate(`/w/${worldId}/productions`);
+    if (result.state?.status === "created" && result.state.productionId) askForPilot(result.state);
     if (onSetupPage && result.state?.status === "created" && result.state.productionId) navigate(createdPath(worldId!, result.state), { replace: true });
   }), [worldId, setupId, navigate, onSetupPage, presentation?.owner]);
   useEffect(() => {
@@ -135,6 +150,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   useEffect(() => {
     if (onSetupPage && setup?.status === "created" && setup.productionId) navigate(createdPath(worldId!, setup), { replace: true });
   }, [setup?.status, setup?.productionId, worldId, navigate, onSetupPage]);
+  useEffect(() => { if (connection === "open" && setup?.status === "created") askForPilot(setup); }, [connection, setup?.status]);
   useEffect(() => () => { if (worldId) openWorldChat(worldId, null); }, [worldId, setupId]);
   /*
    * Plan with Arke is the request (SPEC-057 R-3): a setup the door seeded with a story opens with
@@ -162,7 +178,8 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const planProposed = audioDrama && !!draft?.audioDrama?.pilot && !running && !locked && workspace?.messages.at(-1)?.role === "studio";
   const startPilot = () => {
     if (!draft || !setup) return;
-    if (setup.review) { command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); return; }
+    if (setup.review) { draftPilot.current = setupId ?? null; command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); return; }
+    draftPilot.current = setupId ?? null;
     startingPilot.current = true;
     command({ operation: "review", expectedRevision: draft.revision });
   };
@@ -201,6 +218,11 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               empty={<div className="fy-production-setup__welcome"><h2>Start with a possibility.</h2>
                 <p>A scene you can see. A character with something to lose. A season you have already mapped out.</p>
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
+            {/* The narrator question, answered by example (230c, R-6): the same moment both ways, side by side. */}
+            {audioDrama && draft?.narratorSamples && !draft.audioDrama?.narrator && !locked && (
+              <NarratorSamples samples={draft.narratorSamples} disabled={!!pending || running || !!unavailable}
+                onChoose={text => command({ operation: "send", text, ...(modelId ? { modelId } : {}) })} />
+            )}
             {/* Under Arke's plan, the two ways on (230c, issue 1883): start the pilot, or change the plan first. */}
             {planProposed && (
               <div className="fy-production-setup__choices" role="group" aria-label="The plan">
@@ -299,7 +321,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               <div className="fy-production-setup__actions">
                 <Button disabled={!!pending || running || problems.length > 0} onClick={() => {
                   setTab("outline");
-                  if (setup.review) command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id });
+                  if (setup.review) { draftPilot.current = setupId ?? null; command({ operation: "create", expectedRevision: draft.revision, reviewId: setup.review.id }); }
                   else command({ operation: "review", expectedRevision: draft.revision });
                 }}>{setup.review ? "Create production" : "Review production"}</Button>
                 <Button variant="ghost" disabled={!!pending || running} onClick={() => command({ operation: "discard" })}>Discard setup</Button>
@@ -312,6 +334,31 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   );
 }
 
+
+/**
+ * The two samples Arke wrote for the narrator question (230c, issue 1882), as cards to choose
+ * between. A card is the answer: pressing it says so in the conversation, in the author's words.
+ */
+function NarratorSamples({ samples, disabled, onChoose }: { samples: NarratorSamplesValue; disabled: boolean; onChoose: (text: string) => void }) {
+  const cards = [
+    { key: "narrated", title: "A narrator where needed", lines: samples.narrated, answer: "A narrator, only where the ear needs one." },
+    { key: "in-the-room", title: "In the room", lines: samples.inTheRoom, answer: "In the room: no narrator." },
+  ] as const;
+  return (
+    <div className="fy-setup-samples" role="group" aria-label="Does a narrator guide the listener?">
+      {cards.map(card => (
+        <button key={card.key} type="button" className="fy-setup-sample" disabled={disabled} onClick={() => onChoose(card.answer)}>
+          <span className="fy-setup-sample__head">{card.title}</span>
+          {card.lines.map((line, i) => (
+            <span key={i} className={line.cue ? "fy-setup-sample__line fy-setup-sample__line--cue" : "fy-setup-sample__line"}>
+              <small>{line.speaker}</small><span>{line.words}</span>
+            </span>
+          ))}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Where a created production opens: its home, or for an audio drama with a pilot the pilot's

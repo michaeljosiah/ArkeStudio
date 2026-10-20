@@ -345,6 +345,10 @@ export function normalizeOpenCode(raw: unknown, state: NormalizeState): Normaliz
     case "session.error": {
       const sessionId = sessionIdOf(p);
       const error = p["error"] as { name?: string; data?: { message?: string } } | string | undefined;
+      // The prompt_async generation reports an acknowledged abort as an error before idle.
+      if (sessionId && typeof error === "object" && error?.name === "MessageAbortedError") {
+        return { kind: "events", events: [{ type: "session.ended", sessionId, reason: "cancelled", detail: "cancelled by you" }] };
+      }
       const message =
         typeof error === "string"
           ? error
