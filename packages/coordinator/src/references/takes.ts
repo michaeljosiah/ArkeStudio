@@ -244,35 +244,35 @@ export async function recordUploadedReferenceTake(
   options: { requestId?: string; precondition?: WorldStatePrecondition; sourceData?: Uint8Array } = {},
 ): Promise<Take> {
   const sourceHash = options.sourceData ? sha256(options.sourceData) : undefined;
-  const existing = store
-    .getBundle()
-    .referenceTakes.find(
-      (take) =>
-        ((options.requestId !== undefined && take.params["requestId"] === options.requestId) ||
-        (take.kind === "main-photo" &&
-          take.reference?.sheetId === sheetId &&
-          take.provider === "user" &&
-          take.params["uploadedCandidate"] === candidatePath)) &&
-        (sourceHash === undefined || take.params["uploadedHash"] === sourceHash),
-    );
-  if (existing) return existing;
-  const media = basename(candidatePath);
-  const take = uploadedTake(store, sheetId, "main-photo", media, {
-    uploadedCandidate: candidatePath,
-    ...(sourceHash ? { uploadedHash: sourceHash } : {}),
-    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  });
-  await store.gateOp(() => {
+  return store.gateOp(async () => {
     const stale = options.precondition?.();
     if (stale) throw new WorldStateStaleError(stale);
-    return writeTakeDirectory(store, sheetId, take, async (dir) => {
+    const existing = store
+      .getBundle()
+      .referenceTakes.find(
+        (take) =>
+          ((options.requestId !== undefined && take.params["requestId"] === options.requestId) ||
+          (take.kind === "main-photo" &&
+            take.reference?.sheetId === sheetId &&
+            take.provider === "user" &&
+            take.params["uploadedCandidate"] === candidatePath)) &&
+          (sourceHash === undefined || take.params["uploadedHash"] === sourceHash),
+      );
+    if (existing) return existing;
+    const media = basename(candidatePath);
+    const take = uploadedTake(store, sheetId, "main-photo", media, {
+      uploadedCandidate: candidatePath,
+      ...(sourceHash ? { uploadedHash: sourceHash } : {}),
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+    await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
       // points back at it. Only a staging copy this code made is this code's to remove.
       if (options.sourceData) await atomicWriteFile(join(dir, media), options.sourceData);
       else await placeMedia(join(store.dir, candidatePath), join(dir, media));
     });
+    return take;
   });
-  return take;
 }
 
 /**

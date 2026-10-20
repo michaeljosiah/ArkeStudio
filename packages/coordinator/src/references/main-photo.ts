@@ -96,6 +96,7 @@ export async function acceptMainPhoto(
     const current = store.getBundle();
     const character = current.sheets.find((item) => item.id === sheet.id);
     const kit = current.referenceKits.find((item) => item.sheetId === sheet.id);
+    if (character?.neverDepicted) return "This character is never depicted.";
     return character?.type !== "character" || character.version !== sheet.version || (kit && mainPhotoFor(kit))
       ? "This character changed or already has a main photo."
       : null;

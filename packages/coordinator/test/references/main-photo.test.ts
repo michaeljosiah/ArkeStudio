@@ -29,6 +29,39 @@ async function candidateWorld() {
 }
 
 describe("main-photo acceptance boundary", () => {
+  it("refuses a retained portrait when the current character is never depicted", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find(s => s.id === "bray-half-hitch")!;
+      sheet.neverDepicted = true;
+      const original = await readFile(join(dir, `references/${sheet.id}/head-front.png`));
+      const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" });
+      assert.equal(result.status, "failed");
+      if (result.status === "failed") assert.match(result.error, /never depicted/);
+      assert.equal(store.getBundle().referenceTakes.length, 0);
+      assert.equal(await readKit(store, sheet.id), null);
+      assert.deepEqual(await readFile(join(dir, `references/${sheet.id}/head-front.png`)), original);
+    } finally { await store.close(); }
+  });
+
+  it("records only one immutable copy for concurrent legacy portrait acceptances", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find(s => s.id === "bray-half-hitch")!;
+      const original = await readFile(join(dir, `references/${sheet.id}/head-front.png`));
+      const results = await Promise.all(Array.from({ length: 3 }, () =>
+        acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" })));
+      assert.equal(results.filter(result => result.status === "accepted").length, 1);
+      const takes = store.getBundle().referenceTakes;
+      assert.equal(takes.length, 1);
+      assert.equal(takes[0]!.params["uploadedHash"], sha256(original));
+      assert.equal(store.getBundle().referenceReviews.length, 1);
+      assert.equal((await readKit(store, sheet.id))!.kit.mainPhoto!.sourceTakeId, takes[0]!.id);
+    } finally { await store.close(); }
+  });
+
   it("adopts an unaccepted stock portrait without changing its bytes or inventing provider work", async () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir, { clock: CLOCK });

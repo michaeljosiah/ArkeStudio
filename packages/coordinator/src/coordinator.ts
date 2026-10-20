@@ -18372,7 +18372,9 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         if (result.status === "failed") {
           report("failed", result.candidateRetained, selection.source === "legacy-portrait"
-            ? "The existing portrait could not be adopted. It may be unavailable, or this character already has a main photo."
+            ? store.getBundle().sheets.find(current => current.id === sheet.id)?.neverDepicted
+              ? "This character is marked never depicted. The existing portrait was not adopted."
+              : "The existing portrait could not be adopted. It may be unavailable, or this character already has a main photo."
             : mainPhotoFailureReason(result.stage), result.stage);
           return;
         }
