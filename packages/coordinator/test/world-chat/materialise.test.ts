@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFile } from "node:fs/promises";
+import { SheetSchema } from "@arke-studio/contracts";
 import type { Sheet, WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
 import { materialiseCandidate, MaterialiseError, type Identities } from "../../src/world-chat/materialise.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
@@ -63,6 +65,21 @@ function frontmatterOf(candidate: WorldChangeCandidate, sheet: Sheet): Record<st
 }
 
 describe("a sheet edit changes what it names and nothing else", () => {
+  it("preserves legacy Undersong motivations, fears and private truths (#1910)", async () => {
+    for (const id of ["perrin-tallow", "ines-half-hitch", "the-chorister"]) {
+      const file = new URL(`../../../../fixtures/worlds/the-undersong/characters/${id}.md`, import.meta.url);
+      const doc = MarkdownFile.parse(await readFile(file, "utf8"));
+      const sheet = SheetSchema.parse({ ...doc.data, sections: doc.sections() });
+      const essence = sheet.sections.find(section => section.heading === "Essence")!.body + "\n\nA harmless test sentence.";
+      const draft = editOf({ sections: [{ heading: "Essence", body: essence }] }, sheet);
+      const built = materialiseCandidate(draft, IDENTITIES, bundleWith(sheet), AT);
+      const after = MarkdownFile.parse(built.targets[0]!.content).sections();
+      assert.equal(after.find(section => section.heading === "Essence")?.body, essence);
+      for (const section of sheet.sections.filter(section => section.heading !== "Essence")) {
+        assert.equal(after.find(next => next.heading === section.heading)?.body, section.body, `${id}: ${section.heading}`);
+      }
+    }
+  });
   const sheet = fullSheet();
   const touchOneSection = editOf({ sections: [{ heading: "Essence", body: "Rewritten." }] }, sheet);
 

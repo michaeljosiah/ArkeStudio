@@ -52,8 +52,15 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
 }
 
 /** The prose of a sheet, sections ordered per the schema and the empty optional ones dropped (D2). */
-function sheetBody(type: SheetKind, sections: Record<string, string>): string {
-  return SHEET_SHAPES[type].sections
+function sheetBody(type: SheetKind, sections: Record<string, string>, preserveLegacy = false): string {
+  const shape = SHEET_SHAPES[type].sections;
+  const headings = new Set(shape.map(section => section.heading));
+  return [
+    ...shape,
+    // Older sheets have Wants, Fears and Truth outside today's shape. An edit of Essence must
+    // not discard that prose merely because the form no longer offers its heading (#1910).
+    ...(preserveLegacy ? Object.keys(sections).filter(heading => !headings.has(heading)).map(heading => ({ heading, required: true })) : []),
+  ]
     .map((section) => {
       const text = (sections[section.heading] ?? "").trim();
       if (text === "" && !section.required) return null;
@@ -132,7 +139,7 @@ export function editSheetContent(input: {
       created: sheet.created,
       updated: input.date,
     },
-    sheetBody(sheet.type, input.sections),
+    sheetBody(sheet.type, input.sections, true),
   );
   return doc.serialize();
 }

@@ -39,3 +39,11 @@ content-proposal workflow, where the complete proposed document is reviewed.
 The implementation stays in the existing coordinator handler and `ProposalManager.stageSheetEdit`.
 Regression coverage: coordinator `test/sheet-inline-decisions.test.ts` and `test/gate/proposals.test.ts`.
 See SPEC-007 R-13 and SPEC-040 R-9a for editing and decision ownership.
+
+Conversation sheet edits also preserve existing sections outside the current shape. For example,
+older character sheets contain Wants, Fears and Truth: updating Essence carries their headings
+and prose into the proposal unchanged. Current headings keep their schema order, followed by
+the retained legacy headings in their existing order. This is handled by the shared sheet
+serializer used by both typed sheet actions and candidate materialization. Consolidating those
+sections belongs in an explicit reviewed document edit. Regression coverage includes Perrin,
+Ines and the Chorister from the Undersong fixture in `test/world-chat/materialise.test.ts` (#1910).
