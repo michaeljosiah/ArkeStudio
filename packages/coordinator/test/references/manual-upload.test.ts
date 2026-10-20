@@ -69,6 +69,16 @@ function theReport<T extends DomainEvent["type"]>(events: DomainEvent[], type: T
 }
 
 describe("uploading a main photo by hand", () => {
+  it("accepts the existing portrait through the public command without opening a picker", async () => {
+    const { provider, events, asked, send, kitOf } = await harness(() => []);
+    try {
+      await send({ kind: "choose-anchor", worldId: WORLD_ID, sheetId: "bray-half-hitch", selection: { source: "legacy-portrait" } });
+      assert.equal(theReport(events, "main-photo.acceptance").status, "accepted");
+      assert.match((await kitOf("bray-half-hitch")).mainPhoto!.file, /^takes\//);
+      assert.deepEqual(asked, []);
+    } finally { await provider.close(); }
+  });
+
   it("makes the picked file the identity anchor, through the same accept a chosen candidate takes", async () => {
     const picked = await fileOutsideTheWorld("my-portrait.png");
     const { provider, worldDir, events, asked, send, kitOf } = await harness(() => [picked]);

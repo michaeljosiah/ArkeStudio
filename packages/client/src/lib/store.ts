@@ -4216,8 +4216,9 @@ export function useReconcileReport(): ReconcileAction[] | null {
 export function chooseAnchor(
   worldId: string,
   sheetId: string,
-  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string } | { source: "legacy-portrait" },
 ): void {
+  if (current.mainPhotoAcceptance[sheetId]?.status === null) return;
   emitChange({
     ...current,
     mainPhotoAcceptance: {
@@ -4225,7 +4226,7 @@ export function chooseAnchor(
       [sheetId]: { status: null, candidateRetained: true },
     },
   });
-  send({ kind: "choose-anchor", worldId, sheetId, selection });
+  if (!send({ kind: "choose-anchor", worldId, sheetId, selection })) clearMainPhotoAcceptance(sheetId);
 }
 
 export function useMainPhotoAcceptance() {

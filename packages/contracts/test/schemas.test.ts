@@ -1449,6 +1449,14 @@ describe("domain events and frames", () => {
         selection: { source: "candidate", file: "upload-test.webp" },
       }),
     );
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
+      kind: "choose-anchor", worldId: WORLD_ID, sheetId: "bray-half-hitch",
+      selection: { source: "legacy-portrait" },
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "choose-anchor", worldId: WORLD_ID, sheetId: "bray-half-hitch",
+      selection: { source: "legacy-portrait", file: "elsewhere.png" },
+    }));
     assert.throws(() =>
       ClientMessageSchema.parse({
         kind: "choose-anchor",

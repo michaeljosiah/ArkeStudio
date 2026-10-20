@@ -500,6 +500,16 @@ authorization separately from actual-image approval. Tests: coordinator
 `test/harness/genesis-images.test.ts`, `test/dispatch-refusal.test.ts`,
 `test/world/founding-build.test.ts`; client `test/genesis-images.test.tsx`.
 
+### Adopt an existing cast portrait
+
+Legacy cast portraits can be explicitly adopted on Character Reference (#1913). The existing
+`choose-anchor` frame accepts `selection.source: "legacy-portrait"`; coordinator
+`references/main-photo.ts` validates the fixed contained portrait and reuses upload take recording
+and kit/review acceptance, preserving the original file. Its commit precondition prevents
+replacing an identity accepted concurrently. Client `ImageDialog` reports image availability so
+the control appears only for an existing portrait with no accepted main photo. Tests live in
+`references/main-photo.test.ts`, `references/manual-upload.test.ts` and the character layout smoke.
+
 ### Author props and state references in chat
 
 Contracts `prop.ts`, `genesis-review.ts` and `world-chat-actions.ts` define founding
