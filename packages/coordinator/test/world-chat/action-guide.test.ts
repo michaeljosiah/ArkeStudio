@@ -78,6 +78,15 @@ function namedKinds(text: string): string[] {
 }
 
 describe("the action guide", () => {
+  it("puts read prerequisites before drafting in full and compact guides (#1911)", () => {
+    for (const budget of [HUGE, 1_000]) {
+      const text = renderActionGuide(["world", "production"], budget).text;
+      assert.match(text, /Before drafting a change, obtain all of its required reads/);
+      assert.match(text, /Prop authoring needs both list_references and list_sheets/);
+      assert.match(text, /include draws also need list_sheets and list_canon/);
+    }
+    assert.deepEqual(describeAction("prop-authoring")?.reads, ["list_references", "list_sheets"]);
+  });
   it("names every model action kind, and only those, in the full production-scope guide", () => {
     const named = namedKinds(renderActionGuide(["world", "production"], HUGE).text);
     assert.deepEqual([...named].sort(), [...SCHEMA_KINDS].sort());

@@ -852,7 +852,8 @@ function worldActionObservations(
   action: ModelWorldChatAction,
   deps: WorldChatActionAdapterDeps = {},
 ): ArkeReadObservation[] {
-  const observations = action.checkReceiptIds.map((id) => {
+  const receiptProblems: string[] = [];
+  const observations = action.checkReceiptIds.flatMap((id): ArkeReadObservation[] => {
     const receipt = receipts.find((entry) => entry.id === id);
     if (
       !receipt ||
@@ -876,32 +877,43 @@ function worldActionObservations(
       // Which reads would do (issue 1888): told only that a drama's get_production receipt was a
       // search or draw, Arke cited it again; the read this action needs is named, not guessed.
       const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(WORLD_ACTION_REQUIREMENTS[action.kind] ?? []) : [];
-      throw new Error(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
+      receiptProblems.push(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
+      return [];
     }
     const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
       !current ||
       current.target !== receipt.target.id ||
       current.fence !== receipt.observedRevisionOrDigest
-    ) throw new Error(`The complete ${receipt.target.requirement} read is no longer current.`);
-    return {
+    ) {
+      receiptProblems.push(`The complete ${receipt.target.requirement} read is no longer current.`);
+      return [];
+    }
+    return [{
       requirement: receipt.target.requirement,
       target: receipt.target.id,
       revisionOrDigest: receipt.observedRevisionOrDigest,
       complete: true as const,
       receiptId: receipt.id,
-    };
+    }];
   });
   const observed = new Set(observations.map((observation) => observation.requirement));
-  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].find((requirement) => !observed.has(requirement));
-  if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
-  const wrongTarget = productionActionTargets(store, action).find((required) =>
+  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].filter((requirement) => !observed.has(requirement));
+  const wrongTargets = productionActionTargets(store, action).filter((required) =>
+    !missing.includes(required.requirement) &&
     !observations.some((observation) =>
       observation.requirement === required.requirement &&
       (observation.target === required.target ||
         (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
-  if (wrongTarget) {
-    throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
+  // One corrective turn should discover every prerequisite, not spend a full draft learning
+  // about sheets and then another learning about canon. Invalid receipts never count as reads.
+  const problems = [
+    ...missing.map(requirement => `A ${action.kind} action requires a complete current ${requirement} read.`),
+    ...wrongTargets.map(required => `A ${action.kind} action requires the complete current ${required.requirement} read for ${required.target}.`),
+    ...receiptProblems,
+  ];
+  if (problems.length) {
+    throw new Error([...new Set(problems)].join(" "));
   }
   return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
 }

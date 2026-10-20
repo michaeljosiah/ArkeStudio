@@ -152,6 +152,8 @@ const NO_EVIDENCE: readonly CandidateEvidence[] = [];
 const MAX_KEYS_NAMED = 8;
 const MAX_PROBLEMS = 8;
 const MAX_PROBLEM_CHARS = 300;
+// Preparation names several missing reads at once; cutting it at 300 hid the next prerequisite.
+const MAX_PREPARATION_CHARS = 1_200;
 const MAX_CORRECTIVE_CHARS = 4_000;
 
 /** Whether these reasons include the one that cannot be substituted (§8.4, and wrap-up's gate). */
@@ -236,7 +238,7 @@ export function preparationProblem(error: unknown): TurnProblem {
   const reason = error instanceof z.ZodError
     ? [...new Set(error.issues.slice(0, 3).map(schemaIssueLine))].join("; ")
     : error instanceof Error ? error.message : "";
-  const why = reason.trim() === "" ? "" : `: ${truncate(reason.trim().replace(/[.\s]+$/, ""), MAX_PROBLEM_CHARS)}`;
+  const why = reason.trim() === "" ? "" : `: ${truncate(reason.trim().replace(/[.\s]+$/, ""), MAX_PREPARATION_CHARS)}`;
   return problem(
     "action-preparation",
     // "Say so" (issue 1888): told only to answer without it, the corrective reply described the
@@ -928,7 +930,7 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
+  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, p.code === "action-preparation" ? MAX_PREPARATION_CHARS : MAX_PROBLEM_CHARS)}`);
   const message = [
     "The previous result was not accepted:",
     ...lines,
