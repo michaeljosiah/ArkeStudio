@@ -18,6 +18,9 @@ export interface CapturedRequest {
 export class StubOpenCode {
   private server: Server | null = null;
   port = 0;
+  promptBarrier: Promise<void> | null = null;
+  interruptStatus = 200;
+  abortStatus = 200;
   readonly requests: CapturedRequest[] = [];
   private sseClients = new Set<ServerResponse>();
   private sessionCounter = 0;
@@ -88,7 +91,7 @@ export class StubOpenCode {
           return;
         }
         if (/^\/session\/[^/]+\/prompt_async$/.test(url.pathname)) {
-          res.writeHead(204).end();
+          void (this.promptBarrier ?? Promise.resolve()).then(() => res.writeHead(204).end());
           return;
         }
         if (/^\/api\/session\/[^/]+\/prompt$/.test(url.pathname)) {
@@ -96,7 +99,11 @@ export class StubOpenCode {
           return;
         }
         if (/^\/api\/session\/[^/]+\/interrupt$/.test(url.pathname)) {
-          res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({}));
+          res.writeHead(this.interruptStatus, { "Content-Type": "application/json" }).end(JSON.stringify({}));
+          return;
+        }
+        if (/^\/session\/[^/]+\/abort$/.test(url.pathname)) {
+          res.writeHead(this.abortStatus, { "Content-Type": "application/json" }).end(JSON.stringify(true));
           return;
         }
         if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(url.pathname)) {

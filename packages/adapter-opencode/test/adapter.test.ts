@@ -32,6 +32,13 @@ import { StubOpenCode } from "./helpers/stub-server.js";
 import { until } from "./wait.js";
 
 describe("normalisation (R-14, R-15)", () => {
+  it("states an acknowledged legacy abort as cancellation rather than failure (#1981)", () => {
+    const result = normalizeOpenCode({ type: "session.error", properties: {
+      sessionID: "s1", error: { name: "MessageAbortedError", data: { message: "Aborted" } },
+    } }, createNormalizeState());
+    assert.deepEqual(result, { kind: "events", events: [{ type: "session.ended", sessionId: "s1", reason: "cancelled", detail: "cancelled by you" }] });
+  });
+
   it("unwraps the ≥1.17 payload envelope and maps text parts to deltas", () => {
     const state = createNormalizeState();
     normalizeOpenCode(
@@ -298,7 +305,36 @@ describe("the live adapter over the stub server", () => {
   it("interrupts a session on request (R-13)", async () => {
     const session = await adapter.createSession({ purpose: "authoring" });
     await adapter.interrupt(session.sessionId);
-    assert.ok(stub.lastRequest(new RegExp(`/api/session/${session.sessionId}/interrupt$`)));
+    assert.ok(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)));
+  });
+
+  it("keeps both cancellation routes in the proposal directory and exposes a failed stop (#1981)", async () => {
+    const session = await adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-stop" });
+    stub.abortStatus = 404;
+    try {
+      await adapter.interrupt(session.sessionId);
+      for (const path of [`/api/session/${session.sessionId}/interrupt`, `/session/${session.sessionId}/abort`]) {
+        assert.equal(stub.lastRequest(new RegExp(`${path}$`))?.query.directory, "C:/worlds/proposal-stop");
+      }
+      stub.interruptStatus = 500;
+      await assert.rejects(adapter.interrupt(session.sessionId), /500/);
+    } finally { stub.interruptStatus = 200; stub.abortStatus = 200; }
+  });
+
+  it("does not let cancellation overtake an unacknowledged prompt (#1981)", async () => {
+    const session = await adapter.createSession({ purpose: "authoring", cwd: "C:/worlds/pending-stop" });
+    let release!: () => void;
+    stub.promptBarrier = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "write a draft" }] });
+      await until(() => !!stub.lastRequest(new RegExp(`/session/${session.sessionId}/prompt_async$`)), "pending prompt");
+      const stop = adapter.interrupt(session.sessionId);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)), undefined);
+      release();
+      await stop;
+      assert.ok(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)));
+    } finally { release(); stub.promptBarrier = null; }
   });
 
   it("assesses permission asks against the session's captured v1 confinement", async () => {

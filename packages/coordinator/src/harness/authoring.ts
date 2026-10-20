@@ -45,6 +45,7 @@ interface ActiveRun {
   cancelled: boolean;
   /** The session's setup, while there is no session to interrupt yet (issue 1247): a Stop ends it here. */
   setup?: AbortController;
+  interruption?: Promise<void>;
 }
 
 /**
@@ -116,7 +117,10 @@ export class AuthoringService {
     run.cancelled = true;
     run.setup?.abort(new Error("cancelled by you"));
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-    if (interrupt && run.sessionId) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
+    if (interrupt && run.sessionId) {
+      run.interruption ??= interrupt.call(this.adapter, run.sessionId).catch(() => {});
+      await run.interruption;
+    }
   }
 
   isRunning(proposalId: string): boolean {
@@ -306,16 +310,14 @@ export class AuthoringService {
           const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
           void interrupt?.call(this.adapter, sessionId).catch(() => {});
         }
-        if (run.cancelled && !ending) {
-          ending = { state: "cancelled", detail: "cancelled by you" };
-          break;
-        }
+        // Progress is not a stop receipt. Keep the proposal held until the turn ends.
       }
     } catch (err) {
       ending = { state: "failed", detail: err instanceof Error ? err.message : String(err) };
     } finally {
       clearTimeout(timer);
       abort.abort();
+      await run.interruption;
       this.runs.delete(input.proposalId);
     }
 
