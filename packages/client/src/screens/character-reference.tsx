@@ -229,7 +229,7 @@ export function CharacterReferenceScreen() {
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const photo = kit ? mainPhotoFor(kit) : null;
   const subject = `${world.meta.worldId}/${sheetId}/${photo?.file ?? "head-front.png"}`;
-  const existingPortrait = !photo && portraitSubject === subject;
+  const existingPortrait = !photo && !sheet.neverDepicted && portraitSubject === subject;
   const compilation = kit ? designatedCompilation(kit) : null;
   const stale = kit && compilation ? compilationIsStale(kit, compilation, sheet.version) : false;
   const pendingSheetTakes = world.referenceTakes
