@@ -1,9 +1,10 @@
 import { basename, join } from "node:path";
 import { rm, stat } from "node:fs/promises";
-import type { ReviewDecision, Sheet, Take, WorldBundle } from "@arke-studio/contracts";
+import { mainPhotoFor, type ReviewDecision, type Sheet, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+import { readContainedImageReferences } from "../world/reference-files.js";
 import type { WorldStore } from "../world/store.js";
-import { chooseAnchor } from "./kit.js";
+import { chooseAnchor, type ReferenceMutationOptions } from "./kit.js";
 import { pendingReferenceTake, recordUploadedReferenceTake, referenceReviewDecision } from "./takes.js";
 
 export type MainPhotoAcceptanceStage =
@@ -13,6 +14,7 @@ export type MainPhotoAcceptanceStage =
   | "candidate-cleanup";
 
 export type MainPhotoSelection =
+  | { source: "legacy-portrait" }
   | { source: "take"; takeId: Take["id"] }
   | { source: "candidate"; file: string };
 
@@ -35,6 +37,7 @@ export interface MainPhotoAcceptanceDeps {
       acceptedAt: string;
       review: ReviewDecision;
     },
+    options?: ReferenceMutationOptions,
   ) => Promise<void>;
   removeCandidate?: (path: string) => Promise<void>;
 }
@@ -86,8 +89,37 @@ export async function acceptMainPhoto(
   const removeCandidate = deps.removeCandidate ?? ((path) => rm(toExtendedLength(path)));
   let take: Take | null = null;
   let candidatePath: string | null = sourceCandidatePath;
+  // A visible legacy portrait is not accepted identity. Adopting it is explicit and can only
+  // fill a missing main photo; a concurrent acceptance must never be silently replaced.
+  const legacy = selection.source === "legacy-portrait";
+  const precondition = legacy ? () => {
+    const current = store.getBundle();
+    const character = current.sheets.find((item) => item.id === sheet.id);
+    const kit = current.referenceKits.find((item) => item.sheetId === sheet.id);
+    return character?.type !== "character" || character.version !== sheet.version || (kit && mainPhotoFor(kit))
+      ? "This character changed or already has a main photo."
+      : null;
+  } : undefined;
 
-  if (selection.source === "take") {
+  if (legacy) {
+    const path = `references/${sheet.id}/head-front.png`;
+    let sourceData: Uint8Array;
+    try {
+      const stale = precondition!();
+      if (stale) throw new Error(stale);
+      sourceData = (await readContainedImageReferences(store.dir, [path]))[0]!.data;
+    } catch (err) {
+      return { status: "failed", stage: "candidate-validation", candidateRetained: true, error: message(err) };
+    }
+    try {
+      // Preserve the original portrait. The existing upload take retains its source path,
+      // immutable media, zero cost and the author's acceptance, without inventing generation.
+      take = await recordUpload(store, sheet.id, path, { precondition, sourceData });
+      if (!(await mediaExists(store, sheet.id, take))) throw new Error("the immutable take was not written");
+    } catch (err) {
+      return { status: "failed", stage: "take-recording", candidateRetained: true, error: message(err) };
+    }
+  } else if (selection.source === "take") {
     take = pendingReferenceTake(bundle.referenceTakes, bundle.referenceReviews, selection.takeId, sheet.id, "main-photo");
     if (!take || !(await mediaExists(store, sheet.id, take))) {
       return {
@@ -132,7 +164,7 @@ export async function acceptMainPhoto(
       source: take.provider === "user" ? "upload" : "generated",
       acceptedAt: store.now(),
       review: referenceReviewDecision(store.now(), take, "accept"),
-    });
+    }, { precondition });
   } catch (err) {
     return { status: "failed", stage: "kit-commit", candidateRetained: candidatePath !== null, error: message(err) };
   }

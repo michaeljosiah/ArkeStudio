@@ -13,6 +13,9 @@ import { parseHTML } from "linkedom";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const baseline = process.argv.includes("--baseline");
 const baselineRef = baseline ? process.argv[process.argv.indexOf("--baseline") + 1] : null;
+const onlyRoute = process.argv.includes("--route") ? process.argv[process.argv.indexOf("--route")+1] : null;
+if(onlyRoute) assert.ok(["kit","looks","voice"].includes(onlyRoute),"--route requires kit, looks or voice");
+const pageRoutes = ["kit","looks","voice"].filter(route=>!onlyRoute||route===onlyRoute);
 if (baseline) assert.ok(baselineRef, "--baseline requires a revision");
 const dir = await mkdtemp(join(tmpdir(), "arke-character-layout-"));
 const main = await readFile(join(root, "packages/client/src/main.tsx"), "utf8");
@@ -58,6 +61,7 @@ window.mountCharacter = async (route = "kit", mode = "normal") => {
   if(mode === "pending") world.referenceTakes = ["sheet","look"].map((kind,i)=>({id:"tk_01J8F00000000000000000000"+i,coversShots:[],kind,reference:{sheetId:sheet.id},provider:"openai",model:"gpt-image-2",provenance:{canonRevision:42,sheets:{[sheet.id]:4}},prompt:"A new "+kind,references:[],params:{},cost:{estimatedMicroUsd:40000,actualMicroUsd:40000},dispatchedAt:"2026-09-27T12:00:00Z",completedAt:"2026-09-27T12:01:00Z",media:kind+".png"}));
   const voices={ [sheet.id]: {extracted:[],ranked:["Harbour glass","Low tide","Brine and bell","Kokoro · af_sky"].map((label,i)=>({candidate:{provider:i===3?"kokoro":"elevenlabs",model:i===3?"kokoro-82m":"eleven_multilingual_v2",voiceId:i===0?sheet.voice.voiceId:"voice-"+i,label,attributes:["warm","measured"],local:i===3,canClone:false},matched:[],overlap:0})),previewLine:{text:"The verse, under the water.",source:"own-line"},cloudPreviewMicroUsd:30000,previewMicroUsdByVoice:{},notices:{}} };
   window.commands = [];
+  if(mode === "legacy") world.referenceKits = world.referenceKits.filter(k => k.sheetId !== sheet.id);
   const bridge = { connect() {}, send(command) { window.commands.push(JSON.parse(command)); }, subscribe() { return () => {}; }, coordinatorHttpBase: () => location.origin };
   window.arke = bridge; __setBridgeForTest(bridge); __setStateForTest(state,{voiceCandidates:voices});
   window.characterPath = "/w/" + world.meta.worldId + "/cast/maren-kest/";
@@ -96,12 +100,18 @@ window.measureCharacter = () => {
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
+      return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/screens/world.tsx","packages/client/src/screens/fidelity.css","packages/client/src/screens/character-reference.tsx","packages/client/src/screens/character-voice.tsx","packages/client/src/components/generation-dialog.tsx","packages/client/src/components/character-voice-sample.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Character layout artifacts: " + dir);
@@ -141,13 +151,22 @@ try {
   for(const [name,width,height,touch] of (baseline ? [["desktop",1360,850,false]] : [["desktop",1360,850,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true]]).filter(v=>!only||v[0]===only)) {
     await size(width,height,touch);if(touch)await cdp("Emulation.setTouchEmulationEnabled",{enabled:true});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom","'+(touch?20:0)+'px")');
-    for(const route of ["kit","looks","voice"]) {
+    for(const route of pageRoutes) {
       await js('window.mountCharacter('+JSON.stringify(route)+')');
       if(route === "looks") await js('document.querySelector(".fy-looks-results__grid > div > button")?.click(); window.settleCharacter()');
       const m=await js("window.measureCharacter()");records.push({name,route,...m});await capture(name+"-"+route);
       assert.equal(m.overflow,false,name+" "+route+" horizontal overflow");
       assert.equal(m.coarse,touch,name+" pointer");assert.equal(m.hover,!touch,name+" hover");
       if(!baseline)assert.deepEqual(m.active,[route === "kit"?"Reference":route === "looks"?"More looks":"Voice"]);
+    }
+    if(!baseline && (!onlyRoute || onlyRoute === "kit")) {
+      await js('window.mountCharacter("kit","legacy")');
+      await js('[...document.querySelectorAll("button")].find(b=>b.textContent==="Use this portrait").scrollIntoView({block:"center"})');
+      assert.equal((await js("window.measureCharacter()")).overflow,false,name+" existing portrait overflow");
+      await capture(name+"-legacy-portrait");
+      await js('[...document.querySelectorAll("button")].find(b=>b.textContent==="Use this portrait").click()');
+      assert.ok(await js('window.commands.some(c=>c.kind==="choose-anchor"&&c.selection.source==="legacy-portrait")'),"adopts through the existing acceptance command");
+      assert.equal(await js('[...document.querySelectorAll("button")].find(b=>b.textContent==="Accepting…").disabled'),true,"pending adoption cannot be sent twice");
     }
     for(const [dialog,route,open] of (process.argv.includes("--pages-only") ? [] : [
       ["explore","looks",'document.querySelector(".fy-looks-composer .ui-btn").click()'],
@@ -208,11 +227,11 @@ try {
   if(!baseline){
     // Also exercise the full browser viewport; the paired master crops exclude OS chrome.
     await size(984,1092,true);
-    for(const route of ["kit","looks","voice"]){await navigate("/");await until(()=>js('typeof window.mountCharacter === "function"'));await js('window.mountCharacter('+JSON.stringify(route)+')');assert.equal((await js("window.measureCharacter()")).overflow,false,"984x1092 "+route);await capture("fold-full-"+route);}
+    for(const route of pageRoutes){await navigate("/");await until(()=>js('typeof window.mountCharacter === "function"'));await js('window.mountCharacter('+JSON.stringify(route)+')');assert.equal((await js("window.measureCharacter()")).overflow,false,"984x1092 "+route);await capture("fold-full-"+route);}
     const masterMeasurements={};
     for(const id of ["ch162a1","ch162a2","ch162a3","ch162b1","ch162b2","ch162b3","ch162c","ch162d"]){
       await size(id.endsWith("c")||id.endsWith("d")?984:390,id.endsWith("c")||id.endsWith("d")?1060:797,true);await navigate("/"+id+".html");await capture(id);
-      masterMeasurements[id]=await js('Object.fromEntries([".chead",".tabs",".rcard",".rcard .img",".rgrid",".vhero",".vhero .art",".tiles",".tile",".door",".lgrid",".sheet"].map(s=>{const e=document.querySelector(s); const b=e?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
+      masterMeasurements[id]=await js('Object.fromEntries([".bar",".chead",".tabs",".rcard",".rcard .img",".rgrid",".vhero",".vhero .art",".tiles",".tile",".door",".lgrid",".sheet"].map(s=>{const e=document.querySelector(s); const b=e?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
     }
     await writeFile(join(dir,"master-measurements.json"),JSON.stringify(masterMeasurements,null,2));
     for(const [id,name,route,pairs] of [
@@ -223,7 +242,10 @@ try {
       ["ch162d","fold","voice",[[".tabs",".fy-character-tabs"],[".vhero",".fy-voicehero"],[".tiles",".fy-voiceways"]]]
     ]) {
       const actual=records.find(r=>r.name===name && r.route===route);if(!actual)continue;
-      for(const [design,app]of pairs)for(const key of ["x","y","width","height"])assert.ok(Math.abs(masterMeasurements[id][design][key]-actual.geometry[app][key])<=1,id+" "+app+" "+key+" matches master");
+      // The current phone titlebar is 48px; turn 162 used 52px. Compare the same in-flow
+      // geometry below the measured shell, rather than pinning content to the old bar.
+      const titlebarDelta=actual.geometry[".fy-titlebar"].height-masterMeasurements[id][".bar"].height;
+      for(const [design,app]of pairs)for(const key of ["x","y","width","height"])assert.ok(Math.abs(masterMeasurements[id][design][key]+(key==="y"?titlebarDelta:0)-actual.geometry[app][key])<=1,id+" "+app+" "+key+" matches master");
     }
   }
   console.log("Character layout checks passed");

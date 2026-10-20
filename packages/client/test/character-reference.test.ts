@@ -9,6 +9,7 @@ import {
   __mainPhotoAcceptanceForTest,
   __pendingQueueRequestsForTest,
   __setStateForTest,
+  __setBridgeForTest,
   clearCharacterSheetAcceptance,
   generateWorldImage,
   importCharacterSheet,
@@ -99,6 +100,8 @@ describe("queue acknowledgement correlation", () => {
 describe("main-photo acceptance feedback", () => {
   it("moves from pending to a safe retryable failure", () => {
     __setStateForTest(FIXTURE_STATE);
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, coordinatorHttpBase: () => "http://127.0.0.1" });
+    __connectionStatusForTest("open");
     chooseAnchor(FIXTURE_STATE.world!.meta.worldId, "maren-kest", {
       source: "candidate",
       file: "upload-test.png",
@@ -117,6 +120,8 @@ describe("main-photo acceptance feedback", () => {
     assert.equal(result?.status, "failed");
     assert.equal(result?.candidateRetained, true);
     assert.match(result?.reason ?? "", /try again/);
+    __setBridgeForTest(null);
+    __connectionStatusForTest("closed");
   });
 });
 
@@ -128,6 +133,7 @@ describe("uploading a main photo or character sheet by hand", () => {
     // has to come back off, or the button waits for an answer that can never arrive.
     importMainPhoto(worldId, "maren-kest");
     importCharacterSheet(worldId, "maren-kest");
+    chooseAnchor(worldId, "maren-kest", { source: "legacy-portrait" });
     assert.equal(__mainPhotoAcceptanceForTest()["maren-kest"], undefined);
     assert.equal(__characterSheetAcceptanceForTest()["maren-kest"], undefined);
   });

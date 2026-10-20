@@ -782,10 +782,14 @@ binds only to loopback and serves the disposable bundle and committed design ass
 
 The check covers 360, 375 and 390px phones, a 600px window, Fold7 and 1360×850 desktop,
 including dialogs opened after scrolling, the sample review, long names and pending candidates.
+It also checks an unaccepted legacy portrait at every width: the adoption control remains
+reachable, sends the existing acceptance command and disables while that acceptance is pending.
 Inspect the paired `ch162*` master frames and application screenshots; the phone status bar
 and Fold7 status bar are excluded from both app crops. The fixture simulates a 20px bottom safe
 area. `--baseline <revision>` captures the desktop before the change; `--viewport phone375`
 and `--pages-only` help iterate on a bounded visual failure.
+Combine `--pages-only --route kit` to check Reference and portrait adoption without the other
+character surfaces; `--route` also accepts `looks` or `voice`.
 
 The master's sheet starts 84px below the page area's top, after the 52px bar and 57px pill strip
 (193px in the app viewport). Character generation routes retain that phone backdrop while

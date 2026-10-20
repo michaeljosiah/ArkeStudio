@@ -8,9 +8,10 @@ import {
   mainPhotoFailureReason,
   mainPhotoLogRecord,
 } from "../../src/references/main-photo.js";
-import { readKit } from "../../src/references/kit.js";
-import { recordReferenceTake } from "../../src/references/takes.js";
+import { chooseAnchor, readKit } from "../../src/references/kit.js";
+import { recordReferenceTake, recordUploadedReferenceTake } from "../../src/references/takes.js";
 import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 
 const CLOCK = () => "2026-08-04T08:00:00.000Z";
@@ -28,6 +29,99 @@ async function candidateWorld() {
 }
 
 describe("main-photo acceptance boundary", () => {
+  it("adopts an unaccepted stock portrait without changing its bytes or inventing provider work", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch")!;
+      const path = `references/${sheet.id}/head-front.png`;
+      const before = await readFile(join(dir, path));
+      assert.equal(await readKit(store, sheet.id), null);
+      const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" });
+      assert.equal(result.status, "accepted");
+      const photo = (await readKit(store, sheet.id))!.kit.mainPhoto!;
+      assert.deepEqual(await readFile(join(dir, "references", sheet.id, photo.file)), before);
+      assert.deepEqual(await readFile(join(dir, path)), before, "original portrait is retained");
+      const take = store.getBundle().referenceTakes.find((t) => t.id === photo.sourceTakeId)!;
+      assert.equal(take.params["uploadedCandidate"], path);
+      assert.equal(take.params["uploadedHash"], sha256(before));
+      assert.equal(take.provider, "user");
+      assert.equal(take.cost.actualMicroUsd, 0);
+      assert.equal(take.jobId, undefined);
+      assert.equal(store.getBundle().referenceReviews.at(-1)?.decision, "accept");
+      await store.close();
+      const reopened = await WorldStore.open(dir, { clock: CLOCK });
+      try { assert.deepEqual((await readKit(reopened, sheet.id))!.kit.mainPhoto, photo); }
+      finally { await reopened.close(); }
+    } finally { await store.close(); }
+  });
+
+  for (const [sheetId, reason] of [["maren-kest", "already accepted"], ["perrin-tallow", "missing portrait"], ["the-saltmarket", "not a character"]]) {
+    it(`refuses legacy adoption for ${reason}`, async () => {
+      const dir = await makeTempWorld();
+      const store = await WorldStore.open(dir, { clock: CLOCK });
+      try {
+        const sheet = store.getBundle().sheets.find((s) => s.id === sheetId)!;
+        const before = await readKit(store, sheet.id);
+        const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" });
+        assert.equal(result.status, "failed");
+        assert.deepEqual(await readKit(store, sheet.id), before);
+        assert.equal(store.getBundle().referenceTakes.length, 0);
+      } finally { await store.close(); }
+    });
+  }
+
+  it("does not replace an identity accepted while the legacy take is being copied", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch")!;
+      const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" }, null, {
+        recordUpload: async (...args) => {
+          const take = await recordUploadedReferenceTake(...args);
+          await chooseAnchor(store, sheet.id, { file: "new-identity.png", sheetVersion: sheet.version, source: "upload" });
+          return take;
+        },
+      });
+      assert.equal(result.status, "failed");
+      assert.equal((await readKit(store, sheet.id))!.kit.mainPhoto?.file, "new-identity.png");
+      assert.equal(store.getBundle().referenceReviews.length, 0);
+    } finally { await store.close(); }
+  });
+
+  it("does not reuse an older copy when the legacy portrait changes after a failed acceptance", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch")!;
+      const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" }, null, {
+        commitAnchor: async () => { throw new Error("busy"); },
+      });
+      assert.equal(result.status, "failed");
+      const old = store.getBundle().referenceTakes.at(-1)!;
+      const replacement = await readFile(join(dir, "references/maren-kest/head-front.png"));
+      await store.gateOp(() => writeFile(join(dir, `references/${sheet.id}/head-front.png`), replacement));
+      const retry = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" });
+      assert.equal(retry.status, "accepted");
+      const photo = (await readKit(store, sheet.id))!.kit.mainPhoto!;
+      assert.notEqual(photo.sourceTakeId, old.id);
+      assert.deepEqual(await readFile(join(dir, "references", sheet.id, photo.file)), replacement);
+    } finally { await store.close(); }
+  });
+
+  it("refuses a non-image at the conventional portrait path before recording a take", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch")!;
+      await store.gateOp(() => writeFile(join(dir, `references/${sheet.id}/head-front.png`), "not an image"));
+      const result = await acceptMainPhoto(store, sheet, store.getBundle(), { source: "legacy-portrait" });
+      assert.equal(result.status, "failed");
+      assert.equal(store.getBundle().referenceTakes.length, 0);
+      assert.equal(await readKit(store, sheet.id), null);
+    } finally { await store.close(); }
+  });
+
   it("records the exact generated source path in the immutable take", async () => {
     const { dir, store } = await candidateWorld();
     const job = {

@@ -209,6 +209,7 @@ export function CharacterReferenceScreen() {
   const { state } = useStore();
   const photoUpload = useMainPhotoAcceptance()[sheetId ?? ""];
   const sheetUpload = useCharacterSheetAcceptance()[sheetId ?? ""];
+  const [portraitSubject, setPortraitSubject] = useState<string | null>(null);
   // A success says itself — the card changes. What it must not do is linger: the replace screen
   // reads this same slot and leaves the moment it sees "accepted", so a success left here would
   // make the next press of Replace bounce straight back.
@@ -226,6 +227,8 @@ export function CharacterReferenceScreen() {
   const sheetUploading = sheetUpload?.status === null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const photo = kit ? mainPhotoFor(kit) : null;
+  const subject = `${world.meta.worldId}/${sheetId}/${photo?.file ?? "head-front.png"}`;
+  const existingPortrait = !photo && portraitSubject === subject;
   const compilation = kit ? designatedCompilation(kit) : null;
   const stale = kit && compilation ? compilationIsStale(kit, compilation, sheet.version) : false;
   const pendingSheetTakes = world.referenceTakes
@@ -278,10 +281,11 @@ export function CharacterReferenceScreen() {
              */}
             <ImageDialog
               worldSlug={world.meta.slug}
-              path={photo ? `references/${sheetId}/${photo.file}` : ""}
-              label={photo ? `${sheet.name} main photo` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
+              path={photo ? `references/${sheetId}/${photo.file}` : sheetPortraitPath(sheetId)}
+              onAvailabilityChange={(available) => setPortraitSubject(available ? subject : null)}
+              label={photo ? `${sheet.name} main photo` : existingPortrait ? `${sheet.name} existing portrait` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
               title={sheet.name}
-              subtitle="main photo"
+              subtitle={existingPortrait ? "existing portrait · not yet accepted" : "main photo"}
               triggerLabel={`View larger main photo of ${sheet.name}`}
               closeLabel="Close main photo"
               triggerClassName="fy-reference-card__zoom"
@@ -290,7 +294,7 @@ export function CharacterReferenceScreen() {
               downloadName={`${sheet.name} main photo`}
             />
             <span className="fy-reference-card__status" data-accepted={photo ? true : undefined}>
-              {photo ? "ACCEPTED · IDENTITY ANCHOR" : "OUTSTANDING"}
+              {photo ? "ACCEPTED · IDENTITY ANCHOR" : existingPortrait ? "EXISTING PORTRAIT · NOT ACCEPTED" : "OUTSTANDING"}
             </span>
           </div>
           <div className="fy-reference-card__foot">
@@ -312,6 +316,14 @@ export function CharacterReferenceScreen() {
               {photo ? "Replace" : "Create"}
             </Button>
           </div>
+          {existingPortrait && (
+            <div className="fy-reference-candidates">
+              <span>Keep this portrait as the face to preserve.</span>
+              <Button disabled={photoUploading} onClick={() => chooseAnchor(world.meta.worldId, sheetId, { source: "legacy-portrait" })}>
+                {photoUploading ? "Accepting…" : "Use this portrait"}
+              </Button>
+            </div>
+          )}
           {photoUpload?.status === "failed" && (
             <p className="fy-reference-fallback">{photoUpload.reason ?? "The main photo was not changed."}</p>
           )}

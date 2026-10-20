@@ -1547,6 +1547,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("legacy-portrait") }).strict(),
         z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
         z
           .object({

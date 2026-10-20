@@ -18285,7 +18285,7 @@ export class Coordinator {
       }
       case "choose-anchor": {
         const store = this.opts.provider.openStore?.();
-        let source: "upload" | "generated" = msg.selection.source === "candidate" ? "upload" : "generated";
+        let source: "upload" | "generated" = msg.selection.source === "take" ? "generated" : "upload";
         const report = (
           status: "accepted" | "failed",
           candidateRetained: boolean,
@@ -18337,7 +18337,7 @@ export class Coordinator {
             (typeof take?.params["sourceCandidate"] === "string" ? take.params["sourceCandidate"] : null) ??
             job?.landedFiles?.find((path) => path.startsWith(`references/${msg.sheetId}/candidates/`)) ??
             null;
-        } else {
+        } else if (selection.source === "candidate") {
           const candidatePath = `references/${msg.sheetId}/candidates/${selection.file}`;
           const job = this.jobQueue
             ?.listJobs()
@@ -18369,7 +18369,9 @@ export class Coordinator {
         const result = await acceptMainPhoto(store, sheet, bundle, selection, sourceCandidatePath);
         await this.refreshWorldSnapshot(msg.worldId);
         if (result.status === "failed") {
-          report("failed", result.candidateRetained, mainPhotoFailureReason(result.stage), result.stage);
+          report("failed", result.candidateRetained, selection.source === "legacy-portrait"
+            ? "The existing portrait could not be adopted. It may be unavailable, or this character already has a main photo."
+            : mainPhotoFailureReason(result.stage), result.stage);
           return;
         }
         if (result.cleanupError) {

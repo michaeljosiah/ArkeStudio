@@ -34,6 +34,7 @@ export function ImageDialog({
   dialogRadius = 9,
   download = false,
   downloadName,
+  onAvailabilityChange: notifyAvailability,
 }: {
   worldSlug: string | undefined;
   /** World-relative media path, shown both in the trigger and enlarged. */
@@ -68,6 +69,7 @@ export function ImageDialog({
   download?: boolean;
   /** A human name for the saved file. The extension always comes from the file itself. */
   downloadName?: string;
+  onAvailabilityChange?: (available: boolean) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -84,8 +86,10 @@ export function ImageDialog({
   const subject = `${worldSlug ?? ""}|${path}`;
   const [loaded, setLoaded] = useState<string | null>(null);
   const available = loaded === subject;
+  const notify = useRef(notifyAvailability);
+  notify.current = notifyAvailability;
   const onAvailabilityChange = useCallback(
-    (ok: boolean) => setLoaded(ok ? subject : null),
+    (ok: boolean) => { setLoaded(ok ? subject : null); notify.current?.(ok); },
     [subject],
   );
   const close = () => dialog.current?.close();
