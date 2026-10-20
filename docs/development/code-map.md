@@ -766,3 +766,9 @@ existing review projection; client `domain/domain.tsx` reads prose first and fol
 metadata into Sheet details. Amendments and removals stay expanded. `domain/connected.tsx`
 keeps status and cancellation visible while folding raw drafting activity. Regression coverage:
 coordinator `test/gate/sheet-review.test.ts`, client `test/sheet-inline-decisions.test.tsx`.
+
+Proposal cancellation (#1981): `harness/authoring.ts` retains the active-run guard through the
+writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abort to the same
+directory and execution API as prompt_async, waits for pending prompt admission, and translates
+MessageAbortedError to cancellation. Requests are bounded; partial proposal files remain intact.
+Tests: coordinator `test/harness/authoring.test.ts`, adapter-opencode `test/adapter.test.ts`.
