@@ -1,6 +1,6 @@
 # Arke Player · design master notes
 
-Drawn 20 October 2026, proposed and awaiting the owner's review. Asked: a new mobile application,
+Drawn and approved by the owner on 20 October 2026 (P1–P6, then P7 on request). Asked: a new mobile application,
 Arke Player, where people play productions from worlds shared in Arke and upload packaged Arke
 worlds to play, reusing the player designs already in the Studio master, drawn as a new file in
 the design-system folder.
