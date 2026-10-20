@@ -243,6 +243,45 @@ function invalidNotice(detail: string | undefined): { title: string; hint: strin
       };
 }
 
+type ProposalReviewTarget = NonNullable<StagedProposal["review"]>["targets"][number];
+
+function ProposalReviewFields({ target }: { target: ProposalReviewTarget }) {
+  const prose = target.fields.filter(f => !f.metadata);
+  const metadata = target.fields.filter(f => f.metadata);
+  const renderField = (f: ProposalReviewTarget["fields"][number]) => (
+    <div key={f.field} className="dom-review__field">
+      <div className="dom-review__name">{f.field}</div>
+      {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={target.path} />}
+      {f.before !== null && (
+        <div className="dom-review__was">
+          <span className="dom-review__tag mono">was</span>
+          <span>{f.before}</span>
+        </div>
+      )}
+      {f.proposed !== null ? (
+        <div className="dom-review__now">
+          <span className="dom-review__tag mono">now</span>
+          <span>{f.proposed}</span>
+        </div>
+      ) : (
+        <div className="dom-review__now">
+          <span className="dom-review__tag mono">now</span>
+          <span className="dom-review__removed">removed</span>
+        </div>
+      )}
+    </div>
+  );
+  return <>
+    {prose.map(renderField)}
+    {target.action === "create" && prose.length > 0 && metadata.length > 0 ? (
+      <details className="dom-review__metadata">
+        <summary>Sheet details · {metadata.length} {metadata.length === 1 ? "field" : "fields"}</summary>
+        {metadata.map(renderField)}
+      </details>
+    ) : metadata.map(renderField)}
+  </>;
+}
+
 export function ProposalPanel({
   staged,
   notice,
@@ -295,29 +334,7 @@ export function ProposalPanel({
                 <span className="dom-review__label">{t.label}</span>
                 <span className="dom-review__kind mono">{t.kind}</span>
               </div>
-              {t.fields.map((f) => (
-                <div key={f.field} className="dom-review__field">
-                  <div className="dom-review__name">{f.field}</div>
-                  {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={t.path} />}
-                  {f.before !== null && (
-                    <div className="dom-review__was">
-                      <span className="dom-review__tag mono">was</span>
-                      <span>{f.before}</span>
-                    </div>
-                  )}
-                  {f.proposed !== null ? (
-                    <div className="dom-review__now">
-                      <span className="dom-review__tag mono">now</span>
-                      <span>{f.proposed}</span>
-                    </div>
-                  ) : (
-                    <div className="dom-review__now">
-                      <span className="dom-review__tag mono">now</span>
-                      <span className="dom-review__removed">removed</span>
-                    </div>
-                  )}
-                </div>
-              ))}
+              <ProposalReviewFields target={t} />
             </div>
           ))}
         </div>

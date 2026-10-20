@@ -272,6 +272,8 @@ export const StagedProposalSchema = z
                     field: z.string().min(1),
                     before: z.string().nullable(),
                     proposed: z.string().nullable(),
+                    /** Sheet identity/setup fields, kept available beside the authored prose. */
+                    metadata: z.boolean().optional(),
                   })
                   .strict(),
               ),

@@ -33,6 +33,7 @@ export interface ReviewField {
   field: string;
   before: string | null;
   proposed: string | null;
+  metadata?: boolean;
 }
 
 export interface ReviewTarget {
@@ -51,7 +52,7 @@ export interface ReviewProjection {
 }
 
 /** Parse a sheet or canon file into comparable fields, or null when it is neither. */
-function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string> } | null {
+function fieldsOf(path: string, content: string): { label: string; kind: string; fields: Map<string, string>; metadata?: Set<string> } | null {
   /*
    * The world look is JSON, and the only proposal target that is not Markdown.
    *
@@ -283,8 +284,12 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     ["Voice", sheet.voice ? JSON.stringify(sheet.voice) : "None"],
     ["Retired", sheet.retired ? "Yes" : "No"],
   ]);
-  for (const section of sheet.sections) fields.set(section.heading, section.body);
-  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields };
+  const metadata = new Set(fields.keys());
+  for (const section of sheet.sections) {
+    fields.set(section.heading, section.body);
+    metadata.delete(section.heading);
+  }
+  return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields, metadata };
 }
 
 export interface ReviewInput {
@@ -384,7 +389,7 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     for (const [field, value] of proposed.fields) {
       const before = base?.fields.get(field) ?? null;
       if (before === value) continue;
-      fields.push({ field, before, proposed: value });
+      fields.push({ field, before, proposed: value, ...(proposed.metadata?.has(field) ? { metadata: true } : {}) });
     }
     // A field the proposal removes is a change too, and one a reviewer would want to see.
     if (base) {
