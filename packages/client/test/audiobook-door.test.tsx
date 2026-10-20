@@ -471,6 +471,46 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(all(m, '[data-testid="audiobook-row"]')[1]?.getAttribute("data-state"), "1 to read", "25 of 26 made: the flagged one is left to read");
   });
 
+  it("refreshes newly saved prose during another chapter's read without refreshing for each take", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = asks();
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 26 }));
+    const saved = structuredClone(inkbound());
+    const production = saved.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    Object.assign(production.chapters[2]!, { status: "drafted", version: 2, words: 2909, bodyHash: `sha256:${"c".repeat(64)}` });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: saved }));
+    assert.equal(asks(), before + 1, "the page and rail share one immediate refresh for new prose");
+    const current = door("narrator");
+    Object.assign(current.rows[2]!, { planned: false, total: 12, notMade: 12, seconds: 0 });
+    await answerDoor(m, current);
+    assert.equal(all(m, '[data-testid="audiobook-row"]')[2]!.getAttribute("data-state"), "not read");
+    assert.match(all(m, '[data-testid="audiobook-row"]')[1]!.textContent ?? "", /reading/);
+    const takeLanded = structuredClone(saved);
+    takeLanded.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[1]!.audiobook = { chapterVersion: 4, hash: "h", updatedAt: AT, takes: 23, flagged: 0 };
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 4, state: takeLanded }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.progress", ...ids, chapterId: "neap", block: "p0.0", outcome: "made", made: 1, toMake: 4 }));
+    assert.equal(asks(), before + 1, "take-only changes still use the running row counts");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "neap", outcome: "stopped", made: 1, flagged: 0 }));
+    assert.equal(asks(), before + 2, "the final take state is refreshed when the read stops");
+  });
+
+  it("does not reprepare the book when the page remounts during unchanged narration", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const count = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = count();
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 26 }));
+    for (let visit = 0; visit < 2; visit++) {
+      await act(async () => m.root.render(null));
+      await act(async () => m.root.render(<MemoryRouter initialEntries={[ROUTE]}><Routes><Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}><Route path="story/audiobook" element={<AudiobookScreen />} /></Route></Routes></MemoryRouter>));
+      assert.equal(count(), before, "both consumers reuse the observed manuscript after remounting");
+      assert.match(all(m, '[data-testid="audiobook-row"]')[1]!.textContent ?? "", /reading/);
+    }
+  });
+
   it("a window that joins a run going elsewhere still asks for the door it has none of (codex on PR 1187)", async () => {
     const m = await mount(inkbound());
     const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
