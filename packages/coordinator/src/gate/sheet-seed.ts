@@ -1,9 +1,11 @@
-import type { Proposal } from "@arke-studio/contracts";
+import { SheetSchema, type Proposal } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
 
 /** Metadata, heading renames and whitespace cannot turn a saved brief into authored prose. */
 export function sheetProseHash(content: string): string {
-  return sha256(JSON.stringify(MarkdownFile.parse(content).sections()
+  const doc = MarkdownFile.parse(content);
+  const sheet = SheetSchema.parse({ ...doc.data, sections: doc.sections() });
+  return sha256(JSON.stringify(sheet.sections
     .map(section => section.body.replace(/\s+/gu, " ").trim())
     .filter(body => body !== "" && body !== "—")));
 }

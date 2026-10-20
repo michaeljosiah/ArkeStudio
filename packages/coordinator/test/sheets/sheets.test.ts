@@ -366,7 +366,8 @@ describe("attended sentence seeds (#1916)", () => {
       await store.close(); store = await WorldStore.open(dir, { clock: CLOCK }); gate = new ProposalManager(store);
       assert.equal(store.getBundle().proposals.find(p => p.proposal.id === draft.proposal.id)?.review?.requiresDraft, true);
       assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
-      for (const malformed of ["---\nid: [broken\n---\n\n## Look\nDraft.", raw.replace("## Look", "Prose without a section")]) {
+      const authored = raw.replace("Write a public notice room with clear access.", "A dry notice board faces a clear passage.");
+      for (const malformed of ["---\nid: [broken\n---\n\n## Look\nDraft.", raw.replace("## Look", "Prose without a section"), authored.replace("name: Review Room\n", ""), authored.replace("status: sketch", "status: invalid")]) {
         await writeFile(file, malformed);
         assert.equal((await gate.project(draft.proposal.id)).review.requiresDraft, true);
         assert.match((await gate.recordProblems(draft.proposal.id))[0]!.message, /could not be read/);
