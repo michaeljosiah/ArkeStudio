@@ -367,8 +367,9 @@ for (const scoped of [false, true]) it(`clears requested image size on Codex whi
   if (scoped) assert.match(text(bench), /Composition · 16:9.*Image size chosen by provider/);
 });
 
-it("previews a provider-sized shot crop without changing its source or dispatching", async () => {
+for (const currentAspect of ["16:9", "9:16"]) it(`previews the frozen provider-sized take crop after a ${currentAspect} rebuild without changing its source or dispatching`, async () => {
   const session = shotSession();
+  if (session.subject?.kind === "shot") session.subject.aspect = currentAspect;
   const selected = session.takes[0]!;
   selected.request.provider = "codex"; selected.request.model = "codex-image";
   const bench = await openBench(session, SESSION_ID, state => {
@@ -379,6 +380,7 @@ it("previews a provider-sized shot crop without changing its source or dispatchi
   assert.equal(image.hasAttribute("data-crop"), false);
   await pressLabelled(bench, "Preview 16:9 crop");
   assert.equal(image.getAttribute("data-crop"), "true");
+  assert.match(image.getAttribute("style") ?? "", /--bench-crop-aspect:\s*1\.777/);
   assert.equal(image.getAttribute("src"), source);
   await pressLabelled(bench, "Full image");
   assert.equal(image.hasAttribute("data-crop"), false);

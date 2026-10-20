@@ -953,7 +953,9 @@ function BenchWorkspace({
   const [cropTakeId, setCropTakeId] = useState<string | null>(null);
   const providerSizedImage = selected?.request.mode === "image" && manifest?.models.some(candidate =>
     candidate.id === selected.request.model && candidate.provider === selected.request.provider && candidate.limits.providerSelectedSize);
-  const cropAspect = subject?.kind === "shot" && providerSizedImage ? parseAspect(subject.aspect) : null;
+  const cropShape = subject?.kind === "shot" && providerSizedImage && selected?.request.params.kind === "image"
+    ? selected.request.params.aspect : undefined;
+  const cropAspect = cropShape ? parseAspect(cropShape) : null;
   const showCrop = cropAspect !== null && selected !== null && cropTakeId === selected.id;
   const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded" | "4k">("all");
   const wallTakes = session.takes.filter(
@@ -2599,7 +2601,7 @@ function BenchWorkspace({
               <button type="button" className={cx("fy-bench__tab", showCrop && "fy-bench__tab--active")}
                 aria-pressed={showCrop} title="Preview a centre crop; the original image is kept"
                 onClick={() => setCropTakeId(showCrop ? null : selected.id)}>
-                {showCrop ? "Full image" : `Preview ${subject!.aspect} crop`}
+                {showCrop ? "Full image" : `Preview ${cropShape} crop`}
               </button>
             )}
             {/* Download moved onto the take's own tools (design turn 180). */}
