@@ -153,6 +153,10 @@ Live audio and non-shot result use (#1425) also use coordinator `test/world-chat
 
 Production Chat Studio (#1426) uses client `test/production-studio.test.tsx` with the existing conversation, human-decision, card, timeline and frame-run cases. It checks non-authorizing Show, forty pending shots, live settlement, pinning, single mounted full-size cards, unsent drafts, proposal settlement, that a closed Studio draws no canvas, and that it renders to a string beside the global linkedom document the screen tests install. Phone Stage access (R-68) is the head's Conversation press in `test/scenes-layout.test.tsx`. Run `node scripts/smoke-production-studio.mjs` with Chrome installed (`ARKE_CHROME` overrides its path) for the full cascade at 360, 390, 984 and 1200 px: phone view switching, Fold/desktop columns, native shots/board/Stage/Cut, Understanding/Proposal, widening and preservation of the original composer/card DOM instances. These checks use fixture media; installed provider playback and the complete conversation journey remain #1427.
 
+The Studio smoke uses the real contenteditable composer for #1923: mouse and keyboard input
+before expansion, after card review, after closing and after reopening Studio must retain the
+draft, focus and Send availability. No authoring message is submitted.
+
 ## Select the checks
 
 Browser media import uses contracts/client `test/browser-media-import.test.ts` and coordinator
