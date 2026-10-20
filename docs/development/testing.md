@@ -802,7 +802,12 @@ and `--pages-only` help iterate on a bounded visual failure.
 Combine `--pages-only --route kit` to check Reference and portrait adoption without the other
 character surfaces; `--route` also accepts `looks` or `voice`.
 Add `--import-look` to `--pages-only --route looks` to check the file/name/type form, correlated
-failure and success receipts, and that import leaves acceptance to the existing gallery.
+failure and success receipts, and that import leaves acceptance to the existing gallery. This
+also adds 768px tablet, 1920px desktop and a 480px-high window: the import uses the bounded
+generation-dialog frame above phone width, keeps its footer visible, contains keyboard focus,
+and restores the opener on Escape without sending an import. Busy/error and phone/desktop dark
+captures supplement the normal views; compare them with turn 162, rather than relying on
+containment assertions alone.
 
 The master's sheet starts 84px below the page area's top, after the 52px bar and 57px pill strip
 (193px in the app viewport). Character generation routes retain that phone backdrop while
