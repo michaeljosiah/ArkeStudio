@@ -7186,6 +7186,14 @@ export class Coordinator {
           return;
         }
         try {
+          const byHeading = new Map(msg.sections.map((section) => [section.heading, section]));
+          if (byHeading.size !== msg.sections.length) throw new Error("Each sheet section must be submitted once.");
+          const dirtySections = [...new Set(msg.dirtyHeadings)].map((heading) => {
+            const section = byHeading.get(heading);
+            if (!section) throw new Error(`${heading} is not a field on this form`);
+            return section;
+          });
+          if (dirtySections.length === 0 && msg.role === undefined) throw new Error("No changed sheet fields were submitted.");
           const existing = (await gate.listOpen())
             .filter((proposal) => proposal.targets.some((target) => target.path === msg.path))
             .sort((a, b) => a.created.localeCompare(b.created))[0];
@@ -7197,12 +7205,6 @@ export class Coordinator {
               });
               return;
             }
-            const byHeading = new Map(msg.sections.map((section) => [section.heading, section]));
-            const dirtySections = msg.dirtyHeadings.map((heading) => {
-              const section = byHeading.get(heading);
-              if (!section) throw new Error(`${heading} is not a field on this form`);
-              return section;
-            });
             const merged = await gate.mergeSheetFormEdit({
               proposalId: existing.id,
               requestId: msg.requestId,
@@ -7241,7 +7243,7 @@ export class Coordinator {
             return;
           }
 
-          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form", msg.role);
+          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, dirtySections, "form", msg.role);
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.staged",

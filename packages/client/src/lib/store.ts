@@ -3317,6 +3317,7 @@ export function reconcileExternalEdit(worldId: string, path: string): void {
 
 // ---- the accept gate (SPEC-004) -------------------------------------------
 
+/** Save only dirtyHeadings; sections may be the full form or that subset. Omitted prose stays. */
 export function stageSheetEdit(
   worldId: string,
   path: string,
