@@ -34,14 +34,14 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MemoryRouter, useNavigate } from "react-router";
 import { App } from "./App";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest, __connectionStatusForTest } from "./lib/store";
 import { developLayoutFixture } from "../test/develop-layout-fixture";
 ${styles}
 let renderer;
 function Navigation(){window.go=useNavigate();return null;}
 window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await document.fonts.ready;await Promise.all([...document.images].map(i=>i.decode().catch(()=>{})));for(const a of document.getAnimations()){if(Number.isFinite(a.effect?.getComputedTiming().endTime))a.finish();else{a.pause();a.currentTime=0;}}};
 window.mountLayout=async(route="cast",mode="normal")=>{
- renderer?.unmount();const state=developLayoutFixture(mode),world=state.world;
+ renderer?.unmount();__clearWorldChatHoldsForTest();const state=developLayoutFixture(mode),world=state.world;
 
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){const m=JSON.parse(raw);window.commands.push(m);},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
@@ -50,17 +50,23 @@ window.mountLayout=async(route="cast",mode="normal")=>{
 window.measureLayout=()=>{
  const selectors=[".fy-story__chat",".fy-story__side",".fy-develop-model",".fy-develop-composer",".fy-cx",".fy-overview",".fy-overview-card",".fy-overview-acts__grid",".fy-narrative__fields",".fy-narrative__save","dialog[open]"];
  const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};
- const pages=[...document.querySelectorAll('.fy-story__chat,.fy-story__log,.fy-overview,.fy-narrative,.fy-page-sheet[open]')];
+ const pages=[...document.querySelectorAll('.fy-story,.fy-production-studio-inline,.fy-story__chat,.fy-story__log,.fy-story__side:not([hidden]),.fy-overview,.fy-narrative,.fy-page-sheet[open]')];
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || pages.some(e=>e.scrollWidth>e.clientWidth+1),sideways:pages.filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
 ` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
+      return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx?)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/components/conversation.tsx","packages/client/src/components/composer.tsx","packages/client/src/components/held-bar.tsx","packages/client/src/screens/production-shell.tsx","packages/client/src/screens/production-story.tsx","packages/client/src/screens/production-narrative.tsx","packages/client/src/domain/domain.tsx","packages/client/src/lib/store.ts"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
 await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 console.log("Develop artifacts: " + dir);
@@ -106,13 +112,37 @@ try {
 
   const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["fold",984,1092,true],["desktop",1360,850,false]]) {
+  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');
-    for(const [label,route,mode] of [["develop","p/saltlight/story","normal"],["staged","p/saltlight/story","staged"],["blocked","p/saltlight/story","blocked"],["overview","p/ledger/overview","normal"],["style","p/ledger/overview","style"],["narrative","p/saltlight/narrative","normal"]]) {
-      await js('window.mountLayout('+JSON.stringify(route)+','+JSON.stringify(mode)+')');await check(name+'-'+label);
+    for(const [label,route,mode] of [["develop","p/saltlight/story","normal"],["staged","p/saltlight/story","staged"],["blocked","p/saltlight/story","blocked"],["empty-notes","p/saltlight/story","empty-notes"],["timeout","p/saltlight/story","timeout"],["waiting","p/saltlight/story","waiting"],["overview","p/ledger/overview","normal"],["style","p/ledger/overview","style"],["narrative","p/saltlight/narrative","normal"]]) {
+      await js('window.mountLayout('+JSON.stringify(route)+','+JSON.stringify(mode)+')');
+      if(await js('!!document.querySelector(".fy-production-studio__head")'))await click('.fy-production-studio__head button:last-child');
+      await check(name+'-'+label);
       if(baseline)continue;
+      if(['develop','staged','blocked','empty-notes','timeout','waiting'].includes(label)) {
+        assert.equal((await js('window.measureLayout()')).overflow,false,name+'-'+label+' overflow');
+        if(width>=900) {
+          const before=await js('document.querySelector(".fy-story__chat").getBoundingClientRect().width');
+          assert.ok(await js('document.querySelector(".fy-wrapup button")?.getBoundingClientRect().right<=innerWidth || !!document.querySelector(".dom-proposal")'));
+          await click('.fy-story__heading button');
+          assert.equal(await js('document.querySelector(".fy-story__side").hidden'),true);
+          await check(name+'-'+label+'-collapsed');
+          assert.ok(await js('document.querySelector(".fy-story__chat").getBoundingClientRect().width')>before+200);
+          await click('.fy-story__heading button');
+          assert.equal(await js('document.querySelector(".fy-story__side").hidden'),false);
+        }
+        if(label==='timeout') {
+          await click('.fy-chat__retry');
+          assert.equal(await js('window.commands.filter(c=>c.kind==="world-chat-retry-turn").length'),1,name+" timeout retry is reachable");
+        }
+        if(label==='waiting') {
+          assert.match(await js('document.querySelector(".fy-working__elapsed").textContent'),/1m/);
+          await click('.fy-working__stop');
+          assert.equal(await js('window.commands.filter(c=>c.kind==="world-chat-cancel").length'),1);
+        }
+      }
       if(label==='develop') {
         if(width<1100){await click('.fy-develop-model');await check(name+'-model');await escape();}
         if(width<600){

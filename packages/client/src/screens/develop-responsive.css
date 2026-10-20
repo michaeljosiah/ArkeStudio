@@ -149,7 +149,7 @@
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chat { border: 0; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chathead { display: none; }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-develop-model { margin: 14px 20px 12px; }
-  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__log { padding: 0 20px calc(var(--held-bar-height, 174px) + 14px); }
+  :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__log { padding: 0 20px calc(var(--held-bar-height, 174px) + 14px); scroll-padding-bottom: calc(var(--held-bar-height, 174px) + 14px); }
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__side { display: contents; }
   .fy-develop-composer.fy-held-bar { display: flex; flex-direction: column; align-items: stretch; gap: 30px; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
   .fy-develop-composer.fy-held-bar::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }

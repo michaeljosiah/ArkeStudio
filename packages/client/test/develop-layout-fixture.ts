@@ -47,5 +47,11 @@ export function developLayoutFixture(mode = "normal"): ClientState {
     world.proposals = [staged];
   }
   if (mode === "empty-thread") { world.conversations = []; state.worldChat = null; }
+  if (mode === "empty-notes") state.worldChat!.points = [];
+  if (mode === "timeout") state.worldChat!.lastFailure = { turnId: "tr_01J8F3K2QW9VZX4N7M0RTYB6HC", status: "timeout" };
+  if (mode === "waiting") {
+    state.worldChat!.runStatus = "running";
+    state.worldChat!.runStartedAt = new Date(Date.now() - 95_000).toISOString();
+  }
   return state;
 }
