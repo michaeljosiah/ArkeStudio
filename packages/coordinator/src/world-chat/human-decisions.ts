@@ -94,9 +94,12 @@ export async function projectHumanDecisions(store: WorldStore, loaded: WorldChat
   for (const staged of bundle.proposals) {
     const action = loaded.actions.find(value => value.authority.kind === "proposal-manager" && value.authority.id === staged.proposal.id);
     if (!action && !(staged.proposal.worldChatOrigins ?? []).some(origin => origin.conversationId === loaded.id)) continue;
-    const blocked = action?.status === "pending" && !action.availableDecisions.includes("approve");
+    // The active action already reviews and decides this exact proposal. A second Accept card
+    // duplicates its decision and can conceal a dependency block. Retained proposals whose
+    // action has settled, or is missing, still need their ordinary recovery controls.
+    if (action && ["pending", "approved", "awaiting-host", "queued", "running"].includes(action.status)) continue;
     add(`proposal:${staged.proposal.id}`, "Review the authored proposal", "Only you can accept or discard this proposal",
-      { kind: "proposal", proposalId: staged.proposal.id }, action, blocked ? "blocked" : "pending", blocked ? action.blockedReason : undefined);
+      { kind: "proposal", proposalId: staged.proposal.id }, action);
   }
   for (const artifact of bundle.artifacts.filter(value => (value.extraction?.pending.length ?? 0) > 0)) {
     const action = loaded.actions.find(value => value.targets.some(target => target.kind === "artifact" && target.id === artifact.id));
