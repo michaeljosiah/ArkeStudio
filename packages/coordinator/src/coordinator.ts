@@ -1,4 +1,5 @@
 import { chapterReviewSummary } from "@arke-studio/contracts";
+import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
@@ -12997,13 +12998,7 @@ export class Coordinator {
           });
           if (!prepared.ok) return answer(null, prepared.reason);
           await bench.store.append(
-            {
-              type: "subject-prefill-set",
-              subject: prepared.prefill.subject,
-              title: prepared.prefill.title,
-              composer: prepared.prefill.composer,
-              references: prepared.prefill.references,
-            },
+            session => rebuildBenchPrefill(session, { type: "subject-prefill-set", ...prepared.prefill }),
             { at: this.nowIso(), requestId: msg.requestId },
           );
           await this.refreshBench(msg.worldId, msg.sessionId);
