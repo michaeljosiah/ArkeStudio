@@ -219,22 +219,13 @@ export function LocationReferenceScreen() {
     <div data-screen="location-reference">
       <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} status={sheet.status} />
       <main className={cx("fy-locref", !sheetFile && "fy-locref--uncompiled")}>
-        <section className="fy-locref__views">
-          <div className="fy-locref__sechead">
+        <section className={cx("fy-locref__views", views.length === 0 && pending.length === 0 && superseded.length === 0 && "fy-locref__views--empty")}>
+          {views.length > 0 && <div className="fy-locref__sechead">
             <h2>Accepted views</h2>
             <span className="fy-mono">
               {views.length} of {MAX_ACTIVE_LOCATION_VIEWS}
             </span>
-          </div>
-
-          {views.length === 0 && pending.length === 0 && (
-            <Callout tone="neutral" title="Start with the establishing view">
-              <p>
-                The first view you accept becomes the one a card shows and the one every later view is
-                anchored to. Its Look is already written — the generation reads it.
-              </p>
-            </Callout>
-          )}
+          </div>}
 
           {views.map((view, index) => (
             <article key={view.id} className="fy-locref__view">

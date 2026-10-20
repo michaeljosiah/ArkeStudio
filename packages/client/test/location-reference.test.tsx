@@ -303,11 +303,24 @@ describe("the location reference tab (#243)", () => {
     });
   });
 
-  it("says what to do first when there is nothing at all", () => {
+  it("keeps only the creation controls when no view exists (master turn 192)", () => {
     const html = render([]);
-    assert.ok(html.includes("Start with the establishing view"));
-    assert.ok(html.includes("0 of 6"));
+    assert.ok(!html.includes("Start with the establishing view"));
+    assert.ok(!html.includes("0 of 6"));
+    assert.ok(!html.includes("Accepted views"));
+    assert.match(html, />Generate<\/button>/);
+    assert.match(html, />Upload<\/button>/);
     assert.ok(!html.includes("so the model sees the room from more than one side"), "instruction captions stay off the surface (#1093)");
     assert.ok(!html.includes("WHAT A SHOT CARRIES"), "nothing is carried yet, so nothing is promised");
+  });
+
+  it("keeps the first candidate and its naming and decisions without an empty accepted section", () => {
+    const html = render([], [candidate("Harbour approach")]);
+    assert.ok(!html.includes("Accepted views"));
+    assert.ok(!html.includes("0 of 6"));
+    assert.ok(html.includes("A view is waiting on you"));
+    assert.match(html, /value="Harbour approach"/);
+    assert.match(html, />Accept<\/button>/);
+    assert.match(html, />Reject<\/button>/);
   });
 });
