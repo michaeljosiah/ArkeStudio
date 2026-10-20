@@ -253,6 +253,26 @@ describe("parsing a turn result", () => {
     }
   });
 
+  it("does not redirect misplaced kinds to actions in restricted turns (#1924 review)", async () => {
+    const raw = JSON.stringify({ reply: "Plan prepared", candidateOperations: [{
+      op: "create", temporaryId: "t1", candidate: { classification: "production-chapter" },
+    }], groupOperations: [] });
+    const input = await baseInput({ raw });
+    for (const scope of [{ draftOnly: true }, { revise: "required" as const }, { revise: "only" as const }]) {
+      const result = validateTurnResult({ ...input, ...scope });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.doesNotMatch(correctiveMessage(result.problems), /Put it in actions/);
+    }
+  });
+
+  it("does not redirect execution-blocked kinds to actions (#1924 review)", () => {
+    const parsed = parseTurnResult(JSON.stringify({ reply: "Prepared", candidateOperations: [{
+      op: "create", temporaryId: "t1", candidate: { classification: "voice-audition" },
+    }], groupOperations: [] }));
+    assert.equal(parsed.ok, false);
+    if (!parsed.ok) assert.doesNotMatch(correctiveMessage(parsed.problems), /Put it in actions/);
+  });
+
   it("refuses more operations than one turn may carry", () => {
     const op = {
       op: "create",
