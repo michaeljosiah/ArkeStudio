@@ -186,6 +186,29 @@ describe("what the page says, as data (199)", () => {
   });
 });
 
+describe("audiobook work and measured duration (issue 1935)", () => {
+  it("opens the first unfinished chapter, independently of the listener's place", async () => {
+    store.set(audiobookPlaceKey(FIXTURE_WORLD_ID, "inkbound"), JSON.stringify({ chapterId: "chapter-1", at: 30 }));
+    const m = await mount(inkbound(171), door({ rows: [{ ...ROWS[0]!, made: 171, notMade: 0 }, ROWS[1]!, ROWS[2]!] }));
+    assert.equal(q('[data-testid="audiobook-next-work"]')!.textContent, "Continue work · Chapter 2");
+    await press(q('[data-testid="audiobook-next-work"]'));
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`);
+  });
+
+  it("a complete measured book shows recorded time and no unfinished work, excluding plans", async () => {
+    await mount(inkbound(171), door({ rows: [{ ...ROWS[0]!, made: 171, notMade: 0 }, ROWS[2]!] }));
+    assert.equal(q('[data-testid="audiobook-line"]')!.textContent, "Audiobook · 2 chapters · 10 min recorded · Read by Low tide");
+    assert.equal(q('[data-testid="audiobook-next-work"]'), null);
+    assert.equal(q('.fy-abshow__d')!.textContent, "10 min recorded");
+  });
+
+  it("unmeasured takes stay estimated and the recorded subtotal is explicitly a lower bound", async () => {
+    await mount(inkbound(91), door({ rows: [ROWS[0]!, { ...ROWS[1]!, made: 40, notMade: 0, seconds: null }] }));
+    assert.match(q('[data-testid="audiobook-line"]')!.textContent!, /~29 min estimated total · at least 10 min recorded/);
+    assert.equal(all('.fy-abshow__d')[1]!.textContent, "10 min estimated");
+  });
+});
+
 describe("the hero (199a, 199b, rule 4)", () => {
   it("before narration, Read the book leads and Publish can create a book-only edition", async () => {
     await mount(inkbound(0));
@@ -199,7 +222,7 @@ describe("the hero (199a, 199b, rule 4)", () => {
     assert.equal(q('[data-testid="audiobook-listen"]')!.textContent, "Listen");
     assert.equal(q('[data-testid="read-book"]')!.textContent, "Read the book · 2 chapters · up to $2.40 · 2 no voice");
     assert.ok(!q('[data-testid="read-book"]')!.classList.contains("fy-abshow__btn--pri"), "an outline");
-    assert.equal(q('[data-testid="audiobook-line"]')!.textContent, "Audiobook · 3 chapters · 29 min · Read by Low tide", "one meta line: every chapter, the length, who reads it");
+    assert.equal(q('[data-testid="audiobook-line"]')!.textContent, "Audiobook · 3 chapters · ~29 min estimated total · 10 min recorded · Read by Low tide", "one meta line: every chapter, the length, who reads it");
     assert.equal(q(".fy-abshow__title")!.textContent, "Inkbound");
     assert.doesNotMatch(q('[data-screen="audiobook"]')!.textContent ?? "", /blocks|Kokoro|ElevenLabs|request/, "no counts, providers or requests on the page");
   });
@@ -282,7 +305,7 @@ describe("the chapters as episodes (rule 7)", () => {
     const m = await mount(inkbound(91));
     const rows = all('[data-testid="audiobook-row"]');
     assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__nm")!.textContent), ["Chapter 1", "2 · The counting of bells", "3 · Untitled"]);
-    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__d")?.textContent ?? null), ["19 min", "10 min", null]);
+    assert.deepEqual(rows.map((row) => row.querySelector(".fy-abshow__d")?.textContent ?? null), ["19 min estimated", "10 min estimated", null]);
     assert.deepEqual(rows.map((row) => row.getAttribute("data-state")), ["80 to read", "not read", "planned"]);
     assert.equal(rows[0]!.querySelector(".fy-abshow__syn")!.textContent, "Ade and Tunde's easy friendship opens a night at a club.");
     assert.equal(rows[1]!.querySelector(".fy-abshow__syn"), null, "no synopsis, nothing");

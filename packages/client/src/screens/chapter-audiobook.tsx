@@ -934,6 +934,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
   // other presses that reshape or read it wait (rule 3), as they do for a direction.
   const beatRun = useBeatRuns()[`${worldId}/${prodId}/${chapter.id}`];
   const beatGrouping = beatRun?.state === "grouping";
+  const productionReading = useProductionReading(worldId, prodId);
   const seamsHeld = locked || connection !== "open" || reading_ || beatGrouping;
   const madeAtPress = useRef<{ made: ReadonlySet<string>; updatedAt: string | null } | null>(null);
   const [madeAgain, setMadeAgain] = useState<ReadonlySet<string>>(() => new Set());
@@ -968,7 +969,7 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
     resetAudiobookSeams(worldId, prodId, chapter.file);
   }, [seamsHeld, notePress, worldId, prodId, chapter.file]);
   // Under Cast each voice is read apart, so a beat could join nothing (rule 2): off, said there only.
-  const groupOff = reading === "cast" ? "Cast · voices apart" : undefined;
+  const groupOff = productionReading ? "Wait for the book's read to finish" : reading === "cast" ? "Cast · voices apart" : undefined;
   const groupBeats = useCallback(() => {
     if (seamsHeld || groupOff !== undefined) return;
     notePress();
