@@ -260,6 +260,8 @@ try {
       await capture(name+'-chapter-export-ready');
       await escape();
       const focus=await js('document.activeElement?.dataset.testid');
+      console.log(name, "export return focus", await js('({active:document.activeElement?.outerHTML.slice(0,350),openers:[...document.querySelectorAll("[data-testid=direct-illustrate],[data-testid=audiobook-chapter-export]")].map(e=>({html:e.outerHTML.slice(0,350),connected:e.isConnected,disabled:e.disabled}))})'));
+      await capture(name+'-chapter-export-closed');
       assert.equal(focus,phone?'direct-illustrate':'audiobook-chapter-export','focus returns to the stable chapter opener');
       records.push({name,layer:'chapter-export',...bounds,returnedFocus:focus,scope:held.scope});
     }
