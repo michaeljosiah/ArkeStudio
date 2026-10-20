@@ -250,12 +250,17 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       {result?.ok === true ? (
         <>
           {!remote && (
-            <button type="button" className="fy-abv-btn" onClick={() => folder !== null && openExportsFolder(worldId, folder)}>
-              <Folder />
-              Show in folder
-            </button>
+            <>
+              <button type="button" className="fy-abv-btn" onClick={() => folder !== null && openExportsFolder(worldId, folder)}>
+                <Folder />
+                Show in folder
+              </button>
+              <button type="button" className="fy-abv-btn pri" disabled={connection !== "open" || folder === null} onClick={() => folder !== null && openExportsFolder(worldId, folder, "player.html")}>
+                Open player
+              </button>
+            </>
           )}
-          <button type="button" className="fy-abv-btn pri" onClick={onClose}>
+          <button type="button" className={remote ? "fy-abv-btn pri" : "fy-abv-btn"} onClick={onClose}>
             Done
           </button>
         </>
