@@ -4,7 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { computeNeedsYou, newId, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
+import { candidateHash, extractText, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
 import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable, retireArtifact, restoreArtifact } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -27,6 +27,18 @@ async function sourceFile(name: string, content: string | Buffer): Promise<strin
 }
 
 describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
+  it("files HTML unchanged and uses the same inert reading text (#1907)", async () => {
+    const { store, dir } = await open();
+    const original = '<h1>Echoes</h1><p>The harbour &amp; its price.</p><style>hidden code</style>';
+    try {
+      const filed = await fileArtifact(store, { sourcePath: await sourceFile("lore.html", original), links: [] });
+      assert.equal(filed.outcome, "filed"); if (filed.outcome !== "filed") return;
+      assert.equal(filed.artifact.kind, "document");
+      assert.equal(await readFile(join(dir, "artifacts", filed.artifact.file), "utf8"), original);
+      assert.equal(await extractText(store, filed.artifact), 'Echoes\nThe harbour & its price.');
+    } finally { await store.close(); }
+  });
+
   it("retires durably without erasing bytes or provenance, and re-import restores the same identity (#957)", async () => {
     const { store, dir } = await open();
     const sourcePath = await sourceFile("retire-me.txt", "durable evidence");
