@@ -348,8 +348,10 @@ export class StoryPublicationService {
           const candidate = join(work, "candidate.m4b");
           const coverArgs = frozen.cover ? ["-i", join(inputRoot, frozen.cover.file)] : [];
           const coverMap = frozen.cover ? ["-map", "2:v:0", "-c:v", frozen.cover.mediaType === "image/png" ? "png" : "mjpeg", "-disposition:v:0", "attached_pic"] : ["-vn"];
+          await phase("Encoding audiobook");
           await this.options.ffmpeg.run(["-y", "-f", "concat", "-safe", "1", "-i", join(work, "chapters.txt"), "-i", join(work, "metadata.txt"), ...coverArgs,
             "-map", "0:a:0", ...coverMap, "-map_metadata", "1", "-map_chapters", "1", "-metadata", "album=" + edition.settings.title, "-metadata", "language=" + edition.settings.language, "-metadata", "description=" + edition.settings.description, "-metadata", "comment=" + edition.settings.label, "-c:a", "aac", "-b:a", "192k", ...(stereo ? ["-ac", "2", "-ar", "48000"] : []), "-movflags", "+faststart", "-f", "mp4", candidate], () => {}, signal);
+          await phase("Checking audiobook");
           const info = await this.options.probe.info(candidate, { signal });
           if (!info?.hasAudio || !Number.isFinite(info.durationSec) || Math.abs(info.durationSec - time) > 0.2) throw new Error("The audiobook did not pass its duration and audio checks.");
           const handle = await open(candidate, "r+"); try { await handle.sync(); } finally { await handle.close(); }
