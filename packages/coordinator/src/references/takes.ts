@@ -338,6 +338,18 @@ export async function recordUploadedMainPhotoTake(
   return recordUploadedImageTake(store, sheetId, "main-photo", media, data, options);
 }
 
+export async function recordUploadedLookTake(
+  store: WorldStore,
+  sheetId: string,
+  media: string,
+  data: Uint8Array,
+  options: { requestId: string; precondition: WorldStatePrecondition; lookKind: string; name: string; sourceFilename: string },
+): Promise<Take> {
+  return recordUploadedImageTake(store, sheetId, "look", media, data, options, {
+    lookKind: options.lookKind, lookPrompt: options.name, lookName: options.name, uploadedHash: sha256(data), sourceFilename: options.sourceFilename,
+  });
+}
+
 /**
  * A location view the user photographed, drew or made elsewhere (#243). The same shape as an
  * uploaded character sheet, and deliberately a take rather than a loose candidate: acceptance
@@ -361,6 +373,7 @@ async function recordUploadedImageTake(
   media: string,
   data: Uint8Array,
   options: { requestId?: string; precondition?: WorldStatePrecondition },
+  params: Record<string, unknown> = {},
 ): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
   // is ".." — and both name a directory that already exists, so the write would land on something
@@ -368,24 +381,30 @@ async function recordUploadedImageTake(
   if (basename(media) !== media || media === "." || media === "..") {
     throw new Error(`unsafe media name ${media}`);
   }
-  const existing = options.requestId === undefined
-    ? undefined
-    : store.getBundle().referenceTakes.find((take) => take.params["requestId"] === options.requestId);
-  if (existing) return existing;
-  const take = uploadedTake(store, sheetId, kind, media, {
-    uploadedFile: media,
-    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
-  });
-  await store.gateOp(() => {
+  return store.gateOp(async () => {
     const stale = options.precondition?.();
     if (stale) throw new WorldStateStaleError(stale);
-    return writeTakeDirectory(store, sheetId, take, async (dir) => {
+    const existing = options.requestId === undefined
+      ? undefined
+      : store.getBundle().referenceTakes.find((take) => take.params["requestId"] === options.requestId);
+    if (existing) {
+      if (existing.kind !== kind || existing.reference?.sheetId !== sheetId ||
+        Object.entries(params).some(([key, value]) => existing.params[key] !== value))
+        throw new Error("The import request changed.");
+      return existing;
+    }
+    const take = uploadedTake(store, sheetId, kind, media, {
+      ...params,
+      uploadedFile: media,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+    await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
       // mistaken for a finished one (SPEC-002 R-13).
       await atomicWriteFile(join(dir, media), data);
     });
+    return take;
   });
-  return take;
 }
 
 export async function recordReferenceReview(

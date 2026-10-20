@@ -232,3 +232,9 @@
 @media (pointer: coarse) {
   .fy-portrait-dialog__close { width: 44px; height: 44px; }
 }
+
+.fy-look-import { display: grid; gap: 18px; }
+.fy-looks-composer { gap: 8px; }
+.fy-look-import label { display: grid; gap: 8px; }
+.fy-look-import :is(input,select) { width: 100%; min-width: 0; min-height: 44px; }
+.fy-look-import p { margin: 0; }

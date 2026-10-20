@@ -800,6 +800,11 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     })
     .strict(),
 
+  z.object({
+    ...base, type: z.literal("character-look.imported"), worldId: UlidSchema, sheetId: SlugSchema,
+    requestId: UlidSchema, status: z.enum(["landed", "failed"]), takeId: TakeIdSchema.optional(), reason: z.string().optional(),
+  }).strict(),
+
   /** A provider queue paused, resumed, or its held count moved (SPEC-009 R-8, R-11). */
   z.object({ ...base, type: z.literal("queue.status"), queue: QueueStatusSchema }).strict(),
   /** What start-up reconciliation resolved, reported once (SPEC-009 R-18). */

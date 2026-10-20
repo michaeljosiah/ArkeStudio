@@ -399,6 +399,7 @@ const CLIENT_COMMAND_METADATA = {
   "import-main-photo-candidate": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
   "import-main-photo": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
   "import-character-sheet": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
+  "import-character-look": humanOnly("The person selects the image bytes and reviews the imported look in the character gallery."),
   "generate-main-photo": action("world", "generation", "job-queue", "spend-and-compute", ["sheets", "art-direction", "references"]),
   "generate-character-sheet": action("world", "generation", "job-queue", "spend-and-compute", ["sheets", "art-direction", "references"]),
   "accept-character-sheet": action("world", "take-review", "reference-kit", "authored-change", ["sheets", "references", "takes"]),

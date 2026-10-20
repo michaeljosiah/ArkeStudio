@@ -510,6 +510,15 @@ replacing an identity accepted concurrently. Client `ImageDialog` reports image 
 the control appears only for an existing portrait with no accepted main photo. Tests live in
 `references/main-photo.test.ts`, `references/manual-upload.test.ts` and the character layout smoke.
 
+### Import a finished character look
+
+Finished character looks enter through client `components/character-look-import.tsx`, using the
+shared PageSheet, bounded browser-media reader and correlated `character-look.imported` event.
+Coordinator `references/look-import.ts` validates the image and current character; `references/takes.ts`
+records the immutable unreviewed user take with name, type, source filename/hash and zero cost.
+The existing More looks gallery and `accept-character-look` command own review and acceptance.
+Tests: coordinator `test/references/look-import.test.ts`; contracts `test/character-look-import.test.ts`.
+
 ### Author props and state references in chat
 
 Contracts `prop.ts`, `genesis-review.ts` and `world-chat-actions.ts` define founding

@@ -70,6 +70,11 @@ window.mountCharacter = async (route = "kit", mode = "normal") => {
   await window.settleCharacter();
 };
 window.settleCharacter = async () => { await new Promise(r => setTimeout(r, 850)); await document.fonts.ready; await Promise.all([...document.images].map(i => i.decode().catch(() => {}))); };
+window.replyToLookImport = (status, otherRequest) => {
+  const command=window.commands.findLast(c=>c.kind==="import-character-look");
+  __applyEventForTest({type:"character-look.imported",at:"2026-10-20T06:00:00Z",worldId:command.worldId,sheetId:command.sheetId,requestId:otherRequest??command.requestId,status,
+    ...(status==="landed"?{takeId:"tk_01J8F000000000000000000001"}:{reason:"Choose a complete image."})});
+};
 window.fillReferencePicker = () => {
   const request=window.commands.findLast(c=>c.kind==="browse-reference-images");
   __applyEventForTest({type:"reference.images",at:"2026-09-27T12:01:00Z",requestId:request.requestId,slug:request.slug,
@@ -168,6 +173,23 @@ try {
       assert.ok(await js('window.commands.some(c=>c.kind==="choose-anchor"&&c.selection.source==="legacy-portrait")'),"adopts through the existing acceptance command");
       assert.equal(await js('[...document.querySelectorAll("button")].find(b=>b.textContent==="Accepting…").disabled'),true,"pending adoption cannot be sent twice");
     }
+    if(!baseline && process.argv.includes("--import-look")) {
+      await js('window.mountCharacter("looks","pending");[...document.querySelectorAll("button")].find(b=>b.textContent==="Import a look").click();window.settleCharacter()');
+      await js('(()=>{const input=document.querySelector(".fy-look-import input[type=file]"),data=new DataTransfer();data.items.add(new File(["finished image"],"winter-coat.png",{type:"image/png"}));input.files=data.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
+      await capture(name+"-import-look");
+      assert.equal(await js('(()=>{const d=document.querySelector(".fy-page-sheet[open]"),b=d.getBoundingClientRect(),body=d.querySelector(".fy-page-sheet__body"),foot=d.querySelector(".fy-page-sheet__foot").getBoundingClientRect();return b.x>=0&&b.right<=innerWidth+1&&body.scrollWidth<=body.clientWidth+1&&foot.bottom<=innerHeight+1})()'),true,name+" import controls fit");
+      await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Add for review").click();window.settleCharacter()');
+      assert.equal(await js('window.commands.findLast(c=>c.kind==="import-character-look").name'),"winter coat");
+      assert.equal(await js('window.commands.findLast(c=>c.kind==="import-character-look").files[0].name'),"winter-coat.png");
+      await js('window.replyToLookImport("failed","01J8F3K2QW9VZX4N7M0RTYB6ZZ")');
+      assert.equal(await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Importing…").disabled'),true,"unrelated reply ignored");
+      await js('window.replyToLookImport("failed");window.settleCharacter()');
+      assert.equal(await js('document.querySelector(".fy-look-import [role=alert]").textContent'),"Choose a complete image.");
+      await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Add for review").click();window.settleCharacter()');
+      await js('window.replyToLookImport("landed");window.settleCharacter()');
+      assert.equal(await js('!!document.querySelector(".fy-look-import")'),false,"landed image closes import sheet");
+      assert.equal(await js('window.commands.some(c=>c.kind==="accept-character-look")'),false,"import never accepts identity or the look");
+    }
     for(const [dialog,route,open] of (process.argv.includes("--pages-only") ? [] : [
       ["explore","looks",'document.querySelector(".fy-looks-composer .ui-btn").click()'],
       ["choose","voice",'window.go(window.characterPath+"voice?choose=1")'],
@@ -245,7 +267,11 @@ try {
       // The current phone titlebar is 48px; turn 162 used 52px. Compare the same in-flow
       // geometry below the measured shell, rather than pinning content to the old bar.
       const titlebarDelta=actual.geometry[".fy-titlebar"].height-masterMeasurements[id][".bar"].height;
-      for(const [design,app]of pairs)for(const key of ["x","y","width","height"])assert.ok(Math.abs(masterMeasurements[id][design][key]+(key==="y"?titlebarDelta:0)-actual.geometry[app][key])<=1,id+" "+app+" "+key+" matches master");
+      for(const [design,app]of pairs)for(const key of ["x","y","width","height"]) {
+        // The new import action adds a row to the old single-action Look door.
+        if(app===".fy-looks-composer"&&key==="height") { assert.ok(actual.geometry[app].height>=masterMeasurements[id][design].height); continue; }
+        assert.ok(Math.abs(masterMeasurements[id][design][key]+(key==="y"?titlebarDelta:0)-actual.geometry[app][key])<=1,id+" "+app+" "+key+" matches master");
+      }
     }
   }
   console.log("Character layout checks passed");
