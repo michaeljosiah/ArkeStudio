@@ -1,4 +1,5 @@
 import type { AudiobookActivityUpdate } from "@arke-studio/contracts";
+import { dailyLimitFailure, dailyQuotaNotices, dailyQuotaRefusal, type DailySpeechQuota } from "@arke-studio/contracts";
 import { chapterParagraphs, readBreaksFor, DEFAULT_GROUP_PACKING, groupedText, SPLIT_DID_NOT_MATCH, type AudiobookGrouped, type AudiobookLoudness, type AudiobookSplitFlag, freeCreditDraw, freeCreditOverrun, freeLimitReason, freePlanFailure, freePlanShortfall, GOOGLE_DAILY_LIMIT, GOOGLE_FREE_LIMIT, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readsGrouped, shareByCharacters, speechAsks, type FreePlanAllowance, type FreePlanShort, type GroupPacking, type ReadBreak, type SpeechQuote, type SpeechTurn } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
@@ -90,6 +91,8 @@ export interface AudiobookRunDeps {
   creditLeftMicroUsd?: number;
   /** Each Google model's free day; absent is not known to be short. */
   freePlanAllowance?: (model: string) => FreePlanAllowance;
+  /** A paid Google model's witnessed quota refusal, scoped to the current key. */
+  dailyQuota?: (model: string) => DailySpeechQuota | null;
   narrator: AudiobookReader;
   /** What can speak now (turn 130's rule): a voice the catalogue lacks or marks reads in the narrator's. */
   catalogue: readonly VoiceCandidate[];
@@ -324,6 +327,7 @@ export interface ReadingRoom {
   creditLeftMicroUsd?: number;
   /** Each Google model's free day (design turn 182 follow-up); absent is not known to be short. */
   freePlanAllowance?: (model: string) => FreePlanAllowance;
+  dailyQuota?: (model: string) => DailySpeechQuota | null;
   /** This machine can split a grouped request (design turn 185); grouping is not offered without it. */
   transcriber?: boolean;
   /** Why the book's own narrator cannot read now (issue 1661), as the door says it; absent while it can. */
@@ -784,6 +788,12 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     return;
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
+  const quotaRefusal = dailyQuotaRefusal(preparation.prepared.freeReads, deps.dailyQuota);
+  if (quotaRefusal !== null) {
+    await finish("failed", { reason: quotaRefusal, record: preparation.prepared.record });
+    return;
+  }
+  const notices = [...firstReadNotices(clones), ...dailyQuotaNotices(preparation.prepared.freeReads, deps.dailyQuota)];
   const previews: NonNullable<Extract<import("@arke-studio/contracts").DomainEvent, { type: "audiobook.priced" }>["previews"]> = [];
   const previewGroups = new Map(groups.flatMap(group => group.kept.map(block => [block, group] as const)));
   let previewRequest = 0;
@@ -806,7 +816,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     const priced = chapterPriceToken(deps.worldId, productionId, chapterId, plan.chapter, misses, groups);
     const asked = freePlan !== null ? createHash("sha256").update(`${priced}\n${JSON.stringify(freePlan.short)}`).digest("hex") : priced;
     if (asks && deps.confirmationToken !== asked) {
-      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
+      emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: asked, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}), toCast: toCast.length });
       return;
     }
     const refused = await deps.castFirst();
@@ -855,7 +865,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   // token: the day moves as the book reads, and the book's answer covered it.
   const answer = freePlan !== null ? createHash("sha256").update(`${token}\n${JSON.stringify(freePlan.short)}`).digest("hex") : token;
   if (asks && deps.priced === undefined && deps.confirmationToken !== answer) {
-    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices: firstReadNotices(clones), ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
+    emit({ type: "priced", previews, characters: misses.reduce((sum, block) => sum + block.text.length, 0), estimatedMicroUsd: estimate, confirmationToken: answer, voices: priceLines(misses, priceOf, store.getBundle()), notices, ...(freePlan !== null ? { freePlan: freePlan.short } : {}), ...(groups.length > 0 ? { requests, perParagraph } : {}) });
     return;
   }
 
@@ -1073,7 +1083,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       // unread, and the next press groups them again.
       const ended = job.status === "failed" ? freePlanFailure(job.error) : null;
       if (ended !== null) return { ended };
-      if (job.status === "failed" && job.error?.includes(GOOGLE_DAILY_LIMIT)) return { ended: GOOGLE_DAILY_LIMIT };
+      const daily = job.status === "failed" ? dailyLimitFailure(job.error, group.model.displayName) : null;
+      if (daily !== null) return { ended: daily };
       for (const block of group.kept) {
         await flag(block, "the voice job failed · open Activity for details");
         settled.add(block.block.key);
@@ -1329,7 +1340,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             if (ended !== null) throw new FreePlanEnded(ended.startsWith(GOOGLE_FREE_LIMIT) ? GOOGLE_FREE_LIMIT : ended, ended);
             // A paid key's own day ends the run too (codex on PR 1475): flagged and passed over,
             // a 122-block chapter sent 122 requests to the same refusal and ended `read`.
-            if (job.status === "failed" && job.error?.includes(GOOGLE_DAILY_LIMIT)) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT);
+            const daily = job.status === "failed" ? dailyLimitFailure(job.error, block.model.displayName) : null;
+            if (daily !== null) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT, daily);
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);

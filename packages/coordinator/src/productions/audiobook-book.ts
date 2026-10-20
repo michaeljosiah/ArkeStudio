@@ -9,6 +9,8 @@ import {
   freeCreditOverrun,
   freeLimitReason,
   freePlanShortfall,
+  dailyQuotaNotices,
+  dailyQuotaRefusal,
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
@@ -347,6 +349,12 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const clones = new Map<string, { provider: string; voice: ClonedVoice }>();
   for (const entry of toRead) for (const reader of entry.prepared.clones) clones.set(`${reader.provider}\n${reader.voice.id}`, reader);
   const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === "comfyui") - Number(b.provider === "comfyui"));
+  const quotaReads = toRead.flatMap((entry) => entry.prepared.freeReads);
+  const quotaRefusal = dailyQuotaRefusal(quotaReads, room.dailyQuota);
+  if (quotaRefusal !== null) {
+    emit({ type: "finished", outcome: "failed", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0, reason: quotaRefusal });
+    return;
+  }
   for (const reader of askOrder) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
@@ -392,7 +400,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id, store.getBundle()),
         // Across the book's chapters, each voice and vendor once (SPEC-046 R-40): the first
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
-        notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
+        notices: [...firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)), ...dailyQuotaNotices(quotaReads, room.dailyQuota)],
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
         // Requests counted where reads are priced (design turn 185a).
         ...(toRead.some((entry) => entry.prepared.groups.length > 0)

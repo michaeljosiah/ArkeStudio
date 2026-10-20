@@ -16,7 +16,7 @@ import { inspectBenchVoiceInputs } from "./bench/chat-voice.js";
 import { type AppSettings, type ProductionBundle, JobSchema as QuotedJobSchema } from "@arke-studio/contracts";
 import { ProductionBatchControls, productionBatchSource, type ProductionBatchPorts } from "./world-chat/production-batch.js";
 import { estimateSpeechMicroUsd, samplingProblems, speechInputFits } from "@arke-studio/contracts";
-import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
+import { applyProviderPlans, localTranscriberAvailable, freeCreditDraw, freeCreditLeft, freeCreditOverrun, freeLimitReason, freePlanAllowance, freePlanFailure, freePlanPending, freePlanShortfall, googleDailyQuota, GOOGLE_DAILY_LIMIT, PAID_PLANS, speechAsks, type FreePlanAllowance, type ProviderPlans } from "@arke-studio/contracts";
 import { designedVoiceTarget, isDesignedVoiceTarget, narratorDesignedRecord, resolveDesignedVoice, voiceDisplayLabel, VoiceDesignDraftSchema, quoteVoiceDesign, type NarratorDesignedVoice, type NarratorSettings, type WorldDesignedVoice } from "@arke-studio/contracts";
 import type { VoiceDesignClient } from "@arke-studio/providers";
 import { saveDesignedVoice } from "./voice/designed-library.js";
@@ -1627,6 +1627,10 @@ export class Coordinator {
       freePlanPending(jobs, ledger, model, now), this.providerPlans.googleKeySetAt);
   }
 
+  private dailyQuotaFor(model: string) {
+    return googleDailyQuota(this.jobQueue?.listJobs() ?? [], model, new Date(), this.providerPlans.googleKeySetAt);
+  }
+
   /**
    * Word times on this machine for a grouped request (design turn 185): whisper through Voxa, a
    * stretch between pauses at a time. Undefined when no local transcriber answers, and then no
@@ -2009,6 +2013,7 @@ export class Coordinator {
       models: this.opts.manifest?.models ?? [],
       creditLeftMicroUsd: await this.freeCreditLeftNow(),
       freePlanAllowance: await this.freePlanAllowanceNow(),
+      dailyQuota: model => this.dailyQuotaFor(model),
       narrator: room.narrator,
       catalogue: room.catalogue,
       signal,
@@ -16452,7 +16457,7 @@ export class Coordinator {
         store.closingSignal.addEventListener("abort", onClose, { once: true });
         let ended = false;
         try {
-          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), transcriber: this.wordTimer(voice) !== undefined };
+          const room = { ...(await this.audiobookNarrator(store, voice, msg.productionId, true)), models: this.opts.manifest?.models ?? [], creditLeftMicroUsd: await this.freeCreditLeftNow(), freePlanAllowance: await this.freePlanAllowanceNow(), dailyQuota: (model: string) => this.dailyQuotaFor(model), transcriber: this.wordTimer(voice) !== undefined };
           if (room.narrator.provider === "kokoro" && !voice.localSpeechConfigured) {
             this.emit({ at: at(), type: "audiobook.book-finished", ...ids, outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
               reason: "Local narration is unavailable on this host. Choose a configured cloud narrator." });

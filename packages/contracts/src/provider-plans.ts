@@ -168,6 +168,88 @@ export const GOOGLE_BILLED = "Google billed this read";
  */
 export const GOOGLE_DAILY_LIMIT = "Google's daily request limit was reached";
 
+export interface DailySpeechQuota {
+  model: string;
+  limit?: number;
+  resetsAt: string;
+  observedAt: string;
+  reached: boolean;
+}
+
+function dailyLimitDetails(error: string): { limit?: number; resetsAt?: string } {
+  const limit = Number(/(\d+) a day/.exec(error)?.[1]);
+  const reset = /resets (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/.exec(error)?.[1];
+  return {
+    ...(Number.isSafeInteger(limit) && limit >= 0 ? { limit } : {}),
+    ...(reset !== undefined && Number.isFinite(Date.parse(reset)) ? { resetsAt: reset } : {}),
+  };
+}
+
+/** The paid model's last witnessed daily refusal, scoped to the saved key and its original reset. */
+export function googleDailyQuota(
+  jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[],
+  model: string,
+  now: Date = new Date(),
+  keySetAt?: string | null,
+): DailySpeechQuota | null {
+  const keyed = keySetAt ? Date.parse(keySetAt) : NaN;
+  let latest: DailySpeechQuota | null = null;
+  for (const job of jobs) {
+    if (job.provider !== "google" || job.model !== model || job.status !== "failed" || !job.error?.includes(GOOGLE_DAILY_LIMIT)) continue;
+    const observed = Date.parse(job.updatedAt);
+    if (!Number.isFinite(observed) || observed > now.getTime() || (Number.isFinite(keyed) && observed < keyed)) continue;
+    if (latest !== null && observed <= Date.parse(latest.observedAt)) continue;
+    const details = dailyLimitDetails(job.error);
+    // An old failure must not roll forward to tomorrow whenever a book is reopened.
+    const resetsAt = details.resetsAt ?? nextPacificMidnight(new Date(observed)).toISOString();
+    latest = { model, ...details, resetsAt, observedAt: job.updatedAt, reached: Date.parse(resetsAt) > now.getTime() };
+  }
+  return latest;
+}
+
+/** Preserve the provider's limit/reset while identifying which reader stopped a mixed book. */
+export function dailyLimitFailure(error: string | null | undefined, model: string): string | null {
+  return error?.includes(GOOGLE_DAILY_LIMIT)
+    ? `${GOOGLE_DAILY_LIMIT} · ${model}${freeLimitDetail(dailyLimitDetails(error))}`
+    : null;
+}
+
+type QuotaRead = { model: Pick<ManifestModel, "id" | "provider" | "displayName" | "speechPlan">; requests: number };
+type DailyQuotaReader = (model: string) => DailySpeechQuota | null;
+
+/** Stop before synthesis only on a witnessed, unexpired refusal; a spend budget is not quota. */
+export function dailyQuotaRefusal(reads: readonly QuotaRead[], quota?: DailyQuotaReader): string | null {
+  for (const { model, requests } of reads) {
+    if (requests <= 0 || model.provider !== "google" || model.speechPlan === "free-plan") continue;
+    const observed = quota?.(model.id);
+    if (observed?.reached) return `${GOOGLE_DAILY_LIMIT} · ${model.displayName}${freeLimitDetail(observed)}`;
+  }
+  return null;
+}
+
+/** Speech responses carry no remaining allowance. Name each model's request count without inventing a balance. */
+export function dailyQuotaNotices(reads: readonly QuotaRead[], quota?: DailyQuotaReader): string[] {
+  const totals = new Map<string, QuotaRead>();
+  for (const { model, requests } of reads) {
+    if (requests <= 0 || model.provider !== "google" || model.speechPlan === "free-plan") continue;
+    totals.set(model.id, { model, requests: (totals.get(model.id)?.requests ?? 0) + requests });
+  }
+  return [...totals.values()].map(({ model, requests }) => {
+    const observed = quota?.(model.id);
+    return `${model.displayName} · ${requests} request${requests === 1 ? "" : "s"} · remaining daily allowance unknown${observed?.limit !== undefined ? ` · last reported ${observed.limit} a day` : ""}`;
+  });
+}
+
+export function dailyLimitNote(reason: string | null | undefined, now: Date = new Date()): string | null {
+  if (!reason?.includes(GOOGLE_DAILY_LIMIT)) return null;
+  const detail = dailyLimitDetails(reason);
+  const model = reason.startsWith(`${GOOGLE_DAILY_LIMIT} · `) ? reason.slice(GOOGLE_DAILY_LIMIT.length + 3).split(" · ")[0] : undefined;
+  const reset = detail.resetsAt === undefined ? null : new Date(detail.resetsAt);
+  const timing = reset === null ? "reset time unavailable" : reset.getTime() > now.getTime()
+    ? `resets ${pacificClock(reset)} PT · ${formatTimeLeft(now, reset)}` : "reset time passed · ready to retry";
+  return `${model ? `${model} · ` : ""}daily request limit reached${detail.limit !== undefined ? ` · ${detail.limit} a day` : ""} · ${timing} · recordings kept`;
+}
+
 export type FreePlanStop = { kind: "free-limit"; provider: "google"; resetsAt: string; limit?: number } | { kind: "billed"; provider: "google" };
 
 /**
@@ -376,6 +458,8 @@ export function freePlanAskCopy(short: FreePlanShort): { line: string; confirm: 
 
 /** A free plan's end as one line of text, with when a daily limit resets; null for any other reason. */
 export function freePlanNote(reason: string | null | undefined, now: Date = new Date()): string | null {
+  const daily = dailyLimitNote(reason, now);
+  if (daily !== null) return daily;
   const stop = freePlanStop(reason, now);
   return stop === null ? null : stop.kind === "free-limit" ? freeLimitLine(stop, now) : `${GOOGLE_BILLED} · key looks paid`;
 }
