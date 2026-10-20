@@ -65,7 +65,6 @@ window.measureLayout=()=>{
   const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};};
   const page=document.querySelector(".fy-content");
   return {viewport:[innerWidth,innerHeight],coarse:matchMedia("(pointer:coarse)").matches,hover:matchMedia("(hover:hover)").matches,
-    expandSpace:(()=>{const e=document.querySelector(".fy-global-chat-expand");if(!e)return 0;const style=getComputedStyle(e);return e.getBoundingClientRect().height+parseFloat(style.marginTop)+parseFloat(style.marginBottom);})(),
     overflow:document.documentElement.scrollWidth>innerWidth || (page&&page.scrollWidth>page.clientWidth+1),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)])),
     bubbles:[...document.querySelectorAll(".fy-chat__bubble")].slice(0,4).map(e=>{const b=e.getBoundingClientRect();return {x:b.x,y:b.y,width:b.width,height:b.height};}),
     columns:document.querySelector(".fy-artifact-grid")&&getComputedStyle(document.querySelector(".fy-artifact-grid")).gridTemplateColumns.split(" ").length,
@@ -171,7 +170,7 @@ try {
     for(const id of ["wc164a1", "wc164a2", "wc164a3", "wc164b1", "wc164b2", "wc164b3", "wc164c", "wc164d"]) {
       const fold=id==="wc164c"||id==="wc164d";
       await size(fold?984:390,fold?1060:797,true);await navigate("/"+id+".html");await capture(id);
-      measurements[id]=await js('Object.fromEntries([".head","h1",".chead",".csub",".conv",".wgate",".wnav",".wmain",".wside",".grid2a",".grid3",".acard",".fr",".sheet",".foot",".peek",".viewer",".vtop",".stage",".vfoot"].map(s=>{const b=document.querySelector(s)?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
+      measurements[id]=await js('Object.fromEntries([".bar",".head","h1",".chead",".csub",".conv",".wgate",".wnav",".wmain",".wside",".grid2a",".grid3",".acard",".fr",".sheet",".foot",".peek",".viewer",".vtop",".stage",".vfoot"].map(s=>{const b=document.querySelector(s)?.getBoundingClientRect();return [s,b?{x:b.x,y:b.y,width:b.width,height:b.height}:null]}))');
     }
     await writeFile(join(dir,"master-measurements.json"),JSON.stringify(measurements,null,2));
     // Content counts and record names vary; the frame geometry comes directly from turn 164.
@@ -181,12 +180,18 @@ try {
     };
     const find = (name, route) => records.find(row=>row.name===name && row.route===route)?.geometry;
     const phoneChat=find("phone","conversation"), phoneShelf=find("phone","artifacts"), phoneViewer=find("phone","viewer"), foldShelf=find("fold","artifacts");
-    // The shared Chat entry from turn 224 is in flow above turn 164's phone header.
-    // Keep the original dimensions and account only for that measured control's outer height.
-    const expandSpace=records.find(row=>row.name==="phone"&&row.route==="conversation")?.expandSpace ?? 0;
-    for(const selector of [".chead",".csub"])measurements.wc164a2[selector].y+=expandSpace;
+    // The current phone shell's titlebar is shorter than turn 164's. In-flow shelf content
+    // follows it; viewport-owned dialogs and the held composer do not move with that header.
+    if(phoneShelf)measurements.wc164b1[".fr"].y+=phoneShelf[".fy-titlebar"].height-measurements.wc164b1[".bar"].height;
+    // Turn 224 added the in-flow shared Chat entry above this header. Its dimensions and
+    // contiguous rows still match turn 164; its absolute vertical position no longer does.
+    if(phoneChat) {
+      close(phoneChat[".fy-chat__phonehead"],measurements.wc164a2[".chead"],["x","width","height"],"phone conversation header");
+      close(phoneChat[".fy-chat__phonesub"],measurements.wc164a2[".csub"],["x","width","height"],"phone conversation context");
+      assert.equal(phoneChat[".fy-chat__phonesub"].y,phoneChat[".fy-chat__phonehead"].y+phoneChat[".fy-chat__phonehead"].height);
+    }
     for (const [actual, id, pairs] of [
-      [phoneChat,"wc164a2",[[".fy-chat__phonehead",".chead"],[".fy-chat__phonesub",".csub"],[".fy-thread-peek",".peek"]]],
+      [phoneChat,"wc164a2",[[".fy-thread-peek",".peek"]]],
       [phoneShelf,"wc164b1",[[".fy-artifact-frame",".fr"]]],
       [phoneViewer,"wc164b2",[[".fy-artview__panel",".viewer"],[".fy-artview__head",".vtop"],[".fy-artview__stage",".stage"],[".fy-artview__foot",".vfoot"]]],
       [find("phone","understood"),"wc164a3",[[".fy-page-sheet[open]",".sheet"]]],
