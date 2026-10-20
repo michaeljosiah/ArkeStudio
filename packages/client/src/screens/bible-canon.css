@@ -216,6 +216,9 @@
   [data-screen="canon-thread"] .fy-bubble--user { margin-left: auto; border-top-right-radius: 6px; }
   .fy-thread-composer { display: flex; flex-direction: column; align-items: stretch; gap: 30px; margin: 0; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
   .fy-thread-composer::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }
+}
+/* The shared notes opener is also used by the tablet conversation sheet. */
+@media (max-width: 899px) {
   .fy-thread-peek { display: flex; align-items: center; gap: 10px; height: 56px; flex: none; padding: 0 12px 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--foreground); box-shadow: var(--shadow-lg); text-align: left; cursor: pointer; }
   .fy-thread-peek > span { flex: 1; min-width: 0; }
   .fy-thread-peek b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--text-sm)/1.25 var(--font-sans); }

@@ -112,7 +112,7 @@ try {
 
   const key=async key=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key,code:key,windowsVirtualKeyCode:key==='ArrowRight'?39:37});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key,code:key});await js("window.settleLayout()");};
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",768,1024,true],["fold-narrow",852,1092,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
+  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["phone-wide",599,1024,true],["tablet-start",600,1024,true],["tablet",768,1024,true],["fold-narrow",852,1092,true],["tablet-end",899,1024,true],["fold-start",900,1024,true],["fold",984,1092,true],["desktop-small",1200,790,false],["desktop",1360,850,false],["desktop-wide",2040,1350,false]]) {
     if(only&&name!==only)continue;
     await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:!process.argv.includes("--hover")});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom",'+JSON.stringify(width<600?"20px":"0px")+')');
@@ -123,6 +123,7 @@ try {
       if(baseline)continue;
       if(['develop','staged','blocked','empty-notes','timeout','waiting'].includes(label)) {
         assert.equal((await js('window.measureLayout()')).overflow,false,name+'-'+label+' overflow');
+        if(width<900)assert.ok(await js('(()=>{const chat=document.querySelector(".fy-story__chat").getBoundingClientRect(),body=document.querySelector(".fy-production-studio-inline > div").getBoundingClientRect();return Math.abs(chat.width-body.width)<2;})()'),name+' conversation fills the space when notes use a sheet');
         if(width>=900) {
           const before=await js('document.querySelector(".fy-story__chat").getBoundingClientRect().width');
           assert.ok(await js('document.querySelector(".fy-wrapup button")?.getBoundingClientRect().right<=innerWidth || !!document.querySelector(".dom-proposal")'));
@@ -153,19 +154,19 @@ try {
           assert.ok(await js('document.querySelector(".fy-studio-canvas")?.getBoundingClientRect().height>=44'));
         }
         if(width<1100){await click('.fy-develop-model');await check(name+'-model');await escape();}
-        if(width<600){
+        if(width<900){
           assert.ok(await js('document.querySelector(".fy-develop-composer").getBoundingClientRect().bottom<=innerHeight+1'));
+          assert.ok(await js('document.querySelector(".fy-develop-composer .fy-thread-peek").getBoundingClientRect().height>=44'),name+' notes opener is a touch target');
           await click('.fy-develop-composer .fy-thread-peek');await check(name+'-understood');
           assert.ok(await js('document.querySelector(".fy-develop-sheet[open] .fy-wrapup button").getBoundingClientRect().height>=44'));
           await escape();
-        }else if(width<900)assert.equal(await js('getComputedStyle(document.querySelector(".fy-story__side")).display'),'contents');
-        else if(width<1100)assert.equal(await js('document.querySelector(".fy-story__side").getBoundingClientRect().width'),340);
+        }else if(width<1100)assert.equal(await js('document.querySelector(".fy-story__side").getBoundingClientRect().width'),340);
         await js('(()=>{const e=document.querySelector(".fy-cx__editor");e.innerText="The harbour keeps its silence";e.dispatchEvent(new Event("input",{bubbles:true}));e.focus();})()');
         await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
         await js('window.settleLayout()');
         assert.equal(await js('window.commands.filter(c=>c.kind==="world-chat-send").length'),process.argv.includes('--hover')?1:0);
       }
-      if((label==='staged'||label==='blocked')&&width<600){await click('.fy-develop-composer .fy-thread-peek');await check(name+'-'+label+'-sheet');assert.ok(await js('document.querySelector(".dom-proposal__touch-reasons").textContent.includes("reopens")'));await escape();}
+      if((label==='staged'||label==='blocked')&&width<900){await click('.fy-develop-composer .fy-thread-peek');await check(name+'-'+label+'-sheet');assert.ok(await js('document.querySelector(".dom-proposal__touch-reasons").textContent.includes("reopens")'));await escape();}
       if(label==='overview'&&width<1100){
         assert.ok(await js('getComputedStyle(document.querySelector(".fy-overview .fy-textactions")).opacity==="1"'));
         await click('.fy-overview-more');assert.ok(await js('document.querySelector(".fy-overview-prose").dataset.expanded'));

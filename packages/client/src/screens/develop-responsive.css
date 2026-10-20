@@ -1,5 +1,6 @@
 /* Turn 171: Develop and Overview. The wide mouse layout retains its existing geometry. */
 .fy-develop-composer, .fy-story-composer { flex: none; padding: 14px 36px 22px; }
+.fy-develop-composer .fy-thread-peek > span > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fy-develop-side, .fy-story-side { display: contents; }
 .dom-proposal__touch-reasons, .dom-proposal__send-short { display: none; }
 .fy-narrative__fields { max-width: 760px; display: grid; gap: 20px; }
@@ -154,7 +155,6 @@
   .fy-develop-composer.fy-held-bar { display: flex; flex-direction: column; align-items: stretch; gap: 30px; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
   .fy-develop-composer.fy-held-bar::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }
   .fy-develop-composer .fy-thread-peek { min-height: 56px; }
-  .fy-develop-composer .fy-thread-peek > span > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-overview { padding: 14px 20px 32px; }
   .fy-overview__head { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 12px; }
   .fy-overview__head h1 { font-size: var(--text-3xl); }

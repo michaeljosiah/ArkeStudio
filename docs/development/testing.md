@@ -1000,12 +1000,16 @@ Library, export and undo suites when changing these paths.
 ### Develop, Overview and the composer on touch (turn 171)
 
 Run `node scripts/smoke-develop-layout.mjs` to render the actual Develop conversation, understood
-and staged sheets, story Overview, acts, style and film Narrative at 360, 375, 390, 984, 1200, 1360 and 2040
+and staged sheets, story Overview, acts, style and film Narrative at 360, 375, 390, 599, 600, 768,
+852, 899, 900, 984, 1200, 1360 and 2040
 pixels. It captures all eight master frames for visual comparison, checks overflow and held
 controls, and exercises coarse-pointer Return, model sheets, read sources and narrative saves.
 Develop also checks empty notes, timeout retry, elapsed time and Stop, plus collapsing and
 reopening notes without losing staged proposals. It closes Studio through its normal control
 to exercise the resting conversation. `--viewport desktop-small --hover` reproduces #1926.
+Below 900px it also checks that the conversation fills the available width and that notes and
+staged/conflicted proposals remain reachable in their sheet (#2008). `--viewport tablet-start`,
+`tablet`, `tablet-end` and `fold-start` cover the tablet layout and its grid boundary.
 Use `--viewport phone`, `--viewport fold` or `--viewport desktop --hover` to narrow the run;
 `--baseline <git-ref> --viewport desktop --hover` supplies the previous mouse layout.
 
