@@ -274,6 +274,13 @@ describe("the audiobook as the player (turn 186e)", () => {
       assert.ok(chapterExport.ok, JSON.stringify(chapterExport));
       assert.deepEqual(chapterExport.chapterIds, ["her-own-hand"], "the author can still export that chapter explicitly");
       assert.deepEqual(await Promise.all(takeFiles.map((file) => readFile(file))), savedTakes, "existing media stays unchanged");
+      for (const selection of [{ chapters: ["her-own-hand"] }, { blocks: [{ chapterId: "her-own-hand", key: "title" }] }]) {
+        await send({ kind: "audiobook-word-timing", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, action: "read", ...selection });
+        const timing = events.filter((event) => event.type === "audiobook.word-timing").at(-1)!;
+        assert.equal(timing.type, "audiobook.word-timing");
+        assert.ok(timing.state.blocks.length > 0, "explicit outlined chapter tooling still receives its saved audio");
+        assert.ok(timing.state.blocks.every((block) => block.chapterId === "her-own-hand"));
+      }
     }));
 
   it("packages only the chapters read whole, the same player, the takes and the pictures, and lists it beside the other packages", () =>

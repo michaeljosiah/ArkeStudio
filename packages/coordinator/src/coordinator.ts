@@ -15942,8 +15942,14 @@ export class Coordinator {
         const report = async (refresh = true) => {
           if (refresh) {
           availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
-          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
-          cached = listening.chapters.flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
+          const options = this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {};
+          const selectedIds = msg.chapters ?? msg.blocks?.map((block) => block.chapterId);
+          const currentChapters = store.getBundle().productions.find((production) => production.meta.id === msg.productionId)?.chapters ?? [];
+          const plans = selectedIds === undefined ? [await audiobookListening(store, msg.productionId, options)] : [];
+          for (const chapterId of new Set(selectedIds ?? [])) {
+            if (currentChapters.some((chapter) => chapter.id === chapterId && !chapter.retired)) plans.push(await audiobookListening(store, msg.productionId, { ...options, scope: { kind: "chapter", chapterId } }));
+          }
+          cached = plans.flatMap((plan) => plan.chapters).flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
           }
           const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
           const selected = blocks.filter(included);

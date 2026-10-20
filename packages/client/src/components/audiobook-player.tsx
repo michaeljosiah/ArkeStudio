@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   mountAudiobookPlayer,
   type AudiobookListening,
+  type AudiobookScope,
   type AudiobookPlayerChapter,
   type AudiobookPlayerHandle,
   type ProductionBundle,
@@ -75,16 +76,18 @@ function usePlanStamp(worldId: string, productionId: string, production: Product
   ]);
 }
 
-export function AudiobookPlayerView({ worldId, production, chapterId, onClose }: {
+export function AudiobookPlayerView({ worldId, production, chapterId, scope, onClose }: {
   worldId: string;
   production: ProductionBundle;
   /** Listen on a chapter: start there. */
   chapterId?: string;
+  /** Explicit selection, independent of the book's Continue position. */
+  scope?: AudiobookScope;
   onClose: () => void;
 }) {
   const productionId = production.meta.id;
   // Outlined chapters stay outside the book, but their saved takes remain available individually.
-  const outlinedChapter = production.chapters.find((chapter) => chapter.id === chapterId)?.status === "outlined" ? chapterId : undefined;
+  const scopedChapter = scope?.kind === "chapter" ? scope.chapterId : undefined;
   const slug = useStore().state?.world?.meta.slug ?? null;
   const connection = useStore().connection;
   const shell = useRef<HTMLDivElement>(null);
@@ -101,8 +104,15 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     () =>
       subscribeAudiobookListening((answer) => {
         if (answer.requestId !== asked.current) return;
-        if (answer.listening === null) setRefused(answer.refused ?? "could not open the book");
-        else setPlan(answer.listening);
+        if (answer.listening === null) {
+          handle.current?.destroy();
+          handle.current = null;
+          setPlan(null);
+          setRefused(answer.refused ?? "could not open the book");
+        } else {
+          setRefused(null);
+          setPlan(answer.listening);
+        }
       }),
     [],
   );
@@ -112,14 +122,14 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     if (connection !== "open") return;
     if (first.current) {
       first.current = false;
-      asked.current = openAudiobookListening(worldId, productionId, outlinedChapter !== undefined ? { kind: "chapter", chapterId: outlinedChapter } : undefined);
+      asked.current = openAudiobookListening(worldId, productionId, scopedChapter !== undefined ? { kind: "chapter", chapterId: scopedChapter } : undefined);
       return;
     }
     const timer = setTimeout(() => {
-      asked.current = openAudiobookListening(worldId, productionId, outlinedChapter !== undefined ? { kind: "chapter", chapterId: outlinedChapter } : undefined);
+      asked.current = openAudiobookListening(worldId, productionId, scopedChapter !== undefined ? { kind: "chapter", chapterId: scopedChapter } : undefined);
     }, 1200);
     return () => clearTimeout(timer);
-  }, [worldId, productionId, connection, stamp, outlinedChapter]);
+  }, [worldId, productionId, connection, stamp, scopedChapter]);
 
   /** The book takes the app's one read: the previous owner stopped, the dock's clip let go. */
   const claimBook = () => {
@@ -193,7 +203,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       title: plan.title,
       cover: plan.cover === null ? null : src(plan.cover),
       chapters,
-      storageKey: outlinedChapter !== undefined ? `${audiobookPlaceKey(worldId, productionId)}-chapter-${outlinedChapter}` : audiobookPlaceKey(worldId, productionId),
+      storageKey: scopedChapter !== undefined ? `${audiobookPlaceKey(worldId, productionId)}-chapter-${scopedChapter}` : audiobookPlaceKey(worldId, productionId),
       ...(chapterId !== undefined ? { chapterId } : {}),
       // Listen on a chapter plays it; Listen on the book opens on Continue when a place is kept.
       autoplay: true,
@@ -234,13 +244,15 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
 export function ListenButton({ worldId, production, chapterId, className, solid = false }: { worldId: string; production: ProductionBundle; chapterId?: string; className?: string; /** The filled transport mark the chapter's Audiobook toolbar draws (design turn 194). */ solid?: boolean }) {
   const [open, setOpen] = useState(false);
   const connection = useStore().connection;
+  const outlinedChapter = production.chapters.find((chapter) => chapter.id === chapterId)?.status === "outlined" ? chapterId : undefined;
+  const canListen = outlinedChapter !== undefined ? listenLeads(production, outlinedChapter) : bookHasTakes(production);
   return (
     <>
-      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!(bookHasTakes(production) || listenLeads(production, chapterId)) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!canListen || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
         {solid ? <PlaySolid size={13} /> : <Play size={14} />}
         Listen
       </Button>
-      {open && <AudiobookPlayerView worldId={worldId} production={production} {...(chapterId !== undefined ? { chapterId } : {})} onClose={() => setOpen(false)} />}
+      {open && <AudiobookPlayerView worldId={worldId} production={production} {...(chapterId !== undefined ? { chapterId } : {})} {...(outlinedChapter !== undefined ? { scope: { kind: "chapter", chapterId: outlinedChapter } } : {})} onClose={() => setOpen(false)} />}
     </>
   );
 }
