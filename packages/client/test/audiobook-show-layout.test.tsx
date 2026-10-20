@@ -104,7 +104,7 @@ const DOOR: AudiobookDoor = {
 };
 
 type Box = { l: number; r: number; t: number; b: number };
-type Measured = { width: number; height: number; hero: Box; nextWork: Box; firstChapter: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[] };
+type Measured = { width: number; height: number; hero: Box; portrait: Box; name: Box; nextWork: Box; firstChapter: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[] };
 
 /** The page at one window size, laid out by Chrome. */
 async function measure(chrome: string, width: number, height: number): Promise<Measured> {
@@ -125,7 +125,7 @@ async function measure(chrome: string, width: number, height: number): Promise<M
     const out = document.createElement("pre");
     out.id = "measured";
     out.textContent = JSON.stringify(hero === null ? null : {
-      width: innerWidth, height: innerHeight, hero: box(hero), nextWork: box(document.querySelector('[data-testid="audiobook-next-work"]')), firstChapter: box(document.querySelector('[data-testid="audiobook-row"]')), maxHeight: getComputedStyle(hero).maxHeight, heightRule: hero.style.height,
+      width: innerWidth, height: innerHeight, hero: box(hero), portrait: box(document.querySelector(".fy-abshow__card-im")), name: box(document.querySelector(".fy-abshow__card-nm")), nextWork: box(document.querySelector('[data-testid="audiobook-next-work"]')), firstChapter: box(document.querySelector('[data-testid="audiobook-row"]')), maxHeight: getComputedStyle(hero).maxHeight, heightRule: hero.style.height,
       presses: [...document.querySelectorAll('[data-testid="audiobook-presses"] button')].map((el) => ({ label: el.getAttribute("aria-label") || el.textContent, box: box(el) })),
     });
     document.body.append(out);
@@ -184,8 +184,12 @@ describe("the audiobook hero never clips its presses (design turn 199, rule 2)",
     it(`lays every press inside the hero at ${what}`, { skip: chrome === null ? "no Chrome to lay the page out" : false }, async () => {
       const measured = await measure(chrome!, width, height);
       assert.equal(measured.maxHeight, "none");
-      assert.ok(measured.nextWork.b < measured.height, "next unfinished chapter is visible without scrolling");
-      assert.ok(measured.firstChapter.t < measured.height - 60, "the first chapter starts within the viewport");
+      assert.ok(measured.hero.b - measured.hero.t >= 440, "the master keeps a full artwork hero");
+      const portraitWidth = width >= 1300 ? 220 : 188;
+      assert.ok(Math.abs(measured.portrait.r - measured.portrait.l - portraitWidth) <= 1, "cast uses the approved portrait width");
+      assert.ok(Math.abs(measured.portrait.b - measured.portrait.t - portraitWidth * 1.5) <= 1, "cast retains 2:3 portraits");
+      assert.ok(measured.name.t >= measured.portrait.b, "the cast name belongs below its portrait");
+      assert.ok(measured.nextWork.t >= measured.portrait.b && measured.firstChapter.t >= measured.nextWork.b, "chapter work follows the cast in the scrolling page");
       assert.deepEqual(measured.presses.map((press) => press.label), ["Listen", "Publish", "Read the book · 1 chapter · up to $0.0008 · 2 no voice", "More"]);
       for (const press of measured.presses) {
         const inside = press.box.l >= measured.hero.l - 0.5 && press.box.r <= measured.hero.r + 0.5 && press.box.t >= measured.hero.t - 0.5 && press.box.b <= measured.hero.b + 0.5;

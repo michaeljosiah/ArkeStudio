@@ -159,14 +159,14 @@ describe("the Audiobook door (turn 146)", () => {
     assert.match(m.where(), /story\/chapters\/slack-water\?view=audio-studio$/);
     assert.equal(m.sent.some(message => ["read-audiobook-chapter", "read-audiobook-book", "render-audiobook-mix"].includes(message.kind)), false);
   });
-  it("shows a row a chapter with its state, the count and running time over them, the read bar, and opens a chapter's Audiobook view", async () => {
+  it("shows chapter states and measured versus estimated time, and opens a chapter's Audiobook view", async () => {
     const m = await mount(inkbound());
     // The page is the book's cover (design turn 190a): its title, not the word Audiobook, which the rail says.
     assert.match(text(m), /Inkbound/);
     assert.equal(q(m, 'section[aria-label="Audiobook"]') !== null, true);
     await answerDoor(m, door("narrator"));
     // One meta line (design turn 199): every chapter, the made takes' time and the rest from the words, who reads it.
-    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "Audiobook · 3 chapters · 53 min · Read by George");
+    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "Audiobook · 3 chapters · ~53 min estimated total · 51 min recorded · Read by George");
     const rows = all(m, '[data-testid="audiobook-row"]');
     assert.deepEqual(
       rows.map((row) => row.getAttribute("data-state")),

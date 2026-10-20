@@ -682,8 +682,11 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
-(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
-wide, plus 200% text at 1440 and desktop chrome at the native 1024px minimum. Titlebar controls
+(or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1100, 1440, 1920 and 2560
+wide, plus 200% text at 1440 and desktop chrome at the native 1024px minimum. The show page checks
+turn 199's hero and portrait composition for a single narrator, several cast members and long
+titles, including Reading access. Chapters follow the cast in the scrolling page; fitting them
+above the fold is not a reason to shrink the approved artwork. Titlebar controls
 must not overlap or enter the native window-button area. Use `--viewport desktop-min`, `phone`
 or `small-phone` for a focused check. Phone cases use browser chrome: shrinking an Electron
 CDP viewport to 390px retains its 138px native-button reservation and does not establish a phone
