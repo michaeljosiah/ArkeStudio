@@ -19,6 +19,7 @@ export class StubOpenCode {
   private server: Server | null = null;
   port = 0;
   promptBarrier: Promise<void> | null = null;
+  abortBarrier: Promise<void> | null = null;
   interruptStatus = 200;
   abortStatus = 200;
   readonly requests: CapturedRequest[] = [];
@@ -103,7 +104,7 @@ export class StubOpenCode {
           return;
         }
         if (/^\/session\/[^/]+\/abort$/.test(url.pathname)) {
-          res.writeHead(this.abortStatus, { "Content-Type": "application/json" }).end(JSON.stringify(true));
+          void (this.abortBarrier ?? Promise.resolve()).then(() => res.writeHead(this.abortStatus, { "Content-Type": "application/json" }).end(JSON.stringify(true)));
           return;
         }
         if (/^\/api\/session\/[^/]+\/permission\/[^/]+\/reply$/.test(url.pathname)) {

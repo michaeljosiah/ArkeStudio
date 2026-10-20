@@ -78,6 +78,15 @@ const FALLBACK_TOKEN_BUDGET = 200_000;
  */
 const MAX_REPAIR_TURNS = 2;
 
+/** An unresponsive adapter must not hold a settled turn or the caller's Stop forever. */
+async function waitForInterruption(interruption: Promise<void> | undefined): Promise<void> {
+  if (!interruption) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([interruption, new Promise<void>(resolve => { timer = setTimeout(resolve, 5_000); })]);
+  } finally { clearTimeout(timer); }
+}
+
 /** What the agent is told when what it wrote would be refused. */
 function repairInstruction(problems: Array<{ path: string; message: string }>): string {
   const lines = problems.map((p) => `- ${p.path}: ${p.message}`).join("\n");
@@ -119,7 +128,7 @@ export class AuthoringService {
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
     if (interrupt && run.sessionId) {
       run.interruption ??= interrupt.call(this.adapter, run.sessionId).catch(() => {});
-      await run.interruption;
+      await waitForInterruption(run.interruption);
     }
   }
 
@@ -296,10 +305,10 @@ export class AuthoringService {
           if (!ending) ending = { state: run.cancelled ? "cancelled" : "completed" };
           break;
         } else if (event.type === "session.error") {
-          ending = { state: "failed", detail: event.message };
+          ending ??= { state: "failed", detail: event.message };
           break;
         } else if (event.type === "session.ended") {
-          ending = {
+          ending ??= {
             state: event.reason === "completed" ? "completed" : event.reason === "cancelled" ? "cancelled" : "failed",
             ...(event.detail !== undefined ? { detail: event.detail } : {}),
           };
@@ -317,7 +326,7 @@ export class AuthoringService {
     } finally {
       clearTimeout(timer);
       abort.abort();
-      await run.interruption;
+      await waitForInterruption(run.interruption);
       this.runs.delete(input.proposalId);
     }
 

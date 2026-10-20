@@ -38,6 +38,8 @@ export interface OpenCodeAdapterOptions {
   baseUrl: () => string;
   /** Overridable so a test can prove the watchdog without waiting a minute and a half. */
   streamSilenceMs?: number;
+  /** Prompt admission and each stop request; overridable for transport regressions. */
+  requestTimeoutMs?: number;
   /**
    * One line per adapter-lifecycle fact — connects, stalls, resyncs, dispatch outcomes. The
    * host appends them to logs/harness.jsonl. Diagnosing "the chat is stuck" from outside the
@@ -278,11 +280,18 @@ export class OpenCodeAdapter implements HarnessAdapter {
           "POST",
           `/session/${input.sessionId}/prompt_async`,
           this.turnBody(input),
-          { ...(directory ? { directory } : {}), signal: AbortSignal.timeout(30_000) },
+          { ...(directory ? { directory } : {}), signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? 30_000) },
         );
         this.trace("dispatch.accepted", { sessionId: input.sessionId });
       } catch (err) {
         this.trace("dispatch.failed", { sessionId: input.sessionId, error: String(err) });
+        if (!(err instanceof OpenCodeError && err.status >= 400 && err.status < 500 && err.status !== 408)) {
+          // A lost admission response can leave a writer running. Request its stop, but let
+          // the stream establish the ending; an HTTP response alone is not terminal evidence.
+          this.push({ type: "tool.activity", sessionId: input.sessionId, tool: "interrupt", summary: "The writing request was not confirmed — waiting for the writer to stop." });
+          await this.abortSession(input.sessionId).catch(error => this.trace("dispatch.stop-unconfirmed", { sessionId: input.sessionId, error: String(error) }));
+          return;
+        }
         this.push({
           type: "session.error",
           sessionId: input.sessionId,
@@ -357,13 +366,17 @@ export class OpenCodeAdapter implements HarnessAdapter {
   async interrupt(sessionId: string): Promise<void> {
     // A stop must not overtake a prompt still being admitted by the server.
     await Promise.all(this.pendingDispatches.get(sessionId) ?? []);
+    await this.abortSession(sessionId);
+  }
+
+  private async abortSession(sessionId: string): Promise<void> {
     const directory = this.sessions.get(sessionId)?.cwd;
-    const scope = { ...(directory ? { directory } : {}), signal: AbortSignal.timeout(30_000) };
+    const scope = () => ({ ...(directory ? { directory } : {}), signal: AbortSignal.timeout(this.opts.requestTimeoutMs ?? 30_000) });
     try {
       // Match prompt_async's execution owner; the /api family can coexist with another loop.
-      await this.http.req("POST", `/session/${sessionId}/abort`, {}, scope);
+      await this.http.req("POST", `/session/${sessionId}/abort`, {}, scope());
     } catch {
-      await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {}, scope);
+      await this.http.req("POST", `/api/session/${sessionId}/interrupt`, {}, scope());
     }
   }
 

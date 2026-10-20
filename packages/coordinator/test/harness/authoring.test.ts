@@ -496,6 +496,34 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     } finally { finishWork(); acknowledge(); await cancel; await run; await store.close(); }
   });
 
+  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 8_000 }, async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = neverendingAdapter();
+    let dispatched!: () => void; const ready = new Promise<void>(resolve => { dispatched = resolve; });
+    adapter.dispatchAsync = async input => { dispatched(); return { sessionId: input.sessionId, correlationId: "c" }; };
+    adapter.interrupt = async () => new Promise<void>(() => {});
+    const authoring = service(adapter, events, { wallClockMs: 150 });
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await ready;
+      await Promise.all([authoring.cancel(proposal.id), run]);
+      assert.equal(authoring.isRunning(proposal.id), false);
+      assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
+    } finally { await store.close(); }
+  });
+
+  it("keeps the budget cause when the writer acknowledges interruption (#1981)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = { ...neverendingAdapter(), usageTokens: () => 100 };
+    const authoring = service(adapter, events, { tokenBudget: 1 });
+    try {
+      await authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
+      assert.match(final.detail ?? "", /budget/);
+    } finally { await store.close(); }
+  });
+
   it("cancellation is immediate, stated, and costs nothing (R-13, D8)", async () => {
     const { store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];

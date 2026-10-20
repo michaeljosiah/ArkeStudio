@@ -337,6 +337,36 @@ describe("the live adapter over the stub server", () => {
     } finally { release(); stub.promptBarrier = null; }
   });
 
+  it("stops an uncertain prompt and waits for writer evidence instead of emitting a terminal error (#1981)", async () => {
+    const local = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl(), requestTimeoutMs: 100 });
+    const signal = new AbortController(); const seen: HarnessEvent[] = [];
+    let release!: () => void;
+    stub.promptBarrier = new Promise<void>(resolve => { release = resolve; });
+    let consume: Promise<void> | undefined;
+    try {
+      await local.init();
+      const session = await local.createSession({ purpose: "authoring", cwd: "C:/worlds/uncertain" });
+      consume = (async () => { for await (const event of local.streamEvents(signal.signal)) seen.push(event); })();
+      await local.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "write" }] });
+      await until(() => !!stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)), "uncertain prompt stop");
+      assert.equal(seen.some(e => e.type === "session.error" || e.type === "session.ended"), false, "an HTTP response cannot release the writer");
+      stub.emit({ type: "session.error", properties: { sessionID: session.sessionId, error: { name: "MessageAbortedError" } } });
+      await until(() => seen.some(e => e.type === "session.ended"), "actual writer ending");
+    } finally { release(); stub.promptBarrier = null; signal.abort(); await consume; await local.dispose(); }
+  });
+
+  it("gives the fallback a fresh deadline after abort stalls (#1981)", async () => {
+    const local = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl(), requestTimeoutMs: 100 });
+    let release!: () => void;
+    stub.abortBarrier = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await local.init();
+      const session = await local.createSession({ purpose: "authoring", cwd: "C:/worlds/fallback" });
+      await local.interrupt(session.sessionId);
+      assert.equal(stub.lastRequest(new RegExp(`/api/session/${session.sessionId}/interrupt$`))?.query.directory, "C:/worlds/fallback");
+    } finally { release(); stub.abortBarrier = null; await local.dispose(); }
+  });
+
   it("assesses permission asks against the session's captured v1 confinement", async () => {
     const readOnlyCwd = "C:\\worlds\\world-chat";
     adapter.prepareSession({ preparationId: "prep_read", researchWeb: true });
