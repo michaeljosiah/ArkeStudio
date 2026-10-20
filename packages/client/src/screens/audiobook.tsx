@@ -380,15 +380,22 @@ export function AudiobookScreen() {
     const settled = run !== undefined && run.state !== "reading" && run.state !== "priced" && run.made + run.flagged > 0 && !row.planned && row.castTrouble === undefined
       ? { ...row, made: Math.min(row.total, row.made + run.made), stale: 0, flagged: run.flagged, notMade: Math.max(0, row.total - row.made - run.made - run.flagged) }
       : row;
-    return { row: settled, reading: run?.state === "reading", run };
+    return { row: settled, reading: run?.state === "reading", run, seconds: chapterSeconds(row, words(row.chapterId)), estimated: row.seconds === null || row.made < row.total };
   });
-  const bookSeconds = shown.reduce((sum, { row }) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  // Durations come from the last measured door, not optimistic run counts: a finished run
+  // can add takes before their lengths arrive (issue 1935).
+  const bookSeconds = rows.reduce((sum, row) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  const estimated = rows.some(row => !row.planned && (row.seconds === null || row.made < row.total));
+  const recordedSeconds = rows.reduce((sum, row) => sum + (row.planned ? 0 : row.seconds ?? 0), 0);
+  const unmeasured = rows.some(row => !row.planned && row.made > 0 && row.seconds === null);
+  const nextWork = shown.find(({ row }) => !row.planned && chapterStateWord(row, false) !== null)?.row;
   const plannedChapters = rows.filter(row => row.planned).length;
   // One meta line (rule 3): every chapter, planned ones included; the length; who reads it.
   const meta = [
     "Audiobook",
     `${door === null ? chapters.length : rows.length} chapter${(door === null ? chapters.length : rows.length) === 1 ? "" : "s"}`,
-    ...(door !== null && bookSeconds > 0 ? [formatBookLength(bookSeconds)] : []),
+    ...(door !== null && bookSeconds > 0 && estimated ? [`~${formatBookLength(bookSeconds)} estimated total`] : []),
+    ...(recordedSeconds > 0 ? [`${unmeasured ? "at least " : ""}${formatBookLength(recordedSeconds)} recorded`] : []),
     ...(narratorName !== null ? [`Read by ${narratorName}`] : []),
   ].join(" · ");
 
@@ -570,12 +577,14 @@ export function AudiobookScreen() {
             </section>
           )}
           <section className="fy-abshow__chapters" aria-label="Chapters">
-            <h2 className="fy-abshow__h">Chapters</h2>
+            <div className="fy-abshow__chapter-head">
+              <h2 className="fy-abshow__h">Chapters</h2>
+              {nextWork !== undefined && <button type="button" className="fy-abshow__next" onClick={() => openChapter(nextWork.chapterId)} data-testid="audiobook-next-work">Continue work · Chapter {nextWork.order}<ChevronRight size={16} /></button>}
+            </div>
             {rows.length > 0 ? (
               <div data-testid="audiobook-rows">
-                {shown.map(({ row, reading: chapterReading, run }) => {
+                {shown.map(({ row, reading: chapterReading, run, seconds, estimated: chapterEstimated }) => {
                   const state = chapterReading && run !== undefined ? `reading… ${run.made} of ${run.toMake}` : chapterStateWord(row, false);
-                  const seconds = chapterSeconds(row, words(row.chapterId));
                   const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
                   const playable = row.made > 0;
                   // Against the made takes' time, which is what plays; where that is not measured, the
@@ -604,7 +613,7 @@ export function AudiobookScreen() {
                         <span className="fy-abshow__tx">
                           <span className="fy-abshow__nm">{heading}</span>
                           <span className="fy-abshow__m">
-                            {seconds > 0 && <span className="fy-abshow__d">{formatBookLength(seconds)}</span>}
+                            {seconds > 0 && <span className="fy-abshow__d">{formatBookLength(seconds)} {chapterEstimated ? "estimated" : "recorded"}</span>}
                             {state !== null && <span className="fy-abshow__st" data-testid="audiobook-row-state">{state}</span>}
                           </span>
                         </span>
