@@ -19,6 +19,7 @@ import { migrateLegacyScene, orderedShots, stageShot, seedStoryPictureTimeline, 
 import { ProductionStudio } from "./components/production-studio";
 import { StudioToggle, StudioSidebar } from "./components/production-studio-context";
 import { ConversationPermissionCard } from "./components/conversation";
+import { Composer } from "./components/composer";
 import { __setStateForTest, __setBridgeForTest } from "./lib/store";
 import { FIXTURE_STATE } from "../test/fixture-state";
 ${styles}
@@ -31,17 +32,22 @@ const action={actionId:newId("act"),conversationId:newId("cv"),turnId:newId("tur
  shown:{title:"Review forty shots",consequence:"Updates the shot list",affectedTargets:[],ripples:[],permissionReason:"authored-change",body:{family:"command",commands:[{label:"Edit scene"}],expectedResult:"Scene updated",undoAvailable:true},productionPreview:{kind:"scene",before:scene,after}},status:"pending",preparedAt:"2026-10-04T12:00:00Z",availableDecisions:["approve","deny"]};
 const initial={conversationId:action.conversationId,status:"open",initiative:"collaborate",hasMore:false,runStatus:null,runStartedAt:null,retrievalUnavailable:false,attachments:[],seq:1,actions:[action],points:[],messages:[]};
 window.dispatches=[]; __setBridgeForTest({connect(){},send(message){window.dispatches.push(message)}});__setStateForTest(state);
-function View(){const[workspace,setWorkspace]=useState(initial);
+function View(){const[workspace,setWorkspace]=useState(initial),[message,setMessage]=useState("Unsent draft");window.composerText=message;
  window.addCard=()=>flushSync(()=>setWorkspace({...initial,actions:[action,{...action,actionId:newId("act"),actionKind:"world-chat-production-metadata",targets:[{kind:"production",id:production.meta.id}],shown:{...action.shown,productionPreview:{kind:"production",title:"Next target",medium:"film",productionKind:"short",aspect:"16:9",frameRate:24,series:null,season:null,episodes:0,style:null,model:null}}}]}));
  return <ProductionStudio world={world} productionId={production.meta.id} entry={{kind:"production",productionId:production.meta.id}} workspace={workspace} docked
  understanding={<div><h2>What it understood</h2><input aria-label="Understanding draft" defaultValue="A quiet lobby"/></div>}
  proposal={<div><h2>Staged proposal</h2><input aria-label="Proposal draft" defaultValue="The next scene"/></div>}>
   <aside className="fy-arke"><header className="fy-arke__head"><b>Arke</b><StudioToggle/></header><div className="fy-arke__log"><ConversationPermissionCard action={action} conversationSeq={1}/></div>
-    <div className="fy-arke__strip"><StudioSidebar/></div><div className="fy-arke__foot"><textarea aria-label="Unsent words" defaultValue="Unsent draft"/></div></aside>
+    <div className="fy-arke__strip"><StudioSidebar/></div><div className="fy-arke__foot"><Composer placeholder="Unsent words" value={message} onChange={setMessage} onSubmit={()=>window.dispatches.push({kind:"test-submit"})}/></div></aside>
  </ProductionStudio>;
 }
 flushSync(()=>createRoot(document.getElementById("root")).render(<MemoryRouter><View/></MemoryRouter>));window.cardReady=true;
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js") });
+` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js"),
+  plugins:[{name:"fixture-assets",setup(build){
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>({...(await build.resolve(path.slice(0,-4),{resolveDir,kind})),namespace:"url-asset"}));
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\//},args=>args.kind==="url-token"?{path:join(root,"packages/client/public",args.path.slice(1))}:undefined);
+  }}] });
 await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="view.css"><style>body{margin:8px;background:var(--background)}#root{width:min(360px,100%);height:calc(100dvh - 16px);margin:auto}</style></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 const server = createServer(async (req, res) => {
   try {
@@ -73,6 +79,21 @@ try {
     await evaluate("document.fonts.ready");
     await evaluate(`window.originalComposer=document.querySelector('[aria-label="Unsent words"]');window.originalCard=document.querySelector('[data-action-id]');void 0;`);
     const click=async text=>evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}&&b.getBoundingClientRect().width>0);if(!b)throw new Error('No visible button');b.click();})()`);
+    let draft="Unsent draft";
+    const typeInComposer=async()=>{
+      assert.equal(await evaluate("window.composerText"),draft,"draft survives Studio/card transitions");
+      const point=await evaluate(`(()=>{const e=document.querySelector('[aria-label="Unsent words"]');e.scrollIntoView({block:"nearest"});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+      await cdp("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",clickCount:1,...point});
+      await cdp("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",clickCount:1,...point});
+      await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"End",code:"End",windowsVirtualKeyCode:35,modifiers:2});
+      await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"End",code:"End",windowsVirtualKeyCode:35});
+      await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"x",code:"KeyX",text:"x",windowsVirtualKeyCode:88});
+      await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"x",code:"KeyX",windowsVirtualKeyCode:88});
+      draft+="x";await until(()=>evaluate("window.composerText").then(text=>text===draft));
+      assert.equal(await evaluate(`document.activeElement===window.originalComposer&&!window.originalComposer.closest('[inert]')`),true);
+      assert.equal(await evaluate(`document.querySelector('[aria-label="Send"]').disabled`),false);
+    };
+    await typeInComposer();
     await click("Studio"); await click("Show");
     const metrics=await evaluate(`(()=>{const studio=document.querySelector('.fy-production-studio'), thread=document.querySelector('.fy-production-studio__thread'),canvas=document.querySelector('.fy-production-studio__canvas');return {width:innerWidth,
       overflow:document.documentElement.scrollWidth>innerWidth, rows:canvas.querySelectorAll('[data-testid^="workspace-row-"]').length,
@@ -89,6 +110,7 @@ try {
     assert.equal(await evaluate("document.querySelectorAll('[data-action-id]').length"),1);
     await click("Back to card");
     assert.equal(await evaluate("window.originalComposer===document.querySelector('[aria-label=\"Unsent words\"]')"),true);
+    await typeInComposer();
     if(width<600) await click("Canvas");
     await click("Shots");
     await click("Board");
@@ -102,6 +124,8 @@ try {
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Proposal draft\"]').value"),"The next scene");
     const closeButtons=await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].filter(b=>b.textContent==='Close Studio').map(b=>b.textContent)");
     await evaluate("[...document.querySelectorAll('.fy-production-studio__head button')].find(b=>b.textContent==='Close Studio').click()");
+    await typeInComposer();
+    await click("Studio");await typeInComposer();await click("Close Studio");
     await click("Widen dock");
     assert.equal(await evaluate("document.querySelector('.fy-production-studio-owner').dataset.wide"),"true");
     assert.equal(await evaluate("window.dispatches.length"),0);
