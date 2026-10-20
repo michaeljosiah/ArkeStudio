@@ -18,6 +18,7 @@ import {
   benchTimingChange,
   orderedShots,
   aspectSupport,
+  parseAspect,
   deriveCapabilityAvailability,
   dispatchDuration,
   durationLimitsFor,
@@ -431,7 +432,7 @@ function BenchWorkspace({
   );
   const subjectModelFault = (candidate: ManifestModel): string | null => {
     if (subject === undefined) return null;
-    if (!aspectSupport(candidate, subject.aspect).ok) {
+    if (!(subject.kind === "shot" && candidate.capability === "image" && candidate.limits.providerSelectedSize) && !aspectSupport(candidate, subject.aspect).ok) {
       return `does not make ${subject.aspect}`;
     }
     // A board, and a shot in video mode, are filed as covering an authored length: a model that
@@ -949,6 +950,13 @@ function BenchWorkspace({
 
   // 4K joins the wall only when the session has video to answer for it (issue 305 §3).
   const hasVideoTakes = session.takes.some((t) => t.request.mode === "video");
+  const [cropTakeId, setCropTakeId] = useState<string | null>(null);
+  const providerSizedImage = selected?.request.mode === "image" && manifest?.models.some(candidate =>
+    candidate.id === selected.request.model && candidate.provider === selected.request.provider && candidate.limits.providerSelectedSize);
+  const cropShape = subject?.kind === "shot" && providerSizedImage && selected?.request.params.kind === "image"
+    ? selected.request.params.aspect : undefined;
+  const cropAspect = cropShape ? parseAspect(cropShape) : null;
+  const showCrop = cropAspect !== null && selected !== null && cropTakeId === selected.id;
   const [wallFilter, setWallFilter] = useState<"all" | "filed" | "discarded" | "4k">("all");
   const wallTakes = session.takes.filter(
     (t) =>
@@ -2038,8 +2046,9 @@ function BenchWorkspace({
                   </span>
                 )}
                 <span className="fy-bench__chip fy-bench__chip--fact" title="the production's aspect">
-                  {subject.aspect}
+                  {draft.mode === "image" && model?.limits.providerSelectedSize ? `Composition · ${subject.aspect}` : subject.aspect}
                 </span>
+                {draft.mode === "image" && model?.limits.providerSelectedSize && <span className="fy-bench__nomodel">Image size chosen by provider</span>}
               </>
             )}
             {subject === undefined && !soundOnly && (
@@ -2588,6 +2597,13 @@ function BenchWorkspace({
                 {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
               </button>
             ))}
+            {cropAspect !== null && selected?.media && (
+              <button type="button" className={cx("fy-bench__tab", showCrop && "fy-bench__tab--active")}
+                aria-pressed={showCrop} title="Preview a centre crop; the original image is kept"
+                onClick={() => setCropTakeId(showCrop ? null : selected.id)}>
+                {showCrop ? "Full image" : `Preview ${cropShape} crop`}
+              </button>
+            )}
             {/* Download moved onto the take's own tools (design turn 180). */}
           </div>
 
@@ -2661,7 +2677,7 @@ function BenchWorkspace({
           )}
 
           {selected && hasAdultAdapter(selected.request.params) && !state?.app.adapters?.adultContent.enabled ? <div className="fy-bench__empty">Adult preview hidden · enable adult content in Settings to view this take.</div> : selected && selected.media ? (
-            <div className="fy-bench__media fy-imghost">
+            <div className="fy-bench__media fy-imghost" data-image={selected.request.mode === "image" || undefined}>
               {selected.request.mode === "voice" || selected.request.mode === "music" ? (
                 // A take that is a sound has nothing to look at. Read as "video or else a
                 // picture", this rendered a broken image (design 70) — and a song reaching that
@@ -2733,13 +2749,15 @@ function BenchWorkspace({
                     `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
                   )}
                   alt={`Take ${selected.n}`}
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  className="fy-bench__image"
+                  data-crop={showCrop || undefined}
+                  style={showCrop ? { "--bench-crop-aspect": cropAspect } as CSSProperties : undefined}
                 />
               ) : null}
               <div className="fy-bench__overlaychips">
                 <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>
-                {takeMeta(selected).length > 0 && (
-                  <span className="fy-bench__overlaychip">{takeMeta(selected)}</span>
+                {takeMeta(selected, providerSizedImage).length > 0 && (
+                  <span className="fy-bench__overlaychip">{takeMeta(selected, providerSizedImage)}</span>
                 )}
               </div>
             </div>
@@ -3181,7 +3199,7 @@ const MODE_LABELS: Record<BenchMode, string> = {
 };
 
 /** The selected take's viewer chip: the request's own facts, nothing invented. */
-function takeMeta(take: BenchTake): string {
+function takeMeta(take: BenchTake, providerSizedImage = false): string {
   const p = take.request.params;
   // A song states its length, and states the MEASURED one — the request only ever carried a
   // ceiling, and a take that repeats the ceiling would be claiming a length nobody made.
@@ -3196,7 +3214,7 @@ function takeMeta(take: BenchTake): string {
           : played !== undefined
             ? `${Math.round(played)}s`
             : undefined,
-    p.kind === "voice" ? (benchDirectionSummary(p).join(" · ") || undefined) : p.kind === "music" ? undefined : p.aspect,
+    p.kind === "voice" ? (benchDirectionSummary(p).join(" · ") || undefined) : p.kind === "music" ? undefined : providerSizedImage && p.aspect ? `composition ${p.aspect}` : p.aspect,
     // A clip's length as measured, to one decimal, a whole second without the trailing zero
     // (turn 147): `720p · 9:16 · 4.0s` is the design's chip with the figure as it really is.
     p.kind === "video" && played !== undefined

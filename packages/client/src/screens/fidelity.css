@@ -5251,6 +5251,14 @@ span.fy-bench__who { border-bottom: 0; }
   display: flex; align-items: center; justify-content: center;
 }
 .fy-bench__media video { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+/* The crop is a reversible view of provider-sized reference art, not an edit of its bytes. */
+.fy-bench__media[data-image] { container-type: size; }
+.fy-bench__image { width: 100%; height: 100%; object-fit: contain; }
+.fy-bench__image[data-crop] {
+  width: min(100cqw, calc(100cqh * var(--bench-crop-aspect)));
+  height: min(100cqh, calc(100cqw / var(--bench-crop-aspect)));
+  object-fit: cover;
+}
 /* The clip's own transport (142a): a resting play disc, and a bar over a fade at the foot. */
 .fy-bench__playdisc {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
