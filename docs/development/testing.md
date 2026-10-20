@@ -672,7 +672,12 @@ to a PNG path to capture the 1200×791 source view for visual inspection.
 For changes to the audiobook player, the Export audiobook sheet or a window-wide layer opened from
 a page head, run `node scripts/smoke-audiobook-overlays.mjs` from the root with Chrome installed
 (or `ARKE_CHROME`). It renders the fixture book's door and a chapter at 320, 390, 820, 1440 and 2560
-wide, plus 200% text at 1440. Listen covers the window; Export is a native modal on the body,
+wide, plus 200% text at 1440 and desktop chrome at the native 1024px minimum. Titlebar controls
+must not overlap or enter the native window-button area. Use `--viewport desktop-min`, `phone`
+or `small-phone` for a focused check. Phone cases use browser chrome: shrinking an Electron
+CDP viewport to 390px retains its 138px native-button reservation and does not establish a phone
+browser defect. Verify the host mode as well as viewport size when assessing screenshots.
+Listen covers the window; Export is a native modal on the body,
 within the viewport, with no transformed ancestor or horizontal overflow. The chapter export
 starts at This chapter, blocks an incomplete reading, keeps its options under the missing-block
 read quote, refreshes readiness when saved takes arrive, and returns focus to its stable opener.

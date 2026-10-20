@@ -20,6 +20,7 @@ const baselineRef = arg("--baseline");
 const dir = arg("--out") !== null ? resolve(arg("--out")) : await mkdtemp(join(tmpdir(), "arke-audiobook-overlays-"));
 await mkdir(dir, { recursive: true });
 const BASELINE_FILES = [
+  "packages/client/src/components/chrome.tsx",
   "packages/client/src/components/audiobook-player.tsx",
   "packages/client/src/components/audiobook-export.tsx",
   "packages/client/src/components/editor-dialog.tsx",
@@ -28,6 +29,7 @@ const BASELINE_FILES = [
   "packages/client/src/screens/chapter-audiobook.tsx",
   "packages/client/src/screens/chapter-workspace.tsx",
   "packages/client/src/screens/fidelity.css",
+  "packages/client/src/screens/productions.css",
 ];
 const main = await readFile(join(root, "packages/client/src/main.tsx"), "utf8");
 const styles = [...main.matchAll(/^import "([^"]+\.css)";/gm)].map((m) => m[0]).join("\n");
@@ -161,10 +163,11 @@ try {
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await cdp("Page.navigate", { url: origin + "/" }); await until(() => js('typeof window.mountLayout === "function"'));
   const records = [];
-  for (const [name, width, height, mobile, textScale = 1] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["laptop", 1440, 900, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
+  for (const [name, width, height, mobile, textScale = 1, desktop = false] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["desktop-min", 1024, 790, false, 1, true], ["laptop", 1440, 900, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
     if (arg("--viewport") !== null && arg("--viewport") !== name) continue;
     await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: mobile });
+    await js(`document.documentElement.classList.toggle("is-desktop", ${desktop})`);
     await js(`(()=>{for(const token of ['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'])document.documentElement.style.removeProperty('--text-'+token);if(${textScale}===2){const s=getComputedStyle(document.documentElement);const tokens=['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'].map(t=>[t,parseFloat(s.getPropertyValue('--text-'+t))*2]);for(const [t,size]of tokens)document.documentElement.style.setProperty('--text-'+t,size+'px');}})()`);
     await js('window.mountLayout("p/ledger/story/audiobook")');
     await capture(name + "-door");
@@ -195,14 +198,15 @@ try {
     await closePlayer();
     await click('[data-testid="audiobook-export-open"]');
     await js("window.settleLayout()");
-    if (baselineRef === null) {
+    if (await js('[...document.querySelectorAll("button")].some(b=>b.textContent.trim()==="Other exports")')) {
       await js('[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==="Other exports").click()');
       await js("window.settleLayout()");
     }
-    const sheet = await js(`window.measureLayer(${JSON.stringify(baselineRef === null ? "dialog.fy-abv-modal" : ".fy-editordialog")})`);
+    const exportSelector = await js('document.querySelector("dialog.fy-abv-modal") ? "dialog.fy-abv-modal" : ".fy-editordialog"');
+    const sheet = await js(`window.measureLayer(${JSON.stringify(exportSelector)})`);
     if (baselineRef !== null) covers(sheet, name + " export sheet");
     else { assert.equal(sheet.onBody,true);assert.equal(sheet.inTitleRow,false);assert.equal(sheet.container,null);assert.equal(await js('document.querySelector("dialog.fy-abv-modal").matches(":modal")'),true); }
-    const panel = await js(`(()=>{const e=document.querySelector(${JSON.stringify(baselineRef === null ? "dialog.fy-abv-modal" : ".fy-editordialog__panel")}),r=e.getBoundingClientRect();return{left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom,overflow:e.scrollWidth>e.clientWidth+1}})()`);
+    const panel = await js(`(()=>{const e=document.querySelector(${JSON.stringify(exportSelector === "dialog.fy-abv-modal" ? exportSelector : ".fy-editordialog__panel")}),r=e.getBoundingClientRect();return{left:r.left,right:innerWidth-r.right,top:r.top,bottom:innerHeight-r.bottom,overflow:e.scrollWidth>e.clientWidth+1}})()`);
     console.log(name, "export panel", JSON.stringify(panel));
     if (baselineRef === null) {
       assert.ok(panel.top >= 0 && panel.bottom >= 0, name + ": the sheet is inside the window");
@@ -214,6 +218,17 @@ try {
     await escape();
     await js('window.mountLayout("p/ledger/story/chapters/neap?view=audiobook")');
     await capture(name + "-chapter");
+    if (baselineRef === null) {
+      const controls = await js('[...document.querySelectorAll(".fy-titlebar button")].map(e=>({label:e.getAttribute("aria-label")||e.textContent,rect:e.getBoundingClientRect().toJSON()})).filter(e=>e.rect.width>0&&e.rect.height>0)');
+      for (let i=0;i<controls.length;i++) {
+        const a=controls[i].rect;
+        assert.ok(a.left>=0&&a.right<=width-(desktop?138:0)+1,name+": titlebar control clears viewport/native buttons: "+controls[i].label);
+        for (const other of controls.slice(i+1)) {
+          const b=other.rect;
+          assert.ok(Math.min(a.right,b.right)-Math.max(a.left,b.left)<=1||Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)<=1,name+": titlebar controls do not overlap: "+controls[i].label+" / "+other.label);
+        }
+      }
+    }
     const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),visible:l.getBoundingClientRect().width>0}})()');
     console.log(name, "chapter", JSON.stringify(chapterListen));
     if (chapterListen?.visible) {
