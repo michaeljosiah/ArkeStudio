@@ -6,7 +6,9 @@
 .fy-kind-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .fy-kind-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .fy-kind-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.fy-location-grid .fy-gridcard__frame { height: 270px; }
+/* An establishing image identifies the whole place; a portrait crop can hide its subject. */
+.fy-location-grid .fy-gridcard__frame { height: auto; aspect-ratio: 16 / 9; background: var(--muted); border-radius: 7px; }
+.fy-location-grid .fy-gridcard__frame .fy-portrait { object-fit: contain; }
 .fy-faction-grid { padding: 32px 150px 46px; }
 .fy-faction-grid .fy-gridcard__frame { height: 210px; }
 .fy-faction-grid .fy-gridcard__pad { padding: 2px 8px 0; }
