@@ -196,6 +196,7 @@ export async function createSheetFromSentence(
     production?: string;
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
+    requiresDraft?: boolean;
   },
   precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
@@ -238,7 +239,7 @@ export async function createSheetFromSentence(
         }
       : {}),
     targets: [{ path, content }],
-    ...(input.attendedSurface ? { sheetSeed: { path, bodyHash: sheetProseHash(content) } } : {}),
+    ...(input.attendedSurface && input.requiresDraft ? { sheetSeed: { path, bodyHash: sheetProseHash(content) } } : {}),
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),

@@ -264,7 +264,10 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
         : null;
   if (!type) return null;
 
-  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections: doc.sections() });
+  let sections: ReturnType<MarkdownFile["sections"]>;
+  try { sections = doc.sections(); }
+  catch { return null; }
+  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections });
   if (!parsed.success) return null;
   const sheet = parsed.data;
   const fields = new Map<string, string>([

@@ -352,7 +352,7 @@ describe("attended sentence seeds (#1916)", () => {
     const opened = await open(); let store = opened.store, gate = opened.gate;
     const { dir } = opened;
     try {
-      const draft = await createSheetFromSentence(store, gate, { sheetType: "location", name: "Review Room", sentence: "Write a public notice room with clear access.", attendedSurface: "sheet-list" });
+      const draft = await createSheetFromSentence(store, gate, { sheetType: "location", name: "Review Room", sentence: "Write a public notice room with clear access.", attendedSurface: "sheet-list", requiresDraft: true });
       assert.ok(draft.proposal.sheetSeed);
       assert.equal((await gate.project(draft.proposal.id)).review.requiresDraft, true);
       assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
@@ -366,6 +366,14 @@ describe("attended sentence seeds (#1916)", () => {
       await store.close(); store = await WorldStore.open(dir, { clock: CLOCK }); gate = new ProposalManager(store);
       assert.equal(store.getBundle().proposals.find(p => p.proposal.id === draft.proposal.id)?.review?.requiresDraft, true);
       assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
+      for (const malformed of ["---\nid: [broken\n---\n\n## Look\nDraft.", raw.replace("## Look", "Prose without a section")]) {
+        await writeFile(file, malformed);
+        assert.equal((await gate.project(draft.proposal.id)).review.requiresDraft, true);
+        assert.match((await gate.recordProblems(draft.proposal.id))[0]!.message, /could not be read/);
+        assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
+        await store.close(); store = await WorldStore.open(dir, { clock: CLOCK }); gate = new ProposalManager(store);
+        assert.equal(store.getBundle().proposals.find(p => p.proposal.id === draft.proposal.id)?.review?.requiresDraft, true, "an interrupted writer cannot make the world unopenable");
+      }
       doc.setBody("## Look\n—\n\n## Sound\n\n## Customs\n—");
       await writeFile(file, doc.serialize());
       assert.equal((await gate.accept(draft.proposal.id)).status, "invalid", "deleting the brief does not author a sheet");

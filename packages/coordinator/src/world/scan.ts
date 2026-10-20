@@ -1280,7 +1280,7 @@ export async function scanWorld(
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
       ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(Object.keys(proposedScripts).length > 0 ? { episodeScripts: proposedScripts } : {}),
-      ...(review.targets.length > 0 ? { review } : {}),
+      ...(review.targets.length > 0 || review.requiresDraft ? { review } : {}),
     });
   }
   // Proposals are operational staging, not committed entities. Keep parsing and reporting them,
