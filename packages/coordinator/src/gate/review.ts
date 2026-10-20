@@ -14,6 +14,7 @@ import {
   type Proposal,
 } from "@arke-studio/contracts";
 import { MarkdownFile } from "../world/text-files.js";
+import { undraftedSheetProblem } from "./sheet-seed.js";
 
 /**
  * What a proposal would actually change, field by field (#70 §11.5).
@@ -45,6 +46,7 @@ export interface ReviewTarget {
 }
 
 export interface ReviewProjection {
+  requiresDraft?: boolean;
   targets: ReviewTarget[];
 }
 
@@ -262,7 +264,10 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
         : null;
   if (!type) return null;
 
-  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections: doc.sections() });
+  let sections: ReturnType<MarkdownFile["sections"]>;
+  try { sections = doc.sections(); }
+  catch { return null; }
+  const parsed = SheetSchema.safeParse({ ...doc.data, type, sections });
   if (!parsed.success) return null;
   const sheet = parsed.data;
   const fields = new Map<string, string>([
@@ -397,7 +402,9 @@ export function projectReview(input: ReviewInput): ReviewProjection {
     });
   }
 
-  return { targets };
+  const seed = input.proposal.sheetSeed;
+  const requiresDraft = seed && undraftedSheetProblem(input.proposal, input.proposed(seed.path)) !== null;
+  return { targets, ...(requiresDraft ? { requiresDraft: true } : {}) };
 }
 
 /** A create has no version to show, and "new" is the thing the reviewer needs to notice. */

@@ -576,7 +576,7 @@ export function WorldOverviewScreen() {
         {pendingCast.map((sheet, i) => {
           const slot = FAN[characters.length + i] ?? FAN[2]!;
           const destination = pendingSheetDestination(sheet);
-          const state = pendingSheetState(authoring[sheet.proposalId], destination);
+          const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
           return (
             <div
               key={sheet.proposalId}
@@ -1003,11 +1003,14 @@ function pendingSheetRoute(worldId: string | undefined, sheet: PendingSheet): st
   return null;
 }
 
-function pendingSheetState(activity: AuthoringActivity | undefined, destination: PendingSheetDestination): {
+function pendingSheetState(activity: AuthoringActivity | undefined, destination: PendingSheetDestination, requiresDraft = false): {
   foot: string;
   body: string;
   tone: "live" | "sketch" | "warn";
 } {
+  if (requiresDraft && activity?.status !== "running") {
+    return { foot: "not drafted", body: "your brief is saved — open it to draft the sheet", tone: "warn" };
+  }
   if (activity === undefined) {
     return destination === "here"
       ? { foot: "decision here", body: "open this draft to see where it got to", tone: "sketch" }
@@ -1056,7 +1059,7 @@ function PendingSheetCards({
     <>
       {pending.map((sheet) => {
         const destination = pendingSheetDestination(sheet);
-        const state = pendingSheetState(authoring[sheet.proposalId], destination);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
         return (
           <button
             key={sheet.proposalId}
@@ -1122,7 +1125,7 @@ function PendingSheetRows({
     <>
       {pending.map((sheet) => {
         const destination = pendingSheetDestination(sheet);
-        const state = pendingSheetState(authoring[sheet.proposalId], destination);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination, sheet.requiresDraft);
         return (
           <button
             key={sheet.proposalId}

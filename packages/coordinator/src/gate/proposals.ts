@@ -67,6 +67,7 @@ import {
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
 import { projectReview, type ReviewProjection } from "./review.js";
+import { undraftedSheetProblem } from "./sheet-seed.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
@@ -400,6 +401,7 @@ export interface StageInput {
   openChoices?: ProposalOpenChoice[];
   /** SPEC-019 R-19: the authoring skill this draft was shaped under, when there was one. */
   skill?: ProposalSkill;
+  sheetSeed?: Proposal["sheetSeed"];
 }
 
 /**
@@ -558,6 +560,7 @@ export class ProposalManager {
         ...(input.production !== undefined ? { production: input.production } : {}),
         created: at,
         draftRevision: 1,
+        ...(input.sheetSeed ? { sheetSeed: input.sheetSeed } : {}),
         ...(input.worldChatOrigins ? { worldChatOrigins: input.worldChatOrigins } : {}),
         ...(input.openChoices ? { openChoices: input.openChoices } : {}),
         // Exactly the provenance triple, never the caller's object. The registry's Skill carries
@@ -1192,6 +1195,8 @@ export class ProposalManager {
         return { status: "no-op" };
       }
 
+      const seedProblem = undraftedSheetProblem(proposal, files.find(file => file.path === proposal.sheetSeed?.path)?.content ?? null);
+      if (seedProblem) return { status: "invalid", problems: [seedProblem] };
       const problems = await this.checkAuthoredBounds(files);
       if (problems.length > 0) return { status: "invalid", problems };
 
@@ -1480,7 +1485,8 @@ export class ProposalManager {
       if (content === null) continue;
       files.push({ path: target.path, action: "replace", content, baseHash: target.baseHash });
     }
-    return this.checkAuthoredBounds(files);
+    const seedProblem = undraftedSheetProblem(proposal, files.find(file => file.path === proposal.sheetSeed?.path)?.content ?? null);
+    return [...(seedProblem ? [seedProblem] : []), ...await this.checkAuthoredBounds(files)];
   }
 
   // ---- rebase --------------------------------------------------------------

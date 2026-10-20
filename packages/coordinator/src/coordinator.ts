@@ -9297,6 +9297,7 @@ export class Coordinator {
               ? {}
               : {
                   attendedSurface: msg.production !== undefined ? "production-cast" : "sheet-list",
+                  requiresDraft: this.authoring !== null,
                 }),
           })).value;
           this.emit({

@@ -14,6 +14,7 @@ import {
 } from "@arke-studio/contracts";
 import type { CommitResult } from "../world/commit.js";
 import type { ProposalManager } from "../gate/proposals.js";
+import { sheetProseHash } from "../gate/sheet-seed.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { uniqueSlug } from "../world/slug.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
@@ -195,6 +196,7 @@ export async function createSheetFromSentence(
     production?: string;
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
+    requiresDraft?: boolean;
   },
   precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
@@ -237,6 +239,7 @@ export async function createSheetFromSentence(
         }
       : {}),
     targets: [{ path, content }],
+    ...(input.attendedSurface && input.requiresDraft ? { sheetSeed: { path, bodyHash: sheetProseHash(content) } } : {}),
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),

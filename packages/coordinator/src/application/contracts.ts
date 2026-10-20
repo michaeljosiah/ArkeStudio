@@ -40,6 +40,8 @@ export interface SheetProposalInput {
   sentence: string;
   production?: string;
   attendedSurface?: "sheet-list" | "production-cast";
+  /** A writing service will turn the sentence into prose; otherwise it is a manual sketch. */
+  requiresDraft?: boolean;
 }
 export interface IllustrationInput {
   sheetId: string;

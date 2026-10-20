@@ -208,7 +208,10 @@ describe("sheet-from-a-sentence decision ownership", () => {
       mode: "attended",
       owner: { kind: "surface", surface: "sheet-list", targetPath: attended.targets[0]!.path },
     });
-    await h.provider.gate()!.discard(attended.id);
+    assert.equal(attended.sheetSeed, undefined, "no-harness hosts keep an acceptable manual sketch");
+    await h.send({ kind: "proposal-accept", worldId: WORLD_ID, proposalId: attended.id });
+    assert.ok(h.events.some(event => event.type === "proposal.resolved" && event.proposalId === attended.id && event.outcome === "accepted"));
+    assert.ok(h.provider.openStore()!.getBundle().sheets.some(sheet => sheet.id === "the-attended-quay"));
 
     await h.send({
       kind: "create-sheet-from-sentence",

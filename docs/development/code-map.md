@@ -758,3 +758,5 @@ Chapter review v3: contracts `effectiveReviewVerdict` enforces visibility limits
 
 Untrusted reading links and the desktop new-window handler share contracts `external-links.ts` (absolute HTTP(S) only). Desktop `external-links.ts` enforces that boundary before the OS shell.
 Sheet-list proposals open the shared `PageSheet` from `world.tsx`; the existing connected proposal owns gate and revision commands. `cast.css` constrains only this review surface so its decision controls remain visible while content scrolls.
+
+Attended sentence requests carry a prose-only `sheetSeed` fingerprint on the existing proposal. Coordinator `gate/sheet-seed.ts` derives `review.requiresDraft` and guards acceptance/authoring repair; list cards and the connected panel retain the same brief for retry. Founding sketches and older proposals retain their existing contract.
