@@ -295,6 +295,9 @@ describe("the Mood line (design turn 193, rule 9)", () => {
     assert.deepEqual(cutMoodClothing("Amber lamplight, a leather coat, a silk dress."), {
       text: "Amber lamplight.", cut: 2,
     });
+    assert.deepEqual(cutMoodClothing("Everyone dressed in leather. She is wearing silk. Cool light on the leather ledger."), {
+      text: "Cool light on the leather ledger.", cut: 2,
+    });
   });
 });
 describe("the frame word (design turn 193, rule 11)", () => {

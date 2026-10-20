@@ -338,10 +338,11 @@ export function lookNeedsChoiceBoundary(record: { look?: AudiobookLook | undefin
  * Words for what someone wears, how their hair is done, or what they have on them: the things a
  * Mood line never names (design turn 193, rule 9; SPEC-047 R-117). Clothing belongs to the look.
  * Materials alone do not name clothing: leather may describe a ledger and velvet a chair.
- * The garment in "leather coat" is still checked; this vocabulary does not validate fabrics.
+ * A named garment or an explicit wearing phrase still counts ("wearing leather"); this
+ * vocabulary does not otherwise validate fabrics.
  */
 export const GARMENT_WORDS =
-  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?)\b/i;
+  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?|(?<=\b(?:wears?|wearing|wore|dressed in|clad in|clothed in)\s+)(?:silk|satin|velvet|linen|denim|leather|lace|ankara|aso[- ]oke))\b/i;
 
 /**
  * A Mood line with every clause that names a garment, a hairstyle or an ornament cut out (rule 9):

@@ -159,6 +159,12 @@ describe("the other checks", () => {
     assert.equal(coat["garments"]!.ok, false);
     assert.match(coat["garments"]!.note!, /coat/);
     assert.doesNotMatch(coat["garments"]!.note!, /leather/);
+    for (const clothing of ["She is wearing silk.", "She wears leather.", "She is dressed in velvet.", "She is clad in linen."]) {
+      const marked = pictureChecks({ held: hold({ ...EYES, prompt: `${clothing} ${objects}` }), who: riding(["ife"]), people: PEOPLE, lines: [], block: EYES_BLOCK, mood: MOOD }).find(check => check.id === "garments")!;
+      assert.equal(marked.ok, false, clothing);
+      assert.match(marked.note!, new RegExp(clothing.split(" ").at(-1)!.replace(".", "")));
+    }
+    assert.equal(checksOf({ ...EYES, prompt: `${EYES.prompt} She is wearing satin.` }, `${EYES_BLOCK} She wore satin.`)["garments"]!.ok, true, "the passage can authorize the material");
   });
 
   it("does not turn a shared surname into an off-camera relative, and still recognises familiar names", () => {
