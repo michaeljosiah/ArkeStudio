@@ -28,6 +28,15 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN ARKE PLAYER EXPORT 233
+  { group: "Export · turn 233", screen: "The Export sheet with Arke Player chosen", frame: "233a", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  { group: "Export · turn 233", screen: "Making it, in Activity", frame: "233b", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  { group: "Export · turn 233", screen: "The package made: its file, size and SHA-256", frame: "233c", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  { group: "Export · turn 233", screen: "Not made: each blocker in one clause", frame: "233d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  { group: "Export · turn 233", screen: "Publications · Other exports: the package with its size and SHA-256", frame: "233e", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  { group: "Export · turn 233", screen: "From a phone: made on the desktop, then Download or Share", frame: "233f", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-10-21", controls: [], notes: ["Drawn for review 21 October 2026; SPEC-058, #2037."] },
+  // END ARKE PLAYER EXPORT 233
+
   // BEGIN PROSE REVIEW 232
   { group: "Chapter review · turn 232", screen: "Review chapter · choose the checks; AI tells is new", frame: "232a", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Approved 19 October 2026; implementation tracked in #1952."] },
   { group: "Chapter review · turn 232", screen: "Manuscript · a crowded passage: its tells marked, its count in the margin", frame: "232b", route: "Story / Chapters / chapter", status: "drawn", checked: "2026-10-19", controls: [], notes: ["Approved 19 October 2026; implementation tracked in #1952."] },
@@ -846,6 +855,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "arke-player-export-233.review.html", what: "Turn 233: Export → Arke Player — the sheet with Arke Player chosen, making it in Activity, the package made with its size and SHA-256, blockers in one clause, Publications’ Other exports, and from a phone with Download and Share.", state: "drawn for review; SPEC-058, #2037" },
   { file: "prose-review-232.review.html", what: "Turn 232 revision 2: AI tells in the chapter review — choosing checks, a crowded passage marked in the page with its note and the chapter strip, a tell hovered, a kind lit, What counts, Check again after the writer’s rewrite, the report, a chapter with nothing crowded, phone, and Rewrite with Arke checked before it is shown (still crowded, kept and versioned).", state: "approved; implementation tracked in #1952" },
   { file: "stage-231.review.html", what: "Turn 231: the Stage as its own workspace in the page, the draft bar after Build and Quick layout with Arke’s notes apart, Start from, one Keep, lights in a draft, and the plate picker with locations first.", state: "current" },
   { file: "stage-229.review.html", what: "Turn 229: the Stage with a location plate, the Lit and Plate looks, jointed figures with poses and contacts, the kit and lights, the camera in words, Build with Arke as a working log, Board 1 with a cut animatic, and the Bench prompt written as timed cuts with Follow.", state: "approved; implementation tracked in #1826" },
@@ -1013,6 +1023,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="audio-drama-228.css">
 <link rel="stylesheet" href="stage-229.css">
 <link rel="stylesheet" href="stage-231.css">
+<link rel="stylesheet" href="arke-player-export-233.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
