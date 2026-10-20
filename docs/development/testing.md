@@ -1,5 +1,12 @@
 # Running and validating changes
 
+Character sheet layout (SPEC-001 R-7, master turn 161) uses
+`node scripts/smoke-cast-layout.mjs` and the same command with `--reading`.
+The first compares the prose column with the approved Fold frame; the second checks short and
+long sheets from 320 through 1536 px, including enlarged text and scrolling below navigation.
+Inspect the full-page phone, tablet and desktop captures alongside the applicable master.
+Containment and reachable controls alone do not establish visual fidelity.
+
 Story PDF publishing (SPEC-058) uses contracts `test/story-publication.test.ts`, coordinator
 `test/publications/story-pdf.test.ts`, `test/publications/story.test.ts`, `test/publications/story-routes.test.ts` and
 `test/story-pdf-runner.test.ts`, client `test/story-pdf.test.tsx`, `test/manuscript.test.tsx`
