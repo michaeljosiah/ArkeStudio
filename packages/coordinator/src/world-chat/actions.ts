@@ -584,6 +584,7 @@ function currentWorldObservation(
     case "world-metadata": return { target: store.worldId, fence: worldMetadataFence(bundle) };
     case "canon": return { target: store.worldId, fence: canonFence(bundle) };
     case "sheets": return { target: store.worldId, fence: sheetsFence(bundle) };
+    case "bible": return { target: "bible", fence: bibleFence(bundle) };
     case "art-direction": return { target: "art-direction", fence: artDirectionFence(bundle) };
     case "references": return { target: store.worldId, fence: referencesFence(bundle) };
     case "artifacts": return { target: store.worldId, fence: artifactsFence(bundle) };
@@ -886,7 +887,7 @@ function worldActionObservations(
       current.target !== receipt.target.id ||
       current.fence !== receipt.observedRevisionOrDigest
     ) {
-      receiptProblems.push(`The complete ${receipt.target.requirement} read is no longer current.`);
+      receiptProblems.push(`The complete ${receipt.target.requirement} read is no longer current (receipt ${id}, target ${receipt.target.id}).`);
       return [];
     }
     return [{
