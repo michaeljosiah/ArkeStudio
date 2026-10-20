@@ -37,6 +37,10 @@ and remain usable after the source world moves or closes. Missing/changed files 
 M4B preparation saves and reports the current stage through the existing edition phase:
 rendering each chapter, encoding the combined audiobook, then checking its output. Reopening
 Publish shows that saved phase. These stages do not estimate a percentage or completion time.
+The preparation view follows approved turn 224: edition identity and cover, one row per selected
+output, the shared indeterminate loading indicator, and Back to story. Closing the sheet keeps
+the host operation running; Cancel preparation remains available in its footer. Built rows still
+wait for edition checks and do not expose files for delivery.
 
 Private story previews use a separate authenticated media route. Native Save and download delivery
 require a ready edition after Create has rechecked the source; preview playback does not approve
