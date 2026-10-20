@@ -104,11 +104,13 @@ const DOOR: AudiobookDoor = {
 };
 
 type Box = { l: number; r: number; t: number; b: number };
-type Measured = { width: number; height: number; hero: Box; portrait: Box; name: Box; nextWork: Box; firstChapter: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[] };
+type Measured = { width: number; height: number; hero: Box; portrait: Box; name: Box; nextWork: Box; firstChapter: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[]; coarse: boolean; header: { label: string; box: Box }[] };
 
 /** The page at one window size, laid out by Chrome. */
-async function measure(chrome: string, width: number, height: number): Promise<Measured> {
-  __setStateForTest(state(), { audiobookDoor: { inkbound: { door: DOOR, requestId: "01J8F3K2QW9VZX4N7M0RTYB6D1" } } });
+async function measure(chrome: string, width: number, height: number, options: { longTitle?: boolean; touch?: boolean; desktop?: boolean } = {}): Promise<Measured> {
+  const fixture = state();
+  if (options.longTitle) fixture.world!.productions.find(p => p.meta.id === "inkbound")!.meta.title = "The Ledger of Nights — A Very Long Production Title";
+  __setStateForTest(fixture, { audiobookDoor: { inkbound: { door: DOOR, requestId: "01J8F3K2QW9VZX4N7M0RTYB6D1" } } });
   let html: string;
   try {
     html = renderToString(
@@ -127,15 +129,18 @@ async function measure(chrome: string, width: number, height: number): Promise<M
     out.textContent = JSON.stringify(hero === null ? null : {
       width: innerWidth, height: innerHeight, hero: box(hero), portrait: box(document.querySelector(".fy-abshow__card-im")), name: box(document.querySelector(".fy-abshow__card-nm")), nextWork: box(document.querySelector('[data-testid="audiobook-next-work"]')), firstChapter: box(document.querySelector('[data-testid="audiobook-row"]')), maxHeight: getComputedStyle(hero).maxHeight, heightRule: hero.style.height,
       presses: [...document.querySelectorAll('[data-testid="audiobook-presses"] button')].map((el) => ({ label: el.getAttribute("aria-label") || el.textContent, box: box(el) })),
+      coarse: matchMedia('(pointer: coarse)').matches,
+      header: [...document.querySelectorAll('.fy-titlebar button')].map(el => ({label: el.getAttribute('aria-label') || el.textContent, box: box(el)})).filter(el => el.box.r > el.box.l && el.box.b > el.box.t),
     });
     document.body.append(out);
   });`;
   const dir = mkdtempSync(join(tmpdir(), "arke-abshow-"));
   try {
     const file = join(dir, "page.html");
-    writeFileSync(file, `<!doctype html><html class="dark"><head><meta charset="utf-8"><style>${stylesheets()}
+    writeFileSync(file, `<!doctype html><html class="dark${options.desktop ? " is-desktop" : ""}"><head><meta charset="utf-8"><style>${stylesheets()}
 *,*::before,*::after{animation:none!important;transition:none!important}html,body,#root{height:100%;margin:0}</style></head><body><div id="root">${html}</div><script>${script}</script></body></html>`);
     const args = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${join(dir, "profile")}`, `--window-size=${width},${height}`, "--virtual-time-budget=5000", "--dump-dom", pathToFileURL(file).href];
+    if (options.touch) args.unshift("--blink-settings=primaryPointerType=2,availablePointerTypes=2,primaryHoverType=0,availableHoverTypes=0");
     // The runner's Chrome on Linux has no usable sandbox under Ubuntu's user-namespace policy; the page is our own file.
     if (process.platform === "linux") args.unshift("--no-sandbox");
     const dom = await new Promise<string>((resolve, reject) => {
@@ -196,6 +201,29 @@ describe("the audiobook hero never clips its presses (design turn 199, rule 2)",
         assert.ok(inside, `${what}: ${press.label} at ${JSON.stringify(press.box)} lies inside the hero ${JSON.stringify(measured.hero)}`);
         assert.ok(press.box.r - press.box.l >= 44 - 0.5 && press.box.b - press.box.t >= 44 - 0.5, `${what}: ${press.label} is whole, 44 high`);
       }
+    });
+  }
+});
+
+describe("the book header leaves the centred wordmark and app controls clear (#2041)", () => {
+  for (const [width, touch, desktop] of [[640, true, false], [820, true, false], [1024, false, true], [1440, false, true]] as const) {
+    it(`keeps a long title clear in a ${width}px window with ${desktop ? "desktop chrome" : "touch browser"}`, { skip: chrome === null ? "no Chrome to lay the page out" : false }, async () => {
+      const measured = await measure(chrome!, width, 900, { longTitle: true, touch, desktop });
+      // Chrome's requested window size includes platform decorations. Judge the laid-out viewport.
+      assert.ok(measured.width >= 600 && measured.width <= width);
+      assert.equal(measured.coarse, touch);
+      assert.ok(measured.header.length >= 8, "back, context, wordmark and five app controls are present");
+      for (let i = 0; i < measured.header.length; i++) {
+        const control = measured.header[i]!, a = control.box;
+        assert.ok(a.l >= 0 && a.r <= measured.width - (desktop ? 138 : 0), `${control.label} clears the viewport and native captions`);
+        if (touch) assert.ok(a.r - a.l >= 44 && a.b - a.t >= 44, `${control.label} has a 44px touch target`);
+        for (const other of measured.header.slice(i + 1)) {
+          const b = other.box;
+          assert.ok(Math.min(a.r, b.r) - Math.max(a.l, b.l) <= 1 || Math.min(a.b, b.b) - Math.max(a.t, b.t) <= 1, `${control.label} overlaps ${other.label}`);
+        }
+      }
+      const brand = measured.header.find(c => c.label === "ArkeStudio")!.box;
+      assert.ok(Math.abs((brand.l + brand.r) / 2 - measured.width / 2) < 1, "wordmark remains centred on the window");
     });
   }
 });
