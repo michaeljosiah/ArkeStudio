@@ -576,7 +576,8 @@ export class ProposalManager {
 
   /**
    * The form editor's whole flow (SPEC-004 §2.9): stage a sheet edit whose proposed content
-   * is the live sheet with its prose sections replaced. Serialisation stays server-side.
+   * is the live sheet with only its named prose sections changed. Omitted fields survive;
+   * whole-document replacement belongs to an explicit staged content proposal.
    */
   async stageSheetEdit(
     path: string,
@@ -589,7 +590,13 @@ export class ProposalManager {
     const live = await this.readLive(path);
     if (live === null) throw new Error(`${path} does not exist`);
     const doc = MarkdownFile.parse(live);
-    doc.setBody(sections.map((s) => `## ${s.heading}\n${s.body.trim()}`).join("\n\n"));
+    const current = doc.sections();
+    const edits = new Map(sections.map(section => [section.heading, section.body]));
+    if (edits.size !== sections.length) throw new Error("Each sheet section must be submitted once.");
+    for (const heading of edits.keys()) {
+      if (!current.some(section => section.heading === heading)) throw new Error(`${heading} is not a section on this sheet`);
+    }
+    doc.setBody(current.map(section => `## ${section.heading}\n${(edits.get(section.heading) ?? section.body).trim()}`).join("\n\n"));
     if (role !== undefined) {
       const trimmed = role.trim();
       if (trimmed === "") {
