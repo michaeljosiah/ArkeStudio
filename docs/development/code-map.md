@@ -514,6 +514,9 @@ the control appears only for an existing portrait with no accepted main photo. T
 
 Finished character looks enter through client `components/character-look-import.tsx`, using the
 shared PageSheet, bounded browser-media reader and correlated `character-look.imported` event.
+`screens/character-pages.css` keeps its phone sheet and bounds the larger dialog; the shared
+Button opens the native image picker. `scripts/smoke-character-layout.mjs --pages-only --route looks --import-look`
+checks responsive composition, keyboard cancellation and the import receipt states.
 Coordinator `references/look-import.ts` validates the image and current character; `references/takes.ts`
 records the immutable unreviewed user take with name, type, source filename/hash and zero cost.
 The existing More looks gallery and `accept-character-look` command own review and acceptance.

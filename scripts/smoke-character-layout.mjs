@@ -153,8 +153,8 @@ try {
   await navigate("/");await until(()=>js('typeof window.mountCharacter === "function"'));
   const records=[];
   const only=process.argv.includes("--viewport")?process.argv[process.argv.indexOf("--viewport")+1]:null;
-  for(const [name,width,height,touch] of (baseline ? [["desktop",1360,850,false]] : [["desktop",1360,850,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true]]).filter(v=>!only||v[0]===only)) {
-    await size(width,height,touch);if(touch)await cdp("Emulation.setTouchEmulationEnabled",{enabled:true});
+  for(const [name,width,height,touch] of (baseline ? [["desktop",1360,850,false]] : [["desktop",1360,850,false],["fold",984,1060,true],["phone",390,797,true],["phone375",375,812,true],["phone360",360,800,true],["narrow",600,850,true],...(process.argv.includes("--import-look") ? [["tablet",768,1024,true],["wide",1920,1080,false],["short",1360,480,false]] : [])]).filter(v=>!only||v[0]===only)) {
+    await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:touch});
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom","'+(touch?20:0)+'px")');
     for(const route of pageRoutes) {
       await js('window.mountCharacter('+JSON.stringify(route)+')');
@@ -174,21 +174,37 @@ try {
       assert.equal(await js('[...document.querySelectorAll("button")].find(b=>b.textContent==="Accepting…").disabled'),true,"pending adoption cannot be sent twice");
     }
     if(!baseline && process.argv.includes("--import-look")) {
-      await js('window.mountCharacter("looks","pending");[...document.querySelectorAll("button")].find(b=>b.textContent==="Import a look").click();window.settleCharacter()');
+      await js('window.mountCharacter("looks","pending");window.importOpener=[...document.querySelectorAll("button")].find(b=>b.textContent==="Import a look");window.importOpener.focus();window.importOpener.click();window.settleCharacter()');
+      const bounds=await js('document.querySelector(".fy-page-sheet[open]").getBoundingClientRect().toJSON()');
+      if(width>=600){const dialogWidth=Math.min(560,width-48);assert.equal(bounds.width,dialogWidth,"import reuses the bounded generation dialog width");assert.ok(Math.abs(bounds.x-(width-dialogWidth)/2)<1);assert.ok(bounds.y>=23&&bounds.bottom<=height-23,"desktop dialog stays clear of window edges");}
+      else {assert.equal(bounds.width,width);assert.equal(bounds.y,193,"phone keeps the approved sheet top");}
+      for(let i=0;i<8;i++){await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Tab",code:"Tab",windowsVirtualKeyCode:9});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Tab",code:"Tab",windowsVirtualKeyCode:9});}
+      assert.ok(await js('document.querySelector(".fy-page-sheet[open]").contains(document.activeElement)'),"keyboard focus stays in import");
       await js('(()=>{const input=document.querySelector(".fy-look-import input[type=file]"),data=new DataTransfer();data.items.add(new File(["finished image"],"winter-coat.png",{type:"image/png"}));input.files=data.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
       await capture(name+"-import-look");
       assert.equal(await js('(()=>{const d=document.querySelector(".fy-page-sheet[open]"),b=d.getBoundingClientRect(),body=d.querySelector(".fy-page-sheet__body"),foot=d.querySelector(".fy-page-sheet__foot").getBoundingClientRect();return b.x>=0&&b.right<=innerWidth+1&&body.scrollWidth<=body.clientWidth+1&&foot.bottom<=innerHeight+1})()'),true,name+" import controls fit");
       await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Add for review").click();window.settleCharacter()');
+      await capture(name+"-import-busy");
       assert.equal(await js('window.commands.findLast(c=>c.kind==="import-character-look").name'),"winter coat");
       assert.equal(await js('window.commands.findLast(c=>c.kind==="import-character-look").files[0].name'),"winter-coat.png");
       await js('window.replyToLookImport("failed","01J8F3K2QW9VZX4N7M0RTYB6ZZ")');
       assert.equal(await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Importing…").disabled'),true,"unrelated reply ignored");
       await js('window.replyToLookImport("failed");window.settleCharacter()');
       assert.equal(await js('document.querySelector(".fy-look-import [role=alert]").textContent'),"Choose a complete image.");
+      await capture(name+"-import-error");
       await js('[...document.querySelectorAll(".fy-page-sheet button")].find(b=>b.textContent==="Add for review").click();window.settleCharacter()');
       await js('window.replyToLookImport("landed");window.settleCharacter()');
       assert.equal(await js('!!document.querySelector(".fy-look-import")'),false,"landed image closes import sheet");
       assert.equal(await js('window.commands.some(c=>c.kind==="accept-character-look")'),false,"import never accepts identity or the look");
+      await js('window.importOpener.focus();window.importOpener.click();window.settleCharacter()');
+      if(name==="desktop"||name==="phone"){
+        await js('document.documentElement.classList.add("dark");window.settleCharacter()');await capture(name+"-import-dark");
+        await js('document.documentElement.classList.remove("dark")');
+      }
+      const imports=await js('window.commands.filter(c=>c.kind==="import-character-look").length');
+      await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await js('window.settleCharacter()');
+      assert.ok(await js('!document.querySelector(".fy-look-import")&&document.activeElement===window.importOpener'),"Escape returns focus to the opener");
+      assert.equal(await js('window.commands.filter(c=>c.kind==="import-character-look").length'),imports,"cancellation sends no import");
     }
     for(const [dialog,route,open] of (process.argv.includes("--pages-only") ? [] : [
       ["explore","looks",'document.querySelector(".fy-looks-composer .ui-btn").click()'],

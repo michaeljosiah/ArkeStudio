@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ulid } from "@arke-studio/contracts";
 import { readBrowserMedia } from "../lib/browser-media-import.js";
 import { send, subscribeCharacterLookImport, useStore } from "../lib/store.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button, Input, Select } from "./ui.js";
+import { Upload } from "./icons.js";
 
 export function CharacterLookImport({ worldId, sheetId, characterName, onClose, onImported }: {
   worldId: string; sheetId: string; characterName: string; onClose: () => void; onImported: (takeId: string) => void;
 }) {
   const { state, connection } = useStore();
   const [file, setFile] = useState<File | null>(null);
+  const picker = useRef<HTMLInputElement>(null), fileLabel = useId();
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"costume" | "pose-expression" | "condition-age">("costume");
   const [busy, setBusy] = useState(false);
@@ -43,14 +45,18 @@ export function CharacterLookImport({ worldId, sheetId, characterName, onClose, 
       }
     }
   };
-  return <PageSheet open title="Import a look" subtitle={characterName} onClose={onClose}
+  return <PageSheet open title="Import a look" subtitle={characterName} onClose={onClose} className="fy-look-import-sheet"
     footer={<><Button onClick={onClose}>{busy ? "Close" : "Cancel"}</Button><Button variant="primary" disabled={!file || !name.trim() || busy || !current.current} onClick={() => { void submit(); }}>{busy ? "Importing…" : "Add for review"}</Button></>}>
     <div className="fy-look-import">
       <p>Choose a finished image. Review its identity in More looks before accepting it.</p>
-      <label>Image<Input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={event => {
+      <div className="fy-look-import__image"><span>Image</span>
+        <div className="fy-look-import__file"><Button disabled={busy} aria-describedby={file ? fileLabel : undefined} onClick={() => picker.current?.click()}><Upload size={16} />Choose image</Button>
+          {file && <span id={fileLabel}>{file.name}</span>}
+        </div>
+        <input ref={picker} hidden type="file" aria-label="Image" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={event => {
         const chosen = event.currentTarget.files?.[0] ?? null; setFile(chosen);
         if (chosen && !name.trim()) setName(chosen.name.replace(/\.[^.]*$/, "").replace(/[-_]+/g, " ").slice(0, 60));
-      }} /></label>
+      }} /></div>
       <label>Name<Input value={name} maxLength={60} disabled={busy} onChange={event => setName(event.target.value)} /></label>
       <label>Type<Select label="Look type" value={kind} disabled={busy} onChange={event => setKind(event.target.value as typeof kind)}>
         <option value="costume">Costume</option><option value="pose-expression">Pose / expression</option><option value="condition-age">Condition / age</option>
