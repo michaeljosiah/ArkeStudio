@@ -232,6 +232,9 @@ export function mountAudiobookPlayer(root, options) {
 .abp-play{width:52px;height:52px;flex:none;border-radius:50%;background:var(--abp-fg)!important;color:var(--abp-bg)!important;display:inline-flex!important;align-items:center;justify-content:center}
 .abp-book{position:relative;height:2px;margin-top:12px;border-radius:1px;background:color-mix(in srgb,var(--abp-fg) 16%,transparent)}
 .abp-book>i{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--abp-fg) 60%,transparent)}
+.abp-summary{flex-wrap:wrap;justify-content:space-between;margin-top:8px}
+.abp-summary .abp-mono,.abp-availability{white-space:normal}
+.abp-availability{margin:8px 0 0;line-height:1.5}
 .abp-text-lab{display:none!important}
 .abp-chrome{transition:opacity .35s ease}
 @keyframes abp-rest{to{opacity:0}}
@@ -318,7 +321,8 @@ export function mountAudiobookPlayer(root, options) {
     '<span class="abp-mono abp-len" data-ref="len"></span>' +
     "</div>" +
     '<div class="abp-book" data-ref="book"><i></i></div>' +
-    '<div class="abp-row" style="margin-top:8px"><span class="abp-mono abp-of" data-ref="of"></span><span class="abp-grow"></span><span class="abp-mono abp-left" data-ref="left"></span></div>' +
+    '<div class="abp-row abp-summary"><span class="abp-mono abp-of" data-ref="of"></span><span class="abp-mono abp-left" data-ref="left"></span></div>' +
+    '<p class="abp-mono abp-availability" data-ref="availability"></p>' +
     "</div>" +
     '<audio data-ref="a0" preload="auto"></audio><audio data-ref="a1" preload="auto"></audio>';
 
@@ -327,7 +331,7 @@ export function mountAudiobookPlayer(root, options) {
     pics: [ref("picA"), ref("picB")], eyebrow: ref("eyebrow"), chap: ref("chap"), textTop: ref("textTop"), textLab: ref("textLab"),
     chaptersBtn: ref("chaptersBtn"), follow: ref("follow"), measure: ref("measure"), sheet: ref("sheet"), poster: ref("poster"), track: ref("track"),
     line: ref("line"), now: ref("now"), len: ref("len"), toggle: ref("toggle"), prevBtn: ref("prevBtn"), nextBtn: ref("nextBtn"),
-    speedBtn: ref("speedBtn"), sleepBtn: ref("sleepBtn"), book: ref("book"), of: ref("of"), left: ref("left"),
+    speedBtn: ref("speedBtn"), sleepBtn: ref("sleepBtn"), book: ref("book"), of: ref("of"), left: ref("left"), availability: ref("availability"),
     pushBtn: ref("pushBtn"), pushNote: ref("pushNote"),
   };
   const bar = root.querySelector(".abp-bar");
@@ -848,17 +852,23 @@ export function mountAudiobookPlayer(root, options) {
     el.track.setAttribute("aria-valuetext", time(t) + " of " + time(length));
   }
   function bookLine() {
-    const total = chapters.reduce((sum, c) => sum + c.seconds, 0);
-    const before = chapters.slice(0, ci).reduce((sum, c) => sum + c.seconds, 0);
+    const total = chapters.reduce((sum, c) => sum + (c.audio.length > 0 ? c.seconds : 0), 0);
+    const before = chapters.slice(0, ci).reduce((sum, c) => sum + (c.audio.length > 0 ? c.seconds : 0), 0);
     const done = before + t;
     return { pct: total > 0 ? Math.min(100, (done / total) * 100) : 0, left: Math.max(0, total - done) };
+  }
+  function availability() {
+    if (chapters.length === 0) return "No chapters";
+    const available = chapters.filter((c) => c.audio.length > 0);
+    const complete = available.filter((c) => c.state === "read").length;
+    return available.length + " of " + chapters.length + (chapters.length === 1 ? " chapter has audio" : " chapters have audio") +
+      (complete < available.length ? " · " + complete + " complete" : "");
   }
   function renderSheet() {
     root.toggleAttribute("data-sheet", sheetOpen);
     el.sheet.hidden = !sheetOpen;
     el.chaptersBtn.setAttribute("aria-pressed", String(sheetOpen));
     if (!sheetOpen) return;
-    const read = chapters.filter((c) => c.state === "read").length;
     const rows = chapters.map((c, i) => {
       const progress = i < ci ? 100 : i === ci && c.seconds > 0 ? Math.min(100, (t / c.seconds) * 100) : 0;
       const unread = c.gaps.reduce((sum, g) => sum + (g.to - g.from + 1), 0);
@@ -867,7 +877,7 @@ export function mountAudiobookPlayer(root, options) {
         : '<span class="prog"><i style="width:' + progress + '%"></i></span>' + (c.state === "part" ? '<span class="abp-mono">' + unread + " not read</span>" : "") + '<span class="abp-mono">' + time(c.seconds) + "</span>";
       return '<button type="button" class="abp-ch' + (i === ci ? " cur" : "") + '" data-act="chapter" data-index="' + i + '"' + (c.audio.length === 0 ? " disabled" : "") + (i === ci ? ' aria-current="true"' : "") + '><span class="n abp-mono">' + pad(c.order) + '</span><span class="t">' + esc(c.title) + "</span>" + tail + "</button>" + c.audioNotes.map(note => '<p class="abp-gapnote">' + esc(note) + "</p>").join("");
     });
-    el.sheet.innerHTML = "<h4>Chapters · " + chapters.length + " · " + read + ' read</h4><div class="abp-list">' + rows.join("") + "</div>";
+    el.sheet.innerHTML = "<h4>" + availability() + '</h4><div class="abp-list">' + rows.join("") + "</div>";
   }
   function renderPoster() {
     el.poster.hidden = mode !== "poster";
@@ -877,6 +887,7 @@ export function mountAudiobookPlayer(root, options) {
     const pct = c && c.seconds > 0 ? Math.min(100, (t / c.seconds) * 100) : 0;
     el.poster.innerHTML =
       '<div class="abp-eyebrow">audiobook</div><div class="abp-poster-title">' + esc(options.title) + "</div>" +
+      '<p class="abp-mono abp-availability">' + availability() + "</p>" +
       '<div class="abp-poster-actions">' +
       (resumable
         ? '<button type="button" class="abp-btn primary" data-act="continue">' + icon(I.play, 16, true) + "Continue · chapter " + c.order + " · " + time(t) + '<i><b style="width:' + pct + '%"></b></i></button>' +
@@ -913,8 +924,9 @@ export function mountAudiobookPlayer(root, options) {
     el.len.textContent = time(c ? c.seconds : 0);
     const book = bookLine();
     el.book.firstChild.style.width = book.pct + "%";
-    el.of.textContent = "chapter " + (ci + 1) + " of " + chapters.length;
-    el.left.textContent = left(book.left);
+    el.of.textContent = chapters.length === 0 ? "No chapters" : "chapter " + (ci + 1) + " of " + chapters.length;
+    el.left.textContent = "recorded audio · " + left(book.left);
+    el.availability.textContent = availability();
     renderTrack();
     renderSheet();
     renderPoster();
