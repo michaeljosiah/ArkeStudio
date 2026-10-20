@@ -64,6 +64,59 @@ function resultFor(events: DomainEvent[], requestId: string): SheetResult {
 }
 
 describe("sheet form inline decisions (SPEC-040)", () => {
+  for (const fullForm of [false, true]) it(`preserves omitted and unchanged sections when saving ${fullForm ? "a full form" : "one section"}`, async () => {
+    const h = await harness();
+    const path = "locations/the-quiet-ward.md";
+    const before = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === "the-quiet-ward")!;
+    const customs = { heading: "Customs", body: "Visitors leave the passage clear." };
+    const sections = fullForm ? before.sections.map(section => section.heading === "Customs" ? customs : { ...section, body: "Stale form text must not overwrite this section." }) : [customs];
+    const message = { ...editMessage(sections, ["Customs"]), path };
+    await h.send(message);
+    assert.equal(resultFor(h.events, message.requestId).disposition, "accepted");
+    const after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.version, before.version + 1);
+    assert.deepEqual(after.sections, before.sections.map(section => section.heading === "Customs" ? customs : section));
+    assert.deepEqual(after.canonRules, before.canonRules);
+    assert.deepEqual(after.links, before.links);
+    await h.provider.close();
+  });
+
+  it("saves a role alone without changing prose and clears an explicitly named section", async () => {
+    const h = await harness();
+    const before = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === "maren-kest")!;
+    const role = { ...editMessage([{ heading: "Essence", body: "Stale and ignored." }], []), role: "Harbour witness" };
+    await h.send(role);
+    assert.equal(resultFor(h.events, role.requestId).disposition, "accepted");
+    let after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.role, role.role);
+    assert.deepEqual(after.sections, before.sections);
+    const clear = editMessage([{ heading: "Essence", body: "" }], ["Essence"]);
+    await h.send(clear);
+    assert.equal(resultFor(h.events, clear.requestId).disposition, "accepted");
+    after = h.provider.openStore()!.getBundle().sheets.find(sheet => sheet.id === before.id)!;
+    assert.equal(after.sections.find(section => section.heading === "Essence")?.body, "");
+    assert.deepEqual(after.sections.filter(section => section.heading !== "Essence"), before.sections.filter(section => section.heading !== "Essence"));
+    await h.provider.close();
+  });
+
+  it("refuses unknown, missing, duplicate and empty section changes without staging or deleting content", async () => {
+    const h = await harness();
+    const before = await readFile(join(h.worldDir, MAREN), "utf8");
+    for (const [sections, dirty] of [
+      [[{ heading: "Typo", body: "No" }], ["Typo"]],
+      [[{ heading: "Essence", body: "No" }], ["Appearance"]],
+      [[{ heading: "Essence", body: "One" }, { heading: "Essence", body: "Two" }], ["Essence"]],
+      [[{ heading: "Essence", body: "No" }], []],
+    ] as Array<[Array<{ heading: string; body: string }>, string[]]>) {
+      const message = editMessage(sections, dirty);
+      await h.send(message);
+      assert.equal(resultFor(h.events, message.requestId).disposition, "refused");
+      assert.equal(await readFile(join(h.worldDir, MAREN), "utf8"), before);
+      assert.equal((await h.provider.gate()!.listOpen()).length, 0);
+    }
+    await h.provider.close();
+  });
+
   it("stages and accepts in one command, discloses ripples, and can undo", async () => {
     const h = await harness();
     const before = h.provider.openStore()!.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!;
@@ -96,7 +149,7 @@ describe("sheet form inline decisions (SPEC-040)", () => {
     await h.provider.close();
   });
 
-  it("merges dirty fields into a present proposal without accepting its unread content", async () => {
+  for (const partial of [false, true]) it(`merges dirty fields from ${partial ? "a partial form" : "a full form"} without accepting unread proposal content`, async () => {
     const h = await harness();
     const store = h.provider.openStore()!;
     const gate = h.provider.gate()!;
@@ -115,7 +168,7 @@ describe("sheet form inline decisions (SPEC-040)", () => {
     const sections = sheet.sections.map((section) =>
       section.heading === "Essence" ? { ...section, body: "Form-authored essence." } : section,
     );
-    const message = editMessage(sections, ["Essence"]);
+    const message = editMessage(partial ? sections.filter(section => section.heading === "Essence") : sections, ["Essence"]);
 
     await h.send(message);
 
