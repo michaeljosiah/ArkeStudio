@@ -1321,8 +1321,13 @@ export function ChapterWorkspace({
   };
   const closeChapterExport = () => {
     setChapterExportOpen(false);
-    // A menu item is gone by the time a modal opens; return to its stable chapter action press.
-    requestAnimationFrame(() => chapterExportOpener.current?.isConnected && chapterExportOpener.current.focus({ preventScroll: true }));
+    // A menu item or the toolbar that opened it can be replaced as takes arrive under the sheet.
+    // Resolve the current chapter action when that original control is gone.
+    requestAnimationFrame(() => {
+      const opener = chapterExportOpener.current;
+      const current = opener?.isConnected ? opener : viewLine.current?.querySelector<HTMLElement>('[data-testid="direct-illustrate"]');
+      current?.focus({ preventScroll: true });
+    });
   };
   useEffect(() => setChapterExportOpen(false), [chapter.id]);
   // Make a look from a held row of the proposal (design turn 193h, rule 17): the same sheet the Looks opens, for that character.
