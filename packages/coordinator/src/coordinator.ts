@@ -16470,6 +16470,7 @@ export class Coordinator {
             productionId: msg.productionId,
             room,
             signal: control.signal,
+            findJobs: () => this.jobQueue?.listJobs() ?? [],
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
             requireUploadConfirmation: (reader) =>
               this.requireVoiceUploadConfirmation({

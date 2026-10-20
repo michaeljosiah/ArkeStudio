@@ -729,6 +729,29 @@ export function priorGroupJob(jobs: readonly Job[], identity: string): { kind: "
   return null;
 }
 
+function partIdentity(block: Speaking, productionId: string, chapterId: string): PartIdentity {
+  return {
+    audioFormat: block.format, productionId, chapterId, block: block.block.key,
+    textHash: audiobookTextHash(block.text), provider: block.model.provider, model: block.model.id,
+    voiceId: block.reader.voiceId, parts: block.parts.length,
+    directionHash: block.direction?.hash ?? block.takeHash ?? null,
+    ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
+    reference: block.reference,
+  };
+}
+
+function recoverableBlock(block: Speaking, jobs: readonly Job[], productionId: string, chapterId: string): boolean {
+  const identity = partIdentity(block, productionId, chapterId);
+  return block.parts.every((_, index) => priorPartJob(jobs, identity, index) !== null);
+}
+
+/** A daily refusal must not prevent filing audio already bought before a crash. */
+export function hasRecoverableAudio(prepared: PreparedChapter, jobs: readonly Job[], productionId: string): boolean {
+  const grouped = new Set(prepared.groups.flatMap(group => group.kept));
+  return prepared.groups.some(group => priorGroupJob(jobs, groupIdentity(group)) !== null)
+    || prepared.misses.some(block => !grouped.has(block) && recoverableBlock(block, jobs, productionId, prepared.plan.chapter.id));
+}
+
 /**
  * What a miss is priced as: the block, the words it would send — their own hash, since the
  * chapter's names the prose and not the spoken heading, and a title renamed keeps the version
@@ -789,7 +812,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
   const quotaRefusal = dailyQuotaRefusal(preparation.prepared.freeReads, deps.dailyQuota);
-  if (quotaRefusal !== null) {
+  if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId)) {
     await finish("failed", { reason: quotaRefusal, record: preparation.prepared.record });
     return;
   }
@@ -1044,6 +1067,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       let jobId = prior?.job.id;
       if (jobId === undefined) {
         const text = groupedText(group.turns);
+        const refusal = dailyQuotaRefusal([{ model: group.model, requests: 1 }], deps.dailyQuota);
+        if (refusal !== null) return { ended: refusal };
         const queued = await deps.enqueue([{
           worldId: deps.worldId,
           productionId,
@@ -1144,10 +1169,18 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   };
 
   signal.addEventListener("abort", onAbort, { once: true });
+  let heldByQuota: string | null = null;
   try {
     for (const block of speaking) {
       if (signal.aborted) break;
       const group = groupOf.get(block);
+      if (misses.includes(block)) {
+        const refusal = dailyQuotaRefusal([{ model: block.model, requests: 1 }], deps.dailyQuota);
+        const recoverable = refusal !== null && (group !== undefined
+          ? priorGroupJob(deps.findJobs(), groupIdentity(group)) !== null
+          : recoverableBlock(block, deps.findJobs(), productionId, plan.chapter.id));
+        if (refusal !== null && !recoverable) { heldByQuota ??= refusal; continue; }
+      }
       if (group !== undefined) {
         if (group.kept[0] !== block) continue;
         const settled = new Set<string>();
@@ -1244,20 +1277,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         let cost: number | null = 0;
         let firstJob: string | undefined;
         const textHash = audiobookTextHash(block.text);
-        const identity: PartIdentity = {
-          audioFormat: block.format,
-          productionId,
-          chapterId: plan.chapter.id,
-          block: block.block.key,
-          textHash,
-          provider: block.model.provider,
-          model: block.model.id,
-          voiceId: block.reader.voiceId,
-          parts: block.parts.length,
-          directionHash: block.direction?.hash ?? block.takeHash ?? null,
-          ...(block.compiledSpeechHash !== undefined ? { compiledSpeechHash: block.compiledSpeechHash } : {}),
-          reference: block.reference,
-        };
+        const identity = partIdentity(block, productionId, plan.chapter.id);
         for (const [index, part] of block.parts.entries()) {
           if (signal.aborted) break;
           requestAt += 1;
@@ -1282,6 +1302,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
               job = prior.job;
             }
           } else {
+            const refusal = dailyQuotaRefusal([{ model: block.model, requests: 1 }], deps.dailyQuota);
+            if (refusal !== null) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT, refusal);
             const input: EnqueueInput = {
               worldId: deps.worldId,
               productionId,
@@ -1394,7 +1416,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     await finish("stopped", { record });
     return;
   }
-  await finish("read", { record });
+  await finish(heldByQuota === null ? "read" : "failed", { record, ...(heldByQuota !== null ? { reason: heldByQuota } : {}) });
 }
 
 /**

@@ -6,13 +6,17 @@ preserve those details and the selected reader in their final status (issue #193
 SPEC-049 R-43–R-45).
 
 Contracts `provider-plans.ts` projects the latest matching paid refusal from retained jobs.
-It ignores other providers/models and failures older than the current Google key save.
+It ignores other providers/models and jobs admitted before the current Google key save.
+An old-key response arriving after a new key was saved cannot hold that new key. A queued
+job spanning the save is conservatively excluded because its credential generation is unknown.
 The original reset wins; an older failure without one uses midnight Pacific after that
 failure, never a fresh tomorrow every time the app opens. After reset it stops refusing;
 the last reported limit remains evidence, not a remaining balance.
 
 Coordinator injects this projection into chapter and book preparation. A known exhausted
-day stops before casting, confirmation or synthesis. Otherwise the existing price confirmation
+day stops new work before casting, confirmation or synthesis. Already-paid grouped/solo
+jobs can still be recovered through their existing identity checks; each new submission
+rechecks quota after recovery lookup. Otherwise the existing price confirmation
 names each paid Google model's planned request count and says its remaining daily allowance
 is unknown. A larger spending budget does not imply more provider capacity.
 

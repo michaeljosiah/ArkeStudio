@@ -402,8 +402,8 @@ describe("paid Google daily quota (issue 1934)", () => {
   const now = new Date("2026-10-20T20:00:00.000Z");
   const resetsAt = "2026-10-21T07:00:01.000Z";
   const error = `${GOOGLE_DAILY_LIMIT} for this key (HTTP 429 daily quota · 100 a day · resets ${resetsAt})`;
-  const failed: Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt"> = {
-    provider: "google", model: gemini.id, status: "failed", error, updatedAt: "2026-10-20T18:51:05.000Z",
+  const failed: Pick<Job, "provider" | "model" | "status" | "error" | "createdAt" | "updatedAt"> = {
+    provider: "google", model: gemini.id, status: "failed", error, createdAt: "2026-10-20T18:50:00.000Z", updatedAt: "2026-10-20T18:51:05.000Z",
   };
   const reads = [{ model: gemini, requests: 3 }, { model: gemini, requests: 2 }, { model: voxtral, requests: 9 }];
 
@@ -413,6 +413,8 @@ describe("paid Google daily quota (issue 1934)", () => {
     assert.equal(googleDailyQuota([failed], "gemini-3.8-flash-lite-tts", now), null);
     assert.equal(googleDailyQuota([{ ...failed, provider: "other" }], gemini.id, now), null);
     assert.equal(googleDailyQuota([failed], gemini.id, now, "2026-10-20T19:00:00.000Z"), null);
+    assert.equal(googleDailyQuota([failed], gemini.id, now, "2026-10-20T18:50:30.000Z"), null, "an old-key response arriving after the key save does not hold the new key");
+    assert.equal(googleDailyQuota([failed], gemini.id, now, failed.createdAt)?.reached, true);
     assert.equal(googleDailyQuota([failed], gemini.id, new Date(resetsAt))?.reached, false);
     assert.equal(googleDailyQuota([{ ...failed, error: GOOGLE_DAILY_LIMIT }], gemini.id, new Date("2026-10-22T12:00:00Z"))?.reached, false);
     assert.equal(googleDailyQuota([{ ...failed, error: "HTTP 429 requests per minute" }], gemini.id, now), null);

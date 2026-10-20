@@ -187,7 +187,7 @@ function dailyLimitDetails(error: string): { limit?: number; resetsAt?: string }
 
 /** The paid model's last witnessed daily refusal, scoped to the saved key and its original reset. */
 export function googleDailyQuota(
-  jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "updatedAt">[],
+  jobs: readonly Pick<Job, "provider" | "model" | "status" | "error" | "createdAt" | "updatedAt">[],
   model: string,
   now: Date = new Date(),
   keySetAt?: string | null,
@@ -197,7 +197,10 @@ export function googleDailyQuota(
   for (const job of jobs) {
     if (job.provider !== "google" || job.model !== model || job.status !== "failed" || !job.error?.includes(GOOGLE_DAILY_LIMIT)) continue;
     const observed = Date.parse(job.updatedAt);
-    if (!Number.isFinite(observed) || observed > now.getTime() || (Number.isFinite(keyed) && observed < keyed)) continue;
+    // An old-key response can land after a key change. Without a durable credential generation,
+    // only jobs admitted after the save can safely establish a refusal for the current key.
+    const admitted = Date.parse(job.createdAt);
+    if (!Number.isFinite(observed) || observed > now.getTime() || (Number.isFinite(keyed) && (!Number.isFinite(admitted) || admitted < keyed))) continue;
     if (latest !== null && observed <= Date.parse(latest.observedAt)) continue;
     const details = dailyLimitDetails(job.error);
     // An old failure must not roll forward to tomorrow whenever a book is reopened.
