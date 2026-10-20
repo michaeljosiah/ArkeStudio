@@ -94,7 +94,7 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
 export function StoryPublishSheet({ worldId, production, onClose, onOtherExports }: { worldId: string; production: ProductionBundle; onClose: () => void; onOtherExports?: () => void }) {
   const chapters = production.chapters.filter(chapter => !chapter.retired).sort((a, b) => a.order - b.order);
   const [settings, setSettings] = useState<StoryPublicationSettings>(() => ({ title: production.meta.title, author: "", language: "en", description: "", label: "Private edition", cover: null,
-    chapterIds: chapters.map(chapter => chapter.id), outputs: ["epub"], avoidEmDashes: false }));
+    chapterIds: chapters.filter(chapter => chapter.status !== "outlined").map(chapter => chapter.id), outputs: ["epub"], avoidEmDashes: false }));
   const [step, setStep] = useState<Step>("Edition"), [review, setReview] = useState<StoryPublicationReview | null>(null);
   const [edition, setEdition] = useState<StoryEdition | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const [finding, setFinding] = useState<StoryStyleFinding | null>(null), [replacement, setReplacement] = useState("");
@@ -102,7 +102,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
   const asked = useRef<string | null>(null), loading = useRef<string | null>(null), dirty = useRef(false), operation = useRef(""), pendingImpact = useRef<string[]>([]), watching = useRef<string | null>(null);
   const saving = useRef<AbortController | null>(null);
   const connection = useStore().connection, world = useWorld();
-  const sourceStamp = JSON.stringify(chapters.map(chapter => [chapter.id, chapter.hash, chapter.version, chapter.audiobook]));
+  const sourceStamp = JSON.stringify(chapters.map(chapter => [chapter.id, chapter.hash, chapter.version, chapter.status, chapter.audiobook]));
   const priorSource = useRef(sourceStamp);
   const update = (patch: Partial<StoryPublicationSettings>) => { dirty.current = true; setSettings(value => ({ ...value, ...patch })); setReview(null); setChanged(edition !== null); };
   const request = async (input: StoryPublishAction) => {

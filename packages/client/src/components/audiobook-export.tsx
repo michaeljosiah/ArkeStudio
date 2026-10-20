@@ -72,7 +72,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const records = useAudiobookRecords();
   const prefix = `${worldId}/${production.meta.id}/`;
   const planStamp = JSON.stringify([
-    production.chapters.filter((chapter) => scope.kind === "book" || chapter.id === scope.chapterId).map((chapter) => [chapter.id, chapter.version, chapter.audiobook]),
+    production.chapters.filter((chapter) => scope.kind === "book" || chapter.id === scope.chapterId).map((chapter) => [chapter.id, chapter.version, chapter.status, chapter.retired ?? false, chapter.bodyHash, chapter.audiobook]),
     Object.entries(records).filter(([key]) => scope.kind === "chapter" ? key === prefix + scope.chapterId : key.startsWith(prefix)).map(([key, record]) => [key, record.seq]),
   ]);
   const [subtitlesChosen, setSubtitlesChosen] = useState(false);
@@ -250,12 +250,17 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       {result?.ok === true ? (
         <>
           {!remote && (
-            <button type="button" className="fy-abv-btn" onClick={() => folder !== null && openExportsFolder(worldId, folder)}>
-              <Folder />
-              Show in folder
-            </button>
+            <>
+              <button type="button" className="fy-abv-btn" onClick={() => folder !== null && openExportsFolder(worldId, folder)}>
+                <Folder />
+                Show in folder
+              </button>
+              <button type="button" className="fy-abv-btn pri" disabled={connection !== "open" || folder === null} onClick={() => folder !== null && openExportsFolder(worldId, folder, "player.html")}>
+                Open player
+              </button>
+            </>
           )}
-          <button type="button" className="fy-abv-btn pri" onClick={onClose}>
+          <button type="button" className={remote ? "fy-abv-btn pri" : "fy-abv-btn"} onClick={onClose}>
             Done
           </button>
         </>

@@ -100,7 +100,7 @@ for (const known of [false, true, "partial", "reservation"] as const) {
       let interrupted = false;
       t.mock.method(BenchStore.prototype, "append", async function(this: BenchStore, ...args: Parameters<BenchStore["append"]>) {
         const result = await original.apply(this, args);
-        if (this.dir === opened.store.dir && args[0].type === "takes-reserved" && !interrupted) {
+        if (this.dir === opened.store.dir && typeof args[0] !== "function" && args[0].type === "takes-reserved" && !interrupted) {
           interrupted = true;
           throw new Error("Reservation fsync succeeded but its acknowledgement was lost");
         }

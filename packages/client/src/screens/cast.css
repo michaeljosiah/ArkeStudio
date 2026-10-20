@@ -6,7 +6,9 @@
 .fy-kind-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .fy-kind-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .fy-kind-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.fy-location-grid .fy-gridcard__frame { height: 270px; }
+/* An establishing image identifies the whole place; a portrait crop can hide its subject. */
+.fy-location-grid .fy-gridcard__frame { height: auto; aspect-ratio: 16 / 9; background: var(--muted); border-radius: 7px; }
+.fy-location-grid .fy-gridcard__frame .fy-portrait { object-fit: contain; }
 .fy-faction-grid { padding: 32px 150px 46px; }
 .fy-faction-grid .fy-gridcard__frame { height: 210px; }
 .fy-faction-grid .fy-gridcard__pad { padding: 2px 8px 0; }
@@ -215,3 +217,25 @@
   .fy-sheet .lay-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .fy-sheet .lay-stats__item { padding: 12px; border: 1px solid var(--border); border-radius: 12px; min-width: 0; }
 }
+
+/* Sheet prose uses the shared Markdown parser and reading styles, in the sheet's typography. */
+:is(.fy-sheet__lead, .fy-sheet__secbody) .fy-rme { border: 0; border-radius: 0; background: transparent; }
+:is(.fy-sheet__lead, .fy-sheet__secbody) .fy-rme__doc { padding: 0; font: inherit; color: inherit; white-space: normal; overflow-wrap: anywhere; }
+
+/* Pending sheet decisions live outside the gallery; only their review content scrolls. */
+.fy-page-sheet.fy-sheet-proposal-review { inset: 24px max(16px, calc((100vw - 880px) / 2)); width: auto; border: 1px solid var(--border); border-radius: 16px; }
+.fy-sheet-proposal-review > .fy-page-sheet__body { overflow: hidden; }
+.fy-sheet-proposal-review .dom-connected-proposal { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.fy-sheet-proposal-review .dom-authoring { flex: none; max-height: 100px; overflow: auto; }
+.fy-sheet-proposal-review .dom-proposal { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.fy-sheet-proposal-review .dom-proposal__content { display: grid; align-content: start; gap: var(--space-3); min-height: 0; overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.fy-sheet-proposal-review .dom-proposal__actions { flex: none; flex-wrap: wrap; }
+.fy-sheet-proposal-review .dom-connected-proposal__revise { flex: none; }
+.fy-sheet-proposal-review .dom-connected-proposal__revise label { min-width: 0; }
+.fy-sheet-proposal-review .dom-connected-proposal__revise textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); }
+@media (max-width: 599px) {
+  .fy-page-sheet.fy-sheet-proposal-review { inset: 0; border: 0; border-radius: 0; }
+  .fy-sheet-proposal-review .dom-proposal__head { flex-wrap: wrap; }
+}
+
+.fy-sheet-proposal-review :is(.dom-review__was, .dom-review__now) { font: 400 var(--text-sm)/1.6 var(--font-sans); }

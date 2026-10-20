@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   GARMENT_WORDS,
+  PICTURE_CHECK_NOTE_MAX,
   PICTURE_DETAIL_PART_MAX,
   PICTURE_EXPRESSION_MAX,
   PICTURE_FRAME_MAX,
@@ -333,5 +334,5 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
           ? { note: detail || held.details.length > 0 ? "faces out of frame, said so" : "nobody in frame" }
           : { note: held.inFrame.map((person) => held.expressions[person.key]!).join("; ") }),
   });
-  return checks;
+  return checks.map(check => check.note === undefined ? check : { ...check, note: clip(check.note, PICTURE_CHECK_NOTE_MAX) });
 }

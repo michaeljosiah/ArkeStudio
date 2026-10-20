@@ -31,7 +31,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "stage-audiobook-lines": "host", "open-exports-folder": "host", "pick-manuscript": "host",
   "download-update": "host", "install-update-and-restart": "host", "install-update-on-close": "host",
   "generate-diagnostics": "host", "probe-grouped-read": "host", "open-data-folder": "host", "bench-upload-references": "host",
-  "attach-files-correlated": "host",
+  "attach-files-correlated": "host", "install-sample-world": "host",
   // payload
   "pick-staged-reference": "payload", "adapter-command": "payload", "stage-voice-clip": "payload",
   "publish-story": "studio", "list-story-publications": "studio",
@@ -48,7 +48,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "stop-prose-page": "studio", "read-bible-section": "studio", "generate-world-image": "studio",
   "use-world-image": "studio", "discard-world-image": "studio", "generate-master-look": "studio",
   "browse-reference-images": "studio", "clear-staged-reference": "studio", "use-master-look": "studio",
-  "discard-master-look": "studio", "archive-world": "studio", "install-sample-world": "studio",
+  "discard-master-look": "studio", "archive-world": "studio",
   "reconcile-external-edit": "studio", "stage-sheet-edit": "studio", "restore-sheet-version": "studio",
   "stage-art-direction-change": "studio", "set-art-direction": "studio", "proposal-accept": "studio",
   "proposal-discard": "studio", "proposal-rebase": "studio", "proposal-resolve-conflict": "studio",

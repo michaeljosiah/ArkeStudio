@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
-import { bookHasTakes, listenLeads, playerChapters } from "../src/components/audiobook-player.js";
+import { AudiobookPlayerView, bookHasTakes, listenLeads, ListenButton, playerChapters } from "../src/components/audiobook-player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { claimRead } from "../src/lib/reply-reads.js";
@@ -84,7 +84,7 @@ function listening(made: number): AudiobookListening {
 
 type Mounted = { container: HTMLElement; root: Root; sent: ClientMessage[] };
 const open: Mounted[] = [];
-async function mount(state: ClientState): Promise<Mounted> {
+async function mount(state: ClientState, chapterId?: string, bookStart = false): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) } as unknown as ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -95,7 +95,7 @@ async function mount(state: ClientState): Promise<Mounted> {
     root.render(
       <MemoryRouter initialEntries={[ROUTE]}>
         <Routes>
-          <Route path="/w/:worldId/p/:prodId/story/audiobook" element={<AudiobookScreen />} />
+          <Route path="/w/:worldId/p/:prodId/story/audiobook" element={chapterId === undefined ? <AudiobookScreen /> : bookStart ? <AudiobookPlayerView worldId={FIXTURE_WORLD_ID} production={state.world!.productions.find((production) => production.meta.id === "inkbound")!} chapterId={chapterId} onClose={() => {}} /> : <ListenButton worldId={FIXTURE_WORLD_ID} production={state.world!.productions.find((production) => production.meta.id === "inkbound")!} chapterId={chapterId} />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -127,6 +127,58 @@ async function answer(m: Mounted, plan: AudiobookListening): Promise<void> {
 }
 
 describe("Listen (turn 186)", () => {
+  it("keeps a book Continue position separate from chapter scope", async () => {
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[0]!.status = "outlined";
+    const m = await mount(state, "slack-water", true);
+    assert.equal(asks(m).at(-1)!.scope, undefined, "even an outlined starting position still requests the book");
+  });
+
+  it("does not enable an empty outlined chapter because another chapter has audio", async () => {
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    const m = await mount(state, "neap");
+    assert.equal(q(m, '[data-testid="audiobook-listen"]')!.hasAttribute("disabled"), true);
+  });
+
+  it("stops and clears the previous player plan when a refreshed selection is refused", async () => {
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    await answer(m, listening(2));
+    const requestId = asks(m).at(-1)!.requestId;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: null, refused: "That chapter is no longer in this production." }));
+    assert.match(q(m, '.fy-abplayer__wait')?.textContent ?? "", /no longer in this production/);
+    assert.equal(all('.abp-line').length, 0, "the stale chapter is no longer playable");
+  });
+
+  it("keeps outlined takes off the book controls but available from the chapter", async () => {
+    const state = inkbound(2);
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    production.chapters[0]!.status = "outlined";
+    assert.equal(bookHasTakes(production), false);
+    assert.equal(listenLeads(production, "slack-water"), true);
+    const book = await mount(state);
+    assert.equal(q(book, '[data-testid="audiobook-listen"]'), null);
+    const chapter = await mount(state, "slack-water");
+    assert.equal(q(chapter, '[data-testid="audiobook-listen"]')!.hasAttribute("disabled"), false);
+    await press(q(chapter, '[data-testid="audiobook-listen"]'));
+    assert.deepEqual(asks(chapter).at(-1)!.scope, { kind: "chapter", chapterId: "slack-water" });
+  });
+
+  it("refreshes an open book when only chapter status changes", async () => {
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    await answer(m, listening(2));
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1300)));
+    assert.equal(asks(m).length, 2);
+    assert.equal(asks(m).at(-1)!.scope, undefined, "the book never switches to an outlined chapter");
+    await answer(m, { ...listening(2), chapters: listening(2).chapters.slice(0, 1) });
+    assert.doesNotMatch(q(m, ".abp")?.textContent ?? "", /The counting of bells/);
+  });
+
   it("offers Listen for imported arrangements with no legacy takes", () => {
     const rows = chapters(0), chapter = rows[0]!;
     chapter.audiobook = { ...stamp(0), arranged: true };

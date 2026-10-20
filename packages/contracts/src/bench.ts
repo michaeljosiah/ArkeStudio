@@ -26,6 +26,7 @@ import { ProvenanceSchema, TakeCostSchema } from "./take.js";
 import { DeliverySchema } from "./voice.js";
 import { VoiceDirectionInputSchema, type VoiceDirectionInput } from "./cadence.js";
 import { upscalePlan, type UpscalePlan } from "./upscale.js";
+import { DEFAULT_SHOT_SEC, type Shot } from "./scene.js";
 
 /**
  * The bench (issue 305; design turns 68–69): one picture or one shot made with no production
@@ -785,6 +786,53 @@ export function benchSubjectTitle(subject: BenchSubject): string {
   return chain.join(" · ");
 }
 
+/** The saved request keeps its timing until Rebuild; a changed member matters even at the same total. */
+export function benchTimingChange(subject: VisualBenchSubject, shots: readonly Pick<Shot, "id" | "durationSec">[]): { frozen: number; current: number } | null {
+  const members = subject.kind === "shot" ? [{ shotId: subject.shotId, durationSec: subject.durationSec }] : subject.members;
+  const current = members.map(member => shots.find(shot => shot.id === member.shotId));
+  if (current.some(shot => shot === undefined) || current.every((shot, index) => (shot!.durationSec ?? DEFAULT_SHOT_SEC) === members[index]!.durationSec)) return null;
+  return { frozen: subject.durationSec, current: current.reduce((sum, shot) => sum + (shot!.durationSec ?? DEFAULT_SHOT_SEC), 0) };
+}
+
+/** Keep user-selected lanes in the existing atomic prefill event, without changing old journal semantics. */
+export function rebuildBenchPrefill(session: BenchSession, prefill: Extract<BenchEvent, { type: "subject-prefill-set" }>): Extract<BenchEvent, { type: "subject-prefill-set" }> {
+  const next = { ...session.nextToken };
+  const remapped = new Map<string, string>();
+  // Incoming tokens must not collide with manual tokens carried below. The fold reuses each
+  // source's stable historical token after mapping these temporary, unoccupied names.
+  const references = prefill.references.map(reference => {
+    const n = next[reference.kind] ?? 1;
+    next[reference.kind] = n + 1;
+    const token = benchTokenFor(reference.kind, n);
+    remapped.set(reference.token, token);
+    return { ...reference, token };
+  });
+  const subjectTokens = new Set(session.subjectTokens);
+  const derivedSources = new Set(prefill.references.map(reference => benchSourceKey(reference.source)));
+  const manual = (tokens: readonly string[]) => tokens.filter(token => {
+    const reference = session.tokenRegistry.find(entry => entry.token === token);
+    return !subjectTokens.has(token) && reference !== undefined && !derivedSources.has(benchSourceKey(reference.source));
+  });
+  return { ...prefill, references, composer: {
+    ...prefill.composer,
+    brief: remapBenchBrief(prefill.composer.brief, remapped),
+    activeTokens: [...prefill.composer.activeTokens.map(token => remapped.get(token) ?? token), ...manual(session.composer.activeTokens)],
+    keyframeTokens: [...prefill.composer.keyframeTokens.map(token => remapped.get(token) ?? token), ...manual(session.composer.keyframeTokens)],
+  } };
+}
+
+function remapBenchBrief(text: string, remapped: ReadonlyMap<string, string>): string {
+  let brief = "";
+  let at = 0;
+  for (const mention of benchMentionsIn(text)) {
+    const token = remapped.get(mention.token);
+    if (token === undefined) continue;
+    brief += text.slice(at, mention.start) + benchMentionFor(token);
+    at = mention.end;
+  }
+  return brief + text.slice(at);
+}
+
 export const BenchSessionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -1158,17 +1206,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           session.composer = {
             ...event.composer,
             params: { ...event.composer.params } as BenchParams,
-            brief: (() => {
-              let brief = "";
-              let at = 0;
-              for (const mention of benchMentionsIn(event.composer.brief)) {
-                const token = remapped.get(mention.token);
-                if (token === undefined) continue;
-                brief += event.composer.brief.slice(at, mention.start) + benchMentionFor(token);
-                at = mention.end;
-              }
-              return brief + event.composer.brief.slice(at);
-            })(),
+            brief: remapBenchBrief(event.composer.brief, remapped),
             activeTokens: event.composer.activeTokens.map((token) => remapped.get(token) ?? token),
             keyframeTokens: event.composer.keyframeTokens.map((token) => remapped.get(token) ?? token),
           };

@@ -176,7 +176,7 @@ export class BenchStore {
    * resends after a dropped connection cannot dispatch twice.
    */
   append(
-    event: BenchEvent,
+    event: BenchEvent | ((session: BenchSession) => BenchEvent),
     options: { at: string; requestId?: string } = { at: new Date().toISOString() },
   ): Promise<BenchAppendResult> {
     let result!: BenchAppendResult;
@@ -199,11 +199,19 @@ export class BenchStore {
           throw new Error("this bench session changed outside Arke Studio — nothing was appended");
         }
 
+        // A derived append sees all earlier writes under the same queue. Rebuild must retain
+        // references added while its source preparation was running, not an earlier snapshot.
+        let prepared = event;
+        if (typeof event === "function") {
+          const meta = await this.readMeta();
+          if (meta === null) throw new Error("The Bench session is no longer available.");
+          prepared = event(foldBenchSession(meta, await this.readParsed()));
+        }
         const envelope = BenchEventEnvelopeSchema.parse({
           seq: current.seq + 1,
           at: options.at,
           ...(options.requestId ? { requestId: options.requestId } : {}),
-          event,
+          event: prepared,
         });
 
         const line = JSON.stringify(envelope) + "\n";

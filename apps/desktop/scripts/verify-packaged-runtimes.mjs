@@ -23,19 +23,9 @@ export default async function verifyPackagedRuntimes(context) {
   ]) {
     if (!existsSync(join(voxa, runtime))) throw new Error(`packaged Voxa lacks ${runtime}`);
   }
-  // The sample world (SPEC-016 R-6, R-8). An extraResources entry that quietly fails to copy
-  // does not fail the build — the application simply reports having no sample world, which is
-  // indistinguishable from a build that never carried one. This is the only place that tells
-  // the difference before a user does.
+  // SPEC-016 R-6, R-8: the story downloads separately; the test fixture must stay out of builds.
   const sampleWorld = join(resources, "sample-world");
-  if (!existsSync(join(sampleWorld, "world.json"))) {
-    throw new Error("the sample world is missing from the installer (resources/sample-world/world.json)");
-  }
-  for (const expected of ["characters", "canon", "references", "productions", "world-art.png"]) {
-    if (!existsSync(join(sampleWorld, expected))) {
-      throw new Error(`the packaged sample world is incomplete — ${expected} did not copy`);
-    }
-  }
+  if (existsSync(sampleWorld)) throw new Error("The test fixture must not ship in the installer; The Undersong downloads on demand.");
 
   /*
    * ffmpeg and ffprobe are one runtime, verified together (#253, Codex round 1).

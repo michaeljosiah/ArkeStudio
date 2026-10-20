@@ -98,7 +98,7 @@ export function AppChrome({
             onClick={() => ("onClick" in back ? back.onClick() : navigate(back.to))}
           >
             <ChevronLeft size={13} />
-            {back.label}
+            <span className="fy-titlebar__back-label">{back.label}</span>
           </button>
         )}
         {context &&

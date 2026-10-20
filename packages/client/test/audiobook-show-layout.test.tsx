@@ -104,7 +104,7 @@ const DOOR: AudiobookDoor = {
 };
 
 type Box = { l: number; r: number; t: number; b: number };
-type Measured = { width: number; height: number; hero: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[] };
+type Measured = { width: number; height: number; hero: Box; nextWork: Box; firstChapter: Box; maxHeight: string; heightRule: string; presses: { label: string; box: Box }[] };
 
 /** The page at one window size, laid out by Chrome. */
 async function measure(chrome: string, width: number, height: number): Promise<Measured> {
@@ -125,7 +125,7 @@ async function measure(chrome: string, width: number, height: number): Promise<M
     const out = document.createElement("pre");
     out.id = "measured";
     out.textContent = JSON.stringify(hero === null ? null : {
-      width: innerWidth, height: innerHeight, hero: box(hero), maxHeight: getComputedStyle(hero).maxHeight, heightRule: hero.style.height,
+      width: innerWidth, height: innerHeight, hero: box(hero), nextWork: box(document.querySelector('[data-testid="audiobook-next-work"]')), firstChapter: box(document.querySelector('[data-testid="audiobook-row"]')), maxHeight: getComputedStyle(hero).maxHeight, heightRule: hero.style.height,
       presses: [...document.querySelectorAll('[data-testid="audiobook-presses"] button')].map((el) => ({ label: el.getAttribute("aria-label") || el.textContent, box: box(el) })),
     });
     document.body.append(out);
@@ -184,6 +184,8 @@ describe("the audiobook hero never clips its presses (design turn 199, rule 2)",
     it(`lays every press inside the hero at ${what}`, { skip: chrome === null ? "no Chrome to lay the page out" : false }, async () => {
       const measured = await measure(chrome!, width, height);
       assert.equal(measured.maxHeight, "none");
+      assert.ok(measured.nextWork.b < measured.height, "next unfinished chapter is visible without scrolling");
+      assert.ok(measured.firstChapter.t < measured.height - 60, "the first chapter starts within the viewport");
       assert.deepEqual(measured.presses.map((press) => press.label), ["Listen", "Publish", "Read the book · 1 chapter · up to $0.0008 · 2 no voice", "More"]);
       for (const press of measured.presses) {
         const inside = press.box.l >= measured.hero.l - 0.5 && press.box.r <= measured.hero.r + 0.5 && press.box.t >= measured.hero.t - 0.5 && press.box.b <= measured.hero.b + 0.5;

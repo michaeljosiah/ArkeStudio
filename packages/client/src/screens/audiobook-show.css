@@ -15,20 +15,20 @@
 /* The column the hero's content and the body share: the page's 1080 (188), 56 in at 1440, 40 at
    1100, 32 narrower. */
 .fy-abshow__wrap { position: relative; width: 100%; max-width: 1192px; margin: 0 auto; padding: 0 var(--abshow-pad, 56px); box-sizing: border-box; }
-.fy-abshow { --abshow-pad: 56px; --abshow-card: 220px; --abshow-thumb: 240px; }
-@media (max-width: 1299px) { .fy-abshow { --abshow-pad: 40px; --abshow-card: 188px; --abshow-thumb: 208px; } }
+.fy-abshow { --abshow-pad: 56px; --abshow-card: 260px; --abshow-thumb: 240px; }
+@media (max-width: 1299px) { .fy-abshow { --abshow-pad: 40px; --abshow-card: 240px; --abshow-thumb: 208px; } }
 @media (max-width: 999px) { .fy-abshow { --abshow-pad: 32px; } }
 
 /* ---- The hero: no fixed and no maximum height, so its presses never clip (rule 2). ---------- */
-.fy-abshow__hero { position: relative; min-height: 440px; display: flex; flex-direction: column; justify-content: flex-end; background: var(--media-overlay-bg); color: var(--media-overlay-fg); }
+.fy-abshow__hero { position: relative; min-height: 240px; display: flex; flex-direction: column; justify-content: flex-end; background: var(--media-overlay-bg); color: var(--media-overlay-fg); }
 /* The backdrop and its scrims clip in a layer of their own: the hero itself does not, so the ⋯
    menu can open past its foot. */
 .fy-abshow__bd { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .fy-abshow__bd .fy-portrait, .fy-abshow__bd .fy-portrait--fallback { position: absolute; top: 0; right: 0; height: 100%; width: 74%; object-fit: cover; object-position: center 26%; border-radius: 0; font-size: 0; background: none; }
 .fy-abshow__bd::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--media-overlay-bg) 26%, color-mix(in srgb, var(--media-overlay-bg) 72%, transparent) 42%, color-mix(in srgb, var(--media-overlay-bg) 10%, transparent) 72%, transparent); }
 .fy-abshow__bd::after { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to top, var(--media-overlay-bg), color-mix(in srgb, var(--media-overlay-bg) 40%, transparent) 26%, transparent 48%); }
-.fy-abshow__hero > .fy-abshow__wrap { padding-top: 150px; padding-bottom: 44px; }
-.fy-abshow__title { margin: 0; max-width: 640px; font: var(--type-title); font-size: var(--text-5xl); line-height: 1.04; letter-spacing: var(--tracking-tight); color: inherit; }
+.fy-abshow__hero > .fy-abshow__wrap { padding-top: 28px; padding-bottom: 24px; }
+.fy-abshow__title { margin: 0; max-width: 640px; font: var(--type-title); font-size: var(--text-4xl); line-height: 1.04; letter-spacing: var(--tracking-tight); color: inherit; }
 .fy-abshow__meta { margin-top: 12px; font-size: var(--text-md); color: color-mix(in srgb, var(--media-overlay-fg) 72%, transparent); }
 .fy-abshow__acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; }
 .fy-abshow__btn { position: relative; height: 44px; padding: 0 18px; border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; flex: none; white-space: nowrap; font: var(--type-ui); font-weight: 600; color: var(--media-overlay-fg); border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 34%, transparent); background: color-mix(in srgb, var(--media-overlay-bg) 45%, transparent); cursor: pointer; transition: var(--transition-control); }
@@ -58,29 +58,36 @@
 .fy-abshow__menu em.fy-abshow__w { color: var(--warning); }
 
 /* ---- The body: Cast, then Chapters. --------------------------------------------------------- */
-.fy-abshow__body { padding-top: 36px; padding-bottom: 40px; }
+.fy-abshow__body { padding-top: 24px; padding-bottom: 40px; }
 .fy-abshow__h { margin: 0 0 16px; font: var(--type-h3); color: var(--foreground); }
-.fy-abshow__castwrap { position: relative; margin-bottom: 44px; }
+.fy-abshow__castwrap { position: relative; margin-bottom: 24px; }
 /* The row scrolls, and a scroll box clips what it holds: the card's ring, 3px out and 2px wide,
    lost its top and left edges. Five pixels of room inside, taken back outside, keep it whole. */
 .fy-abshow__cast { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 5px; margin: -5px; scroll-padding-inline: 5px; }
 .fy-abshow__cast::-webkit-scrollbar { display: none; }
-.fy-abshow__card { width: var(--abshow-card); flex: none; display: flex; flex-direction: column; justify-content: flex-start; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; scroll-snap-align: start; font: inherit; }
+.fy-abshow__card { width: var(--abshow-card); flex: none; display: grid; grid-template-columns: 64px minmax(0, 1fr); grid-template-rows: 1fr auto auto 1fr; grid-template-areas: "im ." "im name" "im role" "im ."; column-gap: 12px; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--foreground); text-align: left; cursor: pointer; scroll-snap-align: start; font: inherit; }
 .fy-abshow__card:disabled { cursor: default; }
-.fy-abshow__card-im { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; background: var(--secondary); }
+.fy-abshow__card-im { grid-area: im; position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; background: var(--secondary); }
 .fy-abshow__card-im .fy-portrait, .fy-abshow__card-im .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; display: block; border-radius: 0; font-size: 0; }
 .fy-abshow__card--narrator .fy-abshow__card-im .fy-portrait { object-position: center 6%; }
 .fy-abshow__ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: var(--type-title); font-size: var(--text-4xl); color: var(--muted-foreground); }
 .fy-abshow__wv { position: absolute; left: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--media-overlay-bg) 62%, transparent); color: var(--media-overlay-fg); }
-.fy-abshow__card-nm { display: block; margin-top: 10px; font: var(--type-ui); font-size: var(--text-base); }
-.fy-abshow__card-rl { display: block; margin-top: 1px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-abshow__card-nm { grid-area: name; display: block; overflow-wrap: anywhere; font: var(--type-ui); font-size: var(--text-base); }
+.fy-abshow__card-rl { grid-area: role; display: block; margin-top: 1px; font-size: var(--text-sm); color: var(--muted-foreground); }
 .fy-abshow__card:hover:not(:disabled) .fy-abshow__card-im, .fy-abshow__card:focus-visible .fy-abshow__card-im { outline: 2px solid var(--foreground); outline-offset: 3px; }
 .fy-abshow__card:focus-visible { outline: none; }
 /* More cards than fit scroll sideways, with arrows on hover. */
-.fy-abshow__arrow { position: absolute; top: calc(var(--abshow-card) * 0.75 - 18px); z-index: 2; width: 36px; height: 36px; border-radius: 999px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-lg); cursor: pointer; }
+.fy-abshow__arrow { position: absolute; top: 30px; z-index: 2; width: 36px; height: 36px; border-radius: 999px; display: none; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border); background: var(--background); color: var(--foreground); box-shadow: var(--shadow-lg); cursor: pointer; }
 .fy-abshow__arrow--prev { left: -12px; }
 .fy-abshow__arrow--next { right: -12px; }
 @media (hover: hover) { .fy-abshow__castwrap:hover .fy-abshow__arrow { display: inline-flex; } }
+
+/* Keep the next unfinished chapter beside the list, separate from the listener's place. */
+.fy-abshow__chapter-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.fy-abshow__chapter-head .fy-abshow__h { margin: 0; }
+.fy-abshow__next { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+.fy-abshow__next:hover { background: var(--muted); }
+.fy-abshow__next:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 /* A chapter as an episode: thumbnail, title, length, a state word only when needed, synopsis. */
 .fy-abshow__ep { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 22px; align-items: center; padding: 14px 12px; margin: 0 -12px; border-radius: 14px; }
@@ -158,9 +165,9 @@ button.fy-abshow__sp:hover .fy-abshow__c { color: var(--foreground); }
 .fy-abshow__pbar .fy-abshow__more > button { color: var(--muted-foreground); }
 
 @media (max-width: 599px) {
-  .fy-abshow { --abshow-pad: 16px; --abshow-card: 132px; --abshow-thumb: 128px; }
+  .fy-abshow { --abshow-pad: 16px; --abshow-card: 228px; --abshow-thumb: 128px; }
   .fy-abshow__hero { min-height: 0; justify-content: flex-start; }
-  .fy-abshow__bd { position: relative; height: 300px; flex: none; }
+  .fy-abshow__bd { position: relative; height: 160px; flex: none; }
   .fy-abshow__bd .fy-portrait, .fy-abshow__bd .fy-portrait--fallback { width: 100%; object-position: 62% 20%; }
   .fy-abshow__bd::before { display: none; }
   .fy-abshow__bd::after { background: linear-gradient(to top, var(--media-overlay-bg), transparent 34%); }

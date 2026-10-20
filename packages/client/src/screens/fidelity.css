@@ -79,6 +79,7 @@
 /* The ellipsised left context reserves the wordmark's half-width before it can overlap it. */
 .fy-titlebar__side:first-child { padding-right: 48px; }
 .fy-titlebar__side--right { justify-content: flex-end; }
+.fy-titlebar__back-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /*
  * Where you are, on the left: ellipsised rather than allowed to run under the wordmark, which
  * is centred on the window and cannot move out of its way.
@@ -5250,6 +5251,14 @@ span.fy-bench__who { border-bottom: 0; }
   display: flex; align-items: center; justify-content: center;
 }
 .fy-bench__media video { width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+/* The crop is a reversible view of provider-sized reference art, not an edit of its bytes. */
+.fy-bench__media[data-image] { container-type: size; }
+.fy-bench__image { width: 100%; height: 100%; object-fit: contain; }
+.fy-bench__image[data-crop] {
+  width: min(100cqw, calc(100cqh * var(--bench-crop-aspect)));
+  height: min(100cqh, calc(100cqw / var(--bench-crop-aspect)));
+  object-fit: cover;
+}
 /* The clip's own transport (142a): a resting play disc, and a bar over a fade at the foot. */
 .fy-bench__playdisc {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);

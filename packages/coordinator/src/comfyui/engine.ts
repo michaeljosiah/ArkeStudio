@@ -281,6 +281,7 @@ export function comfyUiChildEnvironment(host: NodeJS.ProcessEnv = process.env): 
   }
   if (env["SystemRoot"] === undefined) env["SystemRoot"] = "C:\\Windows";
   env["PYTHONNOUSERSITE"] = "1";
+  env["PYTHONUTF8"] = "1"; // Custom-node logs must survive redirected Windows pipes (#1939).
   env["HF_HUB_OFFLINE"] = "1";
   env["TRANSFORMERS_OFFLINE"] = "1";
   env["HF_DATASETS_OFFLINE"] = "1";

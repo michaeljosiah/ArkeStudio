@@ -130,7 +130,8 @@ export function productionGenerationSource(store: WorldStore, ports: {
         output: "Immutable candidate takes on the named shots; select with a separate take-review card", cost: "Pending quote",
         ...(durationSec ? { durationSec } : {}),
         options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : production.meta.models?.[action.mode] ? "Production model" : "Settings routing default" },
-          ...Object.entries(inputs[0]!.params).filter(([key]) => !["prompt", "provenance", "references", "audioReferences", "referenceMedia", "shotPlan", "generationQuoteProduction"].includes(key))
+          ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),
+          ...Object.entries(inputs[0]!.params).filter(([key]) => !(model.limits.providerSelectedSize && key === "output") && !["prompt", "provenance", "references", "audioReferences", "referenceMedia", "shotPlan", "generationQuoteProduction"].includes(key))
             .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) }))],
         privacy: ["The resolved prompts and carried image, video and cast-audio references go to the configured provider runtime."], cancellationSupported: true };
       return { inputs, body, authority: { model, sceneVersion: scene.version, defaultModel: production.meta.models?.[action.mode] ?? settings?.routing?.[action.mode] ?? null,

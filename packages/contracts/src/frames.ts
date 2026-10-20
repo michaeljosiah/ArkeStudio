@@ -486,8 +486,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** World-relative sheet path, e.g. "characters/maren-kest.md". */
       path: z.string().min(1),
       summary: z.string().min(1).max(300),
+      /** Full form or changed sections. Omitted sections are preserved; this is not a body replacement. */
       sections: z.array(z.object({ heading: z.string().min(1), body: z.string() }).strict()).min(1),
-      /** Only these form fields may overwrite a proposal already present on this target (R-9a). */
+      /** Only these sections change, on the live sheet or a present draft. Empty body clears a named section. */
       dirtyHeadings: z.array(z.string().min(1)),
       /**
        * Characters only. The one frontmatter field the form edits, bounded here because this is
@@ -3928,8 +3929,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("open-exports-folder"),
       worldId: UlidSchema,
       dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional(),
-      /** One video in that folder, opened in the system's own player (design turn 197e: Open). */
-      file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/).optional(),
+      /** A video or the completed audiobook player, opened by the host. */
+      file: z.union([z.literal("player.html"), z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/)]).optional(),
     })
     .strict(),
   /**

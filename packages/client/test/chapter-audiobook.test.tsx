@@ -2524,6 +2524,24 @@ describe("block seams (design turn 198)", () => {
     assert.equal(q(m, '[data-testid="audiobook-blocks-group"] .fy-ab__menu-meta')!.textContent, "reading or directing · beats wait until it ends", "why it did not group, on the item");
   });
 
+  it("explains why Group by beats waits for a read elsewhere in the book, then unlocks", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST });
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6H2";
+    const other = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "slack-water" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...other, requestId, toMake: 3, blocks: 3 }));
+    await act(async () => q(m, '[data-testid="audiobook-blocks-press"]')!.click());
+    const group = () => q(m, '[data-testid="audiobook-blocks-group"]')!;
+    assert.equal(group().getAttribute("aria-disabled"), "true");
+    assert.match(group().textContent!, /Wait for the book's read to finish/);
+    await act(async () => group().click());
+    assert.equal(m.sent.some(message => message.kind === "group-chapter-beats"), false);
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...other, outcome: "stopped", made: 0, flagged: 0 }));
+    assert.equal(group().getAttribute("aria-disabled"), "false");
+    await act(async () => group().click());
+    assert.ok(m.sent.some(message => message.kind === "group-chapter-beats"));
+  });
+
   it("a beat is one block with its head — its name, whose, paragraphs and length — and the panel names it; a beat changed since keeps no name", async () => {
     const joinedText = `${P0}\n\n${LINE}`;
     const named = { ...joined(), beats: [{ start: "p0.0", textHash: audiobookTextHash(joinedText), name: "The bells", whose: "Maren Kest" }] };

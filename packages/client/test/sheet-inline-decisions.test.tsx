@@ -452,3 +452,41 @@ describe("remaining single-act controls own their result", () => {
     }
   });
 });
+
+
+describe("sheet-list review stays outside the gallery (#1915)", () => {
+  for (const [route, path] of [["locations", "locations/review-room.md"], ["cast", "characters/review-keeper.md"], ["factions", "factions/review-watch.md"]]) {
+    it(`reviews and revises an attended ${route} proposal in the shared sheet`, async () => {
+      const proposal = staged(path!, "sheet-edit");
+      proposal.proposal.kind = "new-sheet";
+      proposal.proposal.summary = "New sheet: Review fixture";
+      proposal.proposal.targets[0]!.baseVersion = null;
+      proposal.proposal.targets[0]!.baseHash = null;
+      proposal.proposal.decision = { mode: "attended", owner: { kind: "surface", surface: "sheet-list", targetPath: path! } };
+      proposal.review!.targets[0]!.label = "Review fixture";
+      proposal.review!.targets[0]!.action = "create";
+      const mounted = await mount(`/w/${WORLD_ID}/${route}`, stateWith([proposal]));
+      try {
+        const opener = mounted.container.querySelector<HTMLButtonElement>(".fy-gridcard--pending, .fy-row--pending")!;
+        assert.ok(opener);
+        await act(async () => opener.click());
+        const dialog = document.querySelector<HTMLElement>("dialog.fy-sheet-proposal-review")!;
+        assert.ok(dialog);
+        assert.equal(mounted.container.querySelector(".dom-proposal"), null, "long review is outside the gallery");
+        assert.match(dialog.textContent ?? "", /Review fixture/);
+        await act(async () => button(dialog, "Accept").click());
+        assert.ok(document.contains(dialog), "click is not an acceptance receipt");
+        assert.ok(mounted.messages.some(m => m.kind === "proposal-accept" && m.proposalId === PROPOSAL_ID));
+        const composer = dialog.querySelector<HTMLTextAreaElement>("textarea")!;
+        await typeInto(composer, "Keep the public passage clear.");
+        await act(async () => button(dialog, "Revise").click());
+        assert.ok(mounted.messages.some(m => m.kind === "draft-with-studio" && m.proposalId === PROPOSAL_ID && m.path === path));
+        await act(async () => button(dialog, "Discard").click());
+        assert.ok(mounted.messages.some(m => m.kind === "proposal-discard" && m.proposalId === PROPOSAL_ID));
+        await act(async () => dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+        assert.equal(document.querySelector("dialog.fy-sheet-proposal-review"), null);
+        assert.ok(mounted.container.contains(opener), "closing review keeps the list card");
+      } finally { await unmount(mounted.root, mounted.container); }
+    });
+  }
+});

@@ -665,9 +665,11 @@ export async function stageWorldChatProductionAuthoredAction(
     const body = changes.passage === undefined
       ? changes.body
       : replacePassage(doc.body, changes.passage, `chapter ${String(chapter.order).padStart(2, "0")}`);
+    const status = changes.status ?? (doc.data["status"] === "outlined" && changes.body !== undefined &&
+      changes.body.trim() !== "" && changes.body.trim() !== doc.body.trim() ? "drafted" : undefined);
     doc.setData({
       ...(changes.title !== undefined ? { title: changes.title } : {}),
-      ...(changes.status !== undefined ? { status: changes.status } : {}),
+      ...(status !== undefined ? { status } : {}),
       ...(changes.draws !== undefined ? { draws: changes.draws ?? undefined } : {}),
       ...(changes.synopsis !== undefined ? { synopsis: changes.synopsis || undefined } : {}),
       ...(changes.viewpointCharacter !== undefined ? { pov } : {}),

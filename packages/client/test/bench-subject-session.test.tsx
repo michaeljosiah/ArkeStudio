@@ -345,8 +345,9 @@ it("Keep names and sends the reviewed take while later results arrive", async ()
   assert.match(text(bench), /View latest/);
 });
 
-it("clears requested image dimensions when a world Bench switches to Codex", async () => {
-  const { subject: _subject, ...session } = shotSession();
+for (const scoped of [false, true]) it(`clears requested image size on Codex while retaining shot intent (${scoped})`, async () => {
+  const { subject, ...unscoped } = shotSession();
+  const session = scoped ? { ...unscoped, subject } : unscoped;
   session.composer.params = { kind: "image", count: 1, tier: "2K", aspect: "16:9" };
   const bench = await openBench(session, SESSION_ID, state => {
     state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex", displayName: "Codex Image",
@@ -361,7 +362,30 @@ it("clears requested image dimensions when a world Bench switches to Codex", asy
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
   const sent = bench.sent.findLast(message => message.kind === "bench-compose");
   assert.equal(sent?.kind, "bench-compose");
-  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1 });
+  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1, ...(scoped ? { aspect: "16:9" } : {}) });
+  assert.equal(select.querySelector('option[value="codex/codex-image"]')?.hasAttribute("disabled"), false);
+  if (scoped) assert.match(text(bench), /Composition · 16:9.*Image size chosen by provider/);
+});
+
+for (const currentAspect of ["16:9", "9:16"]) it(`previews the frozen provider-sized take crop after a ${currentAspect} rebuild without changing its source or dispatching`, async () => {
+  const session = shotSession();
+  if (session.subject?.kind === "shot") session.subject.aspect = currentAspect;
+  const selected = session.takes[0]!;
+  selected.request.provider = "codex"; selected.request.model = "codex-image";
+  const bench = await openBench(session, SESSION_ID, state => {
+    state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex",
+      limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } });
+  });
+  const image = q(bench, '.fy-bench__image'), source = image.getAttribute("src");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  await pressLabelled(bench, "Preview 16:9 crop");
+  assert.equal(image.getAttribute("data-crop"), "true");
+  assert.match(image.getAttribute("style") ?? "", /--bench-crop-aspect:\s*1\.777/);
+  assert.equal(image.getAttribute("src"), source);
+  await pressLabelled(bench, "Full image");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  assert.equal(bench.sent.some(m => m.kind === "bench-dispatch" || m.kind === "bench-accept"), false);
+  assert.match(text(bench), /composition 16:9/);
 });
 
 it("opens Arke from a world Bench and sends into that session's conversation without a production", async () => {
@@ -531,11 +555,23 @@ describe("Image / Video (R-23; design 142a)", () => {
   it("the bin at the bar's end rebuilds the prompt and references from the shot", async () => {
     const bench = await openBench(shotSession());
     const bin = q(bench, '.fy-bench__composerbar [data-testid="bench-rebuild"]');
-    assert.match(bin.getAttribute("title") ?? "", /Clear the bench/);
+    assert.match(bin.getAttribute("title") ?? "", /Rebuild prompt and shot settings; keep manually attached references and takes/);
     await act(async () => bin.click());
     assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
     assert.doesNotMatch(bench.container.innerHTML, /fy-bench__eyebrow--refs/, "no PROMPT eyebrow to hold a link");
   });
+});
+
+it("shows frozen versus current timing and offers Rebuild before Generate can refuse it", async () => {
+  const bench = await openBench(shotSession("video"), SESSION_ID, state => {
+    const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+    const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+    shot.durationSec = 5;
+  });
+  assert.match(q(bench, '[data-testid="bench-timing-changed"]').textContent!, /Bench 4s · current 5s/);
+  assert.equal((q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement).disabled, true);
+  await act(async () => q(bench, '[data-testid="bench-timing-changed"] button').click());
+  assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
 });
 
 describe("references (R-23; design 142a)", () => {

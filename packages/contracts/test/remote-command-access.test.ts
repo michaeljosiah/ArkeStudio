@@ -23,6 +23,7 @@ it("every prepared action has an explicit policy and native work cannot hide in 
 });
 it("host installers, deletion, native folders and chooser payloads stay on the PC", () => {
   const cases: ClientMessage[] = [
+    { kind: "install-sample-world" },
     { kind: "setup-remove", componentId: "kokoro-82m" }, { kind: "setup-install", componentId: "kokoro-82m" },
     { kind: "setup-repair", componentId: "kokoro-82m" }, { kind: "comfyui-update-runtime" },
     { kind: "repair-voice-models" }, { kind: "open-model-folder" }, { kind: "open-engine-log", engine: "voxa" },

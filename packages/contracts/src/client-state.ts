@@ -583,6 +583,7 @@ export const ClientStateSchema = valueSchema(z
           .object({
             available: z.boolean(),
             installing: z.boolean(),
+            download: z.object({ version: z.string(), bytes: z.number().int().positive(), summary: z.string() }).strict().optional(),
             /** What the last attempt did, in words. Null until one has been made. */
             note: z.object({ text: z.string().min(1), refused: z.boolean() }).strict().nullable(),
           })

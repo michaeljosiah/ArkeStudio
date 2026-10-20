@@ -1,4 +1,5 @@
 import { chapterReviewSummary } from "@arke-studio/contracts";
+import { rebuildBenchPrefill } from "@arke-studio/contracts";
 import { ChapterReviewService } from "./productions/chapter-review.js";
 import { makeReviewTaskRunner } from "./harness/review-task.js";
 import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
@@ -368,7 +369,7 @@ import { audioWaveform } from "./audio/waveform.js";
 import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
-import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
+import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -496,6 +497,7 @@ import { noteSentence, performanceNote } from "@arke-studio/contracts";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
+import { cleanupStoryDownload, downloadStory, type StoryDownload } from "./world/story-download.js";
 import {
   characterLookRequests,
   characterSheetRequest,
@@ -880,6 +882,8 @@ export interface CoordinatorOptions {
    * here as a path rather than being looked for.
    */
   sampleWorldPath?: string | null;
+  /** Optional build-pinned on-demand story. Local paths remain available for small tests. */
+  sampleWorldDownload?: StoryDownload;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
   /**
@@ -3275,6 +3279,7 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  private sampleInstallAbort: AbortController | null = null;
   private engineClosed = false;
   /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
   private readonly stoppedReads = new Set<string>();
@@ -7089,33 +7094,59 @@ export class Coordinator {
         return;
       }
       case "install-sample-world": {
+        if (this.stopping || this.sampleInstallAbort) return;
         const install = this.opts.provider.installSampleWorld?.bind(this.opts.provider);
         const source = this.opts.sampleWorldPath ?? null;
+        const release = this.opts.sampleWorldDownload;
+        let outcomeNote = "The story download stopped.";
+        let installed = false;
         const refuse = (reason: string) => {
+          outcomeNote = reason;
           this.readModel.setSampleWorld({ installing: false, note: { text: reason, refused: true } });
           this.emit({ at: new Date().toISOString(), type: "sample-world.refused", reason });
         };
-        if (!install || source === null) {
-          refuse("this build does not carry the sample world");
+        if (!install || (source === null && (!release || !this.opts.appRoot))) {
+          refuse("this build has no story download configured");
           this.transport.broadcastSnapshot();
           return;
         }
         // Megabytes of art take a moment to copy. The flag is what stops a second click
         // starting a second copy while the first is still being written.
+        const control = new AbortController();
+        this.sampleInstallAbort = control;
         this.readModel.setSampleWorld({ installing: true, note: null });
         this.transport.broadcastSnapshot();
+        let downloaded: Awaited<ReturnType<typeof downloadStory>> | undefined;
         try {
-          const { worldId, slug, name } = await install(source);
+          if (release && source === null) downloaded = await downloadStory(release, join(this.opts.appRoot!, "downloads"), {
+            signal: control.signal,
+            progress: text => {
+              if (this.stopping) return;
+              this.readModel.setSampleWorld({ note: { text, refused: false } });
+              this.transport.broadcastSnapshot();
+            },
+          });
+          control.signal.throwIfAborted();
+          const { worldId, slug, name } = await install(downloaded?.directory ?? source!);
+          installed = true;
+          outcomeNote = `${name} is in your library.`;
+          if (this.stopping) return;
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           this.readModel.setSampleWorld({
             installing: false,
-            note: { text: `${name} is in your library.`, refused: false },
+            note: { text: outcomeNote, refused: false },
           });
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
-          refuse(describeCoordinatorError(err));
+          if (!this.stopping) refuse(describeCoordinatorError(err));
+        } finally {
+          const cleaned = await cleanupStoryDownload(downloaded);
+          this.sampleInstallAbort = null;
+          if (!cleaned && !this.stopping) this.readModel.setSampleWorld({
+            note: { text: `${outcomeNote} Temporary download files could not be removed; check the downloads folder in your Arke app folder to reclaim space.`, refused: !installed },
+          });
         }
-        this.transport.broadcastSnapshot();
+        if (!this.stopping) this.transport.broadcastSnapshot();
         return;
       }
       case "reconcile-external-edit": {
@@ -7156,6 +7187,14 @@ export class Coordinator {
           return;
         }
         try {
+          const byHeading = new Map(msg.sections.map((section) => [section.heading, section]));
+          if (byHeading.size !== msg.sections.length) throw new Error("Each sheet section must be submitted once.");
+          const dirtySections = [...new Set(msg.dirtyHeadings)].map((heading) => {
+            const section = byHeading.get(heading);
+            if (!section) throw new Error(`${heading} is not a field on this form`);
+            return section;
+          });
+          if (dirtySections.length === 0 && msg.role === undefined) throw new Error("No changed sheet fields were submitted.");
           const existing = (await gate.listOpen())
             .filter((proposal) => proposal.targets.some((target) => target.path === msg.path))
             .sort((a, b) => a.created.localeCompare(b.created))[0];
@@ -7167,12 +7206,6 @@ export class Coordinator {
               });
               return;
             }
-            const byHeading = new Map(msg.sections.map((section) => [section.heading, section]));
-            const dirtySections = msg.dirtyHeadings.map((heading) => {
-              const section = byHeading.get(heading);
-              if (!section) throw new Error(`${heading} is not a field on this form`);
-              return section;
-            });
             const merged = await gate.mergeSheetFormEdit({
               proposalId: existing.id,
               requestId: msg.requestId,
@@ -7211,7 +7244,7 @@ export class Coordinator {
             return;
           }
 
-          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form", msg.role);
+          const proposal = await gate.stageSheetEdit(msg.path, msg.summary, dirtySections, "form", msg.role);
           this.emit({
             at: new Date().toISOString(),
             type: "proposal.staged",
@@ -12968,13 +13001,7 @@ export class Coordinator {
           });
           if (!prepared.ok) return answer(null, prepared.reason);
           await bench.store.append(
-            {
-              type: "subject-prefill-set",
-              subject: prepared.prefill.subject,
-              title: prepared.prefill.title,
-              composer: prepared.prefill.composer,
-              references: prepared.prefill.references,
-            },
+            session => rebuildBenchPrefill(session, { type: "subject-prefill-set", ...prepared.prefill }),
             { at: this.nowIso(), requestId: msg.requestId },
           );
           await this.refreshBench(msg.worldId, msg.sessionId);
@@ -14545,6 +14572,11 @@ export class Coordinator {
       case "open-exports-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        if (msg.file === "player.html") {
+          const file = await audiobookPlayerFile(store, msg.dir ?? "");
+          if (file && this.opts.provider.openStore?.() === store && !store.closingSignal.aborted) this.opts.openPath?.(file);
+          return;
+        }
         const folder = msg.dir === undefined || msg.dir === "." || msg.dir === ".." ? join(store.dir, "exports") : join(store.dir, "exports", msg.dir);
         // A video in its folder opens in the system's own player (design turn 197e); only a file
         // that is there, named as one, never a path.
@@ -15913,8 +15945,14 @@ export class Coordinator {
         const report = async (refresh = true) => {
           if (refresh) {
           availability = await this.voiceService?.wordTimingAvailability().catch(() => null);
-          const listening = await audiobookListening(store, msg.productionId, this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {});
-          cached = listening.chapters.flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
+          const options = this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {};
+          const selectedIds = msg.chapters ?? msg.blocks?.map((block) => block.chapterId);
+          const currentChapters = store.getBundle().productions.find((production) => production.meta.id === msg.productionId)?.chapters ?? [];
+          const plans = selectedIds === undefined ? [await audiobookListening(store, msg.productionId, options)] : [];
+          for (const chapterId of new Set(selectedIds ?? [])) {
+            if (currentChapters.some((chapter) => chapter.id === chapterId && !chapter.retired)) plans.push(await audiobookListening(store, msg.productionId, { ...options, scope: { kind: "chapter", chapterId } }));
+          }
+          cached = plans.flatMap((plan) => plan.chapters).flatMap((c) => c.blocks.map((b, index) => ({ chapterId: c.chapterId, key: b.key, label: `Chapter ${c.order} · block ${index + 1}`, file: c.mix?.file ?? b.file, text: b.sentences.map((sentence) => sentence.text).join(" "), fromSec: c.mix === undefined ? 0 : b.at, toSec: (c.mix === undefined ? 0 : b.at) + b.seconds, ...(b.words !== undefined ? { words: b.words.map((word) => ({ ...word, startSec: word.startSec - (c.mix === undefined ? b.at : 0), endSec: word.endSec - (c.mix === undefined ? b.at : 0) })) } : {}), ready: b.words !== undefined, ...(b.words === undefined ? { reason: failures.get(`${c.chapterId}/${b.key}`) ?? b.wordTimingReason ?? "word timing not prepared" } : {}) })));
           }
           const blocks = cached.map((block) => ({ ...block, ...(failures.has(`${block.chapterId}/${block.key}`) ? { reason: failures.get(`${block.chapterId}/${block.key}`) } : {}) }));
           const selected = blocks.filter(included);
@@ -16443,6 +16481,7 @@ export class Coordinator {
               // the door no longer shows.
               if (!chapter) return { outcome: "refused", made: 0, flagged: 0, reason: "that chapter is no longer in this production" };
               if (chapter.retired === true) return { outcome: "refused", made: 0, flagged: 0, reason: "retired since the book was priced" };
+              if (chapter.status === "outlined") return { outcome: "refused", made: 0, flagged: 0, reason: "outlined since the book was priced" };
               const chapterKey = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
               // A chapter its own run was reading when the book began is left to that run and
               // counted, as a refused chapter is; it does not end the book (codex on PR 1187).
@@ -21902,7 +21941,10 @@ export class Coordinator {
     this.readModel.setSampleWorld({
       available:
         this.opts.provider.installSampleWorld !== undefined &&
-        (await sampleWorldAvailable(this.opts.sampleWorldPath ?? null)),
+        ((this.opts.sampleWorldDownload !== undefined && this.opts.appRoot !== undefined) || (await sampleWorldAvailable(this.opts.sampleWorldPath ?? null))),
+      ...(this.opts.sampleWorldDownload ? { download: {
+        version: this.opts.sampleWorldDownload.version, bytes: this.opts.sampleWorldDownload.bytes, summary: this.opts.sampleWorldDownload.summary,
+      } } : {}),
     });
   }
 
@@ -21941,6 +21983,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.sampleInstallAbort?.abort();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();
     // A keyless command waiting on the catalogue would otherwise hold shutdown open: the

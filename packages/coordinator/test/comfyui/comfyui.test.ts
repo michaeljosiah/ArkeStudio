@@ -738,6 +738,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.ok(spec.args!.includes("--disable-metadata"), "defence in depth even though landing sanitises");
     assert.ok(spec.args!.includes("--listen"));
     assert.equal(spec.inheritEnv, false);
+    assert.equal(spec.env?.["PYTHONUTF8"], "1");
     assert.equal(spec.env?.["HF_HUB_OFFLINE"], "1");
     assert.equal(spec.env?.["OPENAI_API_KEY"], undefined);
     assert.equal(service.engineStatus().state, "ready");
@@ -1265,6 +1266,8 @@ describe("the managed child environment", () => {
       OPENAI_API_KEY: "secret",
       AWS_SECRET_ACCESS_KEY: "secret",
       HTTP_PROXY: "http://credentialled-proxy.invalid",
+      PYTHONUTF8: "0",
+      PYTHONIOENCODING: "cp1252",
     });
     assert.deepEqual(
       { SystemRoot: env["SystemRoot"], PATH: env["PATH"], TEMP: env["TEMP"] },
@@ -1274,6 +1277,8 @@ describe("the managed child environment", () => {
     assert.equal(env["AWS_SECRET_ACCESS_KEY"], undefined);
     assert.equal(env["HTTP_PROXY"], undefined);
     assert.equal(env["PYTHONNOUSERSITE"], "1");
+    assert.equal(env["PYTHONUTF8"], "1");
+    assert.equal(env["PYTHONIOENCODING"], undefined, "a host code page cannot override UTF-8 pipes");
     assert.equal(env["HF_HUB_OFFLINE"], "1");
   });
 });

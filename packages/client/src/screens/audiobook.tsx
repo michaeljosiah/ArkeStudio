@@ -68,8 +68,10 @@ import {
  * book changes under it (turn 146).
  */
 
-type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
+type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; status?: string; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
 type DoorWorld = { sheets: readonly { id: string; narration?: string; retired?: boolean; voice?: { provider: string; voiceId: string } }[] };
+
+const chapterSources = (production: DoorProduction | null) => production?.chapters.map((c) => [c.id, c.order, c.title, c.version, c.status ?? "", c.bodyHash ?? "", c.retired === true]);
 
 /**
  * What the door's answer depends on, as one string: asked again when it moves. The chapters'
@@ -100,7 +102,8 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
   );
   return JSON.stringify([
     production.audiobook ?? null,
-    production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
+    chapterSources(production),
+    production.chapters.map((c) => c.audiobook ?? null),
     narrator,
     sheets.map((sheet) => [sheet.id, sheet.voice ?? null, sheet.narration ?? null, sheet.retired === true]),
     catalogue === null
@@ -122,19 +125,20 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
 /**
  * The door asked for, by the rail and the page alike: both ask on the one stamp, so the store
  * sends one ask between them and holds a newer one until it is answered. Not asked while a
- * chapter is being read and a door is held — the rows read the run's counts; it is asked once
- * more as the run ends — and always when this window holds no door yet, as one that joins a
- * run going elsewhere does not (codex on PR 1187).
+ * chapter is being read and only its takes changed — the rows read the run's counts; changed
+ * manuscript asks at once, and the final takes ask as the run ends. Always asked when this
+ * window holds no door yet, as one that joins a run going elsewhere does not (codex on PR 1187).
  */
 export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true): void {
   const connection = useStore().connection;
   const stamp = useAudiobookDoorStamp(worldId, prodId, production, world);
   const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const chapterReading = useChapterReading(worldId, prodId);
+  const source = JSON.stringify([worldId, prodId, chapterSources(production)]);
   useEffect(() => {
-    if (!enabled || !worldId || !prodId || production === null || connection !== "open" || (chapterReading && door !== null)) return;
-    openAudiobook(worldId, prodId, stamp);
-  }, [enabled, worldId, prodId, production === null, connection, chapterReading, door === null, stamp]);
+    if (!enabled || !worldId || !prodId || production === null || connection !== "open") return;
+    openAudiobook(worldId, prodId, stamp, { source, reading: chapterReading });
+  }, [enabled, worldId, prodId, production === null, connection, chapterReading, door === null, stamp, source]);
 }
 
 /**
@@ -376,14 +380,22 @@ export function AudiobookScreen() {
     const settled = run !== undefined && run.state !== "reading" && run.state !== "priced" && run.made + run.flagged > 0 && !row.planned && row.castTrouble === undefined
       ? { ...row, made: Math.min(row.total, row.made + run.made), stale: 0, flagged: run.flagged, notMade: Math.max(0, row.total - row.made - run.made - run.flagged) }
       : row;
-    return { row: settled, reading: run?.state === "reading", run };
+    return { row: settled, reading: run?.state === "reading", run, seconds: chapterSeconds(row, words(row.chapterId)), estimated: row.seconds === null || row.made < row.total };
   });
-  const bookSeconds = shown.reduce((sum, { row }) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  // Durations come from the last measured door, not optimistic run counts: a finished run
+  // can add takes before their lengths arrive (issue 1935).
+  const bookSeconds = rows.reduce((sum, row) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  const estimated = rows.some(row => !row.planned && (row.seconds === null || row.made < row.total));
+  const recordedSeconds = rows.reduce((sum, row) => sum + (row.planned ? 0 : row.seconds ?? 0), 0);
+  const unmeasured = rows.some(row => !row.planned && row.made > 0 && row.seconds === null);
+  const nextWork = shown.find(({ row }) => !row.planned && chapterStateWord(row, false) !== null)?.row;
+  const plannedChapters = rows.filter(row => row.planned).length;
   // One meta line (rule 3): every chapter, planned ones included; the length; who reads it.
   const meta = [
     "Audiobook",
     `${door === null ? chapters.length : rows.length} chapter${(door === null ? chapters.length : rows.length) === 1 ? "" : "s"}`,
-    ...(door !== null && bookSeconds > 0 ? [formatBookLength(bookSeconds)] : []),
+    ...(door !== null && bookSeconds > 0 && estimated ? [`~${formatBookLength(bookSeconds)} estimated total`] : []),
+    ...(recordedSeconds > 0 ? [`${unmeasured ? "at least " : ""}${formatBookLength(recordedSeconds)} recorded`] : []),
     ...(narratorName !== null ? [`Read by ${narratorName}`] : []),
   ].join(" · ");
 
@@ -517,6 +529,7 @@ export function AudiobookScreen() {
             <div className="fy-abshow__acts" data-testid="audiobook-presses">
               {presses.map((press, index) => (press === null ? null : <Fragment key={index}>{press}</Fragment>))}
             </div>
+            {plannedChapters > 0 && <div className="fy-abshow__note" data-testid="audiobook-planned">{plannedChapters} planned chapter{plannedChapters === 1 ? "" : "s"} excluded from book narration</div>}
             {(bookNote !== null || note !== undefined) && (
               <div className="fy-abshow__note" data-testid="audiobook-note">
                 {bookNote !== null && (
@@ -564,12 +577,14 @@ export function AudiobookScreen() {
             </section>
           )}
           <section className="fy-abshow__chapters" aria-label="Chapters">
-            <h2 className="fy-abshow__h">Chapters</h2>
+            <div className="fy-abshow__chapter-head">
+              <h2 className="fy-abshow__h">Chapters</h2>
+              {nextWork !== undefined && <button type="button" className="fy-abshow__next" onClick={() => openChapter(nextWork.chapterId)} data-testid="audiobook-next-work">Continue work · Chapter {nextWork.order}<ChevronRight size={16} /></button>}
+            </div>
             {rows.length > 0 ? (
               <div data-testid="audiobook-rows">
-                {shown.map(({ row, reading: chapterReading, run }) => {
+                {shown.map(({ row, reading: chapterReading, run, seconds, estimated: chapterEstimated }) => {
                   const state = chapterReading && run !== undefined ? `reading… ${run.made} of ${run.toMake}` : chapterStateWord(row, false);
-                  const seconds = chapterSeconds(row, words(row.chapterId));
                   const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
                   const playable = row.made > 0;
                   // Against the made takes' time, which is what plays; where that is not measured, the
@@ -598,7 +613,7 @@ export function AudiobookScreen() {
                         <span className="fy-abshow__tx">
                           <span className="fy-abshow__nm">{heading}</span>
                           <span className="fy-abshow__m">
-                            {seconds > 0 && <span className="fy-abshow__d">{formatBookLength(seconds)}</span>}
+                            {seconds > 0 && <span className="fy-abshow__d">{formatBookLength(seconds)} {chapterEstimated ? "estimated" : "recorded"}</span>}
                             {state !== null && <span className="fy-abshow__st" data-testid="audiobook-row-state">{state}</span>}
                           </span>
                         </span>

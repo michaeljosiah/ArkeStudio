@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookListeningSchema,
@@ -61,7 +61,7 @@ function wav(): Uint8Array {
 type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner } = {}): Promise<void> {
+async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner; openPath?: (file: string) => void } = {}): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
@@ -79,6 +79,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     observeEvent: (event) => events.push(event),
     mediaProbe: { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
     ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}),
+    ...(options.openPath !== undefined ? { openPath: options.openPath } : {}),
     voice: {
       sidecar: {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
@@ -112,7 +113,7 @@ async function listen(send: (message: ClientMessage) => Promise<void>, events: D
 }
 
 describe("the book as a listener hears it (turn 186)", () => {
-  it("lists every chapter in order: one read whole, one read in part around its gap, one not read between read ones", () =>
+  it("lists manuscript chapters in order and excludes an outlined chapter even when it has saved takes", () =>
     withHarness(async ({ events, send }) => {
       await read(send, "01-neap");
       // Chapter 2 in part: its title and its first paragraph only.
@@ -121,7 +122,7 @@ describe("the book as a listener hears it (turn 186)", () => {
       const answer = await listen(send, events);
       assert.equal(answer.refused, undefined);
       const listening = AudiobookListeningSchema.parse(answer.listening);
-      assert.deepEqual(listening.chapters.map((chapter) => [chapter.order, chapter.state]), [[1, "read"], [2, "part"], [3, "not read"], [4, "read"]]);
+      assert.deepEqual(listening.chapters.map((chapter) => [chapter.order, chapter.state]), [[1, "read"], [2, "part"], [3, "not read"]]);
       assert.equal(listening.cover, "world-art.png", "the world's key art is the book's cover");
 
       const neap = listening.chapters[0]!;
@@ -231,6 +232,29 @@ async function exportPlayer(send: (message: ClientMessage) => Promise<void>, eve
 }
 
 describe("the audiobook as the player (turn 186e)", () => {
+  it("opens a completed audiobook player through the host and refuses missing or unlisted players", () => {
+    const opened: string[] = [];
+    return withHarness(async ({ worldDir, send, events }) => {
+      await read(send, "01-neap");
+      const result = await exportPlayer(send, events, { kind: "chapter", chapterId: "neap" });
+      assert.ok(result.ok, JSON.stringify(result));
+      const dir = result.dir.slice("exports/".length);
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir, file: "player.html" });
+      assert.equal(opened.length, 1);
+      assert.deepEqual(await readFile(opened[0]!), await readFile(join(worldDir, result.file)));
+      await send({ kind: "open-exports-folder", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", dir, file: "player.html" });
+      const unlisted = join(worldDir, "exports", "audiobook-unlisted");
+      await mkdir(unlisted);
+      await writeFile(join(unlisted, "player.html"), "Unlisted HTML");
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir: "audiobook-unlisted", file: "player.html" });
+      await writeFile(join(unlisted, "manifest.json"), JSON.stringify({ kind: "interactive", productionId: LEDGER, provenance: { exportedAt: CLOCK } }));
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir: "audiobook-unlisted", file: "player.html" });
+      await rename(join(worldDir, result.file), join(worldDir, result.dir, "player.saved"));
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir, file: "player.html" });
+      assert.equal(opened.length, 1, "no other world, unlisted HTML, non-audiobook package or missing player reaches the host");
+    }, { openPath: file => opened.push(file) });
+  });
+
   it("keeps chapter export scope through listening, package and receipt, and never falls back from an incomplete or missing chapter", () =>
     withHarness(async ({ worldDir, events, send }) => {
       await read(send, "01-neap");
@@ -261,7 +285,26 @@ describe("the audiobook as the player (turn 186e)", () => {
       if (!missing.ok) assert.match(missing.blockers.join(" "), /no longer in this production/);
       const book = await exportPlayer(send, events, { kind: "book" });
       assert.ok(book.ok, JSON.stringify(book));
-      assert.deepEqual(book.chapterIds, ["neap", "her-own-hand"]);
+      assert.deepEqual(book.chapterIds, ["neap"], "old outline takes never enter a book export");
+      const bookManifest = JSON.parse(await readFile(join(worldDir, book.dir, "manifest.json"), "utf8"));
+      assert.deepEqual(bookManifest.chapters.map((chapter: { id: string }) => chapter.id), ["neap"]);
+      const outlineScope: AudiobookScope = { kind: "chapter", chapterId: "her-own-hand" };
+      await send({ kind: "open-audiobook-listening", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, scope: outlineScope });
+      const outline = events.filter((event): event is Listening => event.type === "audiobook.listening").at(-1)!.listening!;
+      assert.deepEqual(outline.chapters.map((chapter) => [chapter.chapterId, chapter.state]), [["her-own-hand", "read"]]);
+      const takeFiles = outline.chapters[0]!.blocks.map((block) => join(worldDir, block.file));
+      const savedTakes = await Promise.all(takeFiles.map((file) => readFile(file)));
+      const chapterExport = await exportPlayer(send, events, outlineScope);
+      assert.ok(chapterExport.ok, JSON.stringify(chapterExport));
+      assert.deepEqual(chapterExport.chapterIds, ["her-own-hand"], "the author can still export that chapter explicitly");
+      assert.deepEqual(await Promise.all(takeFiles.map((file) => readFile(file))), savedTakes, "existing media stays unchanged");
+      for (const selection of [{ chapters: ["her-own-hand"] }, { blocks: [{ chapterId: "her-own-hand", key: "title" }] }]) {
+        await send({ kind: "audiobook-word-timing", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST, action: "read", ...selection });
+        const timing = events.filter((event) => event.type === "audiobook.word-timing").at(-1)!;
+        assert.equal(timing.type, "audiobook.word-timing");
+        assert.ok(timing.state.blocks.length > 0, "explicit outlined chapter tooling still receives its saved audio");
+        assert.ok(timing.state.blocks.every((block) => block.chapterId === "her-own-hand"));
+      }
     }));
 
   it("packages only the chapters read whole, the same player, the takes and the pictures, and lists it beside the other packages", () =>
