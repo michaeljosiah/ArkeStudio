@@ -25,6 +25,7 @@ const BASELINE_FILES = [
   "packages/client/src/components/audiobook-export.tsx",
   "packages/client/src/components/editor-dialog.tsx",
   "packages/client/src/screens/audiobook.tsx",
+  "packages/client/src/screens/audiobook-show.css",
   "packages/client/src/screens/audiobook-narrator.tsx",
   "packages/client/src/screens/chapter-audiobook.tsx",
   "packages/client/src/screens/chapter-workspace.tsx",
@@ -58,7 +59,7 @@ function plan(scope) {
   if(window.incomplete)book.chapters[0]={...book.chapters[0],state:'part',gaps:[{at:4,from:2,to:3}]};
   return {...book,scope:scope??{kind:'book'},chapters:scope?.kind==='chapter'?book.chapters.filter(c=>c.chapterId===scope.chapterId):book.chapters};
 }
-window.mountLayout=async(route)=>{
+window.mountLayout=async(route,mode="narrator")=>{
   renderer?.unmount();
   try { localStorage.clear(); } catch {}
   const state=chapterLayoutFixture("normal"),world=state.world,book=world.productions[0];
@@ -70,6 +71,12 @@ window.mountLayout=async(route)=>{
   world.sheets=world.sheets.map(s=>s.id==="maren-kest"?{...s,voice:{provider:"google",model:"gemini-3.8-flash-tts",voiceId:TARGET,assignedAtVersion:s.version??1}}:s);
   world.designedVoices=[{kind:"designed",id:"dv_01M3WMVV9W7J85PPRYQJ0YB26G",revision:1,name:"Ife's voice",description:"Warm, unhurried Lagos storyteller.",language:"en-NG",provider:"google",model:"gemini-3.8-flash-tts",remoteId:"voice_mall1uvc7rp3",expiresAt:"2027-10-01T00:00:00Z",created:"2026-10-01T00:00:00Z",origin:"generated",sample:"voices/dv_01M3WMVV9W7J85PPRYQJ0YB26G.wav"}];
   const door=chapterDoor();
+  if(mode!=="narrator") {
+    door.cast=[{sheet:"maren-kest",name:"Maren Kest"},{sheet:"odile-sarn",name:"Odile Sarn"}];
+    door.reading="cast";book.audiobook={...book.audiobook,schemaVersion:1,reading:"cast"};
+    door.voices.push(...door.cast.map(c=>({...c,state:"no voice",blocks:10})));
+  }
+  if(mode==="long")book.meta.title="The Ledger of Nights and the Remembered Voices Beyond the Northern Harbour";
   door.rows=door.rows.map((row,i)=>({...row,made:Math.min(row.total,TAKES[i]),notMade:Math.max(0,row.total-TAKES[i]),seconds:TAKES[i]>0?[1864,1236][i]:null}));
   door.price={...door.price,chapters:1,blocks:26};
   const answer=(event)=>setTimeout(()=>__applyEventForTest({at:AT,...event}),5);
@@ -93,6 +100,12 @@ window.measureLayer=(selector)=>{
   const e=document.querySelector(selector);if(!e)return null;const r=e.getBoundingClientRect();
   let container=null;for(let a=e.parentElement;a&&a!==document.documentElement;a=a.parentElement){const s=getComputedStyle(a);if(s.transform!=="none"||s.filter!=="none"||/layout|paint|strict|content/.test(s.contain)||(s.containerType&&s.containerType!=="normal")||s.willChange.includes("transform")){container=a.className||a.tagName;break;}}
   return{x:r.x,y:r.y,width:r.width,height:r.height,viewport:[innerWidth,innerHeight],onBody:e.parentElement===document.body,inTitleRow:!!e.closest(".fy-h1row"),container};
+};
+window.measureShowPage=()=>{
+  const box=s=>document.querySelector(s).getBoundingClientRect().toJSON();
+  return {hero:box('.fy-abshow__hero'),backdrop:box('.fy-abshow__bd'),portrait:box('.fy-abshow__card-im'),name:box('.fy-abshow__card-nm'),cards:document.querySelectorAll('.fy-abshow__card').length,
+    overflow:document.documentElement.scrollWidth>innerWidth||document.querySelector('.fy-abshow__page').scrollWidth>document.querySelector('.fy-abshow__page').clientWidth+1,
+    presses:[...document.querySelectorAll('[data-testid=audiobook-presses] button')].map(e=>({text:e.textContent,box:e.getBoundingClientRect().toJSON()}))};
 };
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
   plugins: [{ name: "fixture-cascade", setup(b) {
@@ -163,13 +176,38 @@ try {
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await cdp("Page.navigate", { url: origin + "/" }); await until(() => js('typeof window.mountLayout === "function"'));
   const records = [];
-  for (const [name, width, height, mobile, textScale = 1, desktop = false] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["desktop-min", 1024, 790, false, 1, true], ["laptop", 1440, 900, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
+  for (const [name, width, height, mobile, textScale = 1, desktop = false] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["desktop-min", 1024, 790, false, 1, true], ["desktop1100", 1100, 790, false], ["laptop", 1440, 900, false], ["desktop1920", 1920, 1080, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
     if (arg("--viewport") !== null && arg("--viewport") !== name) continue;
     await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: mobile });
     await js(`document.documentElement.classList.toggle("is-desktop", ${desktop})`);
     await js(`(()=>{for(const token of ['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'])document.documentElement.style.removeProperty('--text-'+token);if(${textScale}===2){const s=getComputedStyle(document.documentElement);const tokens=['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'].map(t=>[t,parseFloat(s.getPropertyValue('--text-'+t))*2]);for(const [t,size]of tokens)document.documentElement.style.setProperty('--text-'+t,size+'px');}})()`);
-    await js('window.mountLayout("p/ledger/story/audiobook")');
+    for(const mode of ["cast","long","narrator"]) {
+      await js('window.mountLayout("p/ledger/story/audiobook",'+JSON.stringify(mode)+')');
+      const show=await js('window.measureShowPage()');
+      records.push({name,layer:"show-page",mode,...show});
+      await capture(name+"-show-"+mode);
+      if(show.overflow)console.log(name,mode,await js('({root:document.documentElement.scrollWidth,page:[document.querySelector(".fy-abshow__page").scrollWidth,document.querySelector(".fy-abshow__page").clientWidth],outside:[...document.querySelectorAll(".fy-abshow__page *")].filter(e=>{const r=e.getBoundingClientRect();return r.width&&r.right>innerWidth+1}).map(e=>({class:e.className,text:e.textContent.slice(0,100),right:e.getBoundingClientRect().right})).slice(0,12)})'));
+      if(baselineRef===null) {
+        assert.equal(show.overflow,false,name+" "+mode+": show page fits its column");
+        assert.equal(show.cards,mode==="narrator"?1:3);
+        const cardWidth=width<600?132:width<1300?188:220;
+        assert.ok(Math.abs(show.portrait.width-cardWidth)<=1,name+": approved portrait width");
+        assert.ok(Math.abs(show.portrait.height-cardWidth*1.5)<=1,name+": 2:3 portrait");
+        assert.ok(show.name.top>=show.portrait.bottom,name+": name below portrait");
+        if(width<600)assert.equal(show.backdrop.height,300,name+": phone artwork height");
+        else assert.ok(show.hero.height>=440,name+": full artwork hero");
+        for(const press of show.presses) {
+          const b=press.box,h=show.hero;
+          assert.ok(b.left>=h.left-1&&b.right<=h.right+1&&b.top>=h.top-1&&b.bottom<=h.bottom+1,name+": hero contains "+press.text);
+        }
+      }
+      if(mode==="cast") {
+        await click('[data-testid="audiobook-more"]');await click('[data-testid="menu-reading"]');
+        assert.ok(await js('!!document.querySelector("[data-testid=reading-sheet]")'),name+": Reading remains reachable");
+        await capture(name+"-reading");await click('[data-testid="reading-done"]');
+      }
+    }
     await capture(name + "-door");
     const head = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),icon:!!l.querySelector("svg"),cast:document.querySelector("[data-testid=audiobook-voices]")?.textContent??""}})()');
     console.log(name, "door", JSON.stringify(head));
