@@ -1,4 +1,5 @@
-// Checks over design-system/Arke Studio.dc.html, the design master (issue 1097).
+// Checks over design-system/Arke Studio.dc.html, the design master (issue 1097), and over
+// design-system/Arke Player.dc.html, the Arke Player's own master (section 7).
 //
 //   node design-system/check-master.mjs            static checks only
 //   node design-system/check-master.mjs --record   add new turns to turns.json (never removes one)
@@ -140,6 +141,49 @@ if (process.argv.includes("--record")) {
   if (unrecorded.length) fail(`turn(s) not in turns.json: ${unrecorded.map((t) => `t${t}`).join(", ")} — run node design-system/check-master.mjs --record`);
 }
 
+// 7. The Arke Player master, a second document with its own turns (P1, P2…). It was begun after
+//    turn 139, so every one of its frames sets type through the tokens and none is a bitmap; its
+//    ids and anchors are checked as the Studio master's are, and its own ledger holds each turn's
+//    rule count so a turn cannot drop out of it unnoticed either.
+const PLAYER = join(here, "Arke Player.dc.html");
+const PLAYER_LEDGER = join(here, "arke-player.turns.json");
+let playerTurns = 0;
+if (existsSync(PLAYER)) {
+  const player = readFileSync(PLAYER, "utf8");
+  const starts = [...player.matchAll(/<section class="dv-turn" id="(p\d+)"/g)];
+  if (!starts.length) fail("Arke Player.dc.html: no p-numbered turns found");
+  const pturns = starts.map((m, i) => ({ id: m[1], body: player.slice(m.index, i + 1 < starts.length ? starts[i + 1].index : undefined) }));
+  playerTurns = pturns.length;
+  for (const { id, body } of pturns) {
+    const hits = body.match(RAW_SIZE) ?? [];
+    if (hits.length) fail(`Arke Player ${id}: ${hits.length} raw font size(s) — frames set type through var(--text-*) / var(--type-*) only: ${[...new Set(hits)].slice(0, 6).join(", ")}`);
+    for (const card of body.split(/<div class="dv-card"[^>]*>/).slice(1)) {
+      if (/^\s*<img\b[^>]*>\s*<\/div>/.test(card.slice(0, 600).replace(/\s+/g, " "))) fail(`Arke Player ${id}: a card that is only an <img>`);
+    }
+  }
+  const pids = new Map();
+  for (const m of player.matchAll(/\bid="([^"]+)"/g)) pids.set(m[1], (pids.get(m[1]) ?? 0) + 1);
+  for (const [id, n] of pids) if (n > 1) fail(`Arke Player: id "${id}" appears ${n} times`);
+  const pmissing = [...new Set([...player.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]).filter((id) => !pids.has(id)))];
+  if (pmissing.length) fail(`Arke Player: anchors with no target: ${pmissing.slice(0, 12).join(", ")}`);
+  const pcounts = new Map(pturns.map(({ id, body }) => [id, ruleCount(body)]));
+  const pledger = existsSync(PLAYER_LEDGER) ? JSON.parse(readFileSync(PLAYER_LEDGER, "utf8")) : { turns: {} };
+  if (process.argv.includes("--record")) {
+    const next = { ...pledger.turns };
+    for (const [id, rules] of pcounts) next[id] = Math.max(rules, next[id] ?? 0);
+    const sorted = Object.fromEntries(Object.entries(next).sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))));
+    writeFileSync(PLAYER_LEDGER, JSON.stringify({ note: "Every turn the Arke Player master has held, with its count of dv-rule paragraphs. check-master fails if a turn drops out or its rules fall; add a new turn with node design-system/check-master.mjs --record.", turns: sorted }, null, 2) + "\n");
+    console.log(`arke-player.turns.json: ${Object.keys(sorted).length} turns recorded`);
+  } else {
+    for (const [id, rules] of Object.entries(pledger.turns)) {
+      if (!pcounts.has(id)) fail(`Arke Player ${id} dropped — arke-player.turns.json holds it with ${rules} rule(s)`);
+      else if (pcounts.get(id) < rules) fail(`Arke Player ${id} lost ${rules - pcounts.get(id)} binding rule(s)`);
+    }
+    const unrecorded = [...pcounts.keys()].filter((id) => !(id in pledger.turns));
+    if (unrecorded.length) fail(`Arke Player turn(s) not in arke-player.turns.json: ${unrecorded.join(", ")} — run node design-system/check-master.mjs --record`);
+  }
+}
+
 // ---- render check ---------------------------------------------------------------------------
 
 function chromePath() {
@@ -156,7 +200,7 @@ function chromePath() {
 }
 
 /** Render one page in headless Chrome and report which Geist faces loaded and what a node paints in. */
-async function renderCheck(chrome, file, { needsRuntime }) {
+async function renderCheck(chrome, file, { needsRuntime, minCards }) {
   const port = 9400 + Math.floor(Math.random() * 400);
   const profile = mkdtempSync(join(tmpdir(), "dc-check-"));
   const proc = spawn(chrome, [
@@ -196,7 +240,7 @@ async function renderCheck(chrome, file, { needsRuntime }) {
     // The master renders through the dc runtime, which fetches React first; give it time and
     // then insist on cards, so an unrendered page reads as a failure rather than "no Geist".
     const deadline = Date.now() + 60_000;
-    const enough = needsRuntime ? 200 : 1;
+    const enough = minCards ?? (needsRuntime ? 200 : 1);
     let cards = 0;
     while (Date.now() < deadline) {
       cards = await evaluate("document.querySelectorAll('[data-screen-label]').length").catch(() => 0);
@@ -242,6 +286,7 @@ if (process.argv.includes("--render")) {
   } else {
     const pages = [{ file: MASTER, needsRuntime: true }];
     if (existsSync(REVIEW)) pages.push({ file: REVIEW, needsRuntime: false });
+    if (existsSync(PLAYER)) pages.push({ file: PLAYER, needsRuntime: true, minCards: 30 });
     for (const page of pages) {
       try {
         const r = await renderCheck(chrome, page.file, page);
@@ -261,4 +306,4 @@ if (failures.length) {
   for (const f of failures) console.error(" - " + f);
   process.exit(1);
 }
-console.log(`design master: ${sections.length - 1} turns, legacy raw sizes ${legacyRaw}/${LEGACY_RAW_SIZES}, anchors resolve`);
+console.log(`design master: ${sections.length - 1} turns, legacy raw sizes ${legacyRaw}/${LEGACY_RAW_SIZES}, anchors resolve${playerTurns ? `; Arke Player: ${playerTurns} turns` : ""}`);
