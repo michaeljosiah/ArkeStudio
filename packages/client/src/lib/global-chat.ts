@@ -283,7 +283,7 @@ export class GlobalChatController {
   }
   history(surface: ChatSurface, open = true) {
     const previous = surface.conversationId ? this.retained.get(`${surface.worldId}:${surface.conversationId}`) : undefined;
-    this.select(previous ? { ...previous, key: surface.key, conversationId: surface.conversationId, newThread: false } : surface);
+    this.select(previous ? { ...previous, key: surface.key, path: surface.path, conversationId: surface.conversationId, newThread: false } : surface);
     if (open) this.changed({ open: true });
   }
   reportConversation(key: string, conversationId: string | null) {

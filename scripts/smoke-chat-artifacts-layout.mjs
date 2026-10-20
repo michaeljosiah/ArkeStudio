@@ -56,7 +56,8 @@ window.mountLayout = async (route="chat", mode="normal", restore=false) => {
   if(!restore&&mode==="production-history") {
     const owner=new GlobalChatController(sessionStorage),list=chatSurfaceForPage(state,"/w/"+world.meta.worldId+"/chat");
     owner.select(list);owner.reportConversation(list.key,"cv_01J8F3K2QW9VZX4N7M0RTYB6HK");owner.setValue(list.key,"draft","Keep the remembered world draft");
-    owner.select(chatSurfaceForPage(state,"/w/"+world.meta.worldId+"/chat/"+CHAT_ID));
+    const production=chatSurfaceForPage(state,"/w/"+world.meta.worldId+"/p/saltlight/story");
+    owner.select(production);owner.reportConversation(production.key,CHAT_ID);
   }
   if(mode==="long") {
     world.conversations[0].title="UnbrokenConversationTitle".repeat(20);
@@ -145,6 +146,7 @@ try {
     await js('document.documentElement.style.setProperty("--smoke-safe-bottom","'+(touch?20:0)+'px")');
     if(productionHistory) {
       await js('window.mountLayout("conversation","production-history")');
+      await js('window.go("/w/"+window.worldId+"/chat/"+window.chatId+"/");window.settleLayout()');
       await check(name,"production-history");
       assert.ok(await js('!!document.querySelector(".fy-story__chat")'),name+" history uses the full-page conversation, not the compact dock");
       if(width>=1100)assert.equal(await js('document.querySelector(".fy-chatnav a").textContent.includes("Older pending work")'),true,"history retains pending-consequence ordering");
@@ -186,7 +188,9 @@ try {
       assert.equal(await js('document.querySelector("[contenteditable=true]").textContent'),"Keep this history draft","window recovery retains the draft");
       assert.ok(await js('window.commands.filter(c=>c.kind==="world-chat-open" && c.conversationId).every(c=>c.conversationId===window.chatId)'),"history opens its exact conversation");
       if(width<600){
+        await js('document.querySelector("[data-global-chat-trigger]").click();window.settleLayout()');
         await js('document.querySelector(".fy-chat__phonehead [aria-label=Conversations]").click();window.settleLayout()');
+        assert.ok(await js('!document.querySelector(".fy-global-chat[open]")'),"Back closes the panel so it cannot cover the list");
         assert.ok(await js('!!document.querySelector(".fy-chatnav--screen")'),"Back opens the conversation list");
         await js('[...document.querySelectorAll(".fy-chatnav a")].find(a=>a.href.endsWith(window.chatId)).click();window.settleLayout()');
         assert.equal(await js('document.querySelector("[contenteditable=true]").textContent'),"Keep this history draft","history returns to the same draft");

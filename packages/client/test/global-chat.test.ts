@@ -71,6 +71,19 @@ describe("global Chat keeps presentation separate from conversation authority (2
     owner.open(history);
     assert.equal(owner.value(history.key, "draft", ""), "A retained draft");
   });
+  it("history rehosts a retained production conversation at its current route", () => {
+    const owner = new GlobalChatController(); owner.open(production); owner.reportConversation(production.key, CHAT_ID);
+    owner.setValue(production.key, "draft", "Keep the production draft"); owner.close();
+    const history = chatSurfaceForPage(state, `${root}/chat/${CHAT_ID}/`)!;
+    const { document } = parseHTML("<html><body><div id='host'></div></body></html>");
+    const host = document.getElementById("host")! as unknown as HTMLElement;
+    owner.history(history, false); owner.register(history, host);
+    assert.equal(owner.getSnapshot().selected?.path, history.path);
+    assert.equal(owner.getSnapshot().selected?.entry.kind, "production");
+    assert.equal(owner.getSnapshot().open, false);
+    assert.equal(owner.host(), host);
+    assert.equal(owner.value(history.key, "draft", ""), "Keep the production draft");
+  });
   it("contextual sheet conversations keep World Chat and its model rules after history and refresh", () => {
     const contextual = { ...state, world: { ...world, conversations: [{ ...world.conversations[0]!, id: CHAT_ID, entryContext: { kind: "sheet" as const, sheetKind: "character" as const, sheetId: "maren-kest" } }] } };
     const surface = chatSurfaceForPage(contextual, `${root}/chat/${CHAT_ID}`)!;

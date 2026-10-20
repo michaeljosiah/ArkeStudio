@@ -1516,7 +1516,7 @@ export function ProductionConversationBody({
         <div className="fy-chat__phonehead">
           <IconButton label="Conversations" onClick={() => {
             const path = `/w/${worldId}/chat`, page = chatSurfaceForPage(state, path);
-            if (page && presentation) presentation.owner.select({ ...page, showList: true });
+            if (page && presentation) { presentation.owner.close(); presentation.owner.select({ ...page, showList: true }); }
             void navigate(path);
           }}><ChevronLeft size={22} /></IconButton>
           <h1>{historyPage.title}</h1>

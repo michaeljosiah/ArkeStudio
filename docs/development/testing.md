@@ -856,6 +856,8 @@ the same app and cascade at those nine widths. It checks a pending action, a com
 the shared global panel, retained draft and selected conversation after remount, and phone
 Back/list navigation with a remembered world conversation. It verifies a visible phone Canvas
 entry, pending-consequence history order and Fold drawer dismissal after choosing a row.
+Retained production-page conversations must rehost at their history URL, including a trailing
+slash; phone Back must also uncover the list when invoked inside the global Chat panel.
 Desktop and phone also receive dark-theme captures. Inspect the complete
 screenshots against turns 164/196/225; a passing overflow check alone is not design acceptance.
 The native check opens a saved production conversation and verifies its exact card and draft

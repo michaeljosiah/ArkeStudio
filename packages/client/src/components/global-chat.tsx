@@ -208,7 +208,7 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   // History owns a page, not a 360px dock. Keep the selected scope/prefix intact and change only
   // its presentation; panel open/close still keeps one conversation and its draft (issue 2019).
   const historyRow = selected?.kind === "production" && current?.conversationId === selected.conversationId &&
-    /^\/w\/[^/]+\/chat\/[^/]+$/.test(location.pathname) ? world?.conversations.find(row => row.id === selected.conversationId) : undefined;
+    /^\/w\/[^/]+\/chat\/[^/]+\/?$/.test(location.pathname) ? world?.conversations.find(row => row.id === selected.conversationId) : undefined;
   const historyProductionId = selected && "productionId" in selected.entry ? selected.entry.productionId : undefined;
   const historyPage = historyRow && selected ? { title: historyRow.title, subject: selected.props?.dock?.subject ||
     world?.productions.find(production => production.meta.id === historyProductionId)?.meta.title || selected.title } : undefined;
