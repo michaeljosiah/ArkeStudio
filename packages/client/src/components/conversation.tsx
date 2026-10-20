@@ -1514,7 +1514,7 @@ export function ProductionConversationBody({
             {notesCollapsed ? "Show notes" : "Hide notes"}
           </Button>}
         </div>
-        {responsive && compact && <StudioCanvasPress />}
+        {responsive && !phone && <StudioCanvasPress />}
       </div>}
       {responsive && compact && <button type="button" className="fy-develop-model" aria-haspopup="dialog" onClick={() => setModelsOpen(true)}>
         <Sparkle size={16} /><b>Story author · {authorLocation}</b>
