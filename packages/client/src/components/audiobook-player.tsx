@@ -49,7 +49,7 @@ export function playerChapters(listening: AudiobookListening, src: (file: string
 
 /** Whether anything of the book is made yet: Listen waits for one block anywhere (R-67). */
 export function bookHasTakes(production: Pick<ProductionBundle, "chapters"> | null): boolean {
-  return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.audiobook !== undefined && "takes" in chapter.audiobook && (chapter.audiobook.takes > 0 || chapter.audiobook.arranged === true));
+  return (production?.chapters ?? []).some((chapter) => !chapter.retired && chapter.status !== "outlined" && chapter.audiobook !== undefined && "takes" in chapter.audiobook && (chapter.audiobook.takes > 0 || chapter.audiobook.arranged === true));
 }
 
 /**
@@ -69,7 +69,7 @@ function usePlanStamp(worldId: string, productionId: string, production: Product
   const runs = useAudiobookRuns();
   const prefix = `${worldId}/${productionId}/`;
   return JSON.stringify([
-    (production?.chapters ?? []).map((chapter) => [chapter.id, chapter.version, chapter.bodyHash ?? "", chapter.audiobook ?? null]),
+    (production?.chapters ?? []).map((chapter) => [chapter.id, chapter.version, chapter.status, chapter.retired ?? false, chapter.bodyHash ?? "", chapter.audiobook ?? null]),
     Object.entries(records).filter(([key]) => key.startsWith(prefix)).map(([key, held]) => [key, held.seq]),
     Object.entries(runs).filter(([key]) => key.startsWith(prefix)).map(([key, run]) => [key, run.state, run.made]),
   ]);
@@ -83,6 +83,8 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
   onClose: () => void;
 }) {
   const productionId = production.meta.id;
+  // Outlined chapters stay outside the book, but their saved takes remain available individually.
+  const outlinedChapter = production.chapters.find((chapter) => chapter.id === chapterId)?.status === "outlined" ? chapterId : undefined;
   const slug = useStore().state?.world?.meta.slug ?? null;
   const connection = useStore().connection;
   const shell = useRef<HTMLDivElement>(null);
@@ -110,14 +112,14 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
     if (connection !== "open") return;
     if (first.current) {
       first.current = false;
-      asked.current = openAudiobookListening(worldId, productionId);
+      asked.current = openAudiobookListening(worldId, productionId, outlinedChapter !== undefined ? { kind: "chapter", chapterId: outlinedChapter } : undefined);
       return;
     }
     const timer = setTimeout(() => {
-      asked.current = openAudiobookListening(worldId, productionId);
+      asked.current = openAudiobookListening(worldId, productionId, outlinedChapter !== undefined ? { kind: "chapter", chapterId: outlinedChapter } : undefined);
     }, 1200);
     return () => clearTimeout(timer);
-  }, [worldId, productionId, connection, stamp]);
+  }, [worldId, productionId, connection, stamp, outlinedChapter]);
 
   /** The book takes the app's one read: the previous owner stopped, the dock's clip let go. */
   const claimBook = () => {
@@ -191,7 +193,7 @@ export function AudiobookPlayerView({ worldId, production, chapterId, onClose }:
       title: plan.title,
       cover: plan.cover === null ? null : src(plan.cover),
       chapters,
-      storageKey: audiobookPlaceKey(worldId, productionId),
+      storageKey: outlinedChapter !== undefined ? `${audiobookPlaceKey(worldId, productionId)}-chapter-${outlinedChapter}` : audiobookPlaceKey(worldId, productionId),
       ...(chapterId !== undefined ? { chapterId } : {}),
       // Listen on a chapter plays it; Listen on the book opens on Continue when a place is kept.
       autoplay: true,
@@ -234,7 +236,7 @@ export function ListenButton({ worldId, production, chapterId, className, solid 
   const connection = useStore().connection;
   return (
     <>
-      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!bookHasTakes(production) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
+      <Button variant={listenLeads(production, chapterId) ? "primary" : "ghost"} className={className} disabled={!(bookHasTakes(production) || listenLeads(production, chapterId)) || connection !== "open"} onClick={() => setOpen(true)} data-testid="audiobook-listen">
         {solid ? <PlaySolid size={13} /> : <Play size={14} />}
         Listen
       </Button>
