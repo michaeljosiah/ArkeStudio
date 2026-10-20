@@ -2045,6 +2045,116 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     <div className="fy-sheet__eyebrow">{sheet.type}{sheet.role ? ` · ${sheet.role}` : ""}</div>
     {isCharacter ? <div className="fy-sheet__heading">{sheetHeading}{characterTabs}</div> : sheetHeading}
   </div>;
+  const details = (
+    <>
+      <div
+        className="fy-sheet__grid"
+        style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
+      >
+        {gridSections.map((s) => {
+          // Every section carries authored prose, so every one earns the hover read-aloud — once
+          // it holds real text, not the empty-section placeholder. It used to be Appearance
+          // alone, which meant a location sheet or a faction sheet had no readable block at all.
+          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
+          const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
+          return (
+            <div key={s.heading}>
+              {/* Every heading on a location record used to carry the sheet's status as a dot —
+                  the same colour on all of them, saying once per section what the badge under the
+                  name says once for the record (issue 1010, U3). */}
+              <div className="fy-sheet__sechead">{s.heading}</div>
+              {readable ? readableProse(s.heading, s.body, body) : body}
+            </div>
+          );
+        })}
+      </div>
+      {rules.length > 0 && (
+        <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
+          {rules.map((rule) => (
+            <div key={rule.id} className="scr-canonrule">
+              {compact ? (
+                <button className="fy-sheet-canon-link mono" aria-label={`Edit ${rule.id} in canon`} onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>{rule.id}</button>
+              ) : <span className="mono" style={{ color: "var(--muted-foreground)" }}>{rule.id}</span>}
+              <span className="scr-prose">{rule.body}</span>
+              {!compact && <span className="scr-canonrule__note">
+                <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>
+                  Edit in canon →
+                </Button>
+              </span>}
+            </div>
+          ))}
+        </Section>
+      )}
+      {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
+        <Section title="Linked">
+          <div className="fy-sheet-links">
+            {sheet.links.map((link) => {
+              const other = world.sheets.find((s) => s.id === link);
+              if (!other)
+                return (
+                  <Badge key={link} tone="outline">
+                    {link}
+                  </Badge>
+                );
+              const base = other.type === "character" ? "cast" : `${other.type}s`;
+              return (
+                <Button
+                  key={link}
+                  variant="secondary"
+                  className="fy-sheet-link"
+                  onClick={() => navigate(`/w/${worldId}/${base}/${link}`)}
+                >
+                  <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>
+                  {other.name} →
+                </Button>
+              );
+            })}
+            {(refs?.incomingLinks ?? [])
+              .filter((id) => !sheet.links.includes(id))
+              .map((id) => {
+                const other = world.sheets.find((s) => s.id === id);
+                const base = other ? (other.type === "character" ? "cast" : `${other.type}s`) : "cast";
+                return (
+                  <Button key={id} variant="ghost" className="fy-sheet-link" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
+                    {other && <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>}
+                    ← {other?.name ?? id}
+                  </Button>
+                );
+              })}
+          </div>
+        </Section>
+      )}
+      <Section title="From this sheet">
+        <div className="lay-stats">
+          <div className="lay-stats__item">
+            <div className="lay-stats__value">{references.total}</div>
+            <div className="lay-stats__label" title={references.detail}>accepted references</div>
+          </div>
+          {refs && <>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">{refs.productions.length}</div>
+              <div className="lay-stats__label">productions</div>
+            </div>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">{refs.artifacts.length}</div>
+              <div className="lay-stats__label">artifacts</div>
+            </div>
+            <div className="lay-stats__item">
+              <div className="lay-stats__value">
+                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
+              </div>
+              <div className="lay-stats__label">
+                takes
+                {Object.keys(refs.takesByVersion).length > 1
+                  ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
+                  : ""}
+              </div>
+            </div>
+          </>}
+        </div>
+      </Section>
+    </>
+  );
   const main = (
     <div
       className={isCharacter ? "fy-sheet__main" : undefined}
@@ -2234,112 +2344,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         }
         onUndo={lifecycle.undo}
       />
-      <div
-        className="fy-sheet__grid"
-        style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
-      >
-        {gridSections.map((s) => {
-          // Every section carries authored prose, so every one earns the hover read-aloud — once
-          // it holds real text, not the empty-section placeholder. It used to be Appearance
-          // alone, which meant a location sheet or a faction sheet had no readable block at all.
-          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
-          const body = <div className="fy-sheet__secbody"><ReadOnlyMarkdown value={s.body} ariaLabel={`${sheet.name} · ${s.heading}`} /></div>;
-          return (
-            <div key={s.heading}>
-              {/* Every heading on a location record used to carry the sheet's status as a dot —
-                  the same colour on all of them, saying once per section what the badge under the
-                  name says once for the record (issue 1010, U3). */}
-              <div className="fy-sheet__sechead">{s.heading}</div>
-              {readable ? readableProse(s.heading, s.body, body) : body}
-            </div>
-          );
-        })}
-      </div>
-      {rules.length > 0 && (
-        <Section title="Canon rules" aside={<span>owned by canon — edit in canon, not here</span>}>
-          {rules.map((rule) => (
-            <div key={rule.id} className="scr-canonrule">
-              {compact ? (
-                <button className="fy-sheet-canon-link mono" aria-label={`Edit ${rule.id} in canon`} onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>{rule.id}</button>
-              ) : <span className="mono" style={{ color: "var(--muted-foreground)" }}>{rule.id}</span>}
-              <span className="scr-prose">{rule.body}</span>
-              {!compact && <span className="scr-canonrule__note">
-                <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon/${rule.id}`)}>
-                  Edit in canon →
-                </Button>
-              </span>}
-            </div>
-          ))}
-        </Section>
-      )}
-      {(sheet.links.length > 0 || (refs?.incomingLinks.length ?? 0) > 0) && (
-        <Section title="Linked">
-          <div className="fy-sheet-links">
-            {sheet.links.map((link) => {
-              const other = world.sheets.find((s) => s.id === link);
-              if (!other)
-                return (
-                  <Badge key={link} tone="outline">
-                    {link}
-                  </Badge>
-                );
-              const base = other.type === "character" ? "cast" : `${other.type}s`;
-              return (
-                <Button
-                  key={link}
-                  variant="secondary"
-                  className="fy-sheet-link"
-                  onClick={() => navigate(`/w/${worldId}/${base}/${link}`)}
-                >
-                  <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>
-                  {other.name} →
-                </Button>
-              );
-            })}
-            {(refs?.incomingLinks ?? [])
-              .filter((id) => !sheet.links.includes(id))
-              .map((id) => {
-                const other = world.sheets.find((s) => s.id === id);
-                const base = other ? (other.type === "character" ? "cast" : `${other.type}s`) : "cast";
-                return (
-                  <Button key={id} variant="ghost" className="fy-sheet-link" onClick={() => navigate(`/w/${worldId}/${base}/${id}`)}>
-                    {other && <span className="fy-sheet-link__face"><Portrait worldSlug={slug} path={sheetPortraitPath(other.id)} label="" radius={16} /></span>}
-                    ← {other?.name ?? id}
-                  </Button>
-                );
-              })}
-          </div>
-        </Section>
-      )}
-      <Section title="From this sheet">
-        <div className="lay-stats">
-          <div className="lay-stats__item">
-            <div className="lay-stats__value">{references.total}</div>
-            <div className="lay-stats__label" title={references.detail}>accepted references</div>
-          </div>
-          {refs && <>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">{refs.productions.length}</div>
-              <div className="lay-stats__label">productions</div>
-            </div>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">{refs.artifacts.length}</div>
-              <div className="lay-stats__label">artifacts</div>
-            </div>
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">
-                {Object.values(refs.takesByVersion).reduce((a, b) => a + b, 0)}
-              </div>
-              <div className="lay-stats__label">
-                takes
-                {Object.keys(refs.takesByVersion).length > 1
-                  ? ` across v${Object.keys(refs.takesByVersion).sort().join(", v")}`
-                  : ""}
-              </div>
-            </div>
-          </>}
-        </div>
-      </Section>
+      {!isCharacter && details}
     </div>
   );
   if (isCharacter) {
@@ -2348,6 +2353,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {phone && header}
         {side}
         {main}
+        <div className="fy-sheet__details">{details}</div>
       </div>
     );
   }

@@ -885,6 +885,12 @@ The printed directory includes PNGs, measurements and all eight turn 161 master 
 unchanged desktop with the same fixture. Compare geometry and images; counts and sheet
 content remain live data. Character rename, duplicate, promote and retire remain available.
 
+`--reading` checks short and long character prose at 320/390/600/984/1024/1200/1536px,
+including enlarged text and 125% CSS zoom. It verifies full-width details below identity,
+unchanged section text, no horizontal overflow and reached headings below navigation (#1996).
+The narrower CSS viewports also exercise zoom reflow. Native acceptance compares the entire
+sheet text before/after and verifies section Read aloud/Copy controls at 1024/1200/1536px.
+
 Run client `test/cast-layout.test.tsx` alongside props, pending-sheets, character-pages
 and world-card-heights tests, and typecheck after changing tests.
 

@@ -12,6 +12,7 @@ import { parseHTML } from "linkedom";
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const baseline = process.argv.includes("--baseline");
+const reading = process.argv.includes("--reading");
 const baselineRef = baseline ? process.argv[process.argv.indexOf("--baseline") + 1] : null;
 if (baseline) assert.ok(baselineRef, "--baseline requires a revision");
 const dir = await mkdtemp(join(tmpdir(), "arke-cast-"));
@@ -46,6 +47,7 @@ window.mountLayout=async(route="cast",mode="normal")=>{
  if(mode==="markdown")world.sheets[0].sections=[{heading:"Essence",body:"A **tide-caller** with *quiet resolve*."},{heading:"Appearance",body:["> Keep the passage clear.","","- Oilskin coat","- Work boots","","A \`ledger\` stays dry."].join(String.fromCharCode(10))}];
  if(mode==="proposal")world.proposals=[{proposal:{id:"pr_01J8E0000000000000000000P1",kind:"new-sheet",summary:"New location: Review Room",targets:[{path:"locations/review-room.md",baseVersion:null,baseHash:null}],baseCanonRevision:42,reservedCanonIds:[],source:"chat:studio",created:"2026-10-20T00:00:00Z",draftRevision:1,decision:{mode:"attended",owner:{kind:"surface",surface:"sheet-list",targetPath:"locations/review-room.md"}}},ripple:null,review:{targets:[{path:"locations/review-room.md",label:"Review Room",kind:"new location sheet",action:"create",fields:[{field:"Look",before:null,proposed:"A public room with a clear passage and a sheltered notice board. ".repeat(180)},{field:"Customs",before:null,proposed:"Keep the passage clear."}]}]}}];
  if(mode==="long")for(const sheet of world.sheets){sheet.name="UnbrokenCharacterName".repeat(12);sheet.role="UnbrokenRole".repeat(20);}
+ if(mode==="prose")world.sheets[0].sections.push(...["Wants","Fears","Truth"].map(heading=>({heading,body:("The harbour keeps a record of every promise. A clear passage remains between the shore and the houses. ").repeat(45)})));
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
  renderer=createRoot(document.getElementById("root"));flushSync(()=>renderer.render(<MemoryRouter initialEntries={["/w/"+world.meta.worldId+"/"+route]}><Navigation/><App/></MemoryRouter>));await window.settleLayout();
@@ -109,7 +111,24 @@ try {
   const click=async selector=>{const point=await js(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"nearest",inline:"nearest"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);await cdp("Input.dispatchMouseEvent",{type:"mouseMoved",...point});await cdp("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",clickCount:1,...point});await cdp("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",clickCount:1,...point});await js("window.settleLayout()");};
   const escape=async()=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await js("window.settleLayout()");};
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
+  if(reading)for(const width of [320,390,600,984,1024,1200,1536])for(const mode of ["normal","prose"]){
+   await size(width,850,width<1100);await cdp("Emulation.setTouchEmulationEnabled",{enabled:width<1100});
+   await js('document.documentElement.style.zoom="";window.mountLayout("cast/maren-kest",'+JSON.stringify(mode)+')');
+   const original=await js('document.querySelector(".fy-sheet").textContent');
+   const identity=await js('(()=>{const sheet=document.querySelector(".fy-sheet"),side=sheet.querySelector(".fy-sheet__side"),details=sheet.querySelector(".fy-sheet__details"),nav=document.querySelector(".fy-pillnav"),style=getComputedStyle(sheet);return{sheet:sheet.getBoundingClientRect().toJSON(),contentWidth:sheet.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),side:side.getBoundingClientRect().toJSON(),details:details.getBoundingClientRect().toJSON(),nav:nav.getBoundingClientRect().toJSON()}})()');
+   assert.ok(identity.sheet.y>=identity.nav.bottom,"navigation sits outside the reading scroll area");
+   assert.ok(identity.details.width>=identity.contentWidth-1,"details use the available page width");
+   await js('document.querySelector(".fy-sheet__grid > div:last-child").scrollIntoView({block:"start"});window.settleLayout()');
+   await check('reading-'+width+'-'+mode);
+   assert.equal(await js('document.querySelector(".fy-sheet").textContent'),original,"scrolling retains every section and control");
+   assert.ok(await js('(()=>{const section=document.querySelector(".fy-sheet__grid > div:last-child"),sheet=document.querySelector(".fy-sheet");return section.getBoundingClientRect().top>=sheet.getBoundingClientRect().top-1})()'),"reached heading remains below navigation");
+   // Enlarged prose exercises text scaling; narrow CSS widths also cover browser zoom reflow.
+   await js('document.querySelector(".fy-sheet__details").style.fontSize="125%";document.querySelectorAll(".fy-sheet__secbody").forEach(e=>e.style.fontSize="125%");window.settleLayout()');
+   await check('reading-'+width+'-'+mode+'-large-text');
+   await js('document.documentElement.style.zoom="125%";window.settleLayout()');
+   await check('reading-'+width+'-'+mode+'-zoom');
+  }
+  for(const [name,width,height,touch] of reading?[]:[["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
    if(only&&only!==name)continue;
    await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:touch});
    for(const route of ["cast","locations","factions","props","cast/maren-kest"]){
@@ -119,8 +138,8 @@ try {
     if(!baseline&&width<600&&route==="cast/maren-kest"){
      assert.equal(await js('getComputedStyle(document.querySelector(".fy-fan__drift")).animationName'),"none");
      assert.ok(await js('document.querySelector(".fy-sheet__header").getBoundingClientRect().bottom <= document.querySelector(".fy-designcard").getBoundingClientRect().top'));
-     await js('document.querySelector(".fy-content").scrollTop=document.querySelector(".fy-sheet__main").getBoundingClientRect().top-109');await check(name+'-sheet');
-     await js('document.querySelector(".fy-content").scrollTop=document.querySelector(".fy-content").scrollHeight');await check(name+'-sheet-bottom');
+     await js('document.querySelector(".fy-sheet__main").scrollIntoView({block:"start"})');await check(name+'-sheet');
+     await js('document.querySelector(".fy-sheet").scrollTop=document.querySelector(".fy-sheet").scrollHeight');await check(name+'-sheet-bottom');
     }
    }
    if(!baseline&&width<1100){await js('window.mountLayout("props")');assert.equal(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height'),0);await click('.fy-kind-new');assert.ok(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height>0'));await check(name+'-new-prop');}
@@ -152,7 +171,8 @@ try {
   if (!baseline) for (const [name,id,pairs] of [
     ["phone-cast","cs161a1",[[".fy-feature",".feat"],[".fy-feature__frame",".feat img"],[".fy-ledger .fy-row",".ledger .row"]]],
     ["phone-locations","cs161a3",[[".fy-kind-grid .fy-gridcard",".pcard"]]],
-    ["phone-cast-maren-kest","cs161c1",[[".fy-designcard",".design"],[".fy-overview-sheet",".sheetrow"]]],
+    // Character detail now owns a scrollbar below navigation (#1996), so its available
+    // width differs from turn 161. The reading matrix checks its bounds and prose instead.
   ]) {
     const actual=records.find(r=>r.name===name),expected=masterRecords.find(r=>r.id===id);
     if(actual) for(const [app,master] of pairs) for(const key of ["x","y","width","height"])
