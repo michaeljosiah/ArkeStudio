@@ -436,7 +436,7 @@ describe("the book, not a chapter (186a, R-67)", () => {
   it("lists every chapter in Chapters: what is read and how far, a part's unread blocks, and one not read held", () => {
     const p = mount();
     p.press("Chapters");
-    assert.equal(p.text(".abp-sheet h4"), "Chapters · 4 · 2 read");
+    assert.equal(p.text(".abp-sheet h4"), "3 of 4 chapters have audio · 2 complete");
     const rows = p.all(".abp-ch");
     assert.deepEqual(rows.map((row) => row.textContent?.replace(/\s+/g, " ").trim()), ["01Neap0:30", "02The Same Ink2 not read0:12", "03Nothing Wrongnot read", "04Her Own Hand0:20"]);
     assert.equal(rows[2]!.hasAttribute("disabled"), true, "not read: listed and held");
@@ -572,7 +572,31 @@ describe("the transport (R-68)", () => {
     p.end();
     p.at(6); // 0:10 into a 62-second book
     assert.equal(p.text(".abp-of"), "chapter 1 of 4");
-    assert.equal(p.text(".abp-left"), "52 s left");
+    assert.equal(p.text(".abp-left"), "recorded audio · 52 s left");
+    assert.equal(p.text("[data-ref='availability']"), "3 of 4 chapters have audio · 2 complete");
+  });
+
+  it("refreshes available and complete counts as takes land, without counting an unread estimate as audio", () => {
+    const p = mount({ chapters: [CH1, CH2, { ...CH3, seconds: 600 }, CH4] });
+    assert.equal(p.text(".abp-left"), "recorded audio · 1 m left");
+    p.press("Chapters");
+    p.handle.update([CH1, { ...CH2, state: "read", gaps: [] }, CH3, CH4]);
+    assert.equal(p.text("[data-ref='availability']"), "3 of 4 chapters have audio");
+    assert.equal(p.text(".abp-sheet h4"), "3 of 4 chapters have audio");
+    p.handle.update([CH1, CH4]);
+    assert.equal(p.text("[data-ref='availability']"), "2 of 2 chapters have audio");
+    assert.match(p.playingAudio()?.getAttribute("src") ?? "", /title.wav/, "the current take still plays");
+  });
+
+  it("distinguishes an empty book and a chapter without audio, including on the poster", () => {
+    const p = mount({ chapters: [CH3], autoplay: false });
+    assert.match(p.text(".abp-poster"), /0 of 1 chapter has audio/);
+    assert.equal(p.text(".abp-left"), "recorded audio · 0 s left");
+    p.handle.update([]);
+    assert.equal(p.text(".abp-of"), "No chapters");
+    assert.match(p.text(".abp-poster"), /No chapters/);
+    p.handle.update([CH1]);
+    assert.match(p.text(".abp-poster"), /1 of 1 chapter has audio/);
   });
 });
 
@@ -606,7 +630,7 @@ describe("the listener's place (R-71)", () => {
 
   it("opens on Play with no place kept", () => {
     const p = mount({ autoplay: false });
-    assert.match(p.text(".abp-poster"), /The Undersong\s*Play/);
+    assert.match(p.text(".abp-poster"), /The Undersong.*3 of 4 chapters have audio · 2 complete.*Play/);
     p.press("Play");
     assert.equal(p.root.getAttribute("data-mode"), "playing");
   });

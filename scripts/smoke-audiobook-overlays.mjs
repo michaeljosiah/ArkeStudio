@@ -60,6 +60,7 @@ window.mountLayout=async(route)=>{
   renderer?.unmount();
   try { localStorage.clear(); } catch {}
   const state=chapterLayoutFixture("normal"),world=state.world,book=world.productions[0];
+  window.chapterFile=book.chapters.find(c=>c.id==='neap').file;
   window.incomplete=false;
   window.markReady=()=>{window.incomplete=false;book.chapters=book.chapters.map(c=>c.id==='neap'?{...c,audiobook:{chapterVersion:c.version,hash:'updated',updatedAt:AT,takes:26,flagged:0}}:c);__setStateForTest(structuredClone(state),{connection:'open'});};
   book.chapters=book.chapters.map((c,i)=>TAKES[i]>0?{...c,audiobook:{chapterVersion:c.version,hash:"h",updatedAt:AT,takes:TAKES[i],flagged:0}}:c);
@@ -93,12 +94,18 @@ window.measureLayer=(selector)=>{
 };
 ` }, bundle: true, platform: "browser", format: "iife", define: { "import.meta.env": "{}" },
   plugins: [{ name: "fixture-cascade", setup(b) {
+    b.onResolve({ filter: /\?url$/ }, async ({ path, resolveDir, kind }) => {
+      const resolved = await b.resolve(path.slice(0, -4), { resolveDir, kind });
+      return { ...resolved, namespace: "url-asset" };
+    });
+    b.onLoad({ filter: /.*/, namespace: "url-asset" }, async ({ path }) => ({ contents: await readFile(path), loader: "file" }));
+    b.onResolve({ filter: /^\/.*\.(png|webp)$/ }, ({ path }) => ({ path: join(root, "packages/client/public", path.slice(1)) }));
     b.onLoad({ filter: /\.(css|tsx?)$/ }, async ({ path }) => {
       const name = relative(root, path).replaceAll("\\", "/");
       const old = baselineRef !== null && BASELINE_FILES.includes(name);
       return { loader: path.endsWith(".css") ? "css" : "tsx", resolveDir: dirname(path), contents: old ? execFileSync("git", ["show", `${baselineRef}:${name}`], { cwd: root, encoding: "utf8" }) : await readFile(path, "utf8") };
     });
-  } }], loader: { ".woff": "file", ".woff2": "file" }, outfile: join(dir, "view.js"),
+  } }], loader: { ".woff": "file", ".woff2": "file", ".png": "file", ".webp": "file" }, outfile: join(dir, "view.js"),
 });
 await writeFile(join(dir, "index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
 const chrome = process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
@@ -161,7 +168,7 @@ try {
     await js(`(()=>{for(const token of ['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'])document.documentElement.style.removeProperty('--text-'+token);if(${textScale}===2){const s=getComputedStyle(document.documentElement);const tokens=['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'].map(t=>[t,parseFloat(s.getPropertyValue('--text-'+t))*2]);for(const [t,size]of tokens)document.documentElement.style.setProperty('--text-'+t,size+'px');}})()`);
     await js('window.mountLayout("p/ledger/story/audiobook")');
     await capture(name + "-door");
-    const head = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.classList.contains("ui-btn--primary"),icon:!!l.querySelector("svg"),cast:document.querySelector("[data-testid=audiobook-voices]")?.textContent??""}})()');
+    const head = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),icon:!!l.querySelector("svg"),cast:document.querySelector("[data-testid=audiobook-voices]")?.textContent??""}})()');
     console.log(name, "door", JSON.stringify(head));
     if (baselineRef === null) {
       assert.equal(head?.primary, true, name + ": Listen leads the door");
@@ -172,11 +179,26 @@ try {
     await js("window.settleLayout()");
     const player = await js('window.measureLayer(".fy-abplayer")');
     covers(player, name + " player");
+    if (baselineRef === null) {
+      assert.equal(await js('document.querySelector("[data-ref=availability]").textContent'), "2 of 3 chapters have audio");
+      assert.match(await js('document.querySelector(".abp-left").textContent'), /^recorded audio/);
+      await click('.abp [data-act="chapters"]');
+      const bounds = await js('(()=>{const sheet=document.querySelector(".abp-sheet"),r=sheet.getBoundingClientRect(),bar=document.querySelector(".abp-bar").getBoundingClientRect();return {bottom:r.bottom,barTop:bar.top,left:r.left,right:r.right,overflow:sheet.scrollWidth>sheet.clientWidth+1}})()');
+      assert.ok(bounds.bottom <= bounds.barTop, name + ": Chapters stays above the transport");
+      assert.ok(bounds.left >= 0 && bounds.right <= width + 1, name + ": Chapters fits the viewport");
+      assert.equal(bounds.overflow, false);
+      await capture(name + "-player-chapters");
+      await click('.abp [data-act="chapters"]');
+    }
     records.push({ name, layer: "player", ...player });
     await capture(name + "-player");
     await closePlayer();
     await click('[data-testid="audiobook-export-open"]');
     await js("window.settleLayout()");
+    if (baselineRef === null) {
+      await js('[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==="Other exports").click()');
+      await js("window.settleLayout()");
+    }
     const sheet = await js(`window.measureLayer(${JSON.stringify(baselineRef === null ? "dialog.fy-abv-modal" : ".fy-editordialog")})`);
     if (baselineRef !== null) covers(sheet, name + " export sheet");
     else { assert.equal(sheet.onBody,true);assert.equal(sheet.inTitleRow,false);assert.equal(sheet.container,null);assert.equal(await js('document.querySelector("dialog.fy-abv-modal").matches(":modal")'),true); }
@@ -192,7 +214,7 @@ try {
     await escape();
     await js('window.mountLayout("p/ledger/story/chapters/neap?view=audiobook")');
     await capture(name + "-chapter");
-    const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.classList.contains("ui-btn--primary"),visible:l.getBoundingClientRect().width>0}})()');
+    const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),visible:l.getBoundingClientRect().width>0}})()');
     console.log(name, "chapter", JSON.stringify(chapterListen));
     if (chapterListen?.visible) {
       await click('[data-testid="audiobook-listen"]');
@@ -218,19 +240,20 @@ try {
       await capture(name+'-chapter-export');
       await js('[...document.querySelectorAll("dialog.fy-abv-modal [aria-label=Export] button")].find(b=>b.textContent.trim()==="Video"||b.dataset.testid==="audiobook-export-video").click()');
       await js('window.settleLayout()');
-      await js('[...document.querySelectorAll("[aria-label=Shape] button")].find(b=>b.textContent.includes("1280")).click()');
-      await js('[...document.querySelectorAll("[aria-label=Subtitles] button")].find(b=>b.textContent==="None").click()');
+      // Incomplete chapters hold video options until the read is complete; the quote preserves
+      // the current selection rather than exposing controls behind its readiness notice.
+      const chosen=await js('window.commands.findLast(m=>m.kind==="read-audiobook-video").options');
       await js('[...document.querySelectorAll("dialog.fy-abv-modal button")].find(b=>b.textContent==="Read remaining blocks…").click()');
       await until(()=>js('!!document.querySelector("[data-testid=read-sheet]")'));
       await js('window.settleLayout()');
       const readAsk=await js('window.commands.findLast(m=>m.kind==="read-audiobook-chapter")');
-      assert.equal(readAsk.chapterFile,'01-neap');assert.equal(readAsk.blocks.length,2);
+      assert.equal(readAsk.chapterFile,await js('window.chapterFile'));assert.equal(readAsk.blocks.length,2);
       assert.equal(await js('document.querySelector("dialog.fy-abv-modal").open'),false,'read quote covers the preserved export');
       await capture(name+'-chapter-export-quote');
       await escape();
       assert.equal(await js('document.querySelector("dialog.fy-abv-modal").matches(":modal")'),true);
       const held=await js('window.commands.findLast(m=>m.kind==="read-audiobook-video").options');
-      assert.deepEqual([held.scope,held.shape,held.subtitles],[{kind:'chapter',chapterId:'neap'},'1280x720','none']);
+      assert.deepEqual(held,chosen);
       await js('window.markReady()');
       await until(()=>js('document.querySelector("[data-testid=audiobook-video-render]")?.disabled===false'));
       assert.equal(await js('!!document.querySelector("[aria-label=Files]")'),false,'chapter scope is not file partitioning');
