@@ -376,6 +376,21 @@ describe("the Audiobook door (turn 146)", () => {
   ];
   const PRICE = { chapters: 9, blocks: 120, cloudBlocks: 41, characters: 108_700, estimatedMicroUsd: 10_870_000 };
 
+  it("names a paid reader's quota reset while preserving the book narrator and the retry press", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 20 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "failed", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
+      reason: "Google's daily request limit was reached · Gemini 3.8 Flash-Lite TTS · 100 a day · resets 2030-10-21T07:00:01.000Z" }));
+    assert.match(text(m), /Gemini 3.8 Flash-Lite TTS · daily request limit reached · 100 a day · resets 00:00 PT/);
+    assert.match(text(m), /recordings kept/);
+    await answerDoor(m, door("narrator"));
+    assert.ok(q(m, '[data-testid="read-book"]'));
+    assert.equal(m.sent.some(message => message.kind === "set-audiobook-narrator"), false);
+    assert.equal(all(m, "button").some(b => /default narrator|shipped narrator/i.test(b.textContent ?? "")), false);
+  });
+
   it("Read the book is priced once, each voice named, and answered by token or declined (R-17)", async () => {
     const m = await mount(inkbound("cast"));
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));

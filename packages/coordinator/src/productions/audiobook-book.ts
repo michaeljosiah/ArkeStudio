@@ -9,6 +9,8 @@ import {
   freeCreditOverrun,
   freeLimitReason,
   freePlanShortfall,
+  dailyQuotaNotices,
+  dailyQuotaRefusal,
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
@@ -25,6 +27,8 @@ import {
   type ChapterSummary,
   type ClonedVoice,
   type FreePlanShort,
+  type Job,
+  GOOGLE_DAILY_LIMIT,
   type VoiceNames,
   voiceDisplayLabel,
   worldImageReferences,
@@ -35,7 +39,7 @@ import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
 import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
-import { chapterPriceToken, firstReadNotices, groupIdentity, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { chapterPriceToken, firstReadNotices, groupIdentity, hasRecoverableAudio, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -305,6 +309,7 @@ export interface AudiobookBookDeps {
   worldId: string;
   productionId: string;
   room: ReadingRoom;
+  findJobs?: () => readonly Job[];
   signal: AbortSignal;
   confirmationToken?: string;
   requireUploadConfirmation: (reader: { provider: string; voice: ClonedVoice }) => boolean | Promise<boolean>;
@@ -347,6 +352,13 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const clones = new Map<string, { provider: string; voice: ClonedVoice }>();
   for (const entry of toRead) for (const reader of entry.prepared.clones) clones.set(`${reader.provider}\n${reader.voice.id}`, reader);
   const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === "comfyui") - Number(b.provider === "comfyui"));
+  const quotaReads = toRead.flatMap((entry) => entry.prepared.freeReads);
+  const quotaRefusal = dailyQuotaRefusal(quotaReads, room.dailyQuota);
+  const readable = quotaRefusal === null ? toRead : toRead.filter(entry => hasRecoverableAudio(entry.prepared, deps.findJobs?.() ?? [], productionId));
+  if (quotaRefusal !== null && readable.length === 0) {
+    emit({ type: "finished", outcome: "failed", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0, reason: quotaRefusal });
+    return;
+  }
   for (const reader of askOrder) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
@@ -392,7 +404,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id, store.getBundle()),
         // Across the book's chapters, each voice and vendor once (SPEC-046 R-40): the first
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
-        notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
+        notices: [...firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)), ...dailyQuotaNotices(quotaReads, room.dailyQuota)],
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
         // Requests counted where reads are priced (design turn 185a).
         ...(toRead.some((entry) => entry.prepared.groups.length > 0)
@@ -406,7 +418,8 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   let flagged = 0;
   let read = 0;
   let done = 0;
-  for (const entry of toRead) {
+  let heldByQuota = quotaRefusal !== null && readable.length < toRead.length;
+  for (const entry of readable) {
     if (signal.aborted) break;
     // The chapter's price as the book priced it (R-17): the chapter's run reads on it only
     // while the chapter is still what was priced (codex on PR 1187).
@@ -415,6 +428,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     flagged += result.flagged;
     if (result.outcome === "refused") refused += 1;
     else if (result.outcome === "failed" || result.outcome === "unavailable") {
+      if (quotaRefusal !== null && result.reason?.includes(GOOGLE_DAILY_LIMIT)) { heldByQuota = true; continue; }
       emit({ type: "finished", outcome: result.outcome, chaptersRead: read, chaptersRefused: refused, made, flagged, ...(result.reason !== undefined ? { reason: result.reason } : {}) });
       return;
     } else if (result.outcome === "read") read += 1;
@@ -424,7 +438,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     done += 1;
     emit({ type: "progress", chapterId: entry.summary.id, done, chapters: toRead.length });
   }
-  emit({ type: "finished", outcome: signal.aborted ? "stopped" : "read", chaptersRead: read, chaptersRefused: refused, made, flagged });
+  emit({ type: "finished", outcome: signal.aborted ? "stopped" : heldByQuota ? "failed" : "read", chaptersRead: read, chaptersRefused: refused, made, flagged, ...(heldByQuota && quotaRefusal !== null ? { reason: quotaRefusal } : {}) });
 }
 
 /**

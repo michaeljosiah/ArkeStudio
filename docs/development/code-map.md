@@ -48,6 +48,10 @@ injects the supervised `VoiceService.transcribeWords` seam; recognized speech ra
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 ElevenLabs audiobook direction and grouping: [implementation boundaries and checks](audiobook-direction.md).
+Paid Google audiobook quotas: contracts `provider-plans.ts` projects model/key-scoped daily
+refusals from retained jobs; coordinator supplies that projection to chapter and book preparation.
+The runners retain provider limit/reset details and use existing confirmation/status surfaces.
+See [quota handling and verification](audiobook-quotas.md), SPEC-049 R-43–R-45.
 Shared character compilation lives in contracts `audiobook-performance.ts` (v4 tags) and
 `audiobook-styled-performance.ts` (Gemini scoped metadata turns); chapter preview and
 coordinator `productions/audiobook-run.ts` use it before the provider request is packed.
