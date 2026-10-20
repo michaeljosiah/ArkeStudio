@@ -54,7 +54,7 @@ export function ConnectedProposalPanel({
   const activity = authoring[id];
   const running = activity?.status === "running";
   return (
-    <div style={{ display: "grid", gap: "var(--space-2)" }}>
+    <div className="dom-connected-proposal">
       {activity && (
         <div className="dom-authoring" role="log">
           <div className="dom-authoring__head">
@@ -101,7 +101,7 @@ export function ConnectedProposalPanel({
         disabledReason={running ? "the studio is still drafting — cancel first if you need to act now" : undefined}
       />
       {conversationPath !== undefined && (
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
+        <div className="dom-connected-proposal__revise">
           <label style={{ display: "grid", gap: 4, flex: 1 }}>
             <span className="fy-mono">Keep shaping this draft</span>
             <textarea

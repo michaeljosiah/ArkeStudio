@@ -44,6 +44,7 @@ window.mountLayout=async(route="cast",mode="normal")=>{
  renderer?.unmount();const state=castLayoutFixture(),world=state.world;
  if(mode==="empty")world.sheets=world.sheets.filter(s=>s.type!=="character");
  if(mode==="markdown")world.sheets[0].sections=[{heading:"Essence",body:"A **tide-caller** with *quiet resolve*."},{heading:"Appearance",body:["> Keep the passage clear.","","- Oilskin coat","- Work boots","","A \`ledger\` stays dry."].join(String.fromCharCode(10))}];
+ if(mode==="proposal")world.proposals=[{proposal:{id:"pr_01J8E0000000000000000000P1",kind:"new-sheet",summary:"New location: Review Room",targets:[{path:"locations/review-room.md",baseVersion:null,baseHash:null}],baseCanonRevision:42,reservedCanonIds:[],source:"chat:studio",created:"2026-10-20T00:00:00Z",draftRevision:1,decision:{mode:"attended",owner:{kind:"surface",surface:"sheet-list",targetPath:"locations/review-room.md"}}},ripple:null,review:{targets:[{path:"locations/review-room.md",label:"Review Room",kind:"new location sheet",action:"create",fields:[{field:"Look",before:null,proposed:"A public room with a clear passage and a sheltered notice board. ".repeat(180)},{field:"Customs",before:null,proposed:"Keep the passage clear."}]}]}}];
  if(mode==="long")for(const sheet of world.sheets){sheet.name="UnbrokenCharacterName".repeat(12);sheet.role="UnbrokenRole".repeat(20);}
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
@@ -134,6 +135,15 @@ try {
     await js('document.querySelector(".fy-sheet__secbody").scrollIntoView({block:"center"})');
     assert.equal(await js('(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector(".fy-sheet__secbody blockquote"));const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return selection.toString();})()'),"Keep the passage clear.");
     await check(name+'-sheet-markdown');
+    await js('window.mountLayout("locations","proposal")');await click('.fy-gridcard--pending');
+    assert.equal(await js('document.querySelectorAll(".fy-location-grid .dom-proposal").length'),0);
+    await js('document.querySelector(".fy-sheet-proposal-review .dom-proposal__content").scrollTop=100000');
+    assert.ok(await js('Array.from(document.querySelectorAll(".fy-sheet-proposal-review .dom-proposal__actions button,.fy-sheet-proposal-review .dom-connected-proposal__revise button")).every(e=>{const r=e.getBoundingClientRect();return r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})'));
+    assert.ok(await js('document.querySelector(".fy-sheet-proposal-review").getBoundingClientRect().width<=880'));
+    await check(name+'-location-review');await escape();
+    assert.equal(await js('document.querySelector(".fy-sheet-proposal-review")'),null);
+    assert.ok(await js('document.activeElement.matches(".fy-gridcard--pending")'));
+
    }
   }
   const masterRecords=[];
