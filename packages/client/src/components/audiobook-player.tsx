@@ -87,7 +87,8 @@ export function AudiobookPlayerView({ worldId, production, chapterId, scope, onC
 }) {
   const productionId = production.meta.id;
   // Outlined chapters stay outside the book, but their saved takes remain available individually.
-  const scopedChapter = scope?.kind === "chapter" ? scope.chapterId : undefined;
+  // Keep the opening selection and storage key together for this player's lifetime.
+  const [scopedChapter] = useState(scope?.kind === "chapter" ? scope.chapterId : undefined);
   const slug = useStore().state?.world?.meta.slug ?? null;
   const connection = useStore().connection;
   const shell = useRef<HTMLDivElement>(null);
