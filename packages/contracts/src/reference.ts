@@ -509,15 +509,23 @@ export function lockedTiles(kit: ReferenceKit): ReferenceTile[] {
 /** Accepted kit entries, including modern identity and looks rather than only legacy tiles. */
 export function referenceKitCounts(kit: ReferenceKit | null | undefined) {
   const photo = kit ? mainPhotoFor(kit) : null;
+  const sheet = kit ? designatedCompilation(kit) : null;
+  const seen = new Set<string>();
+  const count = (files: string[]) => files.filter(file => {
+    if (seen.has(file)) return false;
+    seen.add(file);
+    return true;
+  }).length;
+  // Promoting a look keeps its old entry; attaching a location view creates a look alias.
+  // Count each accepted file once, under its primary role before its aliases.
   const counts = {
-    photos: photo ? 1 : 0,
-    sheets: kit && designatedCompilation(kit) ? 1 : 0,
-    looks: kit?.looks?.length ?? 0,
-    views: kit ? orderedLocationViews(kit).length : 0,
-    // A legacy anchor is already the main photo; do not count its locked tile twice.
-    tiles: kit ? lockedTiles(kit).filter(tile => tile.file !== photo?.file).length : 0,
+    photos: count(photo ? [photo.file] : []),
+    sheets: count(sheet ? [sheet.file] : []),
+    views: count(kit ? orderedLocationViews(kit).map(view => view.file) : []),
+    looks: count((kit?.looks ?? []).map(look => look.file)),
+    tiles: count(kit ? lockedTiles(kit).map(tile => tile.file!) : []),
   };
-  return { ...counts, total: Object.values(counts).reduce((sum, count) => sum + count, 0) };
+  return { ...counts, total: Object.values(counts).reduce((sum, value) => sum + value, 0) };
 }
 
 /** The head-before-body gate (R-7, D4, D5): names what is outstanding, never just "no". */

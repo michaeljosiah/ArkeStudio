@@ -2301,13 +2301,13 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Section>
       )}
-      {refs && (
-        <Section title="From this sheet">
-          <div className="lay-stats">
-            <div className="lay-stats__item">
-              <div className="lay-stats__value">{references.total}</div>
-              <div className="lay-stats__label" title={references.detail}>accepted references</div>
-            </div>
+      <Section title="From this sheet">
+        <div className="lay-stats">
+          <div className="lay-stats__item">
+            <div className="lay-stats__value">{references.total}</div>
+            <div className="lay-stats__label" title={references.detail}>accepted references</div>
+          </div>
+          {refs && <>
             <div className="lay-stats__item">
               <div className="lay-stats__value">{refs.productions.length}</div>
               <div className="lay-stats__label">productions</div>
@@ -2327,9 +2327,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   : ""}
               </div>
             </div>
-          </div>
-        </Section>
-      )}
+          </>}
+        </div>
+      </Section>
     </div>
   );
   if (isCharacter) {

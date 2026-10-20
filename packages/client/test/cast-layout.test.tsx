@@ -92,8 +92,8 @@ for (const indexed of [false, true]) it(`counts accepted cast images with index 
   assert.match(row.getAttribute("aria-label") ?? "", /1 main photo · 1 sheet · 1 look/);
   assert.equal(row.querySelector(".fy-row__meta")?.getAttribute("title"), "1 main photo · 1 sheet · 1 look");
 });
-it("uses the same accepted references in sheet reach instead of the index's zero tiles", async () => {
-  width = 1200; await mount("cast/maren-kest", false, true, true);
+for (const indexed of [false, true]) it(`uses the kit count in sheet reach with index available=${indexed}`, async () => {
+  width = 1200; await mount("cast/maren-kest", false, true, indexed);
   const label = [...dom.document.querySelectorAll(".lay-stats__label")].find(node => node.textContent === "accepted references")!;
   assert.ok(label);
   assert.equal(label.previousElementSibling?.textContent, "3");

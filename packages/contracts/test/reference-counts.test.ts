@@ -28,3 +28,12 @@ it("counts only active location views and one designated accepted sheet", () => 
   const location = kit({ establishingViewId: "day", locationViews: [view, { ...view, id: "old", file: "old.png", status: "superseded" }], compilations: [compilation(true), compilation(true, "older-sheet.png")], designatedCompilation: "sheet.png" });
   assert.deepEqual(referenceKitCounts(location), { photos: 0, sheets: 1, looks: 0, views: 1, tiles: 0, total: 2 });
 });
+
+it("counts promoted looks and attached location views once under their primary role", () => {
+  const look = { id: "ward", file: "promoted.png", kind: "costume", prompt: "Ward visit", acceptedAt: "2026-10-20T00:00:00Z" };
+  const promoted = kit({ mainPhoto: { file: look.file, source: "promotion" }, looks: [look] });
+  assert.deepEqual(referenceKitCounts(promoted), { photos: 1, sheets: 0, looks: 0, views: 0, tiles: 0, total: 1 });
+  const view = { id: "day", name: "Day", file: "day.png", sourceTakeId: "tk_01J8P0000000000000000000P0", sheetVersion: 1, artDirectionVersion: 1, acceptedAt: look.acceptedAt };
+  const attached = kit({ establishingViewId: view.id, locationViews: [view], looks: [{ ...look, kind: "view", file: view.file }] });
+  assert.deepEqual(referenceKitCounts(attached), { photos: 0, sheets: 0, looks: 0, views: 1, tiles: 0, total: 1 });
+});
