@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SHEET_SHAPES, SheetSchema } from "@arke-studio/contracts";
 import { splitSections } from "../../src/frontmatter.js";
@@ -343,5 +343,38 @@ describe("voice and links (R-4, R-15, D10)", () => {
     assert.ok(owning, "the ripple names the canon entries owning this sheet's rules");
     assert.ok(owning.targets.includes("CANON-002"));
     await store.close();
+  });
+});
+
+
+describe("attended sentence seeds (#1916)", () => {
+  it("keeps an unchanged brief blocked across restart and allows the authored sheet", async () => {
+    const opened = await open(); let store = opened.store, gate = opened.gate;
+    const { dir } = opened;
+    try {
+      const draft = await createSheetFromSentence(store, gate, { sheetType: "location", name: "Review Room", sentence: "Write a public notice room with clear access.", attendedSurface: "sheet-list" });
+      assert.ok(draft.proposal.sheetSeed);
+      assert.equal((await gate.project(draft.proposal.id)).review.requiresDraft, true);
+      assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
+      assert.match((await gate.recordProblems(draft.proposal.id))[0]!.message, /saved brief/);
+      const file = join(dir, ".proposals", draft.proposal.id, draft.path);
+      const raw = await readFile(file, "utf8"), doc = MarkdownFile.parse(raw);
+      doc.setData({ region: "Harbour" });
+      doc.setBody(doc.body.replace("public notice", "public\nnotice"));
+      await writeFile(file, doc.serialize());
+      assert.equal((await gate.accept(draft.proposal.id)).status, "invalid", "metadata and whitespace do not author the brief");
+      await store.close(); store = await WorldStore.open(dir, { clock: CLOCK }); gate = new ProposalManager(store);
+      assert.equal(store.getBundle().proposals.find(p => p.proposal.id === draft.proposal.id)?.review?.requiresDraft, true);
+      assert.equal((await gate.accept(draft.proposal.id)).status, "invalid");
+      doc.setBody("## Look\n—\n\n## Sound\n\n## Customs\n—");
+      await writeFile(file, doc.serialize());
+      assert.equal((await gate.accept(draft.proposal.id)).status, "invalid", "deleting the brief does not author a sheet");
+      doc.setBody("## Look\nA dry notice board faces the broad ground-floor passage.\n\n## Sound\nRain drums on the roof.\n\n## Customs\nKeep the passage clear.");
+      await writeFile(file, doc.serialize());
+      assert.equal((await gate.project(draft.proposal.id)).review.requiresDraft, undefined);
+      assert.equal((await gate.recordProblems(draft.proposal.id)).length, 0);
+      assert.equal((await gate.accept(draft.proposal.id)).status, "accepted");
+      assert.match(store.getBundle().sheets.find(sheet => sheet.id === draft.slug)!.sections[0]!.body, /dry notice board/);
+    } finally { await store.close(); }
   });
 });

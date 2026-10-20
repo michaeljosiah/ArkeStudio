@@ -257,6 +257,8 @@ export const StagedProposalSchema = z
      */
     review: z
       .object({
+        /** The saved brief still has no authored prose; not an acceptable sheet. */
+        requiresDraft: z.boolean().optional(),
         targets: z.array(
           z
             .object({
@@ -690,6 +692,7 @@ export type ClientState = z.infer<typeof ClientStateSchema>;
  * request lands; this reads the pending sheets back out of it.
  */
 export interface PendingSheet {
+  requiresDraft?: boolean;
   proposalId: string;
   /** What it will be called, taken from the staged file rather than from the request. */
   name: string;
@@ -753,6 +756,7 @@ export function pendingSheets(
       if (reviewed ? reviewed.action !== "create" : target.baseVersion !== null || target.baseHash !== null) continue;
       pending.push({
         proposalId: staged.proposal.id,
+        ...(staged.review?.requiresDraft ? { requiresDraft: true } : {}),
         name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
         path: target.path,
         ...(staged.proposal.production !== undefined ? { production: staged.proposal.production } : {}),

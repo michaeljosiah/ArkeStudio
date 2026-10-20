@@ -490,3 +490,26 @@ describe("sheet-list review stays outside the gallery (#1915)", () => {
     });
   }
 });
+
+
+describe("undrafted briefs (#1916)", () => {
+  for (const failed of [true, false]) it(`keeps the brief for retry ${failed ? "after failure" : "after reopening"}`, async () => {
+    const proposal = staged("locations/review-room.md", "sheet-edit");
+    proposal.review!.requiresDraft = true;
+    __setStateForTest(stateWith([proposal]), failed ? { authoring: { [PROPOSAL_ID]: { status: "failed", detail: "The configured model is unavailable.", lines: [] } } } : {});
+    const messages: ClientMessage[] = []; __setBridgeForTest(bridge(messages));
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+    try {
+      await act(async () => root.render(<ConnectedProposalPanel staged={proposal} conversationPath="locations/review-room.md" />));
+      assert.equal(button(container, "Accept").disabled, true);
+      assert.match(container.textContent ?? "", /saved brief/);
+      assert.equal(button(container, "Discard").disabled, false);
+      assert.equal(button(container, "Draft sheet").disabled, false);
+      await act(async () => button(container, "Draft sheet").click());
+      const request = messages.find(m => m.kind === "draft-with-studio");
+      assert.ok(request && request.kind === "draft-with-studio");
+      assert.equal(request.proposalId, PROPOSAL_ID);
+      assert.equal(request.path, "locations/review-room.md");
+    } finally { await unmount(root, container); }
+  });
+});

@@ -180,6 +180,8 @@ export const ProposalSchema = z
      * would lose work rather than migrate it.
      */
     draftRevision: z.number().int().min(1).default(1),
+    /** An attended sentence request is a brief until its prose changes; survives failed runs/restart. */
+    sheetSeed: z.object({ path: z.string().min(1), bodyHash: Sha256Schema }).strict().optional(),
     /**
      * The request id of the edit that produced this revision (#70 §11.4.1).
      *

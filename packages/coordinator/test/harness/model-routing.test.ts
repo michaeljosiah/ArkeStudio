@@ -1032,3 +1032,21 @@ describe("effort travels with the model (design turn 195)", () => {
     } finally { await test.close(); }
   });
 });
+
+
+it("keeps an unavailable-model sheet seed blocked and retries with the corrected route (#1916)", async () => {
+  const test = await fixture({ agents: { "sheet-editor": { model: "missing/model" } } });
+  try {
+    await test.send({ kind: "create-sheet-from-sentence", worldId: WORLD_ID, sheetType: "location", name: "Routing Room", sentence: "Write a public notice room." });
+    await until(() => test.events.some(e => e.type === "authoring.status" && e.status === "failed"), "unavailable model refusal");
+    const draft = test.provider.openStore()!.getBundle().proposals.find(p => p.proposal.summary.includes("Routing Room"))!;
+    assert.ok(draft);
+    assert.equal(draft.review?.requiresDraft, true);
+    assert.equal(test.adapter.sessions.length, 0, "unavailable route starts no session");
+    await test.send({ kind: "set-agent-config", agent: "sheet-editor", model: TEXT });
+    await test.send({ kind: "draft-with-studio", worldId: WORLD_ID, path: draft.proposal.targets[0]!.path, proposalId: draft.proposal.id, summary: "Retry the saved brief", instruction: "Draft the full sheet from its saved brief." });
+    await until(() => test.adapter.sessions.some(s => s.agent === "sheet-editor"), "retry on the available route");
+    assert.equal(test.adapter.sessions.find(s => s.agent === "sheet-editor")?.config.agents?.["sheet-editor"]?.model, TEXT);
+    assert.ok(test.provider.openStore()!.getBundle().proposals.some(p => p.proposal.id === draft.proposal.id), "retry keeps the same proposal");
+  } finally { await test.close(); }
+});
