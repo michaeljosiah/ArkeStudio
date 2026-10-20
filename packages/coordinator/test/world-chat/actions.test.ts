@@ -65,6 +65,7 @@ import {
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
+import { projectHumanDecisions } from "../../src/world-chat/human-decisions.js";
 import { sequenceTurnActions } from "../../src/world-chat/action-sequencing.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { ConversationImages } from "../../src/world-chat/images.js";
@@ -421,6 +422,46 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  for (const decision of ["approve", "deny"] as const) it(`keeps one chapter decision surface through ${decision} and reopening (#2016)`, async () => {
+    const w = await setup({ kind: "production", productionId: "the-ledger-of-nights" });
+    const chapter = () => w.store.getBundle().productions.find(p => p.meta.id === "the-ledger-of-nights")!.chapters.find(c => c.id === "neap")!;
+    const before = structuredClone(chapter());
+    const proposalsBefore = w.store.getBundle().proposals.length;
+    const receipts = [currentReceipt(w.store, "chapters", "the-ledger-of-nights"), currentReceipt(w.store, "story", "the-ledger-of-nights")];
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [{
+      kind: "production-chapter", productionId: "the-ledger-of-nights", checkReceiptIds: receipts.map(r => r.id),
+      change: { operation: "edit", chapterId: "neap", changes: { synopsis: "The ledger answers." } },
+    }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const pending = await loaded(w.log), card = pending.actions[0]!;
+    assert.equal(w.store.getBundle().proposals.length, proposalsBefore + 1);
+    assert.ok(card.availableDecisions.includes("approve"));
+    const project = async (view = pending) => (await projectHumanDecisions(w.store, view, w.store.getBundle(), [])).cards.filter(c => c.body.control.kind === "proposal");
+    assert.deepEqual(await project(), [], "the action owns the proposal decision");
+    assert.deepEqual(await project({ ...pending, actions: [{ ...card, availableDecisions: ["deny"], blockedReason: "Wait for the preceding action." }] }), [],
+      "a blocked action retains its own explanation and Deny without a second acceptance path");
+    for (const status of ["approved", "awaiting-host", "queued", "running"] as const) {
+      assert.deepEqual(await project({ ...pending, actions: [{ ...card, status, availableDecisions: [] }] }), []);
+    }
+    for (const status of ["completed", "failed", "cancelled", "denied", "stale", "superseded"] as const) {
+      assert.equal((await project({ ...pending, actions: [{ ...card, status, availableDecisions: [] }] })).length, 1,
+        `a retained proposal with a ${status} action stays recoverable`);
+    }
+    const independent = structuredClone(w.store.getBundle());
+    independent.proposals[0]!.proposal.worldChatOrigins = [{ requestId: ulid(), conversationId: pending.id,
+      candidateId: newId("cand"), candidateRevision: 1, targetPaths: [], fields: [] }];
+    const independentCards = (await projectHumanDecisions(w.store, { ...pending, actions: [] }, independent, [])).cards;
+    assert.equal(independentCards.filter(c => c.body.control.kind === "proposal").length, 1, "a conversation's independent proposal remains reachable");
+    assert.deepEqual(await project(await loaded(new WorldChatStore(w.log.dir))), [], "journal reload keeps one review");
+    assert.equal((await decide(w.lifecycle, w.log, card, decision)).status, decision === "approve" ? "completed" : "denied");
+    assert.equal(w.store.getBundle().proposals.length, proposalsBefore);
+    assert.deepEqual(await project(await loaded(w.log)), []);
+    assert.equal(chapter().synopsis, decision === "approve" ? "The ledger answers." : before.synopsis);
+    assert.equal(chapter().bodyHash, before.bodyHash);
+    assert.equal(chapter().version, before.version + (decision === "approve" ? 1 : 0));
+  });
+
   it("accepted chapter drafts promote outlines when the optional status is omitted", async () => {
     for (const status of [undefined, "outlined"] as const) {
       const w = await setup();
