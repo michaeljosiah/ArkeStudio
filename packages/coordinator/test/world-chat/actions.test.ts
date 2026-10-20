@@ -2685,9 +2685,44 @@ it("verifies a fresh optional Bible receipt when preparing and approving a chapt
   }] });
   const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
   await appendTurn(w.log, one, prepared);await bindAll(w.lifecycle, prepared);
-  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.consequence, "Reorders the chapters shown below.");
+  assert.equal(card.shown.body.family, "command");
+  if (card.shown.body.family === "command") {
+    assert.deepEqual(card.shown.body.commands.map(command => command.label), orderedIds.map((id, index) =>
+      `${index + 1}. ${production.chapters.find(chapter => chapter.id === id)!.title}`), "#2013: show titles in the proposed order");
+  }
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.id), orderedIds, "#2013: labels do not replace stable identities");
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.label), orderedIds.map(id => production.chapters.find(chapter => chapter.id === id)!.title));
+  assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
   assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters].sort((a,b)=>a.order-b.order).map(c=>c.id), orderedIds);
   assert.equal(bibleFence(w.store.getBundle()), bible.observedRevisionOrDigest, "ordering leaves the Bible unchanged");
+});
+
+it("binds order cards for maximum-length and legacy chapter titles (#2013)", async () => {
+  for (const length of [200, 5_000]) {
+    const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+    const w = await setup(context);
+    const production = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+    production.chapters[0]!.title = "A".repeat(length);
+    const chapters = currentReceipt(w.store, "chapters", context.productionId);
+    const orderedIds = [...production.chapters].sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+    const one = turn(w.conversationId, context, { receipts: [chapters], actions: [{
+      kind: "production-chapter-order", productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id],
+    }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.deepEqual(card.shown.affectedTargets.map(target => target.id), orderedIds);
+    assert.ok(card.shown.affectedTargets.every(target => target.label!.length <= 200));
+    assert.equal(card.shown.body.family, "command");
+    if (card.shown.body.family === "command") {
+      const label = card.shown.body.commands.at(-1)!.label;
+      assert.equal(label.length, 200);
+      assert.match(label, /^4\. A+…$/);
+    }
+  }
 });
 
 it("ignores uncited stale context but diagnoses a cited stale Bible receipt (#1925)", async () => {
