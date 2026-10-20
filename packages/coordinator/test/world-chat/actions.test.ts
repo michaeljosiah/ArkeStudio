@@ -109,6 +109,25 @@ const NOW = () => AT;
 const PRODUCTION = "saltlight";
 
 describe("conversational props", () => {
+  it("reports all missing prop reads together, including stale and partial receipts (#1911)", async () => {
+    const w = await setup();
+    const refs = currentReceipt(w.store, "references"), sheets = currentReceipt(w.store, "sheets");
+    refs.observedRevisionOrDigest = "stale";
+    sheets.complete = false;
+    const action = ModelWorldChatActionSchema.parse({ kind: "prop-authoring",
+      change: { operation: "create", name: "Read-check prop", states: ["Intact"] }, checkReceiptIds: [refs.id, sheets.id] });
+    const before = w.store.getBundle().props.length;
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle,
+      turn(w.conversationId, w.entryContext, { actions: [action], receipts: [refs, sheets] })), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /requires a complete current references read/);
+      assert.match(error.message, /requires a complete current sheets read/);
+      assert.match(error.message, /references read is no longer current/);
+      assert.match(error.message, /is an earlier page/);
+      return true;
+    });
+    assert.equal(w.store.getBundle().props.length, before);
+  });
   async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: ArkeReadRequirement[]) {
     const receipts = reads.map(read => currentReceipt(w.store, read));
     const action = ModelWorldChatActionSchema.parse({ ...input, checkReceiptIds: receipts.map(receipt => receipt.id) });
@@ -2698,6 +2717,21 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
 });
 
+
+it("reports sheets and canon together for a chapter with draws (#1911, #1741)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const action = ModelWorldChatActionSchema.parse({ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { draws: { sheets: [], canon: [] } } },
+    checkReceiptIds: receipts.map(receipt => receipt.id) });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts, actions: [action] })), error => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /requires the complete current sheets read/);
+    assert.match(error.message, /requires the complete current canon read/);
+    return true;
+  });
+});
 
 it("fences chapter viewpoints and refuses invalid edits before completing the turn (#967)", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
