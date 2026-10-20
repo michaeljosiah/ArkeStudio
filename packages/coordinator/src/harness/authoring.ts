@@ -127,7 +127,10 @@ export class AuthoringService {
     run.setup?.abort(new Error("cancelled by you"));
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
     if (interrupt && run.sessionId) {
-      run.interruption ??= interrupt.call(this.adapter, run.sessionId).catch(() => {});
+      run.interruption ??= interrupt.call(this.adapter, run.sessionId).catch(() => {
+        // Keep concurrent Stop requests together, but allow another attempt after a failure.
+        delete run.interruption;
+      });
       await waitForInterruption(run.interruption);
     }
   }

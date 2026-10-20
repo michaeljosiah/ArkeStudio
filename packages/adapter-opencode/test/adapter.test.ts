@@ -308,6 +308,13 @@ describe("the live adapter over the stub server", () => {
     assert.ok(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)));
   });
 
+  it("rejects unsupported input before submitting or stopping a turn (#1989)", async () => {
+    const session = await adapter.createSession({ purpose: "authoring" });
+    await assert.rejects(adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "image", mimeType: "image/png", data: "cGl4ZWxz" }] }), /does not accept image/);
+    assert.equal(stub.lastRequest(new RegExp(`/session/${session.sessionId}/prompt_async$`)), undefined);
+    assert.equal(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)), undefined);
+  });
+
   it("keeps both cancellation routes in the proposal directory and exposes a failed stop (#1981)", async () => {
     const session = await adapter.createSession({ purpose: "authoring", cwd: "C:\\worlds\\proposal-stop" });
     stub.abortStatus = 404;
@@ -346,12 +353,42 @@ describe("the live adapter over the stub server", () => {
     try {
       await local.init();
       const session = await local.createSession({ purpose: "authoring", cwd: "C:/worlds/uncertain" });
+      const streams = stub.streamCount;
       consume = (async () => { for await (const event of local.streamEvents(signal.signal)) seen.push(event); })();
+      await until(() => stub.streamCount > streams, "uncertain admission stream");
       await local.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "write" }] });
       await until(() => !!stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)), "uncertain prompt stop");
       assert.equal(seen.some(e => e.type === "session.error" || e.type === "session.ended"), false, "an HTTP response cannot release the writer");
       stub.emit({ type: "session.error", properties: { sessionID: session.sessionId, error: { name: "MessageAbortedError" } } });
       await until(() => seen.some(e => e.type === "session.ended"), "actual writer ending");
+      const ending = seen.find(e => e.type === "session.ended");
+      assert.ok(ending?.type === "session.ended" && ending.reason === "error");
+      assert.match(ending.detail ?? "", /writing request was not confirmed/);
+      release(); stub.promptBarrier = null;
+      await local.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "retry" }] });
+      await local.interrupt(session.sessionId);
+      stub.emit({ type: "session.error", properties: { sessionID: session.sessionId, error: { name: "MessageAbortedError" } } });
+      await until(() => seen.filter(e => e.type === "session.ended").length === 2, "explicit stop after retry");
+      assert.ok(seen.some(e => e.type === "session.ended" && e.reason === "cancelled"), "a later user stop does not inherit the transport failure");
+    } finally { release(); stub.promptBarrier = null; signal.abort(); await consume; await local.dispose(); }
+  });
+
+  it("does not abort a completed turn when its admission response is lost (#1989)", async () => {
+    const local = new OpenCodeAdapter({ baseUrl: () => stub.baseUrl(), requestTimeoutMs: 200 });
+    const signal = new AbortController(); const seen: HarnessEvent[] = [];
+    let release!: () => void; stub.promptBarrier = new Promise<void>(resolve => { release = resolve; });
+    let consume: Promise<void> | undefined;
+    try {
+      await local.init(); const session = await local.createSession({ purpose: "authoring" });
+      const streams = stub.streamCount;
+      consume = (async () => { for await (const event of local.streamEvents(signal.signal)) seen.push(event); })();
+      await until(() => stub.streamCount > streams, "terminal event stream");
+      await local.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: "write" }] });
+      stub.emitTurn(session.sessionId, "done");
+      await until(() => seen.some(e => e.type === "message.completed"), "completion before admission deadline");
+      await new Promise(resolve => setTimeout(resolve, 250));
+      assert.equal(stub.lastRequest(new RegExp(`/session/${session.sessionId}/abort$`)), undefined);
+      assert.equal(seen.some(e => e.type === "session.error"), false);
     } finally { release(); stub.promptBarrier = null; signal.abort(); await consume; await local.dispose(); }
   });
 
