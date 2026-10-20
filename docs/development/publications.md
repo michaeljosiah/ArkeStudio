@@ -41,6 +41,9 @@ The preparation view follows approved turn 224: edition identity and cover, one 
 output, the shared indeterminate loading indicator, and Back to story. Closing the sheet keeps
 the host operation running; Cancel preparation remains available in its footer. Built rows still
 wait for edition checks and do not expose files for delivery.
+The cover preview reads only the captured, digest-checked cover through the authenticated preview
+route, so accepting or removing its original world candidate cannot break it. Remote browsers
+name the desktop host; disconnected clients wait for a refreshed edition before showing activity.
 
 Private story previews use a separate authenticated media route. Native Save and download delivery
 require a ready edition after Create has rechecked the source; preview playback does not approve

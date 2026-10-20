@@ -140,6 +140,24 @@ export class StoryPublicationService {
   }
   async serve(id: string, name: string) { return this.resolveMedia(id, name, false); }
   async previewMedia(id: string, name: string) {
+    if (name === "cover") {
+      try {
+        const saved = await this.load(id), directory = this.directory(id);
+        if (!saved.inputHash) return null;
+        // The world candidate may have been accepted or removed while this edition encodes.
+        // Only the captured cover is exposed; the rest of the source inventory stays private.
+        const chunks: Buffer[] = [];
+        await readPublicationFile(directory, "inputs.json", 64 * 1024 ** 2, undefined, undefined, chunks);
+        const frozen = JSON.parse(Buffer.concat(chunks).toString("utf8")) as FrozenStory;
+        if (storyDigest(frozen) !== saved.inputHash || !frozen.cover ||
+          !["image/png", "image/jpeg"].includes(frozen.cover.mediaType)) return null;
+        const receipt = frozen.media.find(file => file.file === frozen.cover!.file);
+        if (!receipt) return null;
+        const path = "inputs/" + receipt.file;
+        requirePublicationDigest(await readPublicationFile(directory, path, LIMIT), receipt);
+        return { path: await checkedPublicationPath(directory, path), contentType: frozen.cover.mediaType };
+      } catch { return null; }
+    }
     const hit = await this.resolveMedia(id, name, true);
     return hit ? { path: hit.path, contentType: hit.contentType } : null;
   }

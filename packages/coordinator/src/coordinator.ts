@@ -3913,7 +3913,7 @@ export class Coordinator {
         if (drama) return this.dramaEditions.serve(drama[1]!, drama[2]!);
         const edition = /^\/story-edition-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (edition) return this.storyPublications.serve(edition[1]!, edition[2]!);
-        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(story\.(?:epub|m4b|pdf))$/.exec(urlPath);
+        const storyPreview = /^\/story-preview-media\/([a-f0-9-]+)\/(cover|story\.(?:epub|m4b|pdf))$/.exec(urlPath);
         if (storyPreview) return this.storyPublications.previewMedia(storyPreview[1]!, storyPreview[2]!);
         const preview = /^\/voice-preview-media\/([a-f0-9]{64}\.(?:wav|mp3|flac))$/.exec(urlPath);
         if (preview) return this.cataloguePreviews?.serve(preview[1]!) ?? null;

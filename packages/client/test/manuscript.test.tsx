@@ -339,6 +339,17 @@ describe("Publish review (turn 224)", () => {
     await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.editions", requestId: list.requestId, editions: [edition] }));
     await act(async () => button(m, /^View preparation$/)!.click());
     assert.ok(button(m, /^Cancel preparation$/), "reopened work retains cancellation");
+    assert.ok(m.container.querySelector(".fy-publish-preparation .fy-loading"));
+    await act(async () => __setStateForTest(inkbound(), { connection: "closed" }));
+    assert.equal(m.container.querySelector(".fy-publish-preparation"), null, "cached progress is not presented as active while disconnected");
+    assert.match(text(m), /Connection lost/);
+    await act(async () => __setStateForTest(inkbound(), { connection: "open" }));
+    assert.equal(m.container.querySelector(".fy-publish-preparation"), null, "reconnect waits for the saved operation");
+    const recovering = m.sent.findLast(message => message.kind === "publish-story" && message.input.action === "list");
+    assert.ok(recovering && recovering.kind === "publish-story");
+    await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
+      requestId: recovering.requestId, result: { editions: [edition] } }));
+    assert.ok(m.container.querySelector(".fy-publish-preparation .fy-loading"), "authoritative recovery restores the running view");
     await act(async () => __applyEventForTest({ at: edition.createdAt, type: "story.published", worldId: FIXTURE_WORLD_ID, productionId: "inkbound",
       requestId: list.requestId, result: { edition: { ...edition, status: "preview", phase: "Preview ready", files: [{ format: "epub", name: "story.epub", bytes: 42, sha256: "d".repeat(64) }] } } }));
     assert.ok(button(m, /^Create edition$/), "completion from the original request updates the reopened view");

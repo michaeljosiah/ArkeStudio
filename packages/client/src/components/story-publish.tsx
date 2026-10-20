@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { DEFAULT_STORY_PDF_SETTINGS, StoryPublicationSettingsSchema, worldImageReferences, type ProductionBundle, type StoryEdition, type StoryPublicationReview, type StoryPublicationSettings, type StoryStyleFinding, type StoryPublishAction } from "@arke-studio/contracts";
 import { listStoryPublications, publishStory, subscribeStoryPublications, useStore, useWorld } from "../lib/store.js";
-import { mediaUrl, storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
+import { storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button } from "./ui.js";
 import { StoryPdfPreview } from "./story-pdf-preview.js";
@@ -12,14 +13,14 @@ import { Loading } from "./loading.js";
 const steps = ["Edition", "Chapters", "Formatting & style", "Preview", "Files"] as const;
 type Step = typeof steps[number];
 /** Turn 224e: the saved edition is the preparation's identity, even after reopening. */
-function StoryEditionPreparation({ edition, worldSlug, onClose }: { edition: StoryEdition; worldSlug?: string; onClose: () => void }) {
+function StoryEditionPreparation({ edition, onClose }: { edition: StoryEdition; onClose: () => void }) {
   const { settings, phase } = edition;
   const active = phase === "Preparing EPUB" ? "epub" : phase === "Formatting pages" || phase === "Checking PDF" ? "pdf" : /^(Rendering|Encoding|Checking) (audiobook|chapter)/.test(phase) ? "m4b" : null;
   const activeIndex = active === null ? -1 : settings.outputs.indexOf(active);
   return <section className="fy-publish-preparation" aria-label="Edition preparation">
-    <header className="fy-publish-preparation__head"><div><h3>Preparing edition</h3>{settings.label && <p className="fy-publish-muted">{settings.label}</p>}</div><span className="fy-publish-preparation__badge">On this device</span></header>
+    <header className="fy-publish-preparation__head"><div><h3>Preparing edition</h3>{settings.label && <p className="fy-publish-muted">{settings.label}</p>}</div><span className="fy-publish-preparation__badge">{isRemoteSession() ? "On your desktop" : "On this device"}</span></header>
     <div className="fy-publish-preparation__edition">
-      {settings.cover && worldSlug && <img className="fy-publish-preparation__cover" src={mediaUrl(worldSlug, settings.cover)} alt="Selected edition cover" />}
+      {settings.cover && phase !== "Capturing source" && <img className="fy-publish-preparation__cover" src={storyPreviewMediaUrl(edition.id, "cover")} alt="Captured edition cover" />}
       <div className="fy-publish-preparation__details">
         <div className="fy-publish-preparation__summary"><h4>{settings.title}</h4><p className="fy-publish-muted">{settings.chapterIds.length} {settings.chapterIds.length === 1 ? "chapter" : "chapters"}{settings.author && <> · {settings.author}</>}</p></div>
         <div className="fy-publish-preparation__files">{settings.outputs.map((format, index) => {
@@ -186,7 +187,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
   const openFinding = (row: StoryStyleFinding) => { setFinding(row); setReplacement(row.suggestion); };
   const retry = () => { if (edition) request({ action: "retry", editionId: edition.id }); };
   const refresh = () => request({ action: "review", settings });
-  const preparing = step === "Preview" && edition?.status === "creating";
+  const preparing = step === "Preview" && edition?.status === "creating" && busy && connection === "open";
   const footer = <div className={"fy-publish-actions" + (preparing ? " fy-publish-preparation__footer" : "")}>
     {step !== "Edition" && !busy && <Button variant="ghost" onClick={() => { setFinding(null); setStep(steps[Math.max(0, steps.indexOf(step) - 1)]!); }}>Back</Button>}
     {busy ? <>{preparing ? <span className="fy-publish-muted">Preparation continues if you leave.</span> : <span role="status">{edition?.status === "creating" ? edition.phase : "Checking…"}</span>}{edition?.status === "creating" && <Button onClick={() => { publishStory(worldId, production.meta.id, { action: "cancel", editionId: edition.id }); }}>Cancel preparation</Button>}</> :
@@ -238,7 +239,7 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
         {settings.outputs.includes("pdf") && settings.pdf && <p className="fy-publish-muted">PDF · {settings.pdf.preset === "book" ? "Book · 6 × 9 in" : settings.pdf.preset.toUpperCase()} · {settings.pdf.font === "serif" ? "Serif" : "Sans serif"} · {settings.pdf.bodySize} pt · {settings.pdf.lineSpacing} line spacing · Contents {settings.pdf.contents ? "on" : "off"} · Running headers {settings.pdf.runningHeaders ? "on" : "off"}</p>}
         <div className="fy-publish-actions"><Button disabled={busy} onClick={() => { setChanged(false); refresh(); }}>Recheck</Button>{settings.outputs.includes("m4b") && <><Link to={`/w/${worldId}/p/${production.meta.id}/story/audiobook`} onClick={onClose}>Review narration</Link><Button onClick={() => { const remaining = settings.outputs.filter(format => format !== "m4b"); const next: StoryPublicationSettings = { ...settings, outputs: remaining.length ? remaining : ["epub"] }; update(next); request({ action: "review", settings: next }); }}>Without audiobook</Button></>}</div>
       </>)}
-      {preparing && <StoryEditionPreparation edition={edition} worldSlug={world?.meta.worldId === edition.worldId ? world.meta.slug : undefined} onClose={onClose} />}
+      {preparing && <StoryEditionPreparation edition={edition} onClose={onClose} />}
       {(step === "Preview" || step === "Files") && edition && !preparing && <>
         <p>{edition.settings.title} · {edition.settings.author || "No author set"} · {edition.settings.language}</p>
         {edition.status === "preview" && <p>Review the captured files below. These exact files become the edition when you choose Create edition.</p>}
