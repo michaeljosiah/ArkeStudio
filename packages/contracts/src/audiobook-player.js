@@ -386,6 +386,7 @@ export function mountAudiobookPlayer(root, options) {
     // Text is a short caption above the actual transport, including when its labels grow.
     const bounds = root.getBoundingClientRect();
     el.follow.style.bottom = Math.max(0, bounds.bottom - bar.getBoundingClientRect().top + 24) + "px";
+    if (!el.sheet.hidden) el.sheet.style.maxHeight = Math.max(0, bar.getBoundingClientRect().top - el.sheet.getBoundingClientRect().top - 16) + "px";
   }
   const fitStills = () => { for (const image of el.pics) fitStill(image); fitText(); if (!destroyed) renderFollow(); };
   const onStillLoad = (event) => {
