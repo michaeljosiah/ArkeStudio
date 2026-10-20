@@ -3928,8 +3928,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("open-exports-folder"),
       worldId: UlidSchema,
       dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional(),
-      /** One video in that folder, opened in the system's own player (design turn 197e: Open). */
-      file: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/).optional(),
+      /** A video or the completed audiobook player, opened by the host. */
+      file: z.union([z.literal("player.html"), z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/)]).optional(),
     })
     .strict(),
   /**

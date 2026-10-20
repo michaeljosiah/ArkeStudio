@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AudiobookListeningSchema,
@@ -61,7 +61,7 @@ function wav(): Uint8Array {
 type Listening = Extract<DomainEvent, { type: "audiobook.listening" }>;
 type RecordEvent = Extract<DomainEvent, { type: "audiobook.record" }>;
 
-async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner } = {}): Promise<void> {
+async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; send: (message: ClientMessage) => Promise<void>; schemaVersion: () => number; store: () => WorldStore }) => Promise<void>, options: { ffmpeg?: FfmpegRunner; openPath?: (file: string) => void } = {}): Promise<void> {
   const { root, worldDir } = await makeTempRoot();
   await mkdir(join(worldDir, "productions", LEDGER, ".voices"), { recursive: true });
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
@@ -79,6 +79,7 @@ async function withHarness(run: (h: { worldDir: string; events: DomainEvent[]; s
     observeEvent: (event) => events.push(event),
     mediaProbe: { durationSec: async () => 3, info: async () => ({ durationSec: 3, hasAudio: true }) },
     ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}),
+    ...(options.openPath !== undefined ? { openPath: options.openPath } : {}),
     voice: {
       sidecar: {
         health: async () => ({ engineStatus: { kokoro: { ready: true } } }),
@@ -231,6 +232,29 @@ async function exportPlayer(send: (message: ClientMessage) => Promise<void>, eve
 }
 
 describe("the audiobook as the player (turn 186e)", () => {
+  it("opens a completed audiobook player through the host and refuses missing or unlisted players", () => {
+    const opened: string[] = [];
+    return withHarness(async ({ worldDir, send, events }) => {
+      await read(send, "01-neap");
+      const result = await exportPlayer(send, events, { kind: "chapter", chapterId: "neap" });
+      assert.ok(result.ok, JSON.stringify(result));
+      const dir = result.dir.slice("exports/".length);
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir, file: "player.html" });
+      assert.equal(opened.length, 1);
+      assert.deepEqual(await readFile(opened[0]!), await readFile(join(worldDir, result.file)));
+      await send({ kind: "open-exports-folder", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", dir, file: "player.html" });
+      const unlisted = join(worldDir, "exports", "audiobook-unlisted");
+      await mkdir(unlisted);
+      await writeFile(join(unlisted, "player.html"), "Unlisted HTML");
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir: "audiobook-unlisted", file: "player.html" });
+      await writeFile(join(unlisted, "manifest.json"), JSON.stringify({ kind: "interactive", productionId: LEDGER, provenance: { exportedAt: CLOCK } }));
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir: "audiobook-unlisted", file: "player.html" });
+      await rename(join(worldDir, result.file), join(worldDir, result.dir, "player.saved"));
+      await send({ kind: "open-exports-folder", worldId: WORLD_ID, dir, file: "player.html" });
+      assert.equal(opened.length, 1, "no other world, unlisted HTML, non-audiobook package or missing player reaches the host");
+    }, { openPath: file => opened.push(file) });
+  });
+
   it("keeps chapter export scope through listening, package and receipt, and never falls back from an incomplete or missing chapter", () =>
     withHarness(async ({ worldDir, events, send }) => {
       await read(send, "01-neap");

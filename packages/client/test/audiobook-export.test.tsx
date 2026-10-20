@@ -236,6 +236,8 @@ describe("Export audiobook (turn 186e)", () => {
     const show = [...dom.document.querySelectorAll("button")].find((button) => text(button) === "Show in folder") ?? null;
     await press(show);
     assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "audiobook-inkbound-ab_x" });
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player")!);
+    assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: "audiobook-inkbound-ab_x", file: "player.html" });
   });
 
   it("finds its package again when a reconnect lost the export's answer (codex on PR 1498)", async () => {
@@ -251,6 +253,8 @@ describe("Export audiobook (turn 186e)", () => {
     const listAsk = lastAsk(m, "list-web-packages")!;
     await act(async () => __applyEventForTest({ at: AT, type: "web-packages.listed", requestId: listAsk.requestId, worldId: FIXTURE_WORLD_ID, packages: [{ kind: "audiobook", productionId: "inkbound", title: "Inkbound", dir: `exports/audiobook-inkbound-${exportAsk.exportId}`, exportedAt: AT }] }));
     assert.equal(text(q(m, '[data-testid="audiobook-export-done"]')), `exports/audiobook-inkbound-${exportAsk.exportId}`);
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Open player")!);
+    assert.deepEqual(lastAsk(m, "open-exports-folder"), { kind: "open-exports-folder", worldId: FIXTURE_WORLD_ID, dir: `audiobook-inkbound-${exportAsk.exportId}`, file: "player.html" });
   });
 
   it("lists the world's packages, the audiobook beside the interactive and the visual novel", async () => {

@@ -368,7 +368,7 @@ import { audioWaveform } from "./audio/waveform.js";
 import { audioStudioMedia, audioStudioSourceProblems, decideAudioStudioProposal, openAudioStudio, audioStudioSnapshot, editAudioStudio, readAudioHeard, recordAudioHeard, savedEpisodeMixProblems } from "./productions/audio-studio.js";
 import { AudioStudioPreviews } from "./productions/audio-studio-preview.js";
 import { renderAudioStudioMix } from "./productions/audio-studio-mix.js";
-import { exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
+import { audiobookPlayerFile, exportAudiobookPlayer, listWebPackages } from "./productions/audiobook-export.js";
 import { composeCast, type DerivedCast } from "./productions/voices.js";
 import { currentDirection, directionEntry, planAudiobook, readAudiobook, readAudiobookBook, writeAudiobookBookRaised, writeBlockDirection, type ProposalOverride } from "./productions/audiobook.js";
 import { checkDirection, directionPlan, heldKey } from "./voice/direction.js";
@@ -14574,6 +14574,11 @@ export class Coordinator {
       case "open-exports-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        if (msg.file === "player.html") {
+          const file = await audiobookPlayerFile(store, msg.dir ?? "");
+          if (file && this.opts.provider.openStore?.() === store && !store.closingSignal.aborted) this.opts.openPath?.(file);
+          return;
+        }
         const folder = msg.dir === undefined || msg.dir === "." || msg.dir === ".." ? join(store.dir, "exports") : join(store.dir, "exports", msg.dir);
         // A video in its folder opens in the system's own player (design turn 197e); only a file
         // that is there, named as one, never a path.
