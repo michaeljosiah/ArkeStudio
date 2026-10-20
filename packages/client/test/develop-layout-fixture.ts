@@ -1,6 +1,28 @@
-import { type ClientState, type StagedProposal } from "@arke-studio/contracts";
+import { newId, type ClientState, type StagedProposal } from "@arke-studio/contracts";
 import { CHAT_ID, chatArtifactsFixture } from "./chat-artifacts-fixture.js";
 export { CHAT_ID };
+
+/** A saved production conversation opened from World Chat, including its own pending authority. */
+export function productionHistoryLayoutFixture(): ClientState {
+  const state = developLayoutFixture(), world = state.world!, workspace = state.worldChat!;
+  world.conversations.push(
+    { ...world.conversations[0]!, id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HJ", title: "Older pending work", updatedAt: "2026-01-01T00:00:00Z", openProposalCount: 3 },
+    { ...world.conversations[0]!, id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HK", title: "Remembered world conversation", entryContext: { kind: "world" } },
+  );
+  workspace.points = [];
+  const turnId = newId("turn"); workspace.messages.at(-1)!.turnId = turnId;
+  workspace.actions = [{
+    actionId: newId("act"), conversationId: workspace.conversationId, turnId,
+    worldId: world.meta.worldId, productionId: "saltlight", actorId: "local-user", scope: "production",
+    actionKind: "world-chat-production-authoring", authorityKind: "world-store", cardFamily: "authored-diff",
+    targets: [{ kind: "production", id: "saltlight" }], payloadDigest: "a".repeat(64), baseObservations: [], dependencies: [],
+    createdAt: "2026-10-20T12:00:00Z", authority: { kind: "world-store", id: "saltlight" }, authorityRevision: 1,
+    previewDigest: "b".repeat(64), status: "pending", preparedAt: "2026-10-20T12:00:00Z", availableDecisions: ["approve", "deny"],
+    shown: { title: "Revise the ending", consequence: "Updates the proposed ending.", affectedTargets: [], ripples: [], permissionReason: "authored-change",
+      body: { family: "authored-diff", fields: [{ label: "Ending", before: "She keeps the song.", after: "Maren chooses the harbour over the song." }], conflicts: [], openChoices: [] } },
+  }];
+  return state;
+}
 
 export function developLayoutFixture(mode = "normal"): ClientState {
   const state = chatArtifactsFixture(), world = state.world!, film = world.productions[0]!;

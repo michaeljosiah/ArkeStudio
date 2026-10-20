@@ -7,6 +7,7 @@ export type ChatSurface = {
   conversationId?: string; newThread?: boolean; props?: ProductionConversationProps;
   scopeMissing?: boolean;
 };
+type ChatSelection = ChatSurface & { showList?: boolean };
 export const chatKey = (worldId: string, entry: WorldChatContext, conversationId?: string) =>
   `${worldId}:${JSON.stringify(entry)}${conversationId ? ":" + conversationId : ""}`;
 export const chatSubjectKey = (value: ChatSurface) => JSON.stringify([value.entry, value.props?.subject,
@@ -147,7 +148,7 @@ export class GlobalChatController {
   private values = new Map<string, Map<string, unknown>>();
   private conversationIds = new Map<string, string>();
   private listedConversations = new Map<string, ReadonlySet<string>>();
-  private pending: ChatSurface | null = null;
+  private pending: ChatSelection | null = null;
   private openings = new Set<string>();
   private dictations = new Map<string, { key: string; deliver(text: string): void }>();
   private retained = new Map<string, ChatSurface>();
@@ -266,20 +267,23 @@ export class GlobalChatController {
     this.pending = null;
     this.changed({ selected: { ...surface, key, newThread: true, conversationId: undefined }, open: true, switching: false });
   }
-  select(surface: ChatSurface) {
+  select({ showList = false, ...surface }: ChatSelection) {
     if (surface.newThread) { this.startNew(surface); return; }
     const selected = this.snapshot.selected;
     if (selected && (selected.key !== surface.key || chatSubjectKey(selected) !== chatSubjectKey(surface)) &&
       (this.snapshot.phase !== "idle" || selected.worldId === surface.worldId && this.opening())) {
-      this.pending = surface; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return;
+      this.pending = { ...surface, showList }; this.changed({ switching: true, stopCapture: this.snapshot.stopCapture + 1 }); return;
     }
-    const conversationId = surface.conversationId ?? this.conversationIds.get(surface.key);
+    // Returning to a list is not starting a thread or restoring the remembered one. Keep each
+    // conversation's draft, and defer this presentation change while dictation is still held.
+    if (showList) this.conversationIds.delete(surface.key);
+    const conversationId = showList ? undefined : surface.conversationId ?? this.conversationIds.get(surface.key);
     if (conversationId) this.conversationIds.set(surface.key, conversationId);
     this.pending = null; this.changed({ selected: { ...surface, ...(conversationId ? { conversationId } : {}) }, switching: false });
   }
   history(surface: ChatSurface, open = true) {
     const previous = surface.conversationId ? this.retained.get(`${surface.worldId}:${surface.conversationId}`) : undefined;
-    this.select(previous ? { ...previous, key: surface.key, conversationId: surface.conversationId, newThread: false } : surface);
+    this.select(previous ? { ...previous, key: surface.key, path: surface.path, conversationId: surface.conversationId, newThread: false } : surface);
     if (open) this.changed({ open: true });
   }
   reportConversation(key: string, conversationId: string | null) {

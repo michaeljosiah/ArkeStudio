@@ -7,7 +7,7 @@ import { useDictation, useStore } from "../lib/store.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { useKeyboardInset } from "../lib/keyboard-inset.js";
 import { ProductionConversationBody, type ProductionConversationProps } from "./conversation.js";
-import { RowMenuPanel, WorldChatView } from "../screens/world-chat.js";
+import { byPendingConsequence, HistoryRail, RowMenuPanel, WorldChatView } from "../screens/world-chat.js";
 import { ProductionSetupView } from "../screens/production-setup.js";
 import { useClientRender } from "./production-studio-context.js";
 import { ConversationPresentationContext, GlobalChatContext, useGlobalChat } from "./global-chat-context.js";
@@ -66,6 +66,10 @@ function ChatPageCanvas({ owner, surface, props }: { owner: GlobalChatController
 
 export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: string; conversationId?: string }) {
   const owner = useGlobalChat()!, { state } = useStore(), location = useLocation(), navigate = useNavigate(), host = useRef<HTMLDivElement>(null);
+  const phone = useMediaQuery("(max-width: 599px)"), fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const [historyOpen, setHistoryOpen] = useState(!fold);
+  useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
+  const [menu, setMenu] = useState<ComponentProps<typeof RowMenuPanel>["menu"] | null>(null);
   const surface = chatSurfaceForPage(state, location.pathname + location.search);
   useEffect(() => {
     if (conversationId && location.pathname === `/w/${worldId}/chat/${conversationId}` && state?.world?.meta.worldId === worldId && surface && !surface.conversationId)
@@ -81,7 +85,20 @@ export function GlobalWorldChatEntry({ worldId, conversationId }: { worldId: str
     if (conversationId && page && owner.getSnapshot().selected?.key !== page.key) owner.select(page);
   }, [owner, conversationId, surface?.key]);
   useLayoutEffect(() => { if (host.current && latest.current) owner.refresh(latest.current, host.current); });
-  return <div className="fy-global-chat-slot fy-global-chat-slot--world">{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></div>;
+  const rows = [...(state?.world?.conversations ?? [])].sort(byPendingConsequence), menuRow = rows.find(row => row.id === menu?.id);
+  return <div className="fy-global-chat-slot fy-global-chat-slot--world">
+    {surface?.kind === "production" ? <div className="fy-chat__wrap fy-chat__wrap--embedded" data-screen="production-chat">
+      <div className="fy-gate">
+        {fold && historyOpen && <button className="fy-chatnav__drawer-scrim" aria-label="Close history" onClick={() => setHistoryOpen(false)} />}
+        {!phone && <HistoryRail worldId={worldId} live={rows.filter(row => row.status !== "archived")} archived={rows.filter(row => row.status === "archived")}
+          currentId={conversationId} open={historyOpen} onToggle={() => setHistoryOpen(value => !value)}
+          onNew={() => { const page = chatSurfaceForPage(state, `/w/${worldId}/chat`); if (page) owner.startNew(page); void navigate(`/w/${worldId}/chat`); }}
+          menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />}
+        <div ref={host} className="fy-gate__main" />
+      </div>
+      {menuRow && menu && <RowMenuPanel worldId={worldId} row={menuRow} menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />}
+    </div> : <>{surface && <ChatExpand owner={owner} surface={surface} />}<div ref={host} /></>}
+  </div>;
 }
 
 export function GlobalChatProvider({ children }: { children: ReactNode }) {
@@ -188,8 +205,15 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => { if (carriedOn) owner.select(carriedOn); }, [owner, carriedOn?.key, carriedOn?.conversationId]);
   const mismatch = !!selected && !!page && (chatSubjectKey(selected) !== chatSubjectKey(page) ||
     !!page.conversationId && page.conversationId !== selected.conversationId);
+  // History owns a page, not a 360px dock. Keep the selected scope/prefix intact and change only
+  // its presentation; panel open/close still keeps one conversation and its draft (issue 2019).
+  const historyRow = selected?.kind === "production" && current?.conversationId === selected.conversationId &&
+    /^\/w\/[^/]+\/chat\/[^/]+\/?$/.test(location.pathname) ? world?.conversations.find(row => row.id === selected.conversationId) : undefined;
+  const historyProductionId = selected && "productionId" in selected.entry ? selected.entry.productionId : undefined;
+  const historyPage = historyRow && selected ? { title: historyRow.title, subject: selected.props?.dock?.subject ||
+    world?.productions.find(production => production.meta.id === historyProductionId)?.meta.title || selected.title } : undefined;
   const presentation = selected ? { owner, key: selected.key, stopCapture: snapshot.stopCapture, inPanel,
-    panelHost: inPanel ? panelHost : null, hasHome: !!home, scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null;
+    panelHost: inPanel ? panelHost : null, hasHome: !!home, historyPage, scopeMissing: selected.scopeMissing, conversationId: selected.conversationId, newThread: selected.newThread } : null;
   const menuConversation = rowMenu ? world?.conversations.find(row => row.id === rowMenu.id) : undefined;
   return <GlobalChatContext.Provider value={owner}>
     {children}

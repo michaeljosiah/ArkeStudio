@@ -5,7 +5,7 @@ import { useLocation } from "react-router";
 import type { GlobalChatController } from "../lib/global-chat.js";
 export const GlobalChatContext = createContext<GlobalChatController | null>(null);
 export const useGlobalChat = () => useContext(GlobalChatContext);
-export const ConversationPresentationContext = createContext<{ owner: GlobalChatController; key: string; stopCapture: number; inPanel: boolean; panelHost: HTMLElement | null; hasHome: boolean; scopeMissing?: boolean; conversationId?: string; newThread?: boolean } | null>(null);
+export const ConversationPresentationContext = createContext<{ owner: GlobalChatController; key: string; stopCapture: number; inPanel: boolean; panelHost: HTMLElement | null; hasHome: boolean; historyPage?: { title: string; subject: string }; scopeMissing?: boolean; conversationId?: string; newThread?: boolean } | null>(null);
 export const useConversationPresentation = () => useContext(ConversationPresentationContext);
 /** Async media preparation may finish on a parked view. Its result cannot take over a new page. */
 export function useConversationNavigationGuard() {

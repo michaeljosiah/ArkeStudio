@@ -43,8 +43,8 @@ it("shows a native effect composite without accepting or reviewing on arrival or
   const decision = card({ kind: "effect-proposal", productionId: production.meta.id, familyId: fixture.family.id, versionId: fixture.version.id });
   decision.id = `effects:${fixture.family.id}:${fixture.version.id}`; decision.conversationId = fixture.family.conversationId;
   let shown = 0;
-  const studio: StudioControls = { active: false, canvasHost: null, fullCardId: null, restingSide: null,
-    toggle() {}, widen() {}, show() {}, showDecision() { shown++; }, back() {}, sideHost() {} };
+  const studio: StudioControls = { active: false, phoneCanvasOpen: false, canvasHost: null, fullCardId: null, restingSide: null,
+    toggle() {}, openCanvas() {}, widen() {}, show() {}, showDecision() { shown++; }, back() {}, sideHost() {} };
   const { host, sent } = await mount(<ProductionStudioContext.Provider value={studio}><HumanDecisionCardView card={decision} /></ProductionStudioContext.Provider>);
   await act(async () => __setStateForTest({ ...FIXTURE_STATE, world }));
   assert.ok(host.querySelector('[data-effect-version]'));

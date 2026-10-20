@@ -304,7 +304,7 @@ export function RowMenuPanel({
  * Put away it is 48px, and both its controls survive: starting a conversation is what the screen
  * is for and must not cost an expand first.
  */
-function HistoryRail({
+export function HistoryRail({
   worldId,
   live,
   archived,

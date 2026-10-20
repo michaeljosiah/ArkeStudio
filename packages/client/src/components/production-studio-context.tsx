@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import type { ConversationActionCard, HumanDecisionCard } from "@arke-studio/contracts";
 import { PanelRight } from "./icons.js";
 
-export type StudioControls = { active: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
-  toggle(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
+export type StudioControls = { active: boolean; phoneCanvasOpen: boolean; canvasHost: HTMLElement | null; fullCardId: string | null;
+  toggle(): void; openCanvas(): void; widen(): void; show(action: ConversationActionCard, full: boolean): void;
   showDecision(card: HumanDecisionCard): void; back(): void; sideHost(element: HTMLDivElement | null): void;
   /** What the side holds when there is no portal host to move into it: server rendering only. */
   restingSide: ReactNode };
@@ -33,7 +33,7 @@ export function StudioToggle() {
 /** The page's way back to its canvas while the Studio is closed (design turn 202c). */
 export function StudioCanvasPress() {
   const studio = useProductionStudio();
-  return studio && !studio.active ? <button type="button" className="fy-studio-canvas" onClick={studio.toggle}><PanelRight size={16} />Canvas</button> : null;
+  return studio && !studio.active ? <button type="button" className="fy-studio-canvas" onClick={studio.openCanvas}><PanelRight size={16} />Canvas</button> : null;
 }
 export function StudioShow({ action }: { action: ConversationActionCard }) {
   const studio = useProductionStudio();

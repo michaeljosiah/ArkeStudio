@@ -88,6 +88,7 @@
 /* The Canvas press (design turn 202c): with the Studio closed, the page's way back to its canvas,
    at the head's right. Closed, there was none but a card's Show. */
 .fy-studio-canvas { display: none; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--foreground); font: var(--type-ui); cursor: pointer; }
+.fy-chat__phonehead .fy-studio-canvas { display: inline-flex; flex: none; }
 @media(min-width:600px) { .fy-studio-canvas { display: inline-flex; margin-top: 12px; } }
 @media(max-width:1099px) and (min-width:600px) {
   :is([data-screen="production-chat"], [data-screen="episode-chat"]) .fy-story__chathead { position: relative; padding-right: 140px; }

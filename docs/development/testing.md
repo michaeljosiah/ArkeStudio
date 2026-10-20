@@ -856,6 +856,18 @@ portal host and lets the author collapse notes (#1993). The smoke checks navigat
 bounds, notes toggling and inner overflow. For native acceptance, prepare a disposable pending
 review and verify the unsent draft and action survive collapse/reload at 1024/1200/1536px.
 
+`--production-history` exercises the distinct production-context history route (#2019), using
+the same app and cascade at those nine widths. It checks a pending action, a completed receipt,
+the shared global panel, retained draft and selected conversation after remount, and phone
+Back/list navigation with a remembered world conversation. It verifies a visible phone Canvas
+entry, pending-consequence history order and Fold drawer dismissal after choosing a row.
+Retained production-page conversations must rehost at their history URL, including a trailing
+slash; phone Back must also uncover the list when invoked inside the global Chat panel.
+Desktop and phone also receive dark-theme captures. Inspect the complete
+screenshots against turns 164/196/225; a passing overflow check alone is not design acceptance.
+The native check opens a saved production conversation and verifies its exact card and draft
+across reload without sending a message or deciding a card.
+
 Run `test/chat-artifacts-layout.test.tsx` from the client package alongside `world-chat`,
 `artifact-viewers`, `artifacts` and `production-artifacts`. It covers command revision binding,
 empty/nonempty desktop notes, phone New, menu confirmation, reply read/copy controls and filtered navigation that retains the selected artifact across
