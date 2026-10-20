@@ -84,6 +84,8 @@ describe("the action guide", () => {
       assert.match(text, /Before drafting a change, obtain all of its required reads/);
       assert.match(text, /Prop authoring needs both list_references and list_sheets/);
       assert.match(text, /include draws also need list_sheets and list_canon/);
+      assert.match(text, /Cite only reads required or actually relied on by that action/);
+      assert.match(text, /production-chapter-order needs only the final list_chapters receipt for that production/);
     }
     assert.deepEqual(describeAction("prop-authoring")?.reads, ["list_references", "list_sheets"]);
   });

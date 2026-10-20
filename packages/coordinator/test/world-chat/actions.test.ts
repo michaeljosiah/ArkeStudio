@@ -311,7 +311,7 @@ function currentReceipt(
   exportRecords: readonly ArkeExportReadRecord[] = [],
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
-  const fence = requirement === "generation-routes" ? productionReadFence([]) : requirement === "bench" ? productionReadFence(benchReadRows(store.dir, target)) : requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
+  const fence = requirement === "bible" ? bibleFence(bundle) : requirement === "generation-routes" ? productionReadFence([]) : requirement === "bench" ? productionReadFence(benchReadRows(store.dir, target)) : requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
     ? worldMetadataFence(bundle)
     : requirement === "canon"
       ? canonFence(bundle)
@@ -361,7 +361,7 @@ function currentReceipt(
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
-  const targetId = target ?? (requirement === "art-direction" ? "art-direction" : store.worldId);
+  const targetId = target ?? (requirement === "bible" ? "bible" : requirement === "art-direction" ? "art-direction" : store.worldId);
   return {
     id: newId("check"),
     runId: newId("run"),
@@ -2666,6 +2666,89 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
   });
 });
 
+
+it("verifies a fresh optional Bible receipt when preparing and approving a chapter order (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const leases = new QueryLeaseRegistry(() => w.store.worldId);
+  const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({ leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null });
+  const bible = (await retrieval.call(lease.token, "get_bible", {})).receipt;
+  assert.equal(bible.complete, true);
+  assert.equal(bible.observedRevisionOrDigest, bibleFence(w.store.getBundle()));
+  const chapters = currentReceipt(w.store, "chapters", context.productionId);
+  const production = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+  const orderedIds = [...production.chapters].sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+  const one = turn(w.conversationId, context, { receipts: [chapters, bible], actions: [{
+    kind: "production-chapter-order", productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id, bible.id],
+  }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);await bindAll(w.lifecycle, prepared);
+  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+  assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters].sort((a,b)=>a.order-b.order).map(c=>c.id), orderedIds);
+  assert.equal(bibleFence(w.store.getBundle()), bible.observedRevisionOrDigest, "ordering leaves the Bible unchanged");
+});
+
+it("ignores uncited stale context but diagnoses a cited stale Bible receipt (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const bible = currentReceipt(w.store, "bible"), chapters = currentReceipt(w.store, "chapters", context.productionId);
+  await applyTurnBibleEdits(w.store, [{ op: "set-section", heading: "Concurrent", text: "Moved." }], {
+    source: "test", baseVersion: (await readBible(w.store.dir)).version,
+  });
+  const orderedIds = [...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+  const action = { kind: "production-chapter-order" as const, productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id] };
+  const one = turn(w.conversationId, context, { receipts: [chapters, bible], actions: [action] });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...one, actions: [{ ...action, checkReceiptIds: [chapters.id, bible.id] }],
+  }), error => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /bible read is no longer current/);
+    assert.ok(error.message.includes(`receipt ${bible.id}, target bible`));
+    return true;
+  });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  assert.deepEqual(prepared[0]!.intent.baseObservations.map(read => read.requirement), ["chapters"]);
+  await appendTurn(w.log, one, prepared);
+  await bindAll(w.lifecycle, prepared);
+  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+});
+
+it("refuses chapter ordering when a cited Bible changes after preparation (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "bible")];
+  const before = [...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => a.order - b.order).map(chapter => chapter.id);
+  const one = turn(w.conversationId, context, { receipts, actions: [{
+    kind: "production-chapter-order", productionId: context.productionId, orderedIds: [...before].reverse(), checkReceiptIds: receipts.map(r => r.id),
+  }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);
+  await bindAll(w.lifecycle, prepared);
+  await applyTurnBibleEdits(w.store, [{ op: "set-section", heading: "Concurrent", text: "Moved." }], {
+    source: "test", baseVersion: (await readBible(w.store.dir)).version,
+  });
+  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "stale");
+  assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => a.order - b.order).map(chapter => chapter.id), before);
+});
+
+it("still requires complete current chapter-list reads for the right production (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const chapters = currentReceipt(w.store, "chapters", context.productionId);
+  const orderedIds = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters.map(chapter => chapter.id);
+  const refused = (receipts: WorldChatCheckReceipt[]) => prepareWorldChatActions(w.store, w.lifecycle,
+    turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter-order", productionId: context.productionId,
+      orderedIds, checkReceiptIds: receipts.map(r => r.id) }] }));
+  assert.throws(() => refused([]), /requires a complete current chapters read/);
+  assert.throws(() => refused([{ ...chapters, complete: false }]), /is an earlier page/);
+  assert.throws(() => refused([{ ...chapters, observedRevisionOrDigest: "stale" }]), /chapters read is no longer current/);
+  assert.throws(() => refused([currentReceipt(w.store, "chapters", "saltlight")]), /requires the complete current chapters read for the-ledger-of-nights/);
+});
 
 it("stages a chapter with only the brief's eligible receipts and keeps section reads scoped", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
