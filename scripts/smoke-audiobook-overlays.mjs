@@ -161,10 +161,11 @@ try {
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await cdp("Page.navigate", { url: origin + "/" }); await until(() => js('typeof window.mountLayout === "function"'));
   const records = [];
-  for (const [name, width, height, mobile, textScale = 1] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["laptop", 1440, 900, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
+  for (const [name, width, height, mobile, textScale = 1, desktop = false] of [["phone", 390, 844, true], ["small-phone", 320, 844, true], ["tablet", 820, 1180, true], ["desktop-min", 1024, 790, false, 1, true], ["laptop", 1440, 900, false], ["text-200", 1440, 900, false, 2], ["ultrawide", 2560, 1080, false]]) {
     if (arg("--viewport") !== null && arg("--viewport") !== name) continue;
     await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: mobile });
+    await js(`document.documentElement.classList.toggle("is-desktop", ${desktop})`);
     await js(`(()=>{for(const token of ['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'])document.documentElement.style.removeProperty('--text-'+token);if(${textScale}===2){const s=getComputedStyle(document.documentElement);const tokens=['2xs','xs','sm','base','md','lg','xl','2xl','3xl','4xl','5xl'].map(t=>[t,parseFloat(s.getPropertyValue('--text-'+t))*2]);for(const [t,size]of tokens)document.documentElement.style.setProperty('--text-'+t,size+'px');}})()`);
     await js('window.mountLayout("p/ledger/story/audiobook")');
     await capture(name + "-door");
@@ -214,6 +215,17 @@ try {
     await escape();
     await js('window.mountLayout("p/ledger/story/chapters/neap?view=audiobook")');
     await capture(name + "-chapter");
+    if (baselineRef === null) {
+      const controls = await js('[...document.querySelectorAll(".fy-titlebar button")].map(e=>({label:e.getAttribute("aria-label")||e.textContent,rect:e.getBoundingClientRect().toJSON()})).filter(e=>e.rect.width>0&&e.rect.height>0)');
+      for (let i=0;i<controls.length;i++) {
+        const a=controls[i].rect;
+        assert.ok(a.left>=0&&a.right<=width-(desktop?138:0)+1,name+": titlebar control clears viewport/native buttons: "+controls[i].label);
+        for (const other of controls.slice(i+1)) {
+          const b=other.rect;
+          assert.ok(Math.min(a.right,b.right)-Math.max(a.left,b.left)<=1||Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)<=1,name+": titlebar controls do not overlap: "+controls[i].label+" / "+other.label);
+        }
+      }
+    }
     const chapterListen = await js('(()=>{const l=document.querySelector("[data-testid=audiobook-listen]");return l&&{primary:l.matches(".ui-btn--primary,.fy-abshow__btn--pri"),visible:l.getBoundingClientRect().width>0}})()');
     console.log(name, "chapter", JSON.stringify(chapterListen));
     if (chapterListen?.visible) {

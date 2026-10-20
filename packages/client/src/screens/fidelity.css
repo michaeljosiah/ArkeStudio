@@ -79,6 +79,7 @@
 /* The ellipsised left context reserves the wordmark's half-width before it can overlap it. */
 .fy-titlebar__side:first-child { padding-right: 48px; }
 .fy-titlebar__side--right { justify-content: flex-end; }
+.fy-titlebar__back-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /*
  * Where you are, on the left: ellipsised rather than allowed to run under the wordmark, which
  * is centred on the window and cannot move out of its way.
