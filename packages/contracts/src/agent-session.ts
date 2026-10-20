@@ -84,6 +84,7 @@ export interface SessionConfigInput {
 const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
   "chapter-script-reviewer": "chapter-script-review",
   "chapter-visual-reviewer": "chapter-visual-review",
+  "chapter-prose-reviewer": "chapter-prose-review",
   "scene-writer": "scene-drafting",
   "art-director": "storyboard",
 };

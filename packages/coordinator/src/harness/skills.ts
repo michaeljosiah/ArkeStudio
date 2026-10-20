@@ -7,7 +7,7 @@ export async function loadSkillBodies(
   directory = new URL("./skills/", import.meta.url),
 ): Promise<Record<string, string>> {
   const bodies: Record<string, string> = {};
-  for (const purpose of ["scene-drafting", "storyboard", "chapter-script-review", "chapter-visual-review"] as const) {
+  for (const purpose of ["scene-drafting", "storyboard", "chapter-script-review", "chapter-visual-review", "chapter-prose-review"] as const) {
     const skill = skillFor(purpose, input.skillFamily, input.skillModelId);
     if (!skill) continue;
     try {

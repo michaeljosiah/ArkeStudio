@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PictureShotSchema } from "./audiobook-illustrate.js";
+import { ReviewTellsSchema, TellDraftSchema, TELL_ANSWER_MAX } from "./chapter-tells.js";
 
 export const CHAPTER_REVIEW_VERSION = 1;
 export const ChapterReviewTargetSchema = z.object({
@@ -39,6 +40,8 @@ export const ReviewAnswerSchema = z.object({
   assessments: z.array(ReviewAssessmentSchema).max(20).optional(),
   groups: z.array(ReviewGroupSchema).max(200).optional(),
   conflicts: z.array(ReviewConflictSchema).max(200).optional(),
+  // The prose specialist's tags (design turn 232): kinds and exact quotations, no counts.
+  tells: z.array(TellDraftSchema).max(TELL_ANSWER_MAX).optional(),
 }).strict();
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
 export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(), hash: z.string(),
@@ -46,7 +49,7 @@ export const ReviewImageSchema = z.object({ block: z.string(), file: z.string(),
 export const ReviewCandidateSchema = ReviewFindingDraftSchema.extend({
   id: z.string().uuid(), taskId: z.string(), offset: z.number().int().nonnegative(),
 }).strict();
-export const ReviewTaskSchema = z.object({ id: z.string(), specialist: z.enum(["script", "visual", "verification", "consolidation", "narration"]),
+export const ReviewTaskSchema = z.object({ id: z.string(), specialist: z.enum(["script", "visual", "verification", "consolidation", "narration", "prose"]),
   state: z.enum(["pending", "running", "complete", "failed", "unavailable", "cancelled"]),
   images: z.array(z.string()), model: z.string().optional(), sessionId: z.string().optional(),
   provider: z.string().optional(), disclosure: z.string().optional(), detail: z.string().optional(),
@@ -66,6 +69,8 @@ export const ChapterReviewSchema = ChapterReviewTargetSchema.extend({
   // Model replies retain their tighter 200-group / 60-member bounds above.
   groups: z.array(ReviewGroupSchema.extend({ memberIds: z.array(z.string().uuid()).min(2).max(500) })).max(250).optional(),
   conflicts: z.array(ReviewConflictSchema).max(200).optional(),
+  // Absent on reviews from before turn 232, and when the prose task did not complete.
+  tells: ReviewTellsSchema.optional(),
   checks: z.array(z.string().max(1000)).max(150), rejectedFindings: z.number().int().nonnegative(),
   stale: z.boolean().default(false), staleReasons: z.array(z.string()).default([]),
   audioListened: z.literal(false),
@@ -88,8 +93,9 @@ export function chapterReviewKey(target: ChapterReviewTarget): string {
 }
 
 /** Keep chat receipts within their wire limit; the complete evidence remains in the review. */
-export function chapterReviewSummary(review: Pick<ChapterReview, "status" | "findings" | "stale">): string {
-  const head = `${review.status}${review.stale ? " (source check needed)" : ""}: ${review.findings.length} findings. `;
+export function chapterReviewSummary(review: Pick<ChapterReview, "status" | "findings" | "stale"> & Partial<Pick<ChapterReview, "tells">>): string {
+  const tells = review.tells ? ` AI tells: ${review.tells.passages.length} crowded ${review.tells.passages.length === 1 ? "passage" : "passages"} (line ${review.tells.line} in ${review.tells.stretchWords} words).` : "";
+  const head = `${review.status}${review.stale ? " (source check needed)" : ""}: ${review.findings.length} findings.${tells} `;
   const tail = " Open Chapter review for evidence and full coverage. Audio not listened to.";
   const observations = review.findings.slice(0, 5).map(f => f.observation).join(" ");
   const room = 2000 - head.length - tail.length;

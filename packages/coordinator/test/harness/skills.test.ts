@@ -40,7 +40,7 @@ it("fails missing or empty registered files, reloads only for the next construct
 
 it("injects review rubrics into read-only agent prompts without enabling native delegation", async () => {
   const bodies = await loadSkillBodies({ skillFamily: "chapter-review" });
-  for (const agent of ["chapter-script-reviewer", "chapter-visual-reviewer"]) {
+  for (const agent of ["chapter-script-reviewer", "chapter-visual-reviewer", "chapter-prose-reviewer"]) {
     const skill = sessionSkillForAgent(agent, { skillFamily: "chapter-review", skillBodies: bodies })!;
     const prompt = agentPromptFor({ brief: "Review", needsProposal: false, readOnly: true, skill });
     assert.match(prompt, /<AUTHORING_SKILL/);

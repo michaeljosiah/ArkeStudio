@@ -52,7 +52,7 @@ export interface Skill {
   bodyPath: string;
 }
 
-export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-review" | "chapter-visual-review";
+export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-review" | "chapter-visual-review" | "chapter-prose-review";
 
 /**
  * The shipped skills. Vendored here rather than fetched (R-15), and keyed by family rather than
@@ -61,6 +61,8 @@ export type SkillPurpose = "scene-drafting" | "storyboard" | "chapter-script-rev
 export const SKILLS: readonly Skill[] = [
   { id: "chapter-script-review", version: 3, family: "chapter-review", purpose: "chapter-script-review", bodyPath: "chapter-script-review.md" },
   { id: "chapter-visual-review", version: 3, family: "chapter-review", purpose: "chapter-visual-review", bodyPath: "chapter-visual-review.md" },
+  // AI tells (design turn 232): the six definitions of docs/research/ai-tells.md, without its examples.
+  { id: "chapter-prose-review", version: 1, family: "chapter-review", purpose: "chapter-prose-review", bodyPath: "chapter-prose-review.md" },
   {
     id: "seedance-scene-drafting",
     // v3: framing, keep-outs and cuts-on-a-shared-shape, once those fields began reaching the

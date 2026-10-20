@@ -6,7 +6,7 @@ import { extractJson } from "../canon/ask.js";
 import { imageRendition, IMAGE_RUN_ENCODED_BYTES, type ImageRenditionMaker } from "../world-chat/image-rendition.js";
 
 export interface ReviewTaskInput {
-  specialist: "script" | "visual";
+  specialist: "script" | "visual" | "prose";
   phase?: "verification" | "consolidation";
   prompt: string;
   images: Array<{ block: string; bytes: Uint8Array; extension: string }>;
@@ -22,7 +22,7 @@ export function makeReviewTaskRunner(deps: {
 }): ReviewTaskRunner {
   return async (input, signal, receipt) => {
     signal.throwIfAborted();
-    const agent = input.specialist === "script" ? "chapter-script-reviewer" : "chapter-visual-reviewer";
+    const agent = input.specialist === "script" ? "chapter-script-reviewer" : input.specialist === "prose" ? "chapter-prose-reviewer" : "chapter-visual-reviewer";
     const root = resolve(deps.scratch);
     await mkdir(root, { recursive: true });
     const dir = await mkdtemp(join(root, "chapter-review-"));
