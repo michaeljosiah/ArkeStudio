@@ -17,6 +17,8 @@ const PR = {
   tenth: { img: 'banner-story.png', pos: '50% 40%', title: 'The Tenth Key', kind: 'Audiobook · Book · 9 h 40 m' },
   undertow: { img: 'banner-audio.png', pos: '50% 50%', title: 'Undertow', kind: 'Audio drama · 8 episodes' },
 };
+// What Add a file takes (P2c, P7): one data line, never a sentence.
+const FORMATS = 'Arke package · EPUB · PDF · CBZ · M4B · M4A · MP3 · MP4 · MOV';
 const back = gb('left', 22);
 const more = gb('more', 20);
 const close = '<span class="ib">' + ic('down', 26, 2) + '</span>';
@@ -26,7 +28,7 @@ const media = (cls = '') => `phone media${cls ? ' ' + cls : ''}`;
 const P1 = [
   frame('P1a', 'First open', media(), `<img class="pic" src="${A}world-undersong.png" alt="" style="height:66%;object-position:56% 50%"><div class="sbot" style="height:600px"></div>${sb(true)}
 <div style="position:absolute;left:0;right:0;top:432px;text-align:center"><div class="wm">Arke</div><div class="wm2">Player</div></div>
-<div style="position:absolute;left:20px;right:20px;bottom:54px;display:flex;flex-direction:column;gap:10px"><span class="btn pri wide">Sign in with Arke ${ic('out', 16, 2)}</span><span class="btn wide">${ic('package', 18)}Add a package</span></div>${hi()}`),
+<div style="position:absolute;left:20px;right:20px;bottom:54px;display:flex;flex-direction:column;gap:10px"><span class="btn pri wide">Sign in with Arke ${ic('out', 16, 2)}</span><span class="btn wide">${ic('plus', 18, 2)}Add a file</span></div>${hi()}`),
 
   frame('P1b', 'Home', 'phone', `${sb()}<div class="hd"><h1>Home</h1><span class="av">JP</span></div><div class="body">
 ${sh('Continue')}<div class="hrow">${cc({ img: PR.tenth.img, pos: '50% 40%', kind: 'Audiobook', title: 'The Tenth Key', where: 'Chapter 7 · 19 min left', at: 55 })}${cc({ img: PR.saltlight.img, pos: PR.saltlight.pos, kind: 'Film', title: 'Saltlight', where: '38 min left', at: 59 })}</div>
@@ -67,7 +69,7 @@ const P2 = [
 
   frame('P2b', 'Waiting for the browser', media(), `${firstOpenBehind}<div class="veil"></div>${sheet('Shared with you', `${shareCard}<div style="display:flex;flex-direction:column;gap:8px;padding:20px 16px 0"><span class="btn wide" style="gap:10px"><span class="spin"></span>waiting for the browser</span><span class="btn ghost wide">Cancel</span></div>`)}<div class="hi" style="color:var(--foreground)"></div>`),
 
-  frame('P2c', 'Add a package', 'phone', `${libraryBehind()}<div class="veil"></div>${sheet('Add a package', `<div class="opt">${ic('folder', 22)}<span class="l">Choose a file</span><span class="mute">${ic('right', 18)}</span></div><div class="opt">${ic('link', 22)}<span class="l">Paste a link</span><span class="mute">${ic('right', 18)}</span></div>`)}${hi()}`),
+  frame('P2c', 'Add a file', 'phone', `${libraryBehind()}<div class="veil"></div>${sheet('Add', `<div class="opt">${ic('folder', 22)}<span class="l">Choose files</span><span class="mute">${ic('right', 18)}</span></div><div class="opt">${ic('link', 22)}<span class="l">Paste a link</span><span class="mute">${ic('right', 18)}</span></div><div class="mute" style="padding:10px 16px 0;font:var(--type-meta)">${FORMATS}</div>`)}${hi()}`),
 
   frame('P2d', 'Checking a package', 'phone', `${libraryBehind()}<div class="veil"></div>${sheet('Checking', `<div style="display:flex;align-items:center;gap:14px;padding:6px 16px 0"><span class="icb" style="width:52px;height:52px;border-radius:14px">${ic('package', 26)}</span><div class="grow"><div style="font:var(--type-ui);font-size:var(--text-base)">meridian-dust.arke</div><div class="mute num" style="font:var(--type-meta)">1.4 GB</div></div></div><div style="padding:18px 16px 0"><div class="bar"><i style="width:51%"></i></div><div class="mute num" style="margin-top:8px;font:var(--type-meta)">212 of 418 files</div></div><div style="padding:18px 16px 0"><span class="btn wide">Cancel</span></div>`, { close: false })}${hi()}`),
 
@@ -178,7 +180,7 @@ const P6 = [
   frame('P6a', 'Downloads', 'phone', `${sb()}<div class="hd"><h1>Downloads</h1></div><div class="body">
 <div style="padding:8px 16px 0"><div class="sbar"><i class="me" style="width:7%"></i><i class="other" style="width:58%"></i></div><div class="leg"><span><i></i>Arke Player 3.2 GB</span><span><i class="other"></i>Other 29 GB</span><span><i class="free"></i>41 GB free</span></div></div>
 ${sh('Shared')}${dlRow(PR.saltlight.img, PR.saltlight.pos, 'Saltlight', `<span class="num">1.9 GB</span>${ic('downloaded', 14)}`, ic('more', 18))}${dlRow(PR.tenth.img, '50% 40%', 'The Tenth Key', '<span class="num">Downloading · 42%</span>', ic('pausec', 22), 42)}${dlRow(PR.bell.img, '50% 26%', 'The Bell Watch', `${ic('clock', 14)}<span>Waiting for Wi-Fi</span>`, ic('more', 18))}
-${sh('Added')}${dlRow(W.meridian.img, '40% 50%', 'Meridian Dust', '<span class="num">3 productions · 1.4 GB</span>', ic('more', 18))}
+${sh('Added')}${dlRow(W.meridian.img, '40% 50%', 'Meridian Dust', '<span class="num">3 productions · 1.4 GB</span>', ic('more', 18))}${dlRow('char-maren.png', '50% 20%', 'The Salt Almanac', '<span class="num">EPUB · 2.1 MB</span>', ic('more', 18))}
 </div>${tabs('Downloads')}${hi()}`),
 
   frame('P6b', 'You', 'phone', `${sb()}<div class="hd"><h1>You</h1></div><div class="body" style="padding-top:8px">
@@ -213,8 +215,35 @@ ${sh('Worlds')}<div class="hrow">${wc({ ...W.undersong, meta: 'Helen Marsh', cls
 <div class="trow" style="margin-top:16px;justify-content:center;gap:12px">${bookRow2}</div></div>${hi()}`),
 ];
 
+// ---- P7 · files in standard formats ----------------------------------------------------------
+const FILES = {
+  almanac: { img: 'char-maren.png', pos: '50% 20%', title: 'The Salt Almanac', m: 'EPUB · Ines Varga · 2.1 MB' },
+  boards: { img: 'scene4-board-sheet.png', pos: '0% 0%', title: 'Saltlight boards', m: 'PDF · 24 pages · 18 MB' },
+  tide: { img: 'launch-harbour.webp', pos: '50% 50%', title: 'Tidewater Sessions', m: 'M4B · 6 h 12 m · 288 MB' },
+  reel: { img: 'banner-video.png', pos: '60% 50%', title: 'Lighthouse reel', m: 'MP4 · 12 min · 410 MB' },
+};
+const frow = ({ img, pos, title, m }, end, cls = '') => `<div class="frow${cls ? ' ' + cls : ''}"><span class="fth">${img ? `<img src="${A}${img}" alt="" style="object-position:${pos}">` : 'EPUB'}</span><div class="grow"><div class="t">${title}</div><div class="m">${m}</div></div><span class="end">${end}</span></div>`;
+const addedLibrary = `${sb()}<div class="hd"><h1>Library</h1><span class="icb">${ic('plus', 20, 2)}</span></div><div class="chips"><span class="chip">All</span><span class="chip">Shared</span><span class="chip on">Added</span></div><div class="body" style="padding-top:16px">${wc({ ...W.meridian, meta: 'Added · 3 productions · 1.4 GB', pos: '40% 50%' })}
+${sh('Files')}${[FILES.almanac, FILES.boards, FILES.tide, FILES.reel].map((f) => frow(f, ic('more', 18))).join('')}
+</div>${tabs('Library')}`;
+
+const P7 = [
+  frame('P7a', 'Adding files', 'phone', `${addedLibrary}<div class="veil"></div>${sheet('Add', `${frow(FILES.almanac, ic('check', 18, 2.2))}${frow(FILES.boards, ic('check', 18, 2.2))}${frow(FILES.tide, ic('check', 18, 2.2))}${frow({ title: 'Dune Road', m: 'Protected file' }, `<span class="warn">${ic('alert', 18)}</span>`, 'no')}<div style="display:flex;flex-direction:column;gap:8px;padding:16px 16px 0"><span class="btn pri wide">Add 3</span><span class="btn ghost wide">Cancel</span></div>`, { count: '4 files' })}${hi()}`),
+
+  frame('P7b', 'Library · Added, with files', 'phone', `${addedLibrary}${hi()}`),
+
+  frame('P7c', 'A PDF', 'phone pdf', `${sb()}<div class="hd" style="gap:6px;padding-bottom:10px"><span class="icb" style="background:none">${ic('down', 24, 2)}</span><span class="grow" style="text-align:center;font:var(--type-ui)">Saltlight boards</span><span class="icb" style="background:none">${ic('list', 20)}</span><span class="icb" style="background:none">${ic('more', 20)}</span></div>
+<div class="body"><div class="pg" style="margin-top:-120px"><img src="${A}maren-sheet-pitchboard.png" alt=""></div><div class="pg"><img src="${A}scene4-board-sheet.png" alt=""></div><div class="pg"><img src="${A}board-source.png" alt=""></div></div>
+<div style="flex:none;display:flex;align-items:center;gap:12px;padding:10px 20px 40px;background:var(--secondary)"><span class="mute num" style="font:var(--type-meta)">3 of 24</span><div class="bar grow" style="background:color-mix(in srgb,var(--foreground) 12%,transparent)"><i style="width:12%"></i></div></div>${hi()}`),
+
+  frame('P7d', 'An audiobook file', media(), `${sb(true)}<div class="ptop">${close}<div class="ttl"><div class="eb">Tidewater Sessions</div><div class="sc">Chapter 4</div></div><span class="ib">${ic('list', 20)}</span><span class="ib">${ic('more', 20)}</span></div>
+<img src="${A}launch-harbour.webp" alt="" style="position:absolute;left:45px;top:126px;width:300px;height:300px;object-fit:cover;border-radius:14px;box-shadow:var(--shadow-xl)">
+<div style="position:absolute;left:24px;right:24px;top:452px;text-align:center"><div style="font:var(--type-h3);letter-spacing:var(--tracking-tight)">Tidewater Sessions</div><div class="mute" style="margin-top:2px;font:var(--type-ui)">Amaal Reyes</div></div>
+${audioBar(`<span class="ib lab">1.0×</span><span class="ib lab">${ic('moon', 16)}Off</span>`).replace('width:44%"></i><b style="left:44%', 'width:62%"></i><b style="left:62%').replace('<span>13:58</span><span>31:40</span>', '<span>27:05</span><span>43:30</span>').replace('<div class="trow" style="margin-top:14px"><span class="ib lab">', '<div class="trow" style="margin-top:14px;justify-content:center;gap:24px"><span class="ib lab">')}${hi()}`),
+];
+
 // Widths per frame class; a frame's card is drawn at its frame's own size.
 const size = (f) => f.markup.includes('class="ap fold') ? [984, 1092] : f.markup.includes('class="ap turned') ? [844, 390] : [390, 844];
 const withSize = (list) => list.map((f) => ({ ...f, w: size(f)[0], h: size(f)[1] }));
 
-export const FRAMES = { p1: withSize(P1), p2: withSize(P2), p3: withSize(P3), p4: withSize(P4), p5: withSize(P5), p6: withSize(P6) };
+export const FRAMES = { p1: withSize(P1), p2: withSize(P2), p3: withSize(P3), p4: withSize(P4), p5: withSize(P5), p6: withSize(P6), p7: withSize(P7) };

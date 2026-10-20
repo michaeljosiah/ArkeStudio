@@ -13,7 +13,9 @@ P1, P2… and frames P1a… so an issue or commit citing one never collides with
 
 The Player plays **publications** — frozen editions with their own manifest (SPEC-048) — and never
 a world's source. Things arrive two ways: a **share** through an Arke account, which streams until
-downloaded, or a **package** added from a file, which is checked file by file before it plays. Four
+downloaded, or a **file** added from the phone — an Arke package, checked file by file against
+its manifest before it plays, or a standard file (EPUB, PDF, CBZ, M4B, M4A, MP3, MP4, MOV),
+opened and read before it is added (P7). Four
 tabs: Home (Continue, New, Worlds), Library (every world, Shared and Added), Downloads, You. A
 world's page groups its productions by what a person does — Watch, Play, Listen, Read. A
 production's page is Studio 199's show page on a phone. The players are the Studio's own modules
@@ -24,7 +26,7 @@ browser and in the Player; the Player adds its close and the phone's media sessi
 
 | Frame | Screen |
 |---|---|
-| P1a | First open: the wordmark over a world's picture, Sign in with Arke ↗, Add a package |
+| P1a | First open: the wordmark over a world's picture, Sign in with Arke ↗, Add a file |
 | P1b | Home: Continue, New, Worlds |
 | P1c | Library: All · Shared · Added, a card per world, + |
 | P1d | A world: the hero, its logline, Watch and Play; the dock playing an audiobook |
@@ -32,7 +34,7 @@ browser and in the Player; the Player adds its close and the phone's media sessi
 | P1f | A production: a micro drama — Continue · Episode 13, Episodes as 9:16 thumbnails |
 | P2a | A share link opened while signed out |
 | P2b | Waiting for the browser |
-| P2c | Add a package: Choose a file, Paste a link |
+| P2c | Add: Choose files, Paste a link, and the formats it takes as one data line |
 | P2d | Checking a package: 212 of 418 files |
 | P2e | A package, ready: what is inside, the space, Add to library |
 | P2f | A package, refused: 3 files do not match |
@@ -58,6 +60,20 @@ browser and in the Player; the Player adds its close and the phone's media sessi
 | P6d | Offline |
 | P6e | Home on a Fold7 (984 × 1092), the tabs as a rail |
 | P6f | An audiobook on a Fold7 |
+| P7a | Adding files: three read, one refused as Protected file, Add 3 |
+| P7b | Library · Added: an added world, then Files |
+| P7c | A PDF in the page viewer |
+| P7d | An audiobook file (M4B): its cover, its chapter markers |
+
+## Added after the first review (P7)
+
+The owner, on seeing P1–P6: support uploading the formats the industry already uses, such as PDF
+and EPUB. P7 draws it. Standard files are not worlds: they sit under Library's Added as Files,
+open straight into the players already drawn (EPUB in P5e's reader, audio in the audiobook
+player, video in the film player) and a new page viewer for PDF and CBZ. DRM-protected files are
+refused by name (`Protected file`); MOBI/AZW, DOCX and plain text are not opened. P1a and P2c
+were relabelled in place — `Add a package` became `Add a file`, and the sheet takes several files
+and lists the formats as one data line — since nothing was merged yet.
 
 ## Calls for the owner
 
