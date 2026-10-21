@@ -234,15 +234,18 @@ const STOP = new Set(["with", "that", "this", "from", "into", "over", "onto", "t
  * clauses in the check: dropping them could restore an outfit the scene explicitly removed. */
 function clothingSceneFor(block: string, person: ChapterPerson, people: readonly ChapterPerson[]): string {
   return block.split(/(?<=[.!?;])\s+|\n+/u).filter(sentence => {
-    const action = sentence.trim().match(/^(.+?)\s+(?:wears?|wore|(?:is|was) wearing|straightens?|straightened|adjusts?|adjusted|buttons?|buttoned|removes?|removed|takes? off|took off)\s+(?:(?:his|her|their)(?: own)?|an?|the)\s+([^.!?;]+)[.!?;]?$/i);
+    const action = sentence.trim().match(/^(.+?)\s+(wears?|wore|(?:is|was) wearing|straightens?|straightened|adjusts?|adjusted|buttons?|buttoned|removes?|removed|takes? off|took off)\s+(his own|her own|their own|an?|the)\s+([^.!?;]+)[.!?;]?$/i);
     if (action === null) return true;
+    // The actor may be handling somebody else's clothes. Only explicit "own" or wearing
+    // without an unresolved possessor establishes whose outfit this describes.
+    if (!/ own$/i.test(action[3]!) && !/^(?:wears?|wore|(?:is|was) wearing)$/i.test(action[2]!)) return true;
     const subject = action[1]!;
     const familiar = /^[\p{L}-]+$/u.test(subject) ? people.filter(candidate => namedInText(subject, candidate)) : [];
     const owner = resolveChapterPerson(people, subject) ?? (familiar.length === 1 ? familiar[0] : undefined);
     if (owner === undefined || owner.key === person.key) return true;
     if (people.some(other => other.key !== owner.key && namedInText(sentence, other))) return true;
     // Another clause or possessor is not a single person's wardrobe description.
-    return /\b(?:and|but|while|as|he|she|they|him|her|his|their|them|my|your|our|who|which|that)\b|['’]s\b/i.test(action[2]!);
+    return /\b(?:and|but|while|as|he|she|they|him|her|his|their|them|my|your|our|who|which|that)\b|['’]s\b/i.test(action[4]!);
   }).join(" ");
 }
 

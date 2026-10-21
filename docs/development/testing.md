@@ -2,8 +2,9 @@
 
 Canonical picture clothing (#2069) uses coordinator `test/productions/audiobook-picture-brief.test.ts`
 and the existing `audiobook-picture-suggest.test.ts` / `audiobook-picture-only.test.ts` paths. Check
-that a simple clothing action by an unambiguously named other person does not suppress the
-depicted person's main-photo appearance. Keep warnings for ambiguous names/pronouns, compound
+that a named other person wearing an outfit or handling their explicitly own clothing does not
+suppress the depicted person's main-photo appearance. Keep warnings for unresolved garment
+possessors (including a named actor removing her/his/their outer layer), ambiguous names, compound
 clauses, the depicted person's own changes/removals, missing references and selected kit looks.
 This advisory check neither rewrites historical checks nor establishes semantic wardrobe ownership.
 

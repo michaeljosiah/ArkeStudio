@@ -200,12 +200,12 @@ describe("the other checks", () => {
     const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people, places: [], prompt, fallback: () => [] });
     const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
     const garments = (block: string, text = "Hood down.", who = main, lookId?: string, candidates = people) => pictureChecks({ held, who: [who], people: candidates, lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
-    for (const block of ["Bray straightens his shirt.", "Bray Half-Hitch wears a shirt.", "Hitch adjusts his shirt. Maren reads the ledger.", "Bray removes his outer layer."]){
+    for (const block of ["Bray straightens his own shirt.", "Bray Half-Hitch wears a shirt.", "Hitch adjusts his own shirt. Maren reads the ledger.", "Bray removes his own outer layer."]){
       const check = garments(block);
       assert.equal(check.ok, true, block);
       assert.match(check.note!, /canonical appearance/);
     }
-    for (const block of ["Maren straightens her dress.", "Maren removes her outer layer.", "She straightens her shirt.", "Bray and Maren wear shirts.", "Bray adjusts Maren’s dress.", "Bray straightens his shirt while she removes her outer layer.", "Bray straightens his shirt. She removes her outer layer.", "Someone straightens his shirt."])
+    for (const block of ["Maren straightens her dress.", "Maren removes her outer layer.", "She straightens her shirt.", "Bray and Maren wear shirts.", "Bray adjusts Maren’s dress.", "Bray straightens his own shirt while she removes her outer layer.", "Bray straightens his own shirt. She removes her outer layer.", "Someone straightens his shirt.", "Bray removes her outer layer.", "Bray straightens his shirt.", "Bray adjusts their dress.", "Bray removes the outer layer.", "Bray takes off an outer layer."])
       assert.equal(garments(block).ok, false, block);
     assert.equal(garments("Hitch wears a shirt.", undefined, main, undefined, [...people, { ...person("other", "Other Person"), aliases: ["Hitch"] }]).ok, false, "an ambiguous alias retains the warning");
     assert.equal(garments("Bray wears a shirt.", "A plain dress.").ok, false, "the depicted person's own look line keeps authority");
