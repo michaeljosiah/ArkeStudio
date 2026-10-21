@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import {
   newId,
   TURN_RESULT_BOUNDS,
@@ -32,6 +33,7 @@ import {
 } from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
 import { WorldChatModelTurnResultSchema, ProductionChatModelTurnResultSchema, modelActionInputRefusal } from "./model-action-input.js";
+import { conversationCandidateFence } from "./target-reads.js";
 
 /**
  * Turning one model message into propositions, or into nothing at all (#70 §8.3, §8.4).
@@ -434,6 +436,14 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const byId = new Map(input.existing.map((c) => [c.id, c]));
   const receiptIds = new Set(input.receiptsThisRun.map((r) => r.id));
   const at = input.now();
+  const requireDraftRead = (candidate: WorldChangeCandidate, path: string) => {
+    const digest = conversationCandidateFence(candidate, input.groups);
+    if (candidate.conversationId !== input.conversationId || !input.receiptsThisRun.some(receipt =>
+      receipt.tool === "target-read" && receipt.status === "complete" && receipt.complete === true && receipt.nextCursor === null &&
+      receipt.target?.requirement === "conversation-candidate" && receipt.target.id === `${input.conversationId}:${candidate.id}` &&
+      receipt.observedRevisionOrDigest === digest
+    )) problems.push(problem("candidate-read-required", "Read the proposition with get_candidate at its current registry revision through complete=true before replacing it. Preserve unchanged authored fields, evidence and groups.", path));
+  };
 
   // Step 3 and 4: identity, revisions and payloads.
   const temporaryIds = new Set<string>();
@@ -444,6 +454,9 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
         problems.push(problem("duplicate-temporary-id", "Two operations used the same temporary id."));
       }
       temporaryIds.add(op.temporaryId);
+      // Re-emitting a retained create becomes a replacement below; it must not bypass the read.
+      const duplicate = findByStructure(op.candidate, input.existing);
+      if (duplicate && !suppressedByTombstone(op.candidate, input.tombstones)) requireDraftRead(duplicate, path);
       continue;
     }
     const existing = byId.get(op.candidateId);
@@ -463,6 +476,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
         problem("immutable-candidate", "A proposition that has already been carried into a proposal cannot be changed.", path),
       );
     }
+    if (op.op === "update" || op.op === "split") requireDraftRead(existing, path);
   }
 
   for (const { draft } of draftsWithOperations(result)) {
@@ -485,16 +499,20 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
    */
   const drafts = result.candidateOperations.flatMap((op, index) => {
     const path = `candidateOperations.${index}`;
-    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE, path: `${path}.candidate` }];
-    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)), path: `${path}.candidate` }];
+    if (op.op === "create") return [{ draft: op.candidate, retained: findByStructure(op.candidate, input.existing), path: `${path}.candidate` }];
+    if (op.op === "update") return [{ draft: op.candidate, retained: byId.get(op.candidateId) ?? null, path: `${path}.candidate` }];
     if (op.op === "split") {
-      const inherited = intentEvidenceOf(byId.get(op.candidateId));
-      return op.replacements.map((draft, replacement) => ({ draft, inherited, path: `${path}.replacements.${replacement}` }));
+      return op.replacements.map((draft, replacement) => ({ draft, retained: byId.get(op.candidateId) ?? null, path: `${path}.replacements.${replacement}` }));
     }
     return [];
   });
-  for (const { draft, inherited, path } of drafts) {
+  for (const { draft, retained, path } of drafts) {
+    const inherited = intentEvidenceOf(retained ?? undefined);
     for (const [index, evidence] of draft.evidence.entries()) {
+      // Exact stored source citations retain their historical provenance. New/changed citations
+      // still verify against current sources; intent still verifies against the full local log.
+      // This does not carry old checks: fresh() always uses this run's coordinator check plan.
+      if (evidence.kind !== "message" && retained?.evidence.some(stored => isDeepStrictEqual(stored, evidence))) continue;
       for (const evidenceProblem of verifyEvidence(evidence, input.evidenceSources)) {
         problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem), `${path}.evidence.${index}`));
       }

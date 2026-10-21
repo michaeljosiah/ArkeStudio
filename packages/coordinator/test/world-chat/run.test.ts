@@ -15,6 +15,7 @@ import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -192,7 +193,9 @@ describe("taking a turn", () => {
       async () => goodAnswer("Her aunt raised her.", "Her aunt raised her", (await h.view()).messages.find(m => m.role === "user")!.id),
       () => JSON.stringify({ reply: "The same draft is retained.", groupOperations: [], candidateOperations: [{ op: "update", candidateId: original.id, expectedRevision: original.revision,
         candidate: { classification: original.classification, title: original.title, rationale: "Reviewed after reopening.", settledness: "settled", evidence: original.evidence, checkReceiptIds: [], draft: original.draft } }] }),
-    ]));
+    ]), { raiseSchemaBoundary: async () => {}, receiptsFor: runId => original ? [{ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [],
+      target: { requirement: "conversation-candidate", id: `${original.conversationId}:${original.id}` },
+      observedRevisionOrDigest: conversationCandidateFence(original, []), complete: true, nextCursor: null, at: AT }] : [] });
     assert.equal((await h.runner.send(h.store, h.conversationId, "Her aunt raised her.")).status, "completed");
     original = (await h.view()).candidates[0]!;
     const completion = (await h.store.read()).events.find(e => e.event.type === "turn.completed")!.event;

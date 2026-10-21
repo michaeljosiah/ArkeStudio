@@ -100,7 +100,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getBundle: () => deps.activeStore()?.getBundle() ?? null,
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
     getConversationDrafts: async lease => {
-      const loaded = await new WorldChatService(store.dir).load(lease.conversationId, { messageLimit: 0 });
+      const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
       if (!loaded || loaded.problems.length > 0) throw new RetrievalError("unavailable", "The retained conversation drafts could not be read completely.");
       return { candidates: loaded.candidates, groups: loaded.groups };
     },

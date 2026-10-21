@@ -71,7 +71,7 @@ async function harness(options: {
     attachments,
     findAttachment: async (_lease, id) => known.get(id) ?? null,
     ...(options.withDrafts ? { getConversationDrafts: async (lease: import("../../src/world-chat/lease.js").QueryLease) => {
-      const loaded = await new WorldChatService(worldPath).load(lease.conversationId, { messageLimit: 0 });
+      const loaded = await new WorldChatService(worldPath).load(lease.conversationId);
       if (!loaded || loaded.problems.length) throw new RetrievalError("unavailable", "The retained drafts could not be read completely.");
       return loaded;
     } } : {}),

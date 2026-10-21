@@ -19,6 +19,7 @@ import {
   type ValidateInput,
 } from "../../src/world-chat/turn-result.js";
 import { scanWorld } from "../../src/world/scan.js";
+import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
 
 /**
@@ -205,7 +206,10 @@ describe("the evidence a proposition may stand on", () => {
       ],
       groupOperations: [],
     });
-    const outcome = validateTurnResult({ ...input, existing: [existing] });
+    const outcome = validateTurnResult({ ...input, conversationId: existing.conversationId, existing: [existing],
+      receiptsThisRun: [{ id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [],
+        target: { requirement: "conversation-candidate", id: `${existing.conversationId}:${existing.id}` },
+        observedRevisionOrDigest: conversationCandidateFence(existing, []), complete: true, nextCursor: null, at: AT }] });
 
     assert.equal(
       outcome.ok,

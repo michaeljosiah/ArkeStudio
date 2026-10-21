@@ -29,6 +29,8 @@ import {
   type ProductionBundle,
   type WorldBundle,
   type VoiceCandidate,
+  type WorldChangeCandidate,
+  type CandidateGroup,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
@@ -123,6 +125,13 @@ function fence(value: unknown, version?: string | number): string {
   const digest = conversationActionDigest(value);
   return version === undefined ? digest : `${typeof version === "number" ? `v${version}` : version}:${digest}`;
 }
+
+export function conversationCandidateRecord(candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) {
+  return { candidate, groups: groups.filter(group => group.conversationId === candidate.conversationId && group.members.some(member => member.candidateId === candidate.id)) };
+}
+
+export const conversationCandidateFence = (candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) =>
+  fence(conversationCandidateRecord(candidate, groups));
 
 /** Shared with whole-target guards, so "current" means exactly what retrieval signed. */
 export function sceneScriptFence(production: ProductionBundle | undefined, sceneId: string): string {
@@ -591,7 +600,7 @@ export class WorldChatTargetReads {
         const retained = await this.deps.getConversationDrafts(lease);
         const candidate = retained.candidates.find(entry => entry.id === id && entry.conversationId === lease.conversationId);
         if (candidate && candidate.revision !== revision) throw new TargetReadError("That proposition changed; use its current registry revision and start again without a cursor.");
-        const record = candidate ? { candidate, groups: retained.groups.filter(group => group.conversationId === lease.conversationId && group.members.some(member => member.candidateId === id)) } : null;
+        const record = candidate ? conversationCandidateRecord(candidate, retained.groups) : null;
         readTarget = target("conversation-candidate", `${lease.conversationId}:${id}`);
         revisionOrDigest = fence(record);
         rows = record ? chunks(JSON.stringify(record)) : [];

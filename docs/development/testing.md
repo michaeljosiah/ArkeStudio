@@ -1,11 +1,14 @@
 # Running and validating changes
 
 Retained World Chat drafts (#2048): run coordinator `test/world-chat/retrieval.test.ts`,
-`turn-result.test.ts`, `run.test.ts`, `context.test.ts`, `action-guide.test.ts` and
+`turn-result.test.ts`, `shape-drift.test.ts`, `run.test.ts`, `context.test.ts`, `action-guide.test.ts` and
 `test/world/schema-version.test.ts`. The retrieval regression reopens location, character and
 faction drafts beyond the visible message window, rejoins every page and compares exact sections,
 metadata, evidence and group membership. It also checks revision/group changes between pages,
-foreign cursors, unavailable hosts, world switches and the shared text budget. Native validation
+foreign cursors, unavailable hosts, world switches and the shared text budget. Turn validation
+requires an exact final current-run draft receipt for updates, splits and duplicate creates;
+it preserves unchanged historical source citations while still checking new citations and
+refreshing world checks. Native validation
 must additionally create and later revise those propositions through the configured writer;
 scripted journal tests alone do not establish that workflow.
 

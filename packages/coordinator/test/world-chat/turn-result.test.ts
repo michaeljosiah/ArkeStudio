@@ -6,6 +6,7 @@ import {
   WORLD_CHAT_SHAPE_EXAMPLES,
   WorldChatPreparedActionSchema,
   type CandidateChecks,
+  type CandidateGroup,
   type CandidateId,
   type CandidateTombstone,
   type ConversationId,
@@ -19,7 +20,8 @@ import {
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
 import { payloadDigest, structuralKey, suppressedByTombstone } from "../../src/world-chat/identity.js";
-import { contentHash } from "../../src/world-chat/observations.js";
+import { contentHash, canonObservation } from "../../src/world-chat/observations.js";
+import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import {
   correctiveMessage,
   parseTurnResult,
@@ -146,6 +148,12 @@ function turn(result: Partial<WorldChatTurnResult>): string {
   return JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [], ...result });
 }
 
+function draftRead(candidate: WorldChangeCandidate, groups: CandidateGroup[] = []): WorldChatCheckReceipt {
+  return { id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [],
+    target: { requirement: "conversation-candidate", id: `${candidate.conversationId}:${candidate.id}` },
+    observedRevisionOrDigest: conversationCandidateFence(candidate, groups), complete: true, nextCursor: null, at: AT };
+}
+
 it("settles retained sheet drafts by identity without losing sections, metadata or original intent", async () => {
   for (const type of ["location", "character", "faction"] as const) {
     const input = await baseInput();
@@ -155,7 +163,7 @@ it("settles retained sheet drafts by identity without losing sections, metadata 
     const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
     assert.equal(created.ok, true); if (!created.ok) throw new Error("create refused");
     const retained = created.turn.candidates[0]!;
-    const revision = validateTurnResult({ ...input, existing: [retained], raw: turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: { ...candidate, settledness: "settled" } }] }) });
+    const revision = validateTurnResult({ ...input, existing: [retained], receiptsThisRun: [draftRead(retained)], raw: turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: { ...candidate, settledness: "settled" } }] }) });
     assert.equal(revision.ok, true); if (!revision.ok) throw new Error("update refused");
     assert.equal(revision.turn.candidates.length, 1);
     const updated = revision.turn.candidates[0]!;
@@ -163,6 +171,59 @@ it("settles retained sheet drafts by identity without losing sections, metadata 
     assert.equal(updated.settledness, "settled"); assert.deepEqual(updated.draft, retained.draft);
     assert.deepEqual(updated.evidence, retained.evidence); assert.deepEqual(updated.sourceMessageIds, retained.sourceMessageIds);
   }
+});
+
+it("requires an exact complete current-run read for every retained replacement route", async () => {
+  const input = await baseInput(), candidate = canonCreateDraft(input.message);
+  const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+  assert.ok(created.ok);
+  const retained = created.turn.candidates[0]!;
+  const group: CandidateGroup = { id: newId("grp"), conversationId: input.conversationId, revision: 1, title: "Related drafts", rationale: "Together", members: [{ candidateId: retained.id, revision: retained.revision }], atomic: true, status: "live" };
+  const groups = [group], receipt = draftRead(retained, groups);
+  const operations: WorldChatTurnResult["candidateOperations"] = [
+    { op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate },
+    { op: "create", temporaryId: "again", candidate },
+    { op: "split", candidateId: retained.id, expectedRevision: retained.revision, replacements: [candidate, candidate] },
+  ];
+  for (const op of operations) {
+    const current = { ...input, groups, existing: [retained], raw: turn({ candidateOperations: [op] }), receiptsThisRun: [receipt] };
+    assert.ok(validateTurnResult(current).ok, op.op);
+    for (const receipts of [[], [{ ...receipt, complete: false, nextCursor: "more" }], [{ ...receipt, status: "empty" as const }],
+      [{ ...receipt, target: { requirement: "conversation-candidate" as const, id: `${input.conversationId}:${newId("cand")}` } }],
+      [{ ...receipt, target: { requirement: "conversation-candidate" as const, id: `${newId("cv")}:${retained.id}` } }],
+      [draftRead({ ...retained, revision: retained.revision + 1 }, groups)], [draftRead(retained, [{ ...group, revision: 2 }])],
+      [draftRead({ ...retained, rationale: "Changed since reading" }, groups)]]) {
+      const refused = validateTurnResult({ ...current, receiptsThisRun: receipts });
+      assert.ok(!refused.ok && refused.problems.some(p => p.code === "candidate-read-required"), op.op);
+    }
+    const foreign = validateTurnResult({ ...current, conversationId: newId("cv") });
+    assert.ok(!foreign.ok && foreign.problems.some(p => p.code === "candidate-read-required"));
+  }
+});
+
+it("preserves exact historical world evidence without treating it as a fresh check", async () => {
+  const input = await baseInput(), candidate = canonCreateDraft(input.message), entry = input.evidenceSources.bundle.canon[0]!;
+  const evidence = { kind: "world" as const, ...canonObservation(entry, input.evidenceSources.bundle.meta.canonRevision), field: "title", quote: entry.title, purpose: "supports" as const };
+  candidate.evidence.push(evidence);
+  const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+  assert.ok(created.ok);
+  const retained = created.turn.candidates[0]!, changed = structuredClone(input.evidenceSources.bundle);
+  changed.meta.canonRevision++;
+  changed.canon[0]!.title = "A later accepted title";
+  const current = { ...input, existing: [retained], receiptsThisRun: [draftRead(retained)], evidenceSources: { ...input.evidenceSources, bundle: changed },
+    checksFor: () => ({ ...completeChecks(), basedOnCanonRevision: changed.meta.canonRevision }) };
+  const raw = (draft: ModelCandidateDraft) => turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: draft }] });
+  const updated = validateTurnResult({ ...current, raw: raw(candidate) });
+  assert.ok(updated.ok);
+  assert.deepEqual(updated.turn.candidates[0]!.evidence, retained.evidence);
+  assert.equal(updated.turn.candidates[0]!.checks.basedOnCanonRevision, changed.meta.canonRevision);
+  assert.deepEqual(updated.turn.candidates[0]!.checks.targetReads, []);
+  const edited = structuredClone(candidate);
+  edited.evidence[1] = { ...evidence, quote: "An invented historical quotation" };
+  const refused = validateTurnResult({ ...current, raw: raw(edited) });
+  assert.ok(!refused.ok && refused.problems.some(p => p.code === "world-version-moved"));
+  const fresh = validateTurnResult({ ...current, existing: [], raw: turn({ candidateOperations: [{ op: "create", temporaryId: "new", candidate }] }) });
+  assert.ok(!fresh.ok && fresh.problems.some(p => p.code === "world-version-moved"));
 });
 
 describe("parsing a turn result", () => {
@@ -384,7 +445,7 @@ describe("accepting a turn", () => {
     corrected.draft = { ...corrected.draft, statement: "Maren Kest was raised by her great-aunt." } as never;
 
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [first.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [first.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({
         candidateOperations: [
           { op: "update", candidateId: existing.id, expectedRevision: 1, candidate: corrected },
@@ -409,7 +470,7 @@ describe("accepting a turn", () => {
     const existing = created.turn.candidates[0]!;
 
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [input.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [input.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t2", candidate: canonCreateDraft(input.message) }] }),
     });
 
@@ -806,7 +867,7 @@ describe("splitting a proposition", () => {
 
     const bells = canonCreateDraft(input.message, "the bells only ring at slack water");
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [input.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [input.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({
         candidateOperations: [
           {
