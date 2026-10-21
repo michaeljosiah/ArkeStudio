@@ -13,7 +13,8 @@ import {
   type PictureWho,
 } from "@arke-studio/contracts";
 import { clip } from "./audiobook-direction.js";
-import { personIdentity, resolveChapterPerson, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
+import { personIdentity, resolveChapterPerson, type ChapterPerson } from "./audiobook-look.js";
+import { resolveChapterPlace, type ChapterPlace } from "./audiobook-location.js";
 
 /**
  * The picture brief (design turn 193k, SPEC-047 R-120, R-121): the instruction the writing service
@@ -185,7 +186,7 @@ export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]
     const said = clip(words, PICTURE_EXPRESSION_MAX);
     if (person !== undefined && inKeys.has(person.key) && said !== undefined) expressions[person.key] = said;
   }
-  const place = raw.place === null || raw.place === undefined ? undefined : ctx.places.find((candidate) => candidate.key === raw.place);
+  const place = resolveChapterPlace(ctx.places, raw.place);
   const frame = clip(raw.frame ?? "", PICTURE_FRAME_MAX) ?? openingFrame(ctx.prompt) ?? "";
   return { frame, inFrame, notInFrame, expressions, details, detailPeople, place, prompt: ctx.prompt };
 }
@@ -205,7 +206,7 @@ export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place" 
   const people = [...new Map([...(detail ? [] : held.inFrame), ...(held.detailPeople ?? [])].map((person) => [person.key, person])).values()];
   return [
     ...people.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
-    ...(detail || held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, sheet: held.place.key, kind: "place" as const }]),
+    ...(detail || held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, ...(held.place.unlinked === true ? {} : { sheet: held.place.key }), kind: "place" as const }]),
   ].slice(0, 24);
 }
 

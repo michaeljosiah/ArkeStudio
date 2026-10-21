@@ -725,8 +725,16 @@ describe("the looks gallery asks in the dialog (design 66)", () => {
 });
 
 describe("location views ask in the dialog (design 66)", () => {
-  const locationHtml = (): string => {
-    __setStateForTest(FIXTURE_STATE);
+  const locationHtml = (accepted = false): string => {
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest(accepted ? { ...FIXTURE_STATE, world: { ...world, referenceKits: [{
+      sheetId: "the-vigil", tiles: [], compilations: [], establishingViewId: "lv_01",
+      locationViews: [{
+        id: "lv_01", name: "Seaward stair", file: "takes/tk_01J8F0000000000000000001/view.png",
+        sourceTakeId: "tk_01J8F0000000000000000001", sheetVersion: 2, artDirectionVersion: 3,
+        acceptedAt: "2026-08-02T10:00:00Z", status: "active",
+      }],
+    }] } } : FIXTURE_STATE);
     return renderToString(
       <MemoryRouter initialEntries={[`/w/${WORLD_ID}/locations/the-vigil/reference`]}>
         <App />
@@ -738,7 +746,12 @@ describe("location views ask in the dialog (design 66)", () => {
     const html = locationHtml();
     assert.match(html, /<dialog class="fy-gendialog/);
     assert.ok(!html.includes("fy-locref__form"), "the hand-rolled form is gone");
-    assert.ok(html.includes("fy-locref__candidate") || html.includes("Accepted views"), "the page keeps its answers");
+    assert.ok(!html.includes("Accepted views"), "an empty reference kit does not claim an accepted answer");
+    const page = parseHTML(locationHtml(true)).document;
+    const views = page.querySelector(".fy-locref__views");
+    assert.equal(views?.querySelector("h2")?.textContent, "Accepted views");
+    assert.equal(views?.querySelector("h3")?.textContent, "Seaward stair", "the saved answer stays on the page");
+    assert.equal(views?.closest("dialog"), null, "the answer is outside the generation dialog");
   });
 
   it("keeps the angle's name, which is what gates the generation", () => {
