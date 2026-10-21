@@ -18,7 +18,7 @@ import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-list
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
-import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage.js";
+import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
 import { AudioHeardSchema, AudioWaveformSchema, AudioSourceSchema, AudioStudioSnapshotSchema } from "./audio-arrangement-schema.js";

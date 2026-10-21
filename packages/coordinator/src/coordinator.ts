@@ -191,6 +191,7 @@ import {
   type IllustrationProposal,
   type IllustrationRow,
   illustrationRowGoes,
+  illustrationReferencesChanged,
   illustrationTotal,
   disagreementsNotSentAsIs,
   pictureRefusal,
@@ -362,6 +363,7 @@ import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExp
 import { bookReferenceCoverage } from "./productions/audiobook-reference-coverage.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, linkChapterCharacter, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
+import { refreshIllustrationProposal, refreshIllustrationRow } from "./productions/audiobook-illustration-refresh.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
 import { clipPrompt, depictable, makeAdapterPictureDeriver, neutralWhereLooksRide, pictureAspect, pictureRoom, pictureWho, promptRoom, suggestPicture, type PictureDeriver } from "./productions/audiobook-picture-suggest.js";
 import { clothingChange, makeAdapterPromptRewriter, rewritePictureClothing, type PromptRewriter } from "./productions/audiobook-picture-rewrite.js";
@@ -1784,10 +1786,12 @@ export class Coordinator {
             progress.failed.push({ block: row.block, reason: "a picture stands here now" });
             continue;
           }
-          const chosen = row.who.map((entry) => ({ key: entry.key, name: entry.name, ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}), kind: entry.kind, ...(room.people.find((person) => person.key === entry.key)?.billing !== undefined ? { billing: room.people.find((person) => person.key === entry.key)!.billing! } : {}) }));
-          // The chapter's look as it stands now: a look chosen since the proposal rides (R-119); and a
-          // look held on the block for its picture alone rides for that person in its place (R-146).
-          const who = pictureWho(store, model, chosen, { look: record?.look ?? null, frame: row.shot?.frame ?? null, own: room.own(row.block) });
+          const fresh = refreshIllustrationRow(store, room, model, row);
+          if (model.id !== proposal.model.id || model.provider !== proposal.model.provider || illustrationReferencesChanged(row, fresh)) {
+            progress.failed.push({ block: row.block, reason: "references or price changed · refresh references before accepting" });
+            continue;
+          }
+          const who = fresh.who;
           // A look the Looks sheet has come to flag since the proposal holds the row as the card
           // would have (issue 1658), unless the author sent it as it is for that person.
           const disagreeing = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(record?.look ?? null, entry.key).length > 0).map((entry) => entry.key);
@@ -16240,6 +16244,31 @@ export class Coordinator {
         }
         return;
       }
+      case "refresh-illustration-references": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.chapters.find(c => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        const ids = { worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id };
+        const refuse = (refused: string) => this.emit({ at: this.nowIso(), type: "illustration.progress", ...ids, progress: { proposalId: msg.proposalId, state: "done", total: 0, made: [], failed: [], spentMicroUsd: 0, confirmedMicroUsd: 0 }, refused });
+        const held = this.heldIllustrations.get(key);
+        if (this.makingIllustrations.has(key) || this.illustrating.has(key)) return refuse("preparation or pictures are running");
+        if (held?.proposal === undefined || held.proposal.proposalId !== msg.proposalId) return refuse("that proposal changed · reopen its review");
+        try {
+          const model = await this.pictureModel(store);
+          if (!model) return refuse("no picture model is on");
+          const record = await readAudiobook(store, msg.productionId, chapter.file);
+          if (record === "unreadable") return refuse("the chapter record is unreadable");
+          const room = await pictureRoom(store, msg.productionId, chapter.id, record?.look ?? null);
+          const proposal = refreshIllustrationProposal(store, msg.productionId, room, model, held.proposal);
+          if (store.closingSignal.aborted || this.heldIllustrations.get(key) !== held || this.makingIllustrations.has(key) || this.illustrating.has(key)) return refuse("that proposal changed · reopen its review");
+          const event: Extract<DomainEvent, { type: "illustration.finished" }> = { at: this.nowIso(), type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...proposal, proposalId: ulid() } };
+          this.heldIllustrations.set(key, event);
+          this.emit(event);
+        } catch (error) { refuse(describeCoordinatorError(error)); }
+        return;
+      }
       case "discard-illustration": {
         const store = this.opts.provider.openStore?.();
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
@@ -16278,6 +16307,7 @@ export class Coordinator {
         if (total > msg.confirmedMicroUsd) return refuse(`the price moved · ${priceLabel(total)}`);
         const current = await planAudiobook(store, msg.productionId, chapter.id, { narrator: await anyNarrator(store, msg.productionId) }).catch(() => null);
         if (current === null || current.chapter.hash !== proposal.hash) return refuse("the prose moved · illustrate again");
+        if (this.heldIllustrations.get(key) !== held || this.makingIllustrations.has(key)) return refuse("that proposal changed · reopen its review");
         const control = new AbortController();
         const onClose = () => control.abort();
         store.closingSignal.addEventListener("abort", onClose, { once: true });

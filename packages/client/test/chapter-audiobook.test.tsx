@@ -1741,7 +1741,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(sheet.closest("dialog")?.hasAttribute("open"), true, "the proposal owns a native modal above the chapter and dock");
     assert.equal(sheet.closest(".fy-arke"), null);
     assert.equal(q(m, ".fy-ills__head h3")!.textContent, "Illustrate · Chapter 2");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a reference");
     assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((r) => [r.dataset.block, r.dataset.state]), [["p0.0", "ready"], ["p1.0", "held"], ["p3.0", "ready"]]);
     const first = all(m, '[data-testid="illustration-row"]')[0]!;
     assert.match(first.textContent!, /~0:00/, "times are estimated until the chapter is read");
@@ -1787,7 +1787,7 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => (all(m, '[data-testid="illustration-skip"]')[0] as HTMLButtonElement).click());
     assert.deepEqual(all(m, '[data-testid="illustration-chip"]').map((chip) => chip.textContent), ["The line", "The tide"]);
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 skipped · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 skipped · 1 needs a reference");
     assert.equal(all(m, '[data-testid="illustration-row"]')[0]!.dataset.state, "skipped");
     assert.equal(all(m, '[data-testid="illustration-skip"]')[0]!.textContent, "Put back");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
@@ -1804,6 +1804,31 @@ describe("Illustrate this chapter (turn 191)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "illustration.finished", ...ids, outcome: "proposed", proposal: { ...PROPOSAL, rows: [row("p0.0", { shot: shot("Medium two-shot across the table") }), row("p3.0", { at: 150, who: [], shot: shot("Detail, her hand on the rail") }), row("p1.0", { at: 70 })] } }));
     assert.deepEqual(all(m, '[data-testid="illustration-row"]').map((card) => card.querySelector('[data-testid="illustration-frame"]')?.textContent ?? null), ["Two-shot", "Detail", null]);
     assert.match(all(m, '[data-testid="illustration-row"]')[1]!.textContent ?? "", /no reference rides/, "a detail carries no one");
+  });
+
+
+  it("refreshes held references without accepting and clears old Without consent before the revised quote", async () => {
+    const m = await proposedMount();
+    await act(async () => (all(m, '[data-testid="illustration-without"]')[0] as HTMLButtonElement).click());
+    await act(async () => q(m, '[data-testid="illustration-refresh"]')!.click());
+    const request = sentOf(m, "refresh-illustration-references")[0]!;
+    assert.equal(request.proposalId, "ill-1");assert.equal(sentOf(m,"accept-illustration").length,0);
+    assert.equal((q(m,'[data-testid="illustration-accept"]') as HTMLButtonElement).disabled,true);
+    await act(async()=>__applyEventForTest({at:AT,type:"illustration.finished",...ids,outcome:"proposed",proposal:{...PROPOSAL,proposalId:"ill-refreshed",refreshed:true,refreshedBlocks:["p1.0"]}}));
+    assert.match(q(m,'[data-testid="illustration-refreshed"]')!.textContent!,/1 picture changed/);
+    assert.equal(all(m,'[data-testid="illustration-row"]')[1]!.dataset.state,"held","old Without consent is not reused after refresh");
+    assert.equal(sentOf(m,"accept-illustration").length,0);
+  });
+
+  it("shows an unresolved location in its held row and lets the author review or explicitly go without", async()=>{
+    const m=await mount(voiced(inkbound()));await answerOpen(m);
+    const who={key:"north-salt",name:"North Salt",kind:"place" as const,reference:null,carried:false};
+    await act(async()=>__applyEventForTest({at:AT,type:"illustration.finished",...ids,outcome:"proposed",proposal:{...PROPOSAL,rows:[row("p0.0",{who:[who],needs:["North Salt"]})]}}));
+    const card=all(m,'[data-testid="illustration-row"]')[0]!;
+    assert.match(card.textContent!,/North Salt/);assert.match(card.textContent!,/location not linked/);
+    assert.equal(card.dataset.state,"held");assert.equal((q(m,'[data-testid="illustration-accept"]') as HTMLButtonElement).disabled,true);
+    await act(async()=>q(m,'[data-testid="illustration-without"]')!.click());
+    assert.equal(all(m,'[data-testid="illustration-row"]')[0]!.dataset.state,"ready");
   });
 
   it("makes a look from a held row over the proposal for a character with a main photo, and sends one without to their page (design turn 193h)", async () => {
@@ -1929,11 +1954,11 @@ describe("Illustrate this chapter (turn 191)", () => {
     assert.equal(tide.dataset.state, "refused", "not an ordinary proposed picture");
     assert.ok(tide.className.includes("fy-ills__card--held"));
     assert.equal(tide.querySelector('[data-testid="illustration-row-reason"]')?.textContent, "refused by the image safety check");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 needs a look · 1 refused");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 1 to make · 1 needs a reference · 1 refused");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.04", "the total is what will be made");
     await act(async () => (tide.querySelector('[data-testid="illustration-retry"]') as HTMLButtonElement).click());
     assert.equal(q(m, '[data-testid="illustration-row"][data-block="p3.0"]')!.dataset.state, "ready", "Try again puts it back in the run");
-    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a look");
+    assert.equal(q(m, '[data-testid="illustration-headline"]')!.textContent, "3 pictures · one a minute and a half · 2 to make · 1 needs a reference");
     assert.equal(q(m, '[data-testid="illustration-accept"]')!.textContent, "Accept · ~$0.08");
     await act(async () => q(m, '[data-testid="illustration-accept"]')!.click());
     const sent = sentOf(m, "accept-illustration")[0]!;

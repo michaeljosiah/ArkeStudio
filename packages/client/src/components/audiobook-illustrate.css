@@ -88,3 +88,13 @@
   .fy-ills__foot { gap: 12px; }
   .fy-ills__foot .ui-btn--primary { flex: 1; }
 }
+/* Reference evidence stays folded above the proposal grid; opening it must not push Accept off-screen. */
+.fy-ills__sheet > .fy-look__chapterdetails { flex: none; margin-top: 0; max-height: min(320px, 35vh); overflow-y: auto; overflow-wrap: anywhere; }
+.fy-ills__sheet > .fy-look__chapterdetails .fy-look__chapterfields { padding-inline: 0; }
+.fy-ills__who { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
+.fy-ills__review-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 599px) {
+  .fy-ills__review-actions { flex-basis: 100%; }
+  .fy-ills__review-actions .fy-ills__read { flex: 1; }
+  .fy-ills__foot .ui-btn--primary { flex: 1 0 auto; white-space: nowrap; }
+}

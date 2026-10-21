@@ -4111,6 +4111,11 @@ export function ChapterWorkspace({
           onSkip={illustration.skip}
           onWithout={illustration.without}
           onMakeLook={(who) => {
+            if (who.sheet === undefined) {
+              if (who.kind === "place") void navigate(`/w/${worldId}/locations`);
+              else setIllustrationLookOpen(true);
+              return;
+            }
             // A character with a main photo has a look made here, over the proposal; a place, or a
             // character with no main photo to make a look from, is made on its own page.
             const kit = who.kind === "character" && who.sheet !== undefined ? world.referenceKits.find((candidate) => candidate.sheetId === who.sheet) : undefined;
@@ -4121,6 +4126,7 @@ export function ChapterWorkspace({
             }
             void navigate(`/w/${worldId}/${who.kind === "place" ? "locations" : "cast"}/${who.sheet}`);
           }}
+          onRefresh={illustration.refresh}
           onAgain={illustration.press}
           onClose={illustrationSheet.hide}
           onLook={() => setIllustrationLookOpen(true)}

@@ -176,8 +176,7 @@ export function chapterPersonCandidates(store: Pick<WorldStore, "getBundle">, pl
   }
   const rank = (person: ChapterPerson): number => person.first < 0 ? 0 : person.first < Number.MAX_SAFE_INTEGER ? 1 : related.has(person.key) ? 2 : 3;
   return [...people.values()]
-    .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
-    ;
+    .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first);
 }
 
 /** The prompt remains bounded; coverage can inspect the same complete candidate set. */

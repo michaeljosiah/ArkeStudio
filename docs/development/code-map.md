@@ -878,3 +878,15 @@ world-independent Publications library and Publish. The shared `StoryBookPreview
 `preview-page` and captured media; its read-only `PageSheet` does not open a world or recreate
 an edition. Tests: client `audiobook-export.test.tsx` and coordinator
 `publications/story-illustrations.test.ts` (source world removed after capture).
+
+Manuscript reference preparation (#1944/#1948): contracts `audiobook-reference-coverage-schema.ts`
+keeps the wire projection independent of world schema initialization; `audiobook-reference-coverage.ts`
+resolves authored character identities and `audiobook-location.ts` projects location evidence.
+Coordinator `productions/audiobook-reference-coverage.ts` reads current chapter/book preparation,
+including unreadable/stale records and prompt bounds, through optional `read-audiobook-looks` coverage.
+`audiobook-illustration-refresh.ts` refreshes held identities, references and quotes without provider
+work or prompt edits; the coordinator issues a new proposal identity and refuses changed reference
+inputs before dispatch. Client `reference-coverage.tsx` reuses folded Looks disclosures, and
+`audiobook-illustrate.tsx` shows missing places, explicit Refresh, and revised acceptance. Tests:
+contracts/coordinator `audiobook-reference-coverage.test.ts`, client `reference-coverage.test.tsx`
+and `chapter-audiobook.test.tsx`. Existing pictures and world identity records are not rewritten.

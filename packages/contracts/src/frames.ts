@@ -3711,6 +3711,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * discarded; nothing is made or spent by reading. Answered as `illustration.finished`.
    */
   z.object({ kind: z.literal("illustrate-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("refresh-illustration-references"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), proposalId: z.string().min(1).max(64) }).strict(),
   z.object({ kind: z.literal("discard-illustration"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   /**
    * The proposal accepted (R-102): the rows left unskipped, made one at a time through the Bench

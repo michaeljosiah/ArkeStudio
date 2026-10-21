@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { referenceCoverageCounts, type ChapterReferenceCoverage } from "@arke-studio/contracts";
 import { readAudiobookLooks, useStore } from "../lib/store.js";
 import { Button } from "./ui.js";
@@ -32,13 +32,15 @@ export function ReferenceCoverage({ chapter }: { chapter: ChapterReferenceCovera
 export function BookReferenceCoverage({ worldId, productionId, disabled }: { worldId: string; productionId: string; disabled: boolean }) {
   const store = useStore();
   const [request, setRequest] = useState<string | null>(null);
+  useEffect(() => setRequest(null), [worldId, productionId]);
   const answer = request === null ? undefined : store.audiobookAsks[request];
   const chapters = answer?.state === "looks" ? answer.coverage : undefined;
   const working = answer?.state === "working";
   const unresolved = chapters?.reduce((sum, chapter) => sum + referenceCoverageCounts(chapter).unresolved, 0) ?? 0;
+  const missing = chapters?.reduce((sum, chapter) => sum + referenceCoverageCounts(chapter).missing, 0) ?? 0;
   const incomplete = chapters?.filter(chapter => chapter.preparation !== "current" || referenceCoverageCounts(chapter).bounded).length ?? 0;
   return <details className="fy-look__chapterdetails" data-testid="book-reference-coverage">
-    <summary>Book references{chapters === undefined ? "" : ` · ${unresolved} unresolved · ${incomplete} chapter${incomplete === 1 ? "" : "s"} to prepare`}</summary>
+    <summary>Book references{chapters === undefined ? "" : ` · ${unresolved} unresolved · ${missing} missing reference${missing === 1 ? "" : "s"} · ${incomplete} chapter${incomplete === 1 ? "" : "s"} to prepare`}</summary>
     <div className="fy-look__chapterfields">
       <Button variant="secondary" disabled={disabled || working} onClick={() => setRequest(readAudiobookLooks(worldId, productionId, true))}>{working ? "Checking…" : chapters === undefined ? "Check book references" : "Check again"}</Button>
       {chapters !== undefined && <p className="fy-look__savehint">Saved evidence at the last check. Check again after resolving identities or references.</p>}

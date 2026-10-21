@@ -6,7 +6,7 @@ import { chapterPersonCandidates, LOOK_BOUNDS } from "./audiobook-look.js";
 import { clip } from "./audiobook-direction.js";
 
 /** A projection of the evidence already held, never another writing or image request. */
-export function chapterReferenceCoverage(store: WorldStore, productionId: string, plan: AudiobookPlan, pictures: readonly { block: string; who: readonly PictureWho[] }[] = []): ChapterReferenceCoverage {
+export function chapterReferenceCoverage(store: WorldStore, productionId: string | undefined, plan: AudiobookPlan, pictures: readonly { block: string; who: readonly PictureWho[] }[] = []): ChapterReferenceCoverage {
   const bundle = store.getBundle();
   const record = plan.record === "unreadable" ? null : plan.record;
   const look = record?.look;

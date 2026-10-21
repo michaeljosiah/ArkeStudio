@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { LOOK_LINE_MAX, LookViewSchema, MAIN_PHOTO_LOOK, PictureLookSchema, type PictureLookPick } from "./audiobook-look.js";
 import { CODEX_IMAGE_PLAN_LABEL, aspectOffered, estimateMicroUsd, imageOutputFor, type ManifestModel } from "./manifest.js";
 import type { Sheet } from "./world.js";
@@ -350,12 +351,20 @@ export const IllustrationRowSchema = z
   .strict();
 export type IllustrationRow = z.infer<typeof IllustrationRowSchema>;
 
+/** A held price and reference selection must be shown again before changed inputs can be sent. */
+export function illustrationReferencesChanged(before: IllustrationRow, after: IllustrationRow): boolean {
+  return JSON.stringify(before.who) !== JSON.stringify(after.who) || before.estimatedMicroUsd !== after.estimatedMicroUsd;
+}
+
 export const IllustrationProposalSchema = z
   .object({
     proposalId: z.string().min(1).max(64),
     /** The prose the proposal was made for: written onto only while the chapter still says it. */
     hash: z.string().min(1),
     rows: z.array(IllustrationRowSchema).max(60),
+    coverage: ChapterReferenceCoverageSchema.optional(),
+    refreshed: z.literal(true).optional(),
+    refreshedBlocks: z.array(z.string().min(1).max(40)).max(60).optional(),
     model: PictureModelSchema,
     aspect: z.string().min(1).optional(),
     /** The chapter's length on the proposal's clock, in seconds, and whether any block's time is estimated. */

@@ -163,6 +163,7 @@ export type AudiobookAsk =
 export interface IllustrationRun {
   state: "reading" | "proposed" | "making" | "done" | "failed" | "unavailable" | "stopped";
   proposal?: import("@arke-studio/contracts").IllustrationProposal;
+  refreshing?: boolean;
   /** Rows the author took out, and held rows they said to make without a reference. */
   skipped: string[];
   without: string[];
@@ -2367,7 +2368,7 @@ function handleFrame(json: string): void {
             skipped: (before?.skipped ?? []).filter((block) => present.has(block)),
             // A row refused again is held again: consent to try it was for the run that just ended (codex on PR 1559).
             // So is one the run found a look disagreeing on that it never showed: the consent was not to that (codex on PR 1868).
-            without: (before?.without ?? []).filter((block) => {
+            without: (event.proposal.refreshed === true && event.proposal.proposalId !== before?.proposal?.proposalId ? [] : before?.without ?? []).filter((block) => {
               const row = event.proposal!.rows.find((candidate) => candidate.block === block);
               return row !== undefined && row.refused === undefined && (row.disagrees ?? []).every((who) => shown.get(block)?.has(who) === true);
             }),
@@ -2382,7 +2383,7 @@ function handleFrame(json: string): void {
       const before = illustration[key];
       if (event.refused !== undefined) {
         // Refused before it began: the proposal stands, with the clause that says why.
-        if (before !== undefined) illustration = { ...illustration, [key]: { ...before, state: before.proposal !== undefined ? "proposed" : before.state, reason: event.refused } };
+        if (before !== undefined) illustration = { ...illustration, [key]: { ...before, state: before.proposal !== undefined ? "proposed" : before.state, refreshing: false, reason: event.refused } };
       } else {
         illustration = {
           ...illustration,
@@ -6182,11 +6183,21 @@ export function sendIllustrationWithout(worldId: string, productionId: string, c
   emitChange({ ...current, illustration: { ...current.illustration, [key]: { ...run, without } } });
 }
 
+/** Reread references on the held proposal without asking a provider or changing its words. */
+export function refreshIllustrationReferences(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
+  const key = `${worldId}/${productionId}/${chapterId}`;
+  const run = current.illustration[key];
+  if (run?.state !== "proposed" || run.proposal === undefined || run.refreshing) return false;
+  if (!send({ kind: "refresh-illustration-references", worldId, productionId, chapterFile, proposalId: run.proposal.proposalId })) return false;
+  emitChange({ ...current, illustration: { ...current.illustration, [key]: { ...run, refreshing: true } } });
+  return true;
+}
+
 /** The proposal accepted (191d): the rows left, one confirm of the total Accept showed; made one at a time. */
 export function acceptIllustration(worldId: string, productionId: string, chapterId: string, chapterFile: string): boolean {
   const key = `${worldId}/${productionId}/${chapterId}`;
   const run = current.illustration[key];
-  if (run === undefined || run.state !== "proposed" || run.proposal === undefined) return false;
+  if (run === undefined || run.state !== "proposed" || run.proposal === undefined || run.refreshing) return false;
   const total = illustrationTotal(run.proposal.rows, new Set(run.skipped), new Set(run.without));
   if (total.count === 0) return false;
   // A row held for a reference, or one a run's picture was refused for, goes only once the author named it (2026-10-04).
