@@ -1,0 +1,44 @@
+{
+  "cover": {
+    "path": "ledger/cover.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "a01": {
+    "path": "ledger/audio/ch01.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "a02": {
+    "path": "ledger/audio/ch02.m4a",
+    "mediaType": "audio/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "p001": {
+    "path": "ledger/pictures/p001.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "p002": {
+    "path": "ledger/pictures/p002.jpg",
+    "mediaType": "image/jpeg",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "p003": {
+    "path": "ledger/pictures/p003.png",
+    "mediaType": "image/png",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "m001": {
+    "path": "ledger/motion/m001.mp4",
+    "mediaType": "video/mp4",
+    "byteLength": 1,
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

@@ -799,6 +799,13 @@ export function subscribeAudiobookExported(listener: (answer: AudiobookExported)
   audiobookExportedListeners.add(listener);
   return () => audiobookExportedListeners.delete(listener);
 }
+/** The world package for Arke Player (design turn 233c): answered to the export that named it. */
+export type ArkePlayerExported = Extract<DomainEvent, { type: "arke-player.exported" }>;
+const arkePlayerExportedListeners = new Set<(answer: ArkePlayerExported) => void>();
+export function subscribeArkePlayerExported(listener: (answer: ArkePlayerExported) => void): () => void {
+  arkePlayerExportedListeners.add(listener);
+  return () => arkePlayerExportedListeners.delete(listener);
+}
 /** The audiobook's video (design turn 197): what a render would make, and what one made. */
 export type AudiobookVideoExported = Extract<DomainEvent, { type: "audiobook.video-exported" }>;
 const audiobookVideoExportedListeners = new Set<(answer: AudiobookVideoExported) => void>();
@@ -1920,6 +1927,9 @@ function handleFrame(json: string): void {
     if (event.type === "audiobook.exported") {
       for (const listener of audiobookExportedListeners) listener(event);
     }
+    if (event.type === "arke-player.exported") {
+      for (const listener of arkePlayerExportedListeners) listener(event);
+    }
     if (event.type === "character-look.imported") {
       for (const listener of characterLookImportListeners) listener(event);
     }
@@ -2815,6 +2825,8 @@ function handleFrame(json: string): void {
           ...(event.sidecar !== undefined ? { sidecar: event.sidecar } : {}),
           ...(event.deliveryKind !== undefined ? { deliveryKind: event.deliveryKind } : {}),
           ...(event.video !== undefined ? { video: event.video } : {}),
+          ...(event.label !== undefined ? { label: event.label } : {}),
+          ...(event.step !== undefined ? { step: event.step } : {}),
           ...(exportsState[event.exportId]?.made !== undefined ? { made: exportsState[event.exportId]!.made! } : {}),
           error: event.error,
         },
@@ -5686,6 +5698,9 @@ export interface ExportState {
   deliveryKind?: "video" | "manuscript" | "interactive" | "audiobook-video";
   /** An audiobook video's place while it renders (design turn 197d). */
   video?: import("@arke-studio/contracts").AudiobookVideoProgress;
+  /** What Activity calls the export and its step in hand (233b). */
+  label?: string;
+  step?: string;
   /** What an audiobook video made, once it has (197e): its folder and files. */
   made?: { dir: string; files: import("@arke-studio/contracts").AudiobookVideoFile[]; scope?: import("@arke-studio/contracts").AudiobookScope; chapterIds?: string[] };
   error: string | null;
@@ -6411,6 +6426,12 @@ export function setAudiobookPictureFocus(worldId: string, productionId: string, 
 export function exportAudiobookPlayer(worldId: string, productionId: string, exportId?: string, scope?: import("@arke-studio/contracts").AudiobookScope): string | null {
   const requestId = ulid();
   return send({ kind: "export-audiobook-player", worldId, productionId, requestId, ...(exportId !== undefined ? { exportId } : {}), ...(scope !== undefined ? { scope } : {}) }) ? requestId : null;
+}
+
+/** The world package for Arke Player (design turn 233): answered as `arke-player.exported` for the export id given. */
+export function exportArkePlayer(worldId: string, productionId: string, exportId: string, options: { book: boolean; motion: boolean }): string | null {
+  const requestId = ulid();
+  return send({ kind: "export-arke-player", worldId, productionId, requestId, exportId, options }) ? requestId : null;
 }
 
 /** The world's web packages (design turn 186e): answered as `web-packages.listed` under the id returned. */

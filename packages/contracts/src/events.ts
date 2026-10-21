@@ -1655,6 +1655,24 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       ]),
     })
     .strict(),
+  /**
+   * The world package for Arke Player (design turn 233c, SPEC-058 R-7): the ZIP written under
+   * `exports/` with its length and digest and what it holds, or each thing that stood in the way.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("arke-player.exported"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      result: z.union([
+        z.object({ ok: z.literal(true), file: z.string().min(1), bytes: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/), edition: z.string().min(1), chapters: z.number().int().min(0), pictures: z.number().int().min(0), book: z.boolean() }).strict(),
+        z.object({ ok: z.literal(false), blockers: z.array(z.string().min(1)).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
   /** The audiobook's video (design turn 197e): the files made and how many chapters were encoded, or what stood in the way. */
   z
     .object({
@@ -1677,7 +1695,26 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       type: z.literal("web-packages.listed"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      packages: z.array(z.object({ kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video"]), productionId: SlugSchema, title: z.string(), dir: z.string().min(1), exportedAt: z.string().min(1), scope: AudiobookScopeSchema.optional(), chapterIds: z.array(SlugSchema).min(1).optional() }).strict()),
+      packages: z.array(z.object({
+        kind: z.enum(["interactive", "visual-novel", "audiobook", "audiobook-video", "arke-player"]),
+        productionId: SlugSchema,
+        title: z.string(),
+        dir: z.string().min(1),
+        exportedAt: z.string().min(1),
+        scope: AudiobookScopeSchema.optional(),
+        chapterIds: z.array(SlugSchema).min(1).optional(),
+        /** An Arke Player package (turn 233e): the export that made it, its file under `exports/`, its length and its SHA-256 to copy. */
+        exportId: z.string().min(1).optional(),
+        file: z.string().min(1).optional(),
+        bytes: z.number().int().min(0).optional(),
+        sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        /** What it holds, as Publications says it: `12 chapters · 131 pictures · the book`. */
+        holds: z.string().optional(),
+        /** The same as numbers, so a window that lost the export's answer shows the package it made. */
+        chapters: z.number().int().min(0).optional(),
+        pictures: z.number().int().min(0).optional(),
+        book: z.boolean().optional(),
+      }).strict()),
     })
     .strict(),
   /** The book as a listener hears it (design turn 186), answered to the window that asked; or none, and why. */
@@ -2041,6 +2078,9 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
       percent: z.number().min(0).max(100),
       /** An audiobook video's place (design turn 197d): the chapter in hand and the length done, for Activity. */
       video: AudiobookVideoProgressSchema.optional(),
+      /** What Activity calls the export and the step in hand (233b): `Arke Player · The Ledger of Nights`, `Fitting pictures · 54 of 131`. */
+      label: z.string().min(1).max(200).optional(),
+      step: z.string().min(1).max(200).optional(),
       output: z.string().nullable(),
       /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
       sidecar: z.string().optional(),

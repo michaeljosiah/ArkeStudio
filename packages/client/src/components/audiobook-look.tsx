@@ -592,4 +592,3 @@ export function lookCount(look: AudiobookLook | null | undefined): string {
   const count = Object.keys(look.characters).length;
   return `${count} character${count === 1 ? "" : "s"}`;
 }
-
