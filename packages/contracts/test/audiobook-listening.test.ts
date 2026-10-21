@@ -117,6 +117,36 @@ describe("pictures that follow the words (R-69)", () => {
     assert.deepEqual(edited.placed.map((entry) => [entry.key, entry.index, entry.moved]), [["p0.0", 0, false]]);
   });
 
+  it("follows exact surviving words before an old key reused inside another join", () => {
+    const blocks = [
+      { key: "p0.0", text: "New first. New second.", starts: ["p0.0", "p1.0"] },
+      { key: "p2.0", text: "Odile did not answer.", starts: ["p2.0", "p3.0"] },
+    ];
+    const held = { ...picture("Odile did not answer.", "artifacts/odile.png"), focus: { x: 0.3, y: 0.7 } };
+    const records: Array<Record<string, AudiobookPicture>> = [{ "p1.0": held }, { "p0.0": picture(blocks[0]!.text, "artifacts/new.png"), "p1.0": held }];
+    for (const pictures of records) {
+      const result = placePictures(blocks, pictures);
+      const moved = result.placed.find(entry => entry.key === "p1.0")!;
+      assert.equal(moved.index, 1);
+      assert.equal(moved.moved, true);
+      assert.equal(moved.picture, held, "the original metadata is preserved without rewriting the record");
+      assert.deepEqual(result.off, []);
+      assert.deepEqual(result.lost, []);
+    }
+  });
+
+  it("does not guess between repeated text when an old picture belongs to a join", () => {
+    const blocks = [
+      { key: "p0.0", text: "Before. Repeated.", starts: ["p0.0", "p1.0"] },
+      { key: "p2.0", text: "Repeated." },
+      { key: "p3.0", text: "Repeated." },
+    ];
+    const result = placePictures(blocks, { "p0.0": picture("Before.", "artifacts/first.png"), "p1.0": picture("Repeated.", "artifacts/later.png") });
+    assert.deepEqual(result.placed.map(entry => [entry.key, entry.index]), [["p0.0", 0]]);
+    assert.deepEqual(result.off, ["p1.0"]);
+    assert.deepEqual(result.lost, []);
+  });
+
   it("skips a picture whose file is no longer usable, rather than showing a blank", () => {
     const chapter = listeningChapter({ chapterId: "neap", order: 7, title: "T", blocks: BLOCKS, pictures: { "p2.0": picture(BLOCKS[3]!.text, "artifacts/gone.png") }, cover: null, usable: () => false });
     assert.deepEqual(chapter.pictures, []);

@@ -762,7 +762,9 @@ arke:save-story-publication resolves an inventoried edition through the coordina
 native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
 
 Illustrated EPUB (#2033) uses `publications/story-illustrations.ts` to resolve existing block
-pictures against manuscript paragraphs and `story-epub.ts` to stream captured PNG/JPEG inputs
+pictures against manuscript paragraphs. Shared `placePictures` in contracts `audiobook-listening.ts`
+finds unique surviving text before a reused key's joined-block fallback (#2118), preserving the
+picture's metadata without reattachment. `story-epub.ts` streams captured PNG/JPEG inputs
 through the shared manuscript EPUB parts. The existing Publish sheet owns the explicit option;
 its authenticated preview reads only inventoried edition media. Regressions live in
 `test/publications/story-illustrations.test.ts`, `story-routes.test.ts`, contracts
