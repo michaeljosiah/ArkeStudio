@@ -35,6 +35,7 @@ export interface HearDeps {
   local: (voiceId: string, text: string, settings: Record<string, number>) => Promise<{ audio: Uint8Array; parts: number }>;
   enqueue: (input: EnqueueInput) => Promise<string>;
   waitForJob: (jobId: string) => Promise<Job>;
+  findJobs?: () => readonly Job[];
   /** Word times on this machine (design turn 185): with them a block is heard with its neighbours, as a press would read it. */
   wordTimes?: (wav: Uint8Array, signal: AbortSignal) => Promise<{ words: TimedWord[]; seconds: number }>;
 }
@@ -117,18 +118,32 @@ export async function hearAudiobookLine(
   // Heard with its neighbours (design turn 185): one request of the three, split here, the middle kept.
   if (group !== undefined && deps.wordTimes !== undefined) {
     const text = groupedText(group.turns);
-    const jobId = await deps.enqueue({
-      worldId: deps.worldId,
-      productionId,
-      target: { kind: "voice-preview", id: `hear/${group.model.provider}/${group.model.id}/${speaking.reader.voiceId}` },
-      capability: "voice-tts",
-      provider: group.model.provider,
-      model: group.model.id,
-      params: { voiceId: speaking.reader.voiceId, text, turns: group.turns, audioFormat: "wav", purpose: "audiobook", hear: true, productionId, chapterId: chapter.id, block, characterCount: text.length },
-      estimatedMicroUsd: group.quote.expectedMicroUsd,
-      landing: { dir: audiobookLanding(productionId, chapter.file), name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-group.wav` },
-    });
-    const job = await deps.waitForJob(jobId);
+    // The cache is written only after the local split. A paid preview whose transcription
+    // failed is still the exact preview named by this cache key, not a reason to buy it twice.
+    let job: Job | undefined;
+    for (const candidate of [...(deps.findJobs?.() ?? [])].reverse()) {
+      if (candidate.worldId !== deps.worldId || candidate.params.purpose !== "audiobook" || candidate.params.hear !== true ||
+          candidate.params.productionId !== productionId || candidate.params.chapterId !== chapter.id || candidate.params.hearCache !== cacheFile ||
+          candidate.status !== "succeeded" || candidate.landedFiles?.[0] === undefined) continue;
+      if (await stat(toExtendedLength(join(store.dir, fromPortable(candidate.landedFiles[0])))).then(file => file.isFile(), () => false)) {
+        job = candidate;
+        break;
+      }
+    }
+    if (job === undefined) {
+      const jobId = await deps.enqueue({
+        worldId: deps.worldId,
+        productionId,
+        target: { kind: "voice-preview", id: `hear/${group.model.provider}/${group.model.id}/${speaking.reader.voiceId}` },
+        capability: "voice-tts",
+        provider: group.model.provider,
+        model: group.model.id,
+        params: { voiceId: speaking.reader.voiceId, text, turns: group.turns, audioFormat: "wav", purpose: "audiobook", hear: true, hearCache: cacheFile, productionId, chapterId: chapter.id, block, characterCount: text.length },
+        estimatedMicroUsd: group.quote.expectedMicroUsd,
+        landing: { dir: audiobookLanding(productionId, chapter.file), name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-group.wav` },
+      });
+      job = await deps.waitForJob(jobId);
+    }
     if (job.status !== "succeeded" || job.landedFiles?.[0] === undefined) throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
     const landed = join(store.dir, fromPortable(job.landedFiles[0]));
     const bytes = new Uint8Array(await readFile(toExtendedLength(landed)));

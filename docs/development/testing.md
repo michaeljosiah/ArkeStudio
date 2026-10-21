@@ -1176,7 +1176,9 @@ Chapter narration Activity (turn 206, #1684) has focused contracts identity/cost
 coordinator `test/productions/audiobook-activity.test.ts` for restart, corruption and stop
 ordering, and `audiobook-grouped.test.ts` for provider success followed by local alignment
 and durable block writes. The grouped suite also covers local transcription failure, preserved
-received WAVs across reopen, retry without synthesis and previously completed groups;
+received WAVs across reopen, retry without synthesis and previously completed groups. It checks
+paid grouped Hear retries against the original cache identity and world/production/chapter scope,
+without creating chapter takes;
 `test/voice/transcription-rate.test.ts` distinguishes an HTTP 503 from a successful empty
 transcript (#1932). Client `activity-panel.test.tsx` and
 `queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run

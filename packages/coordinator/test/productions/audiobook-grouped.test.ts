@@ -22,6 +22,7 @@ import { dropRunawayTail, integratedLoudness, normaliseSpeech, readSpeechWav, tr
 import { judgeSplit, LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "../../src/productions/audiobook-split.js";
 import { groupIdentity, keepSplitTake, priorPartJob, prepareChapter, readBreaks, runAudiobookChapter, type AudiobookRunEvent } from "../../src/productions/audiobook-run.js";
 import { directionEntry, updateAudiobook, planAudiobook, writeAudiobookBookRaised, writeBlockDirection } from "../../src/productions/audiobook.js";
+import { hearAudiobookLine } from "../../src/productions/audiobook-hear.js";
 import { directionPlan } from "../../src/voice/direction.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { speechStretches, timeWords, type TimedWord } from "../../src/voice/word-times.js";
@@ -733,6 +734,66 @@ describe("a chapter read grouped (design turn 185)", () => {
         assert.ok(retry.activity.some(update => update.job?.id === job.id && update.job.reused));
         assert.equal(finished(retry.events)?.outcome, "read");
       } finally { await reopened.close(); }
+    } finally { await w.close(); }
+  });
+
+  it("reuses a paid grouped Hear preview after transcription returns without creating a take", async () => {
+    const w = await world();
+    try {
+      let store = w.store;
+      const room = { narrator: READER, models: [GROUPABLE], catalogue: [KORE], transcriber: true };
+      const plan = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+      const key = plan.blocks[2]!.block.key;
+      const preparation = await prepareChapter(store, LEDGER, "neap", room, () => store.now(), [key]);
+      assert.equal(preparation.kind, "ready"); if (preparation.kind !== "ready") return;
+      const group = preparation.prepared.groups[0]!;
+      assert.ok(group.members.length > 1);
+      const bytes = writeSpeechWav(join_(...group.members.flatMap((_, i) => [silence(i ? 0.5 : 0.2), tone(1, 0.2)]), silence(0.2)));
+      const jobs: Job[] = [];
+      let sent = 0, unavailable = true;
+      const hear = (quoteToken?: string) => hearAudiobookLine(store, LEDGER, "neap", key, room, {
+        worldId: WORLD_ID, ...(quoteToken === undefined ? {} : { quoteToken }),
+        local: async () => { throw new Error("cloud only"); },
+        enqueue: async input => {
+          sent += 1;
+          const file = `heard-request-${sent}.wav`;
+          await writeFile(join(w.worldDir, file), bytes);
+          const job = { ...input, id: `preview-${sent}`, status: "succeeded", landedFiles: [file] } as unknown as Job;
+          jobs.push(job); return job.id;
+        },
+        waitForJob: async id => jobs.find(job => job.id === id)!,
+        findJobs: () => jobs,
+        wordTimes: wav => {
+          let index = 0;
+          return timeWords(wav, async () => {
+            if (unavailable) throw new Error("Voxa /stt HTTP 503");
+            return group.members[index++]?.text ?? "";
+          });
+        },
+      });
+      const quote = await hear(); assert.ok("quote" in quote);
+      await assert.rejects(hear(quote.quote.token), /Local transcription failed/);
+      assert.equal(sent, 1);
+      const received = jobs[0]!;
+      assert.equal(typeof received.params.hearCache, "string");
+      assert.deepEqual(await readFile(join(w.worldDir, received.landedFiles![0]!)), Buffer.from(bytes));
+      await w.close(); store = await w.reopen();
+      // Newer previews with a different owner or request must not stand in for this one.
+      jobs.push(
+        { ...received, id: "foreign-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD", landedFiles: ["foreign.wav"] },
+        { ...received, id: "foreign-production", params: { ...received.params, productionId: "another-production" }, landedFiles: ["foreign.wav"] },
+        { ...received, id: "foreign-chapter", params: { ...received.params, chapterId: "another-chapter" }, landedFiles: ["foreign.wav"] },
+        { ...received, id: "changed-request", params: { ...received.params, hearCache: "changed-request.wav" }, landedFiles: ["foreign.wav"] },
+      );
+      await writeFile(join(w.worldDir, "foreign.wav"), new Uint8Array([1, 2, 3]));
+      unavailable = false;
+      const recovered = await hear(quote.quote.token); assert.ok("file" in recovered);
+      assert.equal(sent, 1, "the retry never enqueues a second synthesis");
+      assert.ok((await readFile(join(w.worldDir, recovered.file))).length > 44);
+      const cached = await hear(); assert.ok("file" in cached && cached.cached);
+      assert.equal(sent, 1);
+      const after = await planAudiobook(store, LEDGER, "neap", { narrator: READER });
+      assert.ok(after.record === null || (after.record !== "unreadable" && Object.keys(after.record.takes).length === 0));
     } finally { await w.close(); }
   });
 

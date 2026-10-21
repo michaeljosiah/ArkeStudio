@@ -15723,6 +15723,7 @@ export class Coordinator {
               return queued.jobIds[0];
             },
             waitForJob: (jobId) => this.waitForAudiobookJob(jobId),
+            findJobs: () => this.jobQueue?.listJobs() ?? [],
             worldId: msg.worldId,
             ...(this.wordTimer(voice) !== undefined ? { wordTimes: this.wordTimer(voice)! } : {}),
           }, override);
