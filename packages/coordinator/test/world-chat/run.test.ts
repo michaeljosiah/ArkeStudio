@@ -186,6 +186,27 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("validates retained intent after reopening beyond the recent message window", async () => {
+    let original: import("@arke-studio/contracts").WorldChangeCandidate;
+    const h = await setup(fakeAdapter([
+      async () => goodAnswer("Her aunt raised her.", "Her aunt raised her", (await h.view()).messages.find(m => m.role === "user")!.id),
+      () => JSON.stringify({ reply: "The same draft is retained.", groupOperations: [], candidateOperations: [{ op: "update", candidateId: original.id, expectedRevision: original.revision,
+        candidate: { classification: original.classification, title: original.title, rationale: "Reviewed after reopening.", settledness: "settled", evidence: original.evidence, checkReceiptIds: [], draft: original.draft } }] }),
+    ]));
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Her aunt raised her.")).status, "completed");
+    original = (await h.view()).candidates[0]!;
+    const completion = (await h.store.read()).events.find(e => e.event.type === "turn.completed")!.event;
+    if (completion.type !== "turn.completed") throw new Error("Expected completion");
+    for (let n = 0; n < 60; n++) {
+      const turnId = newId("turn");
+      await h.store.append({ ...completion, message: { ...completion.message, id: newId("msg"), turnId, text: "Later history without changes." }, run: { ...completion.run, id: newId("run"), turnId }, candidates: [], groups: [] }, { at: AT });
+    }
+    assert.ok(!(await h.view()).messages.some(m => m.id === original.sourceMessageIds[0]));
+    assert.equal((await h.runner.send(new WorldChatStore(h.store.dir), h.conversationId, "Keep the same draft and original intent.")).status, "completed");
+    const updated = (await h.view()).candidates[0]!;
+    assert.equal(updated.id, original.id); assert.equal(updated.revision, original.revision + 1);
+    assert.deepEqual(updated.evidence, original.evidence); assert.deepEqual(updated.draft, original.draft);
+  });
   it("fences retained draft receipts before journalling them and refuses a host without that boundary", async () => {
     const answer = JSON.stringify({ reply: "I read the earlier draft.", candidateOperations: [], groupOperations: [] }), raised: number[] = [];
     const receiptsFor: NonNullable<RunDeps["receiptsFor"]> = runId => [{ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [],

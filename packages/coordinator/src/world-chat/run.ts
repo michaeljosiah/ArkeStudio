@@ -1079,7 +1079,9 @@ export class WorldChatRunner {
     // against an empty set would make every turn create new propositions and every retraction
     // fail to suppress anything — the conversation would accumulate contradictions instead of
     // being corrected by talking.
-    const folded = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    // Validation must still resolve intent cited by retained drafts after its message leaves the
+    // visible window. This full journal view stays local; prompt assembly keeps its bounded fold.
+    const folded = foldConversation(conversationId, meta?.createdAt ?? at, events, { messageLimit: events.length }).view;
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
