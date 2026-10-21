@@ -1,5 +1,18 @@
 # Running and validating changes
 
+Explicit chapter drafting (#1928) uses coordinator `test/world-chat/chapter-draft.test.ts`,
+`chapter-brief.test.ts`, `run.test.ts`, `input-journal.test.ts` and `test/application/writing.test.ts`,
+plus client `test/chapter-workspace.test.tsx`. Verify that the drafting presses require one complete
+manuscript action, ordinary questions remain conversational, and advice gets only the existing
+single corrective attempt. A drafting press must flush pending prose, wait for the latest save
+acknowledgement, and cancel its queued request after a refusal or disconnection. Queued promotion,
+reopen and explicit retry must retain the drafting
+intent; full current-manuscript reads share the leased context budget. Native acceptance uses a
+disposable Undersong copy: draft through the public command or chapter press, inspect the pending
+proposal, accept and reopen, preserving unrelated plan fields and completed media. Compare the
+unchanged chapter and global Chat composition at phone/tablet/desktop with master turn 227 revision
+4 (227u/v/y) and turn 225. These checks do not establish the literary quality of generated prose.
+
 Long conversation drafts (#1927) use coordinator `test/world-chat/turn-result.test.ts` and
 `run.test.ts` and `summarisation.test.ts`, plus client `test/chat-reply.test.ts` and `chat-read-replies.test.tsx`.
 Check exact retained/reopened text beyond 8,000 characters, strict whole-result validation,

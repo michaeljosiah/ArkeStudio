@@ -1478,7 +1478,7 @@ export function ProductionConversationBody({
                     type="button"
                     className="fy-arke__prompt"
                     disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
+                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly, subject))}
                   >
                     {prompt}
                   </button>

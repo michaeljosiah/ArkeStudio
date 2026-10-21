@@ -6,7 +6,7 @@ export async function chapterDraftingBrief(
   bundle: WorldBundle, productionId: string, chapterId: string,
   read: (tool: string, args: Record<string, unknown>) => Promise<RetrievalOutcome>,
   budgetChars: number,
-  options: { impliedFacts?: boolean } = {},
+  options: { impliedFacts?: boolean; manuscript?: boolean } = {},
 ): Promise<string> {
   const production = bundle.productions.find((p) => p.meta.id === productionId);
   const chapters = production?.chapters.filter((c) => !c.retired) ?? [];
@@ -23,6 +23,7 @@ export async function chapterDraftingBrief(
     sections[1] = sections[1]!.replace("Include newly implied world facts in changes.implies for separate decisions, not as canon or open-thread proposals in this drafting turn.", "World-fact proposals are outside this operation; do not include changes.implies.");
     sections.splice(2, 1);
   }
+  if (options.manuscript) sections[1] = sections[1]!.replace("If an unresolved author choice prevents drafting, ask that specific question instead of claiming chapter authoring is unavailable.", "This explicit drafting request requires manuscript in the action, not editorial advice or another question.");
   const appendRead = async (label: string, tool: string, args: Record<string, unknown>) => {
     let cursor: string | undefined;
     do {
@@ -45,5 +46,9 @@ export async function chapterDraftingBrief(
   await appendRead("Overview and prose style", "get_story", { productionId, section: "overview" });
   for (const id of chapter.draws?.sheets ?? []) await appendRead(`Draws on sheet: ${id}`, "get_sheet", { id });
   for (const id of chapter.draws?.canon ?? []) await appendRead(`Draws on canon: ${id}`, "get_entry", { id });
+  if (options.manuscript) {
+    await appendRead("Complete chapter inventory", "list_chapters", { productionId });
+    await appendRead("Complete current manuscript", "get_chapter", { productionId, chapterId: chapter.id });
+  }
   return sections.join("\n\n");
 }

@@ -1697,6 +1697,7 @@ export function ChapterWorkspace({
   const dockSubject: WorldChatSubject = passage === null
     ? { kind: "chapter", chapterId: chapter.id }
     : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
+  const draftPrompt = (label: string) => ({ label, press: () => askContinue("draft", label) });
   const [nameAsk, setNameAsk] = useState<string | null>(null);
   // A name is Chat's subject until Chat is put away or the page moves on (codex on PR 1800).
   useEffect(() => setNameAsk(null), [chapter.id, view]);
@@ -2034,17 +2035,29 @@ export function ChapterWorkspace({
     }
     return null;
   };
-  const [queuedContinue, setQueuedContinue] = useState<{ kind: "continue" | "describe" | "dialogue"; what?: string; at: number } | null>(null);
-  const askContinue = (kind: "continue" | "describe" | "dialogue", what?: string) => {
+  const [queuedContinue, setQueuedContinue] = useState<{ kind: "continue" | "describe" | "dialogue" | "draft"; what?: string; at: number } | null>(null);
+  const askContinue = (kind: "continue" | "describe" | "dialogue" | "draft", what?: string) => {
     setArkePrompt(null);
     if (locked || asking || stagedDraft !== undefined) return;
+    if (kind === "draft" && (saveRefusal !== null || draftConflict || connection !== "open")) {
+      setQueuedContinue(null);
+      return;
+    }
     // The words before the caret must be on disk before they are quoted (codex on PR 1808): the
     // editor holds a keystroke for 400ms and the save follows, so the ask waits for both.
     if (draft !== null || saving || (queuedContinue === null && Date.now() - lastTyped.current < CONTINUE_SETTLE_MS)) {
+      // A chapter draft reads the saved manuscript too. Flush the current words, then use the
+      // same acknowledgement/typing wait as a caret continuation (codex on PR 2070).
+      if (kind === "draft" && draft !== null && (pendingSave.current === null || draft !== savedText.current)) flushSave(draft);
       setQueuedContinue({ kind, ...(what !== undefined ? { what } : {}), at: Date.now() });
       return;
     }
     setQueuedContinue(null);
+    if (kind === "draft") {
+      const line = what ?? "Draft the rest";
+      setAsk({ press: crypto.randomUUID(), line, text: `About ${chapterLabel}: ${line}`, subject: { kind: "chapter", chapterId: chapter.id, intent: "draft" } });
+      return;
+    }
     const at = caretContext();
     if (at === null) return;
     const request = kind === "continue"
@@ -2063,7 +2076,7 @@ export function ChapterWorkspace({
   // A queued Continue goes once the words are saved; a minute on, it is let go.
   useEffect(() => {
     if (queuedContinue === null) return;
-    if (Date.now() - queuedContinue.at > 60_000) {
+    if (Date.now() - queuedContinue.at > 60_000 || (queuedContinue.kind === "draft" && (saveRefusal !== null || draftConflict || connection !== "open"))) {
       setQueuedContinue(null);
       return;
     }
@@ -2840,8 +2853,8 @@ export function ChapterWorkspace({
                   ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
                   : live.trim() === ""
                     // A chapter with no words starts from its plan, its opening, or the plan itself (SPEC-056 R-34).
-                    ? [...(chapter.synopsis?.trim() ? ["Draft from the synopsis"] : []), "Draft the opening", "Plan the beats"]
-                    : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
+                    ? [...(chapter.synopsis?.trim() ? [draftPrompt("Draft from the synopsis")] : []), draftPrompt("Draft the opening"), "Plan the beats"]
+                    : [draftPrompt(firstPrompt(live, chapter.synopsis)), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,
