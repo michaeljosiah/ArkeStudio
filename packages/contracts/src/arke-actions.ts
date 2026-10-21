@@ -488,6 +488,9 @@ const ConversationActionIntentFields = {
 export const ConversationActionPrepareIntentSchema = z.object(ConversationActionIntentFields).strict();
 export type ConversationActionPrepareIntent = z.infer<typeof ConversationActionPrepareIntentSchema>;
 
+export const SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION = 99;
+const SheetCreationProseFieldsSchema = z.array(z.number().int().nonnegative()).min(1);
+
 export const ConversationActionBindingSchema = z
   .object({
     ...ConversationActionIntentFields,
@@ -495,6 +498,7 @@ export const ConversationActionBindingSchema = z
     authorityRevision: z.number().int().min(0),
     previewDigest: Sha256Schema,
     shown: ConversationActionShownProjectionSchema,
+    sheetCreationProseFields: SheetCreationProseFieldsSchema.optional(),
     approvalBlockedReason: z.string().min(1).max(1_000).optional(),
     status: z.literal("pending"),
     preparedAt: IsoDateTimeSchema,
@@ -506,6 +510,13 @@ export const ConversationActionBindingSchema = z
     }
     if (binding.shown.body.family !== binding.cardFamily) {
       ctx.addIssue({ code: "custom", path: ["shown", "body", "family"], message: "card body family differs from binding" });
+    }
+    if (binding.sheetCreationProseFields) {
+      const body = binding.shown.body, indices = binding.sheetCreationProseFields;
+      if (body.family !== "authored-diff" || body.fields.some(field => field.before !== null) ||
+        indices.some(index => index >= body.fields.length) || new Set(indices).size !== indices.length) {
+        ctx.addIssue({ code: "custom", path: ["sheetCreationProseFields"], message: "expected unique field indices for a creation review" });
+      }
     }
   });
 export type ConversationActionBinding = z.infer<typeof ConversationActionBindingSchema>;
@@ -554,6 +565,7 @@ export const ConversationActionRecordSchema = z
     authorityRevision: z.number().int().min(0),
     previewDigest: Sha256Schema,
     shown: ConversationActionShownProjectionSchema,
+    sheetCreationProseFields: SheetCreationProseFieldsSchema.optional(),
     approvalBlockedReason: z.string().min(1).max(1_000).optional(),
     status: ConversationActionStatusSchema,
     preparedAt: IsoDateTimeSchema,

@@ -23,6 +23,7 @@ import { refusedChangeReason } from "./turn-result.js";
 import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 import { foldWorldChatInputs } from "./input-fold.js";
+import { sheetCreationProseFields } from "./sheet-card.js";
 
 /**
  * The event log, folded into the workspace a screen renders (#70 §7.2).
@@ -644,7 +645,7 @@ export function foldConversation(
     [...actionIntents.keys()].flatMap((actionId) => {
       const action = actions.get(actionId);
       return action ? [action] : [];
-    }),
+    }), candidates,
   );
   const unresolvedActionIntent = [...actionIntents.keys()].some(
     (actionId) => !actions.has(actionId) && !failedActionIntents.has(actionId),
@@ -755,7 +756,7 @@ export function foldConversation(
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
 }
 
-function projectActionCards(records: readonly ConversationActionRecord[]): ConversationActionCard[] {
+function projectActionCards(records: readonly ConversationActionRecord[], candidates: ReadonlyMap<string, WorldChangeCandidate>): ConversationActionCard[] {
   const byId = new Map(records.map((action) => [action.actionId, action]));
   return records.map((action) => {
     const blocking = action.dependencies
@@ -773,8 +774,10 @@ function projectActionCards(records: readonly ConversationActionRecord[]): Conve
       : action.status === "stale"
         ? (["deny"] as const)
         : ([] as const);
+    const proseFields = action.sheetCreationProseFields ?? sheetCreationProseFields(action, candidates);
     return {
       ...action,
+      ...(proseFields ? { sheetCreationProseFields: proseFields } : {}),
       availableDecisions: [...availableDecisions],
       ...(blockedReason ? { blockedReason } : {}),
     };

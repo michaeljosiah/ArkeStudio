@@ -68,6 +68,7 @@ import { HarnessModelStatus, harnessModelsNeedAWord, languageChoiceReason } from
 import { ModelChip } from "./model-chip.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
+import { ProposalReviewFields } from "../domain/domain.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Film, Pin, ChevronLeft, ChevronDown, ChevronUp, Sparkle, X } from "./icons.js";
 import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
@@ -463,7 +464,9 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
   switch (body.family) {
     case "authored-diff":
       return <div className="fy-actioncard__body">
-        {body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+        {action.sheetCreationProseFields ? <ProposalReviewFields target={{ action: "create", fields: body.fields.map((field, index) => ({
+          field: field.label, before: field.before, proposed: field.after, metadata: !action.sheetCreationProseFields!.includes(index),
+        })) }} /> : body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
           <strong>{field.label}</strong>
           <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
           <span aria-hidden="true">→</span>

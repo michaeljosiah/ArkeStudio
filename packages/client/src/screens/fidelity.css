@@ -4551,6 +4551,8 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-actioncard__consequence,
 .fy-actioncard__body p { margin: 0; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__body { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+/* Keep the shared sheet review at the app's prose measure when chat fills a wide window. */
+.fy-actioncard__body .dom-review__field { max-width: var(--width-text); }
 .fy-actioncard__strip { display: flex; gap: 4px; overflow-x: auto; padding: 0; margin: 4px 0; list-style: none; }
 .fy-actioncard__strip li { flex: 0 0 140px; display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; font: 400 11px/1.4 var(--font-sans); }
 .fy-actioncard__media { display: block; width: 100%; max-height: 280px; border-radius: 7px; background: var(--media-overlay-bg); object-fit: contain; }

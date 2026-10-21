@@ -86,6 +86,36 @@ it("Show opens all forty pending shots without a decision and preserves the same
   assert.equal(input.value, "Still typing");
 });
 
+it("sheet creation cards reuse prose-first review while retaining every field and decision (#2047)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-proposal";
+  action.cardFamily = "authored-diff";
+  action.sheetCreationProseFields = [1];
+  action.shown = { ...action.shown, productionPreview: undefined, title: "New harbour", body: { family: "authored-diff", fields: [
+    { label: "Harbour: Region", before: null, after: "None" },
+    { label: "Harbour: Look", before: null, after: "Stone steps.\n\nA sheltered doorway." },
+  ], conflicts: ["Check the harbour name."], openChoices: [] } };
+  const made = await setup(action);
+  assert.equal(dom.document.querySelector('.dom-review__name')?.textContent, "Harbour: Look");
+  assert.equal(dom.document.querySelector('.dom-review__now > span:last-child')?.textContent, "Stone steps.\n\nA sheltered doorway.");
+  const details = dom.document.querySelector('.dom-review__metadata');
+  assert.ok(details);
+  assert.equal(details.hasAttribute("open"), false);
+  assert.match(details.textContent!, /Sheet details · 1 fieldHarbour: RegionnowNone/);
+  assert.match(dom.document.querySelector('.fy-actioncard__notice')!.textContent!, /Check the harbour name/);
+  assert.equal(made.sent.length, 0);
+  await click("Approve");
+  assert.equal(made.sent.length, 1);
+  assert.equal(JSON.parse(made.sent[0] as string).decision, "approve");
+  const amendment = structuredClone(action);
+  delete amendment.sheetCreationProseFields;
+  if (amendment.shown.body.family !== "authored-diff") throw new Error("Expected review");
+  amendment.shown.body.fields[0] = { label: "Harbour: Region", before: "Slackwater", after: null };
+  await made.update([amendment]);
+  assert.equal(dom.document.querySelector('.dom-review__metadata'), null);
+  assert.match(dom.document.querySelector('.fy-actioncard__change')!.textContent!, /Slackwater→Removed/);
+});
+
 it("a full-size permission card and human review each move their one mounted instance", async () => {
   const beforeMounts = mounts, beforeUnmounts = unmounts, made = await setup();
   const article = dom.document.querySelector(`[data-action-id="${made.action.actionId}"]`);

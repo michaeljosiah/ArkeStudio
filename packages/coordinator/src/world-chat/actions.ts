@@ -1,7 +1,7 @@
 import { readToolsFor } from "./action-guide.js";
 import { DEFAULT_AUDIO_DRAMA_PLAN, WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
-import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION, SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema, PRODUCTION_TIMELINE_CHAT_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { compileProductionTimelineRequest, historyDigestFromCommitSource, discardProductionTranscriptionQuote, productionHistoryDigest, freezeProductionTimeline, productionTimelineBody, executeProductionTimeline } from "./production-timeline.js";
 import type { TranscriptionPorts } from "../productions/transcription.js";
@@ -1699,6 +1699,7 @@ async function proposalProjection(
   gate: ProposalManager,
   intent: Pick<ConversationActionPrepareIntent, "targets">,
   proposalId: string,
+  preparing = true,
 ): Promise<PreparedConversationActionAuthority> {
   const { proposal, review, ripple, scenePreview } = await gate.project(proposalId);
   const productionPreview = scenePreview ? { kind: "scene" as const, ...scenePreview } : undefined;
@@ -1716,9 +1717,15 @@ async function proposalProjection(
   if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
     fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
   }
+  // Proposal files are removed after a decision. Keep only the reading order with the binding,
+  // so both authoring paths retain the same review after acceptance, denial and reopening.
+  const proseFields = review.targets.length > 0 && review.targets.every(target => target.action === "create" && target.kind.endsWith(" sheet"))
+    ? review.targets.flatMap(target => target.fields).flatMap((field, index) => field.metadata ? [] : [index]) : [];
+  if (preparing && proseFields.length > 0) await store.ensureSchemaVersion(SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION, "sheet-creation-card-review");
   return {
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,
+    ...(proseFields.length > 0 ? { sheetCreationProseFields: proseFields } : {}),
     shown: {
       ...(productionPreview ? { productionPreview } : {}),
       title: proposal.summary.slice(0, 200),
@@ -4710,7 +4717,7 @@ export function worldChatActionAdapters(
       if (!checked.ok) {
         return { ok: false, reason: checked.stale ? "stale" : "blocked", detail: checked.detail };
       }
-      const currentProjection = await proposalProjection(store, gate, action, action.authority.id);
+      const currentProjection = await proposalProjection(store, gate, action, action.authority.id, false);
       if (conversationActionDigest(currentProjection.shown) !== action.previewDigest) {
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
