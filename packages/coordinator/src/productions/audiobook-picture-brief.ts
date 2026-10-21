@@ -226,7 +226,7 @@ export function namedInText(text: string, person: Pick<ChapterPerson, "name" | "
 
 const TITLES = new Set(["the", "old", "young", "mr", "mrs", "ms", "miss", "dr", "lady", "lord", "sir", "dame", "madam", "mother", "father", "aunt", "uncle", "brother", "sister", "captain", "chief", "king", "queen", "prince", "princess", "saint"]);
 
-const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|no faces? in (?:the )?frame|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
+const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|no faces? in (?:the )?frame(?=\s*(?:[.,;:!?—]|$))|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
 const REFERENCE_FACE = /\b(as in the reference|reference'?s (?:face|expression)|same (?:face|expression) as (?:the )?reference)\b/i;
 const STOP = new Set(["with", "that", "this", "from", "into", "over", "onto", "their", "them", "they", "then", "than", "very", "little", "slightly", "just", "only", "still", "while"]);
 
@@ -313,7 +313,7 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
     const line = input.lines.find((entry) => entry.key === person.key);
     if (!reference?.reference || reference.look || line?.lookId) return false;
     const current = `${line?.text ?? ""} ${input.block}`;
-    return !GARMENT_WORDS.test(current.replace(/\b(?:hoods?|sleeves?|collars?)\b/gi, "")) && !/\b(?:without|no longer|removed?|taking off|taken off|changed into|instead of)\b/i.test(current);
+    return !GARMENT_WORDS.test(current.replace(/\b(?:hoods?|sleeves?|collars?)\b/gi, "")) && !/\b(?:without|no longer|remov(?:e[sd]?|ing)|tak(?:es?|ing|en) off|took off|chang(?:e[sd]?|ing) into|instead of)\b/i.test(current);
   });
   const allowed = [scene, ...canonical.map((person) => person.appearance)].join(" ").toLowerCase();
   const found = [...new Set([...held.prompt.matchAll(new RegExp(GARMENT_WORDS.source, "gi"))].map((match) => match[0].toLowerCase()))];

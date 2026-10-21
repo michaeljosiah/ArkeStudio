@@ -94,10 +94,11 @@ describe("the eyes: a close frame on her, without him (193i)", () => {
 
 describe("the hands: detail owners carry identity references (#1677)", () => {
   it("recognizes explicit no-face wording without excusing a missing visible expression (#2011)", () => {
-    for (const phrase of ["No face in frame.", "No faces in the frame.", "Faces stay out of frame."]) {
+    for (const phrase of ["No face in frame.", "No faces in the frame.", "Faces stay out of frame.", "No face in frame, only her hands."]) {
       assert.equal(checksOf({ ...HANDS, prompt: `Detail shot of their hands. ${phrase}` }, HANDS_BLOCK)["expression"]!.ok, true, phrase);
       assert.equal(checksOf({ ...EYES, prompt: `Close-up on Ife. ${phrase}`, expressions: {} }, EYES_BLOCK)["expression"]!.ok, false, "an in-frame face still requires its expression");
     }
+    assert.equal(checksOf({ ...HANDS, prompt: "Detail shot of their hands. No face in frame is smiling." }, HANDS_BLOCK)["expression"]!.ok, false, "a longer statement about faces does not exclude them");
   });
 
   it("has no full person in frame and carries the detail owners without the place", () => {
@@ -173,7 +174,7 @@ describe("the other checks", () => {
     const held = holdBrief({ frame: "Medium shot", inFrame: ["maren"], prompt }, { people: [maren], places: [], prompt, fallback: () => [] });
     const main: PictureWho = { key: "maren", name: maren.name, sheet: "maren", kind: "character", reference: "references/maren/main.png", carried: true };
     const garments = (text: string, block = "She studies the page.", who = main, lookId?: string) => pictureChecks({ held, who: [who], people: [maren], lines: [{ key: "maren", text, ...(lookId ? { lookId } : {}) }], block, mood: undefined }).find(check => check.id === "garments")!;
-    for (const text of ["A plain dress.", "She has removed her outer layer.", "Without her usual outer layer."])
+    for (const text of ["A plain dress.", "She has removed her outer layer.", "Without her usual outer layer.", "She takes off her outer layer.", "She took off her outer layer.", "She removes her outer layer."])
       assert.equal(garments(text).ok, false, text);
     assert.equal(garments("Hood down, wet hair.", "She changed into a dress.").ok, false, "the passage can change the wardrobe");
     assert.equal(garments("Hood down, wet hair.", undefined, { ...main, look: { lookId: "tk_other", view: "full" } }).ok, false, "a selected picture look does not inherit another outfit");
