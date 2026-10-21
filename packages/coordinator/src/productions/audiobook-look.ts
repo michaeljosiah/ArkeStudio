@@ -35,6 +35,8 @@ import { bookLookChoices, carriedLooks } from "./audiobook-look-book.js";
 import { clip, section } from "./audiobook-direction.js";
 import { anyNarrator } from "./audiobook-listening.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
+import { chapterPlaces, CHAPTER_PLACE_LOOK_MAX, type ChapterPlace } from "./audiobook-location.js";
+export { chapterPlaces, type ChapterPlace } from "./audiobook-location.js";
 
 /**
  * The look of a chapter (design turn 191c, SPEC-047 R-98): the harness's model reads the chapter's
@@ -46,7 +48,7 @@ import { makeAdapterJsonDeriver } from "./continuity.js";
  */
 
 /** The sizes the prompt is held to: a long chapter or a crowded cast cannot crowd the words out. */
-export const LOOK_BOUNDS = { people: 24, section: 240, identity: 1_200, place: 200, art: 400, chapter: 60_000, block: 320 } as const;
+export const LOOK_BOUNDS = { people: 24, section: 240, identity: 1_200, place: CHAPTER_PLACE_LOOK_MAX, art: 400, chapter: 60_000, block: 320 } as const;
 
 const RawLookSchema = z.object({
   place: z.object({ text: z.string(), blocks: z.array(z.string()).optional() }).nullable().optional(),
@@ -83,13 +85,6 @@ export interface ChapterPerson {
   neverDepicted: boolean;
   /** Where the prose first names them, so the order is the story's. */
   first: number;
-}
-
-/** A place a chapter's prose names: a location sheet, and what the sheet says it looks like. */
-export interface ChapterPlace {
-  key: string;
-  name: string;
-  look?: string;
 }
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -199,19 +194,6 @@ export function blockSpeakers(sheets: readonly Pick<Sheet, "id" | "name">[], blo
     if (!names.includes(name)) names.push(name);
   }
   return names.length === 0 ? undefined : names.join(", ");
-}
-
-/** The places a chapter names: location sheets the prose mentions, each with what its sheet says it looks like. */
-export function chapterPlaces(store: WorldStore, plan: Pick<AudiobookPlan, "body">): ChapterPlace[] {
-  const places: Array<ChapterPlace & { first: number }> = [];
-  for (const sheet of store.getBundle().sheets as readonly Sheet[]) {
-    if (sheet.type !== "location" || sheet.retired === true) continue;
-    const at = nameAt(plan.body, sheet.name);
-    if (at < 0) continue;
-    const look = clip(section(sheet, /^look/i), LOOK_BOUNDS.place);
-    places.push({ key: sheet.id, name: sheet.name, ...(look !== undefined ? { look } : {}), first: at });
-  }
-  return places.sort((a, b) => a.first - b.first).slice(0, 8).map(({ first: _first, ...place }) => place);
 }
 
 /** The book's art direction as a prompt carries it: the production's own style, else the world's. */
