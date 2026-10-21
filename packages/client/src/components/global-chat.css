@@ -83,8 +83,8 @@
   body[data-global-chat-enabled="true"] #root .fy-titlebar { display: flex; height: 48px; min-height: 48px; }
   .fy-global-chat { inset: 48px 0 var(--chat-keyboard, 0px); width: 100%; height: calc(100dvh - 48px - var(--chat-keyboard, 0px)); border-left: 0; }
   .fy-global-chat::backdrop { background: transparent; }
-  .fy-global-chat.fy-global-chat--chapter { top: auto; height: min(620px, calc(100dvh - 48px - var(--chat-keyboard, 0px))); border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; overflow: hidden; box-shadow: 0 -20px 60px #0008; }
-  .fy-global-chat--chapter::backdrop { background: #0008; }
+  .fy-global-chat.fy-global-chat--chapter { top: auto; height: min(620px, calc(100dvh - 48px - var(--chat-keyboard, 0px))); border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; overflow: hidden; box-shadow: 0 -20px 60px color-mix(in srgb, var(--neutral-950) 50%, transparent); }
+  .fy-global-chat--chapter::backdrop { background: color-mix(in srgb, var(--neutral-950) 50%, transparent); }
   .fy-global-chat-panel header > button { width: 44px; height: 44px; }
   .fy-global-chat .fy-cx :is(.fy-cx__attach,.fy-cx__mic,.fy-cx__send) { width: 44px; min-width: 44px; height: 44px; }
   .fy-global-chat .fy-cx__attach { margin-left: 0; }
