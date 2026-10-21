@@ -437,7 +437,7 @@ export function ReferencePickerBody({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="reference-picker">
+    <div className="fy-refpicker" style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="reference-picker">
       <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ margin: 0, font: "650 17px var(--font-sans)", letterSpacing: "-0.01em" }}>

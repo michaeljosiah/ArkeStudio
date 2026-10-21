@@ -5487,6 +5487,10 @@ span.fy-bench__who { border-bottom: 0; }
 }
 
 /* Keep the shared picker composition (69a) at phone widths: browse, then confirm. */
+@media (pointer: coarse) {
+  .fy-prop-detail button, .fy-refpicker button { min-width: 44px; min-height: 44px; }
+  .fy-prop-detail input, .fy-refpicker__searchwrap { min-height: 44px; }
+}
 @media (max-width: 640px) {
   .fy-refpicker__sources { flex-wrap: wrap; }
   .fy-refpicker__lanes { flex-wrap: wrap; border-radius: 16px; }
