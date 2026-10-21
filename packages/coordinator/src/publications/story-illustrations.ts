@@ -39,7 +39,7 @@ export async function storyIllustrations(store: WorldStore, chapters: readonly {
       if (entry.picture.textHash !== audiobookTextHash(block.text) && (!original || entry.picture.textHash !== audiobookTextHash(original.text))) {
         blockers.push(`${source.title}: picture ${entry.key} belongs to earlier text. Reattach it to the current passage.`); continue;
       }
-      if (pictureLookChanged(entry.picture.look, record?.look, kitLookLibrary(bundle.referenceKits, record?.look))) {
+      if (pictureLookChanged(entry.picture.look, record?.look, kitLookLibrary(bundle.referenceKits, record?.look), entry.picture.lookReview)) {
         blockers.push(`${source.title}: picture ${entry.key} has a changed look. Review it before publishing.`); continue;
       }
       if (block.paragraph < -1 || block.paragraph >= paragraphs) {

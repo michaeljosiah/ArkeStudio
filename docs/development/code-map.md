@@ -911,3 +911,5 @@ and managed model bytes. Client `components/audiobook-words.tsx` reuses Voice/Ta
 contracts `audiobook-words.ts` carries progress and honest comparison counts. No generation flag,
 take selection or acoustic word-timing record is changed. Tests: coordinator
 `productions/audiobook-words.test.ts`, desktop `voxa-runtime.test.ts`, client `audiobook-words.test.tsx`.
+
+Explicit same-file audiobook picture choices preserve the existing generation look/shot, focus and motion, and may record a separate current-look review (SPEC-047 R-98/R-103, #2125). `setAudiobookPicture` fences source/selection/look freshness; `pictureLookChanged` applies that review consistently in the existing picker and illustrated EPUB preflight. `writeAudiobook` raises reader boundary105 before the first review field.

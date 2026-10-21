@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile, writeFile, rename, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { audiobookTextHash, DEFAULT_NARRATOR, type StoryPublicationSettings } from "@arke-studio/contracts";
+import { audiobookTextHash, DEFAULT_NARRATOR, pictureLookFor, type StoryPublicationSettings } from "@arke-studio/contracts";
 import { writeIllustratedEpub } from "../../src/publications/story-epub.js";
 import { manuscriptDocument } from "@arke-studio/contracts";
 import { StoryPublicationService } from "../../src/publications/story.js";
 import { planAudiobook, updateAudiobook } from "../../src/productions/audiobook.js";
+import { setAudiobookPicture } from "../../src/productions/audiobook-listening.js";
 import { openChapter } from "../../src/productions/ops.js";
 import { ProseAuthoringService } from "../../src/application/prose-authoring.js";
 import { zipEntry } from "../../src/world-chat/document-text.js";
@@ -119,4 +120,20 @@ it("refuses Create when a new invalid picture leaves the captured image list unc
   assert.ok(changed.blockers.some(row => row.includes("p999.0")));
   await assert.rejects(h.service.create(h.store, h.productionId, preview.id), /picture p999\.0 is missing/);
   assert.equal((await h.service.list()).find(row => row.id === preview.id)?.status, "preview");
+});
+
+
+it("publishes an explicitly reaffirmed retained picture and blocks a later look change", async () => {
+  const h = await setup();
+  const look = { chapterHash: "h", at: "2026-10-20T00:00:00Z", characters: { maren: { name: "Maren", text: "Grey coat." } } };
+  await updateAudiobook(h.store, h.productionId, h.plan.chapter, record => ({ ...record, look: { ...look, characters: { maren: { name: "Maren", text: "Grey coat, marked cuffs." } } }, pictures: { ...record.pictures, "p0.0": { ...record.pictures!["p0.0"]!, look: pictureLookFor(look, ["maren"])! } } }));
+  assert.ok((await h.service.review(h.store, h.productionId, h.settings)).blockers.some(row => row.includes("changed look")));
+  const kept = await setAudiobookPicture(h.store, h.productionId, h.chapter.file, "p0.0", { file: "world-art.png", source: "world" });
+  assert.equal(kept.pictures!["p0.0"]!.look!.hash, pictureLookFor(look, ["maren"])!.hash);
+  const review = await h.service.review(h.store, h.productionId, h.settings); assert.deepEqual(review.blockers, []);
+  const edition = await h.service.preview(h.store, h.productionId, h.settings, review.fingerprint, () => {});
+  assert.equal(edition.status, "preview", edition.error);
+  await updateAudiobook(h.store, h.productionId, h.plan.chapter, record => ({ ...record, look: { ...look, characters: { maren: { name: "Maren", text: "Red coat." } } } }));
+  assert.ok((await h.service.review(h.store, h.productionId, h.settings)).blockers.some(row => row.includes("changed look")));
+  await assert.rejects(h.service.create(h.store, h.productionId, edition.id), /changed look|source changed/);
 });

@@ -201,7 +201,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   };
   // A picture Arke made keeps the look it was made under: marked when that has since changed (R-98).
   // A look it was made with alone is judged by that look's own line (R-115, R-146), read from the kits.
-  const lookChanged = pictureLookChanged(here?.entry.look, record?.look, kitLookLibrary(world?.referenceKits ?? [], record?.look));
+  const lookChanged = pictureLookChanged(here?.entry.look, record?.look, kitLookLibrary(world?.referenceKits ?? [], record?.look), here?.entry.lookReview);
 
   const pad = String(chapterOrder).padStart(2, "0");
   const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, row.block.key, null);

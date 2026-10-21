@@ -288,6 +288,10 @@ export const PictureLookSchema = z
   .strict();
 export type PictureLook = z.infer<typeof PictureLookSchema>;
 
+/** An explicit review of this retained picture against the current look; never its generation stamp. */
+export const PictureLookReviewSchema = z.object({ hash: z.string().min(1), at: IsoDateTimeSchema }).strict();
+export type PictureLookReview = z.infer<typeof PictureLookReviewSchema>;
+
 /**
  * The look to stamp on a picture made now, from the chapter's look and the people in it. `picks`
  * says which image of the chapter's chosen look rides for each person (the frame decides, R-118)
@@ -315,9 +319,10 @@ export function pictureLookFor(
  * chosen for one picture alone is marked only by a change to that look's own line (R-115): the
  * chapter changing its choice does not reach it.
  */
-export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary): boolean {
+export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary, review?: PictureLookReview): boolean {
   if (made === undefined) return false;
-  return lookDigest(lookLinesFor(look, made.who, made.looks, library)) !== made.hash;
+  const current = lookDigest(lookLinesFor(look, made.who, made.looks, library));
+  return current !== made.hash && current !== review?.hash;
 }
 
 /**
