@@ -1,0 +1,109 @@
+{
+  "note": "SPEC-058 R-16: the listening-document cases both readers run, Arke Player arke_world (Dart) and ArkeStudio contracts (TypeScript). Each file is read against assets.json; \"at\" lists the picture (asset id) and phrase (index) showing at a time on a chapter clock.",
+  "cases": [
+    {
+      "file": "valid.json",
+      "expect": "ok",
+      "at": [
+        {
+          "chapter": "neap",
+          "ms": 0,
+          "picture": null,
+          "phrase": null
+        },
+        {
+          "chapter": "neap",
+          "ms": 1300,
+          "picture": null,
+          "phrase": 0
+        },
+        {
+          "chapter": "neap",
+          "ms": 5000,
+          "picture": "p001",
+          "phrase": 0
+        },
+        {
+          "chapter": "neap",
+          "ms": 5400,
+          "picture": "p001",
+          "phrase": 1
+        },
+        {
+          "chapter": "neap",
+          "ms": 19999,
+          "picture": "p001",
+          "phrase": null
+        },
+        {
+          "chapter": "neap",
+          "ms": 34999,
+          "picture": "p002",
+          "phrase": null
+        },
+        {
+          "chapter": "neap",
+          "ms": 35000,
+          "picture": null,
+          "phrase": null
+        },
+        {
+          "chapter": "neap",
+          "ms": 59999,
+          "picture": "p003",
+          "phrase": null
+        },
+        {
+          "chapter": "the-rail-book",
+          "ms": 100,
+          "picture": "p002",
+          "phrase": null
+        }
+      ]
+    },
+    {
+      "file": "metadata.json",
+      "expect": "ok"
+    },
+    {
+      "file": "newer-version.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "requires.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "unknown-key.json",
+      "expect": "newerArke"
+    },
+    {
+      "file": "missing-asset.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "wrong-media.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "out-of-order.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "overlap.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "word-outside.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "duplicate-order.json",
+      "expect": "notAPackage"
+    },
+    {
+      "file": "picture-after-end.json",
+      "expect": "notAPackage"
+    }
+  ]
+}
