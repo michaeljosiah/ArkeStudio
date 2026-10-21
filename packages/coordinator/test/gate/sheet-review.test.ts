@@ -32,3 +32,16 @@ describe("sheet review presentation (#1982)", () => {
     });
   }
 });
+
+
+it("shows the exact character identity names added and removed in a review", () => {
+  const path = "characters/review.md";
+  const proposal: Proposal = { id: "pr_01J8H0000000000000000000Z9", kind: "sheet-edit", summary: "Other names", source: "form",
+    targets: [{ path, baseVersion: 1, baseHash: "base" }], baseCanonRevision: 1, reservedCanonIds: [], created: "2026-10-21T00:00:00Z", draftRevision: 1 };
+  const doc = MarkdownFile.parse(buildSheetContent({ id: "review", type: "character", name: "Review", status: "sketch", date: "2026-10-21", sections: {} }));
+  const base = doc.serialize(); doc.setData({ aliases: ["Rena", "Harbour witness"] }); const written = doc.serialize();
+  const added = projectReview({ proposal, proposed: () => written, base: () => base }).targets[0]!;
+  assert.deepEqual(added.fields, [{ field: "Other names", before: "None", proposed: "Rena\nHarbour witness", metadata: true }]);
+  const cleared = projectReview({ proposal, proposed: () => base, base: () => written }).targets[0]!;
+  assert.deepEqual(cleared.fields, [{ field: "Other names", before: "Rena\nHarbour witness", proposed: "None", metadata: true }]);
+});

@@ -201,7 +201,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 100: exact retained conversation-candidate read receipts (#2048).
 // 101: the exact prompt saved picture checks examined (#2011).
 // 102: explicit chapter drafting intent survives queued turns and retries (#1928).
-export const SUPPORTED_SCHEMA_VERSION = 102;
+// 103: explicitly authored character identity aliases (#1944).
+export const SUPPORTED_SCHEMA_VERSION = 103;
 
 export class WorldOpenError extends Error {
   constructor(

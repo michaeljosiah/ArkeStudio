@@ -3861,9 +3861,9 @@ export function setSheetStatus(worldId: string, path: string, status: "sketch" |
 }
 
 /** Rename a sheet, and for a character set its short name too (null or empty puts the default back; absent leaves it). */
-export function renameSheet(worldId: string, path: string, name: string, shortName?: string | null): string | null {
+export function renameSheet(worldId: string, path: string, name: string, shortName?: string | null, aliases?: string[]): string | null {
   const requestId = ulid();
-  return send({ kind: "rename-sheet", worldId, requestId, path, name, ...(shortName !== undefined ? { shortName } : {}) }) ? requestId : null;
+  return send({ kind: "rename-sheet", worldId, requestId, path, name, ...(shortName !== undefined ? { shortName } : {}), ...(aliases !== undefined ? { aliases } : {}) }) ? requestId : null;
 }
 
 /**

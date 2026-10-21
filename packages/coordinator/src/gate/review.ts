@@ -284,6 +284,7 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     ["Voice", sheet.voice ? JSON.stringify(sheet.voice) : "None"],
     ["Retired", sheet.retired ? "Yes" : "No"],
   ]);
+  if (type === "character") fields.set("Other names", sheet.aliases?.join("\n") || "None");
   const metadata = new Set(fields.keys());
   for (const section of sheet.sections) {
     fields.set(section.heading, section.body);

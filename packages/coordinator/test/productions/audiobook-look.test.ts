@@ -222,6 +222,7 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.equal(nameAt("Sol was asleep.", 'Solomon "Sol" Vale'), 0);
     const people = [{ key: "maren", name: "Maren Kest", aliases: ["Rena"] }, { key: "other", name: "Marena Vale", aliases: ["Rena"] }];
     assert.equal(resolveChapterPerson(people, "Rena"), undefined);
+    assert.equal(resolveChapterPerson([{ key: "a", name: "Rena", aliases: [] }, { key: "b", name: "Other", aliases: ["RENA"] }], "rena"), undefined, "an alias cannot silently claim another full name");
     assert.equal(resolveChapterPerson(people, "maren")?.name, "Maren Kest");
     assert.equal(resolveChapterPerson(people.slice(0, 1), "rena")?.key, "maren");
   });
@@ -232,7 +233,7 @@ describe("what the look is asked, and what is kept of the answer", () => {
     const chapter = production.chapters[0]!;
     const base = bundle.sheets.find((sheet) => sheet.type === "character")!;
     const sheets = [
-      { ...base, id: "maren", name: "Maren Kest", shortName: "Rena", sections: [{ heading: "Relationships", body: "Rena is the name her mother Lena uses. Lena is her mother." }] },
+      { ...base, id: "maren", name: "Maren Kest", shortName: "Rena", aliases: ["Harbour Witness"], sections: [{ heading: "Relationships", body: "Rena is the name her mother Lena uses. Lena is her mother." }] },
       { ...base, id: "lena", name: "Lena Kest", sections: [{ heading: "Essence", body: "Maren's mother." }] },
       { ...base, id: "sol", name: 'Solomon "Sol" Vale', sections: [] },
     ];
@@ -240,9 +241,21 @@ describe("what the look is asked, and what is kept of the answer", () => {
     assert.deepEqual(people.map((person) => person.key), ["maren", "sol", "lena"]);
     const prompt = buildLookPrompt({ title: "Dawn", people, places: [], blocks: [{ key: "p0.0", text: "She watched him sleep." }] });
     assert.match(prompt, /chapter viewpoint/);
-    assert.match(prompt, /also called: Rena/);
+    assert.match(prompt, /also called: Harbour Witness, Rena/);
+    assert.equal(resolveChapterPerson(people, "  HARBOUR   witness ")?.key, "maren");
+    assert.equal(resolveChapterPerson(people, "Harbour Witnes"), undefined, "similar spelling is not an identity link");
     assert.match(prompt, /Lena is her mother/);
     assert.match(prompt, /A relative mentioned or remembered is not necessarily present/);
     assert.match(prompt, /silent or asleep/);
   }));
 });
+
+it("keeps alias collisions unresolved when the other claimant is outside the 24-person prompt bound", () => withHarness(async ({ store }) => {
+  const bundle = store().getBundle(), base = bundle.sheets.find(sheet => sheet.type === "character")!;
+  const sheets = Array.from({ length: 26 }, (_, i) => ({ ...base, id: "person-" + i, name: "Person" + i, aliases: i === 0 || i === 25 ? ["Witness"] : [], shortName: undefined }));
+  const people = chapterPeople({ getBundle: () => ({ ...bundle, sheets }) }, { body: sheets.map(sheet => sheet.name).join(". ") + ". Witness waited.", cast: null });
+  assert.equal(people.length, 24);
+  assert.equal(people.some(person => person.key === "person-25"), false);
+  assert.equal(resolveChapterPerson(people, "Witness"), undefined);
+  assert.equal(resolveChapterPerson(people, "person-0")?.key, "person-0", "a canonical key stays explicit");
+}));

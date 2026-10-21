@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   ART_DIRECTION_PATH,
+  CHARACTER_ALIASES_SCHEMA_VERSION,
   FOUNDING_IMAGES_SCHEMA_VERSION,
   ArtDirectionRecordSchema,
   BIBLE_PATH,
@@ -1023,6 +1024,7 @@ export class Committer {
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "shortName" in MarkdownFile.parse(f.newContent).data) ? SHEET_SHORT_NAME_SCHEMA_VERSION : 0,
+      files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "aliases" in MarkdownFile.parse(f.newContent).data) ? CHARACTER_ALIASES_SCHEMA_VERSION : 0,
       files.some((f) => classify(f.path).track === "sheet" && f.newContent != null && "narration" in MarkdownFile.parse(f.newContent).data) ? SHEET_NARRATION_SCHEMA_VERSION : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
