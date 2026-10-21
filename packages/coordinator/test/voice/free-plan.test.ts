@@ -272,7 +272,7 @@ describe("a provider's Free plan (design turn 182)", () => {
       const ending = h.events.filter((event) => event.type === "audiobook.finished").at(-1);
       assert.ok(ending?.type === "audiobook.finished");
       assert.equal(ending.outcome, "failed");
-      assert.equal(ending.reason, "Google's daily request limit was reached");
+      assert.match(ending.reason ?? "", /^Google's daily request limit was reached · Gemini 3\.8 Flash TTS · 2000 a day · resets \d{4}-\d\d-\d\dT[\d:.]+Z$/);
       assert.equal(h.google.attempts, 1, "one request, not one a block");
     } finally {
       await h.coordinator.stop();
