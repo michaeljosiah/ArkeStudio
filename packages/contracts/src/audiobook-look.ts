@@ -555,7 +555,7 @@ export function linkLookCharacter(held: AudiobookLook | null | undefined, input:
   }
   const characters = { ...held.characters };
   delete characters[input.key];
-  characters[input.sheet.id] = { ...line, name: input.sheet.name, sheet: input.sheet.id, by: "author" };
+  characters[input.sheet.id] = { ...line, sheet: input.sheet.id, by: "author" };
   return { ...held, at, characters };
 }
 

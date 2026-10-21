@@ -3711,6 +3711,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * discarded; nothing is made or spent by reading. Answered as `illustration.finished`.
    */
   z.object({ kind: z.literal("illustrate-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("refresh-illustration-references"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), proposalId: z.string().min(1).max(64) }).strict(),
   z.object({ kind: z.literal("discard-illustration"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   /**
    * The proposal accepted (R-102): the rows left unskipped, made one at a time through the Bench
@@ -3760,7 +3761,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Which chapters of the book chose each kit look (design turn 193, SPEC-047 R-114): read from the
    * chapters' records, nothing changed. Answered as `audiobook.looks` under the same id.
    */
-  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, coverage: z.boolean().optional() }).strict(),
   /**
    * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
    * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The

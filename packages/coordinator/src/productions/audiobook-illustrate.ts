@@ -29,6 +29,7 @@ import { blockSpeakers, type ChapterPerson } from "./audiobook-look.js";
 import { makeAdapterJsonDeriver } from "./continuity.js";
 import { BRIEF_EXAMPLES, briefGiven, briefRiders, briefRules, holdBrief, pictureChecks, type BriefLine } from "./audiobook-picture-brief.js";
 import { briefLines, clipPrompt, depictable, neutralWhereLooksRide, ownLooksThatRide, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureRoom } from "./audiobook-picture-suggest.js";
+import { chapterReferenceCoverage } from "./audiobook-reference-coverage.js";
 import { ownLookChanges, rewritePictureClothing, type PromptRewriter } from "./audiobook-picture-rewrite.js";
 
 /**
@@ -205,7 +206,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     const who = pictureWho(store, model, briefRiders(candidate.held), { look: room.look, frame: candidate.held.frame, own });
     // Rule 4 where a look image rides: no skin, cut or body in the words (2026-10-04).
     const held = { ...candidate.held, prompt: neutralWhereLooksRide(rewritten.get(candidate.index) ?? candidate.held.prompt, who) };
-    const needs = who.filter((entry) => entry.kind === "character" && entry.reference === null).map((entry) => entry.name);
+    const needs = who.filter((entry) => entry.reference === null).map((entry) => entry.name);
     // A chapter look the Looks sheet flags would dress them against the prose (issue 1658); one
     // chosen for this picture alone is the author's own call.
     const disagrees = who.filter((entry) => entry.kind === "character" && entry.only !== true && chapterLookDisagreement(room.look, entry.key).length > 0).map((entry) => entry.key);
@@ -233,6 +234,7 @@ export async function proposeIllustrations(store: WorldStore, room: PictureRoom,
     proposal: {
       hash: plan.chapter.hash,
       rows,
+      coverage: chapterReferenceCoverage(store, undefined, plan, rows),
       model: { provider: model.provider, id: model.id, name: model.displayName, references: referenceBudgetFor(model),
         ...(model.pricing.kind === "included-plan" ? { plan: "included-plan" as const } : {}) },
       ...(pictureAspect(model) !== undefined ? { aspect: pictureAspect(model)! } : {}),

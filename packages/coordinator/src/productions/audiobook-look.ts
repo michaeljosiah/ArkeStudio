@@ -111,7 +111,7 @@ export function nameAt(body: string, name: string): number {
  * Bounded identity candidates: POV and authored looks first, then named people and speakers,
  * followed by other sheets for relationship resolution. The model still decides visible presence.
  */
-export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<AudiobookPlan, "body" | "cast"> & Partial<Pick<AudiobookPlan, "chapter" | "record">>, productionId?: string): ChapterPerson[] {
+export function chapterPersonCandidates(store: Pick<WorldStore, "getBundle">, plan: Pick<AudiobookPlan, "body" | "cast"> & Partial<Pick<AudiobookPlan, "chapter" | "record">>, productionId?: string): ChapterPerson[] {
   const bundle = store.getBundle();
   const sheets = bundle.sheets.filter((sheet) => sheet.type === "character" && sheet.retired !== true);
   const chapter = bundle.productions.filter((production) => productionId === undefined || production.meta.id === productionId).flatMap((production) => production.chapters).find((candidate) => candidate.id === plan.chapter?.id);
@@ -176,8 +176,12 @@ export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<A
   }
   const rank = (person: ChapterPerson): number => person.first < 0 ? 0 : person.first < Number.MAX_SAFE_INTEGER ? 1 : related.has(person.key) ? 2 : 3;
   return [...people.values()]
-    .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first)
-    .slice(0, LOOK_BOUNDS.people);
+    .sort((a, b) => rank(a) - rank(b) || (a.billing === "lead" ? 0 : 1) - (b.billing === "lead" ? 0 : 1) || a.first - b.first);
+}
+
+/** The prompt remains bounded; coverage can inspect the same complete candidate set. */
+export function chapterPeople(store: Pick<WorldStore, "getBundle">, plan: Pick<AudiobookPlan, "body" | "cast"> & Partial<Pick<AudiobookPlan, "chapter" | "record">>, productionId?: string): ChapterPerson[] {
+  return chapterPersonCandidates(store, plan, productionId).slice(0, LOOK_BOUNDS.people);
 }
 
 /** Exact keys win; names and authored aliases resolve only when they identify one sheet. */
