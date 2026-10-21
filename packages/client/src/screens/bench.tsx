@@ -139,7 +139,7 @@ import { laneRestorePlan } from "../lib/restore.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { disabledRecipes, usableModels } from "../components/dispatch-bar.js";
+import { disabledRecipes, strandReason, usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
   characterPickerSources,
@@ -426,8 +426,8 @@ function BenchWorkspace({
   }, [rebuiltSession, session]);
 
   const models = useMemo(() => usableModels(state, modeCapability(draft.mode)), [state, draft.mode]);
-  const disabledVoiceRecipes = useMemo(
-    () => (draft.mode === "voice" ? disabledRecipes(state, "voice-tts") : []),
+  const unavailableRecipes = useMemo(
+    () => disabledRecipes(state, modeCapability(draft.mode)),
     [state, draft.mode],
   );
   const subjectModelFault = (candidate: ManifestModel): string | null => {
@@ -456,6 +456,18 @@ function BenchWorkspace({
     ) ?? null;
   const modelName = (provider: string, id: string): string =>
     manifest?.models.find((m) => m.provider === provider && m.id === id)?.displayName ?? id;
+  // Readiness can remove a choice from dispatch without removing it from the saved composer.
+  // Keep its identity visible (design 153 / SPEC-033 R-78); `model` above stays runnable-only.
+  const savedModelValue = draft.provider && draft.model ? `${draft.provider}/${draft.model}` : "";
+  const savedModel = manifest?.models.find((m) => m.provider === draft.provider && m.id === draft.model);
+  const unavailableReason = !savedModelValue || model !== null ? null
+    : savedModel === undefined ? "This model is no longer listed. Choose another model or check Settings."
+    : savedModel.capability !== modeCapability(draft.mode) ? `This model does not make ${draft.mode}. Choose another model.`
+    : models.includes(savedModel) ? subjectModelFault(savedModel)
+    : strandReason(state, savedModel);
+  const savedModelNotListed = savedModelValue !== "" &&
+    !models.some((m) => m.provider === draft.provider && m.id === draft.model) &&
+    !unavailableRecipes.some(({ model: m }) => m.provider === draft.provider && m.id === draft.model);
 
   // ---- references ----
   const worldSources = useMemo(
@@ -2447,18 +2459,19 @@ function BenchWorkspace({
               )}
             </span>
             <div className="fy-bench__modelcontrols">
-            {models.length === 0 ? (
+            {models.length === 0 && !savedModelValue ? (
               /* An empty select is mute; the bar says the repair (dispatch-bar's own words). */
               <span className="fy-bench__nomodel">
-                {disabledVoiceRecipes[0]?.reason ??
+                {unavailableRecipes[0]?.reason ??
                   `No ${draft.mode} model is available — add a provider key in Settings.`}
               </span>
             ) : (
               <span className="fy-bench__modelwrap">
                 <select
                   aria-label="Model"
+                  aria-describedby={unavailableReason !== null ? "bench-model-unavailable" : undefined}
                   className="fy-bench__model"
-                  value={model ? `${model.provider}/${model.id}` : ""}
+                  value={savedModelValue}
                   onChange={(e) => {
                     const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
                     if (!chosen) return;
@@ -2494,6 +2507,11 @@ function BenchWorkspace({
                   <option value="" disabled>
                     choose a model
                   </option>
+                  {savedModelNotListed && (
+                    <option value={savedModelValue} disabled>
+                      {savedModel?.displayName ?? draft.model} · unavailable
+                    </option>
+                  )}
                   {models.map((candidate) => {
                     const fault = subjectModelFault(candidate);
                     // The display name alone (design 142): the price of the chosen model is the
@@ -2509,7 +2527,7 @@ function BenchWorkspace({
                       </option>
                     );
                   })}
-                  {disabledVoiceRecipes.map(({ model: disabled, reason }) => (
+                  {unavailableRecipes.map(({ model: disabled, reason }) => (
                     <option
                       key={`${disabled.provider}/${disabled.id}`}
                       value={`${disabled.provider}/${disabled.id}`}
@@ -2563,6 +2581,11 @@ function BenchWorkspace({
               {draft.params.kind === "image" && draft.params.count > 1 ? `Generate ${draft.params.count}` : "Generate"}
             </Button>
           </div>
+          {unavailableReason !== null && (
+            <p id="bench-model-unavailable" data-testid="bench-model-unavailable" className="fy-bench__modelnote">
+              {unavailableReason}
+            </p>
+          )}
           {routeRefusal !== null && (
             <p role="alert" className="fy-bench__refusal" data-testid="bench-route-refusal">
               {routeRefusal}
