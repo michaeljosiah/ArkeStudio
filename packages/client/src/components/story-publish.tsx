@@ -40,6 +40,7 @@ function StoryEditionPreparation({ edition, onClose }: { edition: StoryEdition; 
 }
 export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
   const [saved, setSaved] = useState<string | null>(null);
+  const [preview, setPreview] = useState(false);
   const [handoff, setHandoff] = useState<"kindle" | "audio" | null>(null);
   return <div className="fy-publish-files">
     {saved && <p role="status">{saved}</p>}
@@ -58,9 +59,13 @@ export function StoryEditionFiles({ edition }: { edition: StoryEdition }) {
         const result = await window.arke!.locateStoryPublication!(edition.id, file.name);
         setSaved(result.ok ? "Matching file restored. You can save it again." : result.cancelled ? null : result.reason ?? "The file could not be restored.");
       }}>Locate {file.format.toUpperCase()}</Button>}
+      {edition.status === "ready" && file.format === "epub" && <Button onClick={() => setPreview(true)}>Preview EPUB</Button>}
       {edition.status === "ready" && file.format !== "pdf" && <Button variant="ghost" onClick={() => setHandoff(file.format === "epub" ? "kindle" : "audio")}>{file.format === "epub" ? "Read on Kindle" : "Listen on your phone"}</Button>}
       {file.format === "m4b" && <audio controls preload="none" aria-label="Preview the captured audiobook" src={storyPreviewMediaUrl(edition.id, file.name)} />}
     </article>)}
+    {preview && <PageSheet open onClose={() => setPreview(false)} title={edition.settings.title} subtitle={edition.settings.label || "Private edition"} className="fy-publish-sheet fy-publish-reader" preserveReturnFocus footer={<div className="fy-publish-actions"><Button onClick={() => setPreview(false)}>Done</Button></div>}>
+      <div className="fy-publish"><StoryBookPreview edition={edition} /></div>
+    </PageSheet>}
     {handoff === "kindle" && <div className="fy-publish-card"><strong>Read on Kindle</strong><ol><li>Save the EPUB file.</li><li>Open Amazon’s Send to Kindle and sign in to your Amazon account.</li><li>Upload the EPUB, then open your Kindle app after Amazon finishes processing it.</li></ol><a className="fy-publish-link" href="https://www.amazon.com/sendtokindle" target="_blank" rel="noreferrer">Open Send to Kindle</a><p>Arke cannot confirm that Amazon has received or delivered your book.</p></div>}
     {handoff === "audio" && <div className="fy-publish-card"><strong>Listen with Arke’s voices</strong><ol><li>Save the M4B file to your phone’s Files or Downloads.</li><li>Import it into an audiobook app that accepts M4B files.</li><li>Check playback and offline access in that app.</li></ol><p>The audiobook includes the chosen narration and character voices. Your listening position is separate from your Kindle reading position.</p></div>}
     {edition.status === "ready" && <p className="fy-publish-muted">Files ready. Sharing a copy is a separate step; copies you share cannot be recalled by Arke.</p>}
@@ -80,7 +85,7 @@ function StoryBookPreview({ edition }: { edition: StoryEdition }) {
     asked.current = publishStory(edition.worldId, edition.productionId, { action: "preview-page", editionId: edition.id, chapter });
     return off;
   }, [edition.id, chapter]);
-  return <section aria-label="Captured EPUB preview">
+  return <section className="fy-publish-book-preview" aria-label="Captured EPUB preview">
     <div className="fy-publish-actions"><Button disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}>Previous chapter</Button><span>Chapter {chapter + 1} of {edition.settings.chapterIds.length}</span><Button disabled={chapter + 1 >= edition.settings.chapterIds.length} onClick={() => setChapter(value => value + 1)}>Next chapter</Button></div>
     {error && <p role="alert">{error}</p>}
     {html ? <iframe title="Captured book page" sandbox="allow-same-origin" srcDoc={html} className="fy-publish-book" /> : <p role="status">Opening captured book…</p>}

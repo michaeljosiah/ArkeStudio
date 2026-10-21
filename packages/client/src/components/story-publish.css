@@ -58,3 +58,6 @@
 .fy-pdf-text>:not(.markedContent),.fy-pdf-text .markedContent span:not(.markedContent){--font-height:0;--scale-x:1;--rotate:0deg;font-size:calc(var(--text-scale-factor) * var(--font-height));transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv))}
 .fy-pdf-text .markedContent{display:contents}.fy-pdf-text ::selection{background:color-mix(in srgb,var(--media-control-fg) 25%,transparent);color:transparent}
 @media(max-width:599px){.fy-pdf-toolbar button{flex:1}.fy-pdf-viewport{height:60vh}}
+
+.fy-publish-reader .fy-page-sheet__body,.fy-publish-reader .fy-publish,.fy-publish-reader .fy-publish-book-preview{display:flex;flex-direction:column;flex:1;min-height:0}
+.fy-publish-reader .fy-publish-book{flex:1;height:auto;min-height:160px}
