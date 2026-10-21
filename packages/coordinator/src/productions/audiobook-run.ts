@@ -38,6 +38,7 @@ import {
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { classifyError } from "../queue/classify.js";
 import { cachedVoiceAudioLooksRight, joinSpeech, speechCacheFile } from "../voice/service.js";
 import { clipFor, clipHashOf } from "../voice/library.js";
 import { piecesFor } from "../voice/pieces.js";
@@ -51,6 +52,13 @@ import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-s
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
 import { audiobookLanding, recordsLoudness, castLeftToCast, castRefusal, currentDirection, directionEntry, effectiveReader, emptyAudiobook, planAudiobook, readerLanguage, updateAudiobook, type AudiobookPlan, type PlannedBlock, type ProposalOverride } from "./audiobook.js";
+
+/** Keep the queue's witnessed failure class when its error crosses into the chapter run. */
+function failedConnection(job: Job): Error | null {
+  if (job.status !== "failed") return null;
+  const error = Object.assign(new Error(job.error ?? "The provider connection is unavailable."), { failureClass: job.failureClass });
+  return classifyError(error) === "offline" ? error : null;
+}
 
 /**
  * A read ended by a limit the rest of the run would only meet again — the free day, a billed key,
@@ -855,6 +863,14 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   }
   const partPrices = new Map(misses.map(block => [block, block.quotes.map(quote => quote.expectedMicroUsd)]));
   let record = preparation.prepared.record;
+  const finishConnectionFailure = async (error: unknown): Promise<boolean> => {
+    if (classifyError(error) !== "offline") return false;
+    const detail = error instanceof Error ? error.message : String(error);
+    // Connectivity is a run interruption, not a verdict on each later passage. Keep any
+    // landed parts for the existing explicit retry; an outage says nothing about their cost.
+    await finish("failed", { record, reason: `Connection interrupted: ${detail.replace(/[.\s]+$/, "")}. Saved recordings are kept. Check the connection, then ${deps.only === undefined ? "read the remaining blocks to retry" : "retry the same read"}.` });
+    return true;
+  };
   const chapterFile = plan.chapter.file;
   // A grouped run counts its requests and names each group's blocks (design turn 185b): the
   // progress and the margin's brackets. A run that groups nothing says what it always said.
@@ -1112,6 +1128,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       if (ended !== null) return { ended };
       const daily = job.status === "failed" ? dailyLimitFailure(job.error, group.model.displayName) : null;
       if (daily !== null) return { ended: daily };
+      const connection = failedConnection(job);
+      if (connection !== null) throw connection;
       for (const block of group.kept) {
         await flag(block, "the voice job failed · open Activity for details");
         settled.add(block.block.key);
@@ -1204,6 +1222,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             await finish("failed", { reason, record });
             return;
           }
+          if (await finishConnectionFailure(err)) return;
           try {
             for (const kept of group.kept) if (!settled.has(kept.block.key)) await flag(kept, message);
           } catch (flagErr) {
@@ -1371,6 +1390,8 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             // a 122-block chapter sent 122 requests to the same refusal and ended `read`.
             const daily = job.status === "failed" ? dailyLimitFailure(job.error, block.model.displayName) : null;
             if (daily !== null) throw new FreePlanEnded(GOOGLE_DAILY_LIMIT, daily);
+            const connection = failedConnection(job);
+            if (connection !== null) throw connection;
             throw new Error(job.status === "cancelled" ? "stopped" : "the voice job failed · open Activity for details");
           }
           landed.push(job.landedFiles[0]);
@@ -1402,6 +1423,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
           await finish("failed", { reason: message, record });
           return;
         }
+        if (await finishConnectionFailure(err)) return;
         try {
           await flag(block, message);
         } catch (flagErr) {
