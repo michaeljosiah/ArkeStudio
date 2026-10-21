@@ -133,9 +133,11 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
   if (production === undefined) return { ok: false, blockers: ["that production is no longer in this world"] };
   const step = options.onStep ?? (() => {});
 
+  if (signal.aborted) return cancelled();
   const listeningOptions = { ffmpeg, signal, scope: { kind: "book" as const }, finalAudio: true };
   const listening = await audiobookListening(store, productionId, listeningOptions);
   const whole = listening.chapters.filter(readWhole);
+  if (signal.aborted) return cancelled();
 
   const bookChapters = options.include.book ? await readBook(store, productionId) : [];
   const madeFrom = fingerprint(whole, listening.cover, bookChapters, store, productionId);
@@ -366,7 +368,7 @@ export async function exportArkePlayer(store: WorldStore, productionId: string, 
       if ((await exists(destination)) || (await exists(`${destination}.json`))) return { ok: false as const, blockers: [`exports/${name} already exists · make it again`] };
       // What Publications lists, written before the package is named (233e): a record without
       // its package is never listed, and a package is never left without its record.
-      const listed: ArkePlayerListed = { kind: "arke-player", exportId: options.exportId, exportedAt: stamp, productionId, title: bundle.meta.name, bytes: checked.bytes, sha256: checked.sha256, holds };
+      const listed: ArkePlayerListed = { kind: "arke-player", exportId: options.exportId, exportedAt: stamp, productionId, title: bundle.meta.name, bytes: checked.bytes, sha256: checked.sha256, holds, chapters: whole.length, pictures: shown, book: bookId !== undefined };
       await writeFile(toExtendedLength(`${destination}.json`), `${JSON.stringify(listed, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
       try {
         await rename(toExtendedLength(zip), toExtendedLength(destination));
@@ -392,6 +394,10 @@ const ArkePlayerListedSchema = z.object({
   bytes: z.number().int().min(0),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   holds: z.string(),
+  /** What it holds as numbers, so a window that lost the answer shows the same package (233c). */
+  chapters: z.number().int().min(0),
+  pictures: z.number().int().min(0),
+  book: z.boolean(),
 }).strict();
 type ArkePlayerListed = z.infer<typeof ArkePlayerListedSchema>;
 

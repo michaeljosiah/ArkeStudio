@@ -277,8 +277,12 @@ export function readListening(source: string, assets: Readonly<Record<string, Wo
       // before the last has ended could never be shown.
       if (heard !== undefined && phrase.at < heard.end) return notAPackage(`${where}: phrases out of order or overlapping`);
       heard = phrase;
+      let spoken: { at: number; end: number } | undefined;
       for (const word of phrase.words ?? []) {
         if (word.at >= word.end || word.at < phrase.at || word.end > phrase.end) return notAPackage(`${where}: a word outside its phrase`);
+        // Words follow one another too, or a highlight has no single way through them.
+        if (spoken !== undefined && word.at < spoken.end) return notAPackage(`${where}: words out of order or overlapping`);
+        spoken = word;
       }
     }
     if (!asset(chapter.audio, LISTENING_AUDIO_MEDIA_TYPES)) return notAPackage(`${where} audio`);

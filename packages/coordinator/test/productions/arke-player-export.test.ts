@@ -133,6 +133,21 @@ describe("Export → Arke Player (turn 233, SPEC-058)", () => {
       assert.equal(progress.at(-1)?.status, "failed");
     }));
 
+  it("stops on a Cancel pressed while it is still starting (codex on PR 2058)", () => {
+    const calls: string[][] = [];
+    return withHarness(async ({ events, send }) => {
+      await read(send, "01-neap");
+      const asked = send({ kind: "export-arke-player", worldId: WORLD_ID, productionId: LEDGER, requestId: "01J00000000000000000000001", exportId: exportId(4), options: { book: true, motion: true } });
+      // Cancel the moment Activity shows it, while Publish's settings are still being read.
+      while (!events.some((event) => event.type === "export.progress" && event.exportId === exportId(4))) await new Promise((resolve) => setImmediate(resolve));
+      await send({ kind: "cancel-export", worldId: WORLD_ID, exportId: exportId(4) });
+      await asked;
+      const answer = events.filter((event): event is Exported => event.type === "arke-player.exported" && event.exportId === exportId(4)).at(-1);
+      assert.deepEqual(answer?.result, { ok: false, blockers: ["the export was cancelled"] });
+      assert.equal(calls.length, 0, "nothing was encoded");
+    }, recordingFfmpeg(calls));
+  });
+
   it("makes one package of the book and the chapters read whole, read back by the shared reader (R-2, R-5, R-7, R-8)", () => {
     const calls: string[][] = [];
     return withHarness(async ({ worldDir, events, send }) => {
@@ -245,7 +260,7 @@ describe("the package's parts", () => {
     await provider.loadWorld(WORLD_ID);
     try {
       await mkdir(join(worldDir, "exports"), { recursive: true });
-      const record = { kind: "arke-player", exportId: "ap_01J8G000000000000000000001", exportedAt: "2026-10-21T09:00:00.000Z", productionId: LEDGER, title: "The Undersong", bytes: 4, sha256: "a".repeat(64), holds: "the book" };
+      const record = { kind: "arke-player", exportId: "ap_01J8G000000000000000000001", exportedAt: "2026-10-21T09:00:00.000Z", productionId: LEDGER, title: "The Undersong", bytes: 4, sha256: "a".repeat(64), holds: "the book", chapters: 0, pictures: 0, book: true };
       await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21.zip"), "zip!");
       await writeFile(join(worldDir, "exports", "the-undersong-player-2026-10-21.zip.json"), JSON.stringify(record));
       // A record edited by hand, missing what Publications needs, and one whose package has grown.
@@ -275,5 +290,20 @@ describe("the package's parts", () => {
 
     const measured = phrasesOf([block({ words: [{ text: "First", startSec: 10.1, endSec: 10.4, probability: 1 }, { text: "one.", startSec: 10.4, endSec: 10.9, probability: 1 }, { text: "Then", startSec: 11.5, endSec: 11.8, probability: 1 }] })], 60_000);
     assert.deepEqual(measured.map((phrase) => [phrase.text, phrase.at, phrase.end, phrase.words?.length]), [["First one.", 10_100, 10_900, 2], ["Then", 11_500, 11_800, 1]]);
+
+    // Measured words that overlap are kept in order: one starts as the last ends (R-13).
+    const overlapping = phrasesOf([block({ words: [{ text: "Slack", startSec: 10, endSec: 10.6, probability: 1 }, { text: "water.", startSec: 10.5, endSec: 11, probability: 1 }] })], 60_000);
+    assert.deepEqual(overlapping[0]!.words!.map((word) => [word.at, word.end]), [[10_000, 10_600], [10_600, 11_000]]);
+  });
+
+  it("splits a sentence longer than a phrase into pieces that follow one another, losing nothing (R-11)", () => {
+    const long = `${Array.from({ length: 900 }, (_, i) => `word${i}`).join(" ")}.`;
+    assert.ok(long.length > 4000);
+    const phrases = phrasesOf([{ key: "p0.0", number: 2, file: "take.wav", at: 0, seconds: 300, sentences: [{ at: 0, text: long }] }], 300_000);
+    assert.ok(phrases.length >= 3);
+    assert.ok(phrases.every((phrase) => phrase.text.length <= 2000));
+    assert.equal(phrases.map((phrase) => phrase.text).join(" "), long);
+    assert.ok(phrases.every((phrase, index) => index === 0 || phrase.at === phrases[index - 1]!.end), "back to back");
+    assert.equal(phrases.at(-1)!.end, 300_000);
   });
 });

@@ -14732,8 +14732,9 @@ export class Coordinator {
         const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, step?: string, output: string | null = null, error: string | null = null) =>
           this.emit({ at: new Date().toISOString(), type: "export.progress", worldId: msg.worldId, productionId: msg.productionId, exportId: msg.exportId, status, percent: Math.max(0, Math.min(100, Math.round(percent))), label, ...(step !== undefined ? { step: step.slice(0, 200) } : {}), output, error });
         progress("running", 0, "Reading the book");
-        const publish = await this.storyPublications.settings(msg.worldId, msg.productionId).catch(() => undefined);
-        const run = exportArkePlayer(store, msg.productionId, {
+        // Publish's settings are read inside the run, after it is registered below, so a Cancel
+        // pressed while they load still finds the export (codex on PR 2058).
+        const run = this.storyPublications.settings(msg.worldId, msg.productionId).catch(() => undefined).then((publish) => exportArkePlayer(store, msg.productionId, {
           clock: () => new Date().toISOString(),
           ...(this.opts.ffmpeg !== undefined ? { ffmpeg: this.opts.ffmpeg } : {}),
           exportId: msg.exportId,
@@ -14748,7 +14749,7 @@ export class Coordinator {
             last = now;
             progress("running", percent, step);
           },
-        }).catch((err: unknown): { ok: false; blockers: string[] } => {
+        })).catch((err: unknown): { ok: false; blockers: string[] } => {
           void this.appLog?.append({ kind: "arke-player.export-failed", production: msg.productionId, message: err instanceof Error ? err.message : String(err) });
           return { ok: false, blockers: [control.signal.aborted ? "the export was cancelled" : describeCoordinatorError(err)] };
         });

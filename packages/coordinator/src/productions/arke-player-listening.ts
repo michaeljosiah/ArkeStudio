@@ -30,12 +30,20 @@ export function phrasesOf(blocks: readonly ListeningBlock[], duration: number): 
     const blockEnd = block.at + block.seconds;
     if (block.words !== undefined && block.words.length > 0) {
       let held: Array<{ at: number; end: number; text: string }> = [];
+      let heard = 0;
       const flush = () => {
-        if (held.length > 0) add(held[0]!.at, held[held.length - 1]!.end, held.map((word) => word.text).join(" "), held);
+        if (held.length > 0) add(held[0]!.at, held[held.length - 1]!.end, held.map((word) => word.text).join(" "), held.map((word) => ({ ...word, text: word.text.slice(0, MAX_WORD) })));
         held = [];
       };
       for (const word of block.words) {
-        held.push({ at: ms(word.startSec), end: ms(word.endSec), text: word.text.slice(0, 200) });
+        // Words follow one another (R-13): one that starts inside the last starts as it ends.
+        const at = Math.max(ms(word.startSec), heard);
+        const end = ms(word.endSec);
+        if (end <= at) continue;
+        // A phrase holds at most its limit, so a long run without a sentence end is cut between words.
+        if (held.length > 0 && [...held.map((w) => w.text), word.text].join(" ").length > MAX_PHRASE) flush();
+        held.push({ at, end, text: word.text });
+        heard = end;
         if (SENTENCE_END.test(word.text)) flush();
       }
       flush();
@@ -44,17 +52,38 @@ export function phrasesOf(blocks: readonly ListeningBlock[], duration: number): 
     block.sentences.forEach((sentence, index) => {
       const start = Math.max(block.at, sentence.at);
       const end = Math.min(blockEnd, block.sentences[index + 1]?.at ?? blockEnd);
-      const parts = sentencesOf(sentence.text);
+      // Each sentence by its length, and a sentence longer than a phrase may be in pieces that
+      // follow one another, never cut short: Text keeps every word the narration says.
+      const parts = sentencesOf(sentence.text).flatMap(bounded);
       const total = parts.reduce((sum, part) => sum + part.length, 0);
       let at = start;
       for (const part of parts) {
         const until = at + ((end - start) * part.length) / total;
-        add(ms(at), ms(until), part.slice(0, 2000));
+        add(ms(at), ms(until), part);
         at = until;
       }
     });
   }
   return phrases;
+}
+
+const MAX_PHRASE = 2000;
+const MAX_WORD = 200;
+
+/** A text in pieces of at most a phrase's length, cut between words, a word longer than that by characters. */
+function bounded(text: string): string[] {
+  if (text.length <= MAX_PHRASE) return [text];
+  const words = text.split(" ").flatMap((word) => (word.length <= MAX_PHRASE ? [word] : Array.from({ length: Math.ceil(word.length / MAX_PHRASE) }, (_, i) => word.slice(i * MAX_PHRASE, (i + 1) * MAX_PHRASE))));
+  const pieces: string[] = [];
+  let piece = "";
+  for (const word of words) {
+    if (piece !== "" && piece.length + 1 + word.length > MAX_PHRASE) {
+      pieces.push(piece);
+      piece = word;
+    } else piece = piece === "" ? word : `${piece} ${word}`;
+  }
+  if (piece !== "") pieces.push(piece);
+  return pieces;
 }
 
 /** One chapter read whole, its files named by the package's asset ids. */

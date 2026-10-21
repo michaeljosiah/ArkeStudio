@@ -1710,6 +1710,10 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
         sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
         /** What it holds, as Publications says it: `12 chapters · 131 pictures · the book`. */
         holds: z.string().optional(),
+        /** The same as numbers, so a window that lost the export's answer shows the package it made. */
+        chapters: z.number().int().min(0).optional(),
+        pictures: z.number().int().min(0).optional(),
+        book: z.boolean().optional(),
       }).strict()),
     })
     .strict(),

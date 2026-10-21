@@ -70,8 +70,11 @@ const madeStamp = (at: Date) => {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 };
 
-/** `21 Oct 2026`, today, as the edition the package will carry. */
-const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+/**
+ * `21 Oct 2026`: the edition the package will carry, on the exporter's own clock — the UTC day —
+ * so a phone in another time zone, or a desktop near midnight, previews the edition it gets.
+ */
+const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
   [result.chapters > 0 ? `${result.chapters} chapter${result.chapters === 1 ? "" : "s"}` : null, result.pictures > 0 ? `${result.pictures} picture${result.pictures === 1 ? "" : "s"}` : null, result.book ? "the book" : null].filter((part) => part !== null).join(" · ");
@@ -116,7 +119,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
       const found = answer.packages.find((entry) => entry.kind === "arke-player" && entry.exportId === making);
       if (found?.file === undefined || found.sha256 === undefined) return;
       setMaking(null);
-      setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: 0, pictures: 0, book: false });
+      setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: found.chapters ?? 0, pictures: found.pictures ?? 0, book: found.book ?? false });
       setMadeAt(new Date(found.exportedAt));
     });
     return () => {
