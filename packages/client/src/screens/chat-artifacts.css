@@ -161,6 +161,9 @@
   .fy-chat__mode button[aria-pressed="true"] { background: var(--accent); }
   .fy-chat__mode button span, .fy-chat__mode p { display: block; margin: 4px 0; font: var(--type-meta); color: var(--muted-foreground); }
   .fy-chat__wrap .fy-gate__body { padding: 14px 20px; overflow: visible; animation: none; }
+  /* The phone scrolls the whole page beneath its sticky world tabs. Keep a reached card or
+     keyboard target inside the reading space, using HeldBar's measured composer height. */
+  .fy-chat__wrap .fy-gate__body :is(.fy-actioncard, .fy-actioncard__head, h3, button, summary, [tabindex]) { scroll-margin-block: 70px calc(var(--held-bar-height, 180px) + 12px); }
   .fy-chat__wrap :is(.fy-chat__turn--user, .fy-chat__turn--studio) { max-width: 84%; }
   .fy-chat__wrap .fy-chat__bubble { font: 400 var(--text-sm)/1.5 var(--font-sans); border-radius: 16px; padding: 10px 14px; }
   .fy-chat__wrap .fy-chat__transcript { gap: 12px; }
@@ -170,6 +173,7 @@
   .fy-chat__wrap .fy-chat__turn:has(.fy-actioncard) { max-width: 100%; width: 100%; }
   .fy-chat__composer.fy-held-bar { display: flex; flex-direction: column; align-items: stretch; gap: 30px; margin: 0; padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px)); border: 0; background: transparent; box-shadow: none; }
   .fy-chat__composer.fy-held-bar::before { content: ""; position: absolute; z-index: -1; inset: 86px 0 0; border-top: 1px solid var(--border); background: var(--background); }
+  .fy-chat__composer.fy-held-bar:not(:has(.fy-thread-peek))::before { inset-block-start: 0; }
   .fy-chat__composer .fy-thread-peek b > span { margin-left: 3px; color: inherit; font: inherit; }
   .fy-chat__composer .fy-thread-peek > span > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fy-page-sheet .fy-panel__body { gap: 16px; }

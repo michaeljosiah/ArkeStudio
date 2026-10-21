@@ -489,6 +489,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [understoodOpen, setUnderstoodOpen] = useState(false);
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [notesVisible, setNotesVisible] = useState<boolean | null>(null);
   const notesId = useId();
   useEffect(() => { setNotesVisible(null); }, [conversationId]);
@@ -761,6 +762,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
+  const notesFeedback = rippleNotice ? "What changed elsewhere"
+    : wrapUpRefusal && !wrappingUp ? "Review needed"
+    : mediaRefusal ? "Media could not open" : null;
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure;
   const starting = opening !== null;
@@ -988,11 +992,13 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           </div>
 
           <HeldBar className="fy-chat__composer">
-            {(phone || inPanel) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
-              <span><b>What I’ve understood <span>· {carried} of {points.length} ready</span></b><span>{[...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
+            {(phone || inPanel) && (points.length > 0 || notesFeedback) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
+              <span><b>{points.length > 0 ? <>What I’ve understood <span>· {carried} of {points.length} ready</span></> : notesFeedback}</b><span>{(notesFeedback && (points.length > 0 ? notesFeedback : "View details"))
+                ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
             <Composer
               value={draft}
+              focusRequest={composerFocusRequest}
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
@@ -1086,7 +1092,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           {understoodBody}
           <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
         </div>}
-        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
+        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => {
+          setUnderstoodOpen(false);
+          // Dismissing the last result removes the opener. Return to the existing draft instead.
+          if (points.length === 0 && !notesFeedback) setComposerFocusRequest(value => value + 1);
+        }} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
           <div className="fy-panel__count">{carried} of {points.length} ready</div>
           {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           {understoodBody}{decisionNotices}

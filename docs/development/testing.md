@@ -1,5 +1,14 @@
 # Running and validating changes
 
+World Chat phone notes (#2050, SPEC-001 R-7) use client
+`test/world-chat-phone-notes.test.tsx` alongside `world-chat.test.tsx` and
+`world-chat-fidelity.test.tsx`. The hydrated regression covers empty and populated notes,
+final-point ripple dismissal and wrap-up refusal without writing or deciding an action.
+Review the full App at 320/390, 820 and 1440 in light/dark against master turns 164 and 225:
+long cards, 20px prose, direct heading scrolling, offscreen keyboard focus, held-composer
+clearance and a draft retained on return. Phone evidence must use a browser, not a native
+Electron viewport below its minimum. These rendered checks are separate from the DOM test.
+
 Story download recovery (#1950, SPEC-016 R-6): contracts `test/story-download.test.ts` covers
 space arithmetic; coordinator `test/world/story-download.test.ts` covers pinned ranges,
 whole-archive verification, cancellation, restart, changed releases, low space and cleanup.
