@@ -199,6 +199,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
 // 99: retained prose-first sheet creation review on conversation action bindings (#2047).
 // 100: exact retained conversation-candidate read receipts (#2048).
+// 101: the exact prompt saved picture checks examined (#2011).
 // 102: explicit chapter drafting intent survives queued turns and retries (#1928).
 export const SUPPORTED_SCHEMA_VERSION = 102;
 
