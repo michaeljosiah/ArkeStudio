@@ -1,0 +1,5 @@
+.fy-chat__reply-part { scroll-margin-block: 16px; }
+.fy-chat__reply-pages { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 8px; margin-top: 12px; white-space: normal; font-size: var(--text-sm); color: var(--muted-foreground); }
+@media (pointer: coarse) {
+  .fy-chat__reply-pages .ui-btn { min-height: 44px; }
+}

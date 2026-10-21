@@ -1765,7 +1765,9 @@ export type ModelGroupOperation = z.infer<typeof ModelGroupOperationSchema>;
  * accept, so that one turn cannot become a wall of propositions nobody can review.
  */
 export const TURN_RESULT_BOUNDS = {
-  reply: 8_000,
+  // A chapter is durable conversation text, not a display-sized summary (#1927). The client
+  // pages long replies; the entire result still passes validation before anything is retained.
+  reply: 200_000,
   candidateOperations: 12,
   groupOperations: 6,
   actions: 12,
@@ -3128,7 +3130,7 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters, which is about 1,000 words: a longer answer is refused whole, so give the most useful part and offer the rest). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
+reply is plain prose for the person. Prefer a concise answer, but preserve requested long-form prose in full (hard limit ${TURN_RESULT_BOUNDS.reply} characters; the client divides long replies into readable parts). A reply is conversation, not a saved chapter: when preparing a chapter edit, put its complete manuscript in the production-chapter action's changes.body and use reply for a short introduction. Never shorten a manuscript to fit the conversation display or claim a prepared action is committed. candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}

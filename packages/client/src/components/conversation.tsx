@@ -74,7 +74,7 @@ import { Film, Pin, ChevronLeft, ChevronDown, ChevronUp, Sparkle, X } from "./ic
 import { ARKE_HALF_QUERY } from "../lib/arke-half.js";
 import { ReplyRead } from "./read-aloud.js";
 import { useReadReplies } from "./read-replies.js";
-import { renderInlineMarkdown } from "./inline-markdown.js";
+import { ConversationReply } from "./conversation-reply.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -170,7 +170,7 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.role === "studio" ? renderInlineMarkdown(m.text) : about === undefined ? m.text : withoutSubject(m.text, about)}
+            {m.role === "studio" ? <ConversationReply key={m.id} text={m.text} /> : about === undefined ? m.text : withoutSubject(m.text, about)}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.

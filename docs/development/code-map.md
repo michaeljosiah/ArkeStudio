@@ -833,6 +833,14 @@ Missing or ambiguous legacy evidence and amendments keep the expanded diff. `con
 coordinator `test/world-chat/actions.test.ts` and client `test/production-studio.test.tsx` cover
 preserved values, decisions and replay.
 
+Long conversation prose (#1927): contracts `world-chat.ts` separates the 200,000-character
+retention limit from the client display. Client `lib/chat-reply.ts` divides exact text at
+chapter/paragraph boundaries; `components/conversation-reply.tsx` pages it within the shared
+transcript. Copy and Listen continue addressing the entire saved message. No page transition
+prepares or accepts an authored change; the existing action card owns that distinction.
+Coordinator `world-chat/summarisation.ts` condenses oversized transcripts in fresh, model-budgeted
+sessions, carrying the previous summary forward and checkpointing only after every batch succeeds.
+
 Retained conversation drafts (#2048): `world-chat/target-reads.ts` serves `get_candidate`
 through the existing leased pager, using `application/conversation-runs.ts` to reload the owning
 conversation's current candidates and groups through its checkpoint, independently of the recent message window.

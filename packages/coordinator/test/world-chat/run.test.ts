@@ -187,6 +187,21 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("keeps every long-draft character through completion and reopening without a corrective rewrite (#1927)", async () => {
+    const reply = "# Warning slip\n\n" + "Maren folded the warning slip and counted the bells.\n\n".repeat(500) + "The final bell rang.\n";
+    const prompts: string[] = [];
+    const h = await setup(fakeAdapter([JSON.stringify({ reply, candidateOperations: [], groupOperations: [] })], { prompts }));
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Draft the full chapter in this conversation.")).status, "completed");
+    assert.equal(prompts.length, 1, "no paid rewrite merely to fit the display");
+    const reopened = new WorldChatStore(h.store.dir), meta = await reopened.readMeta();
+    const events = (await reopened.read()).events;
+    const view = foldConversation(meta!.id, meta!.createdAt, events).view;
+    assert.equal(view.messages.at(-1)!.text, reply);
+    assert.equal(events.filter(e => e.event.type === "turn.completed").length, 1);
+    assert.equal(events.filter(e => e.event.type === "run.retry-started").length, 0);
+    assert.equal(view.candidates.length, 0, "retained conversation prose is not a committed world change");
+  });
+
   it("validates retained intent after reopening beyond the recent message window", async () => {
     let original: import("@arke-studio/contracts").WorldChangeCandidate;
     const h = await setup(fakeAdapter([

@@ -1,5 +1,16 @@
 # Running and validating changes
 
+Long conversation drafts (#1927) use coordinator `test/world-chat/turn-result.test.ts` and
+`run.test.ts` and `summarisation.test.ts`, plus client `test/chat-reply.test.ts` and `chat-read-replies.test.tsx`.
+Check exact retained/reopened text beyond 8,000 characters, strict whole-result validation,
+chapter and paragraph display boundaries, and full-message Copy/Listen while paging.
+Summary batches must fit the selected session's budget, retain every manuscript character,
+and checkpoint only after all batches succeed; test cancellation and a later-batch failure.
+Compare full-App phone/tablet/desktop light/dark captures with master turns 164 and 225;
+check focus at each new part, sticky navigation/composer clearance and enlarged text.
+Native acceptance additionally needs a real long writer reply and a reopened conversation;
+scripted persistence and fixture rendering alone do not prove that workflow.
+
 Coordinator import-order regressions (#2057) use
 `node --import tsx --test packages/coordinator/test/productions/audiobook-grouped.test.ts`
 from the repository root, without pre-importing Coordinator. Also run coordinator
