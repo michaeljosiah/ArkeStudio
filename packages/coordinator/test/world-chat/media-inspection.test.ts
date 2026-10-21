@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { VoxaClient, VoxaCancelledError, VoxaTimeoutError } from "@arke-studio/voice";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -70,6 +71,58 @@ const speechAnswer = { text: "Stay here", seconds: 1, engine: { id: "whisper.cpp
 const listeningAnswer = { engine: { id: "local-qwen2-audio-v1" as const, model: "Qwen2-Audio-7B-Instruct" as const,
   modelHash: hash(Buffer.from("model fixture")), runtime: "fixture-1" }, review: "The voice sounds restrained; soft strings support the slow pulse." };
 const listener: AgentAudioListener = { ready: async () => true, listen: async () => listeningAnswer };
+
+test("a safe Voxa refusal after successful decode stays a speech refusal and still consumes the four-call budget", async () => {
+  const client = new VoxaClient(async () => new Response(JSON.stringify({ detail: "The recognizer returned multiple words under one timestamp." }),
+    { status: 422, headers: { "content-type": "application/problem+json" } }), "http://127.0.0.1:9");
+  let recognized = 0;
+  const h = await harness({ speech: async (bytes, signal) => { recognized++; assert.ok(bytes.length > 32000); return client.transcribeWords(bytes, { signal }); } });
+  const before = h.store.getBundle().meta.schemaVersion, args = { source: h.source, range: { startSec: 0, endSec: 1 } };
+  try {
+    for (let i = 0; i < 4; i++) {
+      const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", args);
+      assert.equal(outcome.receipt.status, "unavailable");
+      assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: the recognizer grouped multiple words under one timestamp." });
+    }
+    assert.equal(recognized, 4); assert.equal(h.counts().snapshots, 4);
+    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls/);
+    assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+  } finally { client.dispose(); }
+});
+
+for (const [name, speech, reason] of [
+  ["timeout", async () => { throw new VoxaTimeoutError("stt", 12345); }, "Local speech recognition exceeded its time limit."],
+  ["cancel", async () => { throw new VoxaCancelledError("stt"); }, "Local speech recognition was stopped."],
+  ["deadline", async () => { throw new Error("Speech recognition was stopped or exceeded its deadline"); }, "Local speech recognition was stopped or exceeded its time limit."],
+  ["duration", async () => ({ ...speechAnswer, seconds: 4 }), "The recognizer returned timing for a different recording duration."],
+  ["malformed", async () => ({ ...speechAnswer, words: [] }), "Local speech recognition could not be completed or its response was invalid."],
+  ["unknown", async () => { throw new Error("PRIVATE transcript /secret/path " + "x".repeat(10000)); }, "Local speech recognition could not be completed or its response was invalid."],
+] as const) test(`speech ${name} keeps a safe stage-specific refusal without claiming a decode failure`, async () => {
+  const h = await harness({ speech });
+  const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(outcome.result, { unavailable: true, reason });
+  assert.equal(outcome.receipt.status, "unavailable"); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("an unknown host failure is neutral while a listener failure names only the listening stage", async () => {
+  let speechCalls = 0;
+  const broken = await harness({ duringProbe: async () => { throw new Error("PRIVATE decoder path"); }, speech: async () => { speechCalls++; return speechAnswer; } });
+  const failed = await broken.retrieval.call(broken.lease.token, "transcribe_audio", { source: broken.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(failed.result, { unavailable: true, reason: "Media inspection could not be completed, or inspection was stopped." });
+  assert.equal(speechCalls, 0);
+  const listening = await harness({ listener: { ...listener, listen: async () => { throw new Error("PRIVATE model output"); } } });
+  const result = await listening.retrieval.call(listening.lease.token, "listen_audio", { source: listening.source, range: { startSec: 0, endSec: 1 }, focuses: ["voice-delivery"] });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local audio listening could not be completed or its response was invalid." });
+  assert.equal((await listening.loaded())!.mediaReceipts, undefined);
+});
+
+test("cancellation during recognition overrides a coincident recognizer validation error", async () => {
+  let h: Awaited<ReturnType<typeof harness>>;
+  h = await harness({ speech: async () => { h.stop.abort(); throw new Error("Recognizer duration does not match the derivative"); } });
+  const result = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local speech recognition was stopped." });
+  assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
 
 test("local listening serves subjective music/emotion/delivery text through leased MCP and replays schema 81 without audio bytes", async () => {
   let calls = 0;
