@@ -19,6 +19,7 @@ import {
 import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { PageSheet } from "./page-sheet.js";
 import { SavedLookCollection, SavedLookImage } from "./saved-look-collection.js";
+import { BookReferenceCoverage } from "./reference-coverage.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, linkAudiobookCharacter, useAudiobookRecords, useStore } from "../lib/store.js";
@@ -551,6 +552,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
           {rows.filter((row) => row.line !== undefined).map((row) => renderRow(row, "overview"))}
           <p className="fy-look__hint">A chapter look applies to new pictures. Existing pictures stay as they are.</p>
           {refused !== null && <p className="fy-mono fy-ch__who-where--warn" data-testid="look-refused">{refused}</p>}
+          <BookReferenceCoverage worldId={worldId} productionId={productionId} disabled={off} />
           <details className="fy-look__chapterdetails" data-testid="look-chapter-details">
             <summary>Chapter details</summary>
             <div className="fy-look__chapterfields">

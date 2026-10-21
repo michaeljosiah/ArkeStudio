@@ -616,6 +616,7 @@ const CLIENT_COMMAND_METADATA = {
   "suggest-audiobook-picture": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
   // Illustrate this chapter (turn 191b): read by the writing service and held; accepted, it makes the pictures one at a time on the one confirmed total.
   "illustrate-chapter": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets", "references"]),
+  "refresh-illustration-references": readOnly(QUERY),
   "discard-illustration": action("production", "command", "extraction", "external-network-action", ["chapters"]),
   "accept-illustration": action("production", "generation", "bench", "spend-and-compute", ["chapters", "sheets", "references", "artifacts", "bench"]),
   "stop-illustration": action("production", "command", "bench", "spend-and-compute", ["chapters"]),

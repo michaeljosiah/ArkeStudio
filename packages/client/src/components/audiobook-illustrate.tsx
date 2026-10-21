@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatRunningTime, frameWord, illustrationRowGoes, illustrationTotal, pacePhrase, priceLabel, type IllustrationRow, type PictureWho } from "@arke-studio/contracts";
-import { dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
+import { refreshIllustrationReferences, dismissIllustration, illustrateChapter, skipIllustrationRow, sendIllustrationWithout, stopIllustration, acceptIllustration, useIllustrationRuns, type IllustrationRun } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
+import { ReferenceCoverage } from "./reference-coverage.js";
 import { PageSheet } from "./page-sheet.js";
 import { Button, cx } from "./ui.js";
 
@@ -37,6 +38,7 @@ export function useIllustration(worldId: string, productionId: string, chapter: 
     busy: run?.state === "reading" || run?.state === "making",
     press: () => illustrateChapter(worldId, productionId, chapter.file),
     accept: () => acceptIllustration(worldId, productionId, chapter.id, chapter.file),
+    refresh: () => refreshIllustrationReferences(worldId, productionId, chapter.id, chapter.file),
     stop: () => stopIllustration(worldId, productionId, chapter.file),
     discard: () => dismissIllustration(worldId, productionId, chapter.id, chapter.file),
     skip: (block: string) => skipIllustrationRow(worldId, productionId, chapter.id, block),
@@ -125,7 +127,7 @@ function Face({ who, slug }: { who: PictureWho; slug: string }) {
   return who.reference === null ? <i className="fy-ills__fig fy-ills__fig--none" aria-hidden="true" /> : <img className={cx("fy-ills__fig", !who.carried && "fy-ills__fig--over")} src={mediaUrl(slug, who.reference)} alt="" />;
 }
 
-function Card({ row, estimated, words, skipped, without, reason, slug, disabled, onSkip, onWithout, onMakeLook, onLook }: {
+function Card({ row, estimated, words, skipped, without, reason, slug, disabled, refreshed, onSkip, onWithout, onMakeLook, onLook }: {
   row: IllustrationRow;
   estimated: boolean;
   words: string | undefined;
@@ -134,6 +136,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   reason: string | undefined;
   slug: string;
   disabled: boolean;
+  refreshed: boolean;
   onSkip: () => void;
   onWithout: () => void;
   onMakeLook: (who: PictureWho) => void;
@@ -151,8 +154,8 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
   // sends the row as Without and As it is do, so a press that named only the retry sent a missing
   // reference without, or a disputed look as it is, unsaid.
   const retry = ["Try again", ...((row.needs?.length ?? 0) > 0 ? ["without"] : []), ...(disagrees.size > 0 ? ["as it is"] : [])].join(" · ");
-  const people = row.who.filter((entry) => entry.kind === "character");
-  const lacking = people.find((entry) => entry.sheet !== undefined && entry.reference === null);
+  const people = row.who;
+  const lacking = people.find((entry) => entry.reference === null);
   const time = clock(row.at, estimated);
   // The frame word in the slot's corner (193h, rule 11): what the brief said the picture is.
   const frame = row.shot === undefined ? null : (frameWord(row.shot.frame) ?? (row.shot.frame === "" ? null : row.shot.frame));
@@ -170,8 +173,8 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           <span className="fy-mono fy-ills__meta">{frame !== null ? `${frame} · ${time}` : time}</span>
         </span>
         {held && !skipped ? (
-          <Button variant="ghost" disabled={disabled || lacking === undefined} onClick={() => lacking !== undefined && onMakeLook(lacking)} data-testid="illustration-needs">
-            Make a look
+          <Button variant="ghost" disabled={disabled} onClick={() => lacking !== undefined ? onMakeLook(lacking) : onLook()} data-testid="illustration-needs">
+            {lacking?.sheet === undefined ? lacking?.kind === "place" ? "Review location" : "Review identities" : lacking.kind === "place" ? "Make a reference" : "Make a look"}
           </Button>
         ) : disagreeing && !skipped ? (
           <Button variant="ghost" onClick={onLook} data-testid="illustration-review-look">
@@ -183,12 +186,13 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
           </Button>
         )}
       </div>
+      {refreshed && <p className="fy-mono fy-ills__note" data-testid="illustration-row-refreshed">References updated</p>}
       <div className="fy-ills__wh">
         {people.map((entry) => (
           <span className="fy-ills__who" key={entry.key} data-testid="illustration-who">
             <Face who={entry} slug={slug} />
-            {entry.name}
-            {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : entry.sheet === undefined ? "identity not linked · check the character" : "no look"}</span>}
+            {entry.name}{entry.kind === "place" && <span className="fy-ills__note">location</span>}
+            {entry.reference === null && <span className="fy-ills__note">{without ? "sent without" : entry.sheet === undefined ? entry.kind === "place" ? "location not linked" : "identity not linked · check the character" : entry.kind === "place" ? "no reference" : "no look"}</span>}
             {entry.reference !== null && disagrees.has(entry.key) && <span className="fy-ills__note" data-testid="illustration-disagrees">{without ? "sent as it is" : "look disagrees with the chapter"}</span>}
           </span>
         ))}
@@ -225,7 +229,7 @@ function Card({ row, estimated, words, skipped, without, reason, slug, disabled,
  * `onMakeLook` is the held row's one action; the default sends a person to the character's page,
  * where the picture a look is made from lives.
  */
-export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, offline }: {
+export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, onRefresh, offline }: {
   run: IllustrationRun;
   chapterOrder: number;
   slug: string;
@@ -239,9 +243,11 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
   onClose: () => void;
   onLook: () => void;
   offline: boolean;
+  onRefresh?: () => void;
 }) {
   const proposal = run.proposal;
   if (proposal === undefined) return null;
+  const disabled = offline || run.refreshing === true;
   const skipped = new Set(run.skipped);
   const total = illustrationTotal(proposal.rows, skipped, new Set(run.without));
   const reasons = new Map((run.progress?.failed ?? []).map((entry) => [entry.block, entry.reason]));
@@ -252,7 +258,7 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
     pacePhrase(per),
     `${total.count} to make`,
     ...(skipped.size > 0 ? [`${skipped.size} skipped`] : []),
-    ...(total.held > 0 ? [`${total.held} need${total.held === 1 ? "s" : ""} a look`] : []),
+    ...(total.held > 0 ? [`${total.held} need${total.held === 1 ? "s" : ""} a reference`] : []),
     ...(total.disagree > 0 ? [`${total.disagree} look${total.disagree === 1 ? " disagrees" : "s disagree"}`] : []),
     ...(total.refused > 0 ? [`${total.refused} refused`] : []),
   ].join(" · ");
@@ -266,9 +272,11 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
             <span className="fy-mono fy-ills__sum" data-testid="illustration-headline">{headline}</span>
             <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd, proposal.model.plan)}</span>
             <span className="fy-ills__push" />
-            <Button variant="secondary" className="fy-ills__again" disabled={offline} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
+            <Button variant="secondary" className="fy-ills__again" disabled={disabled} onClick={onAgain} data-testid="illustration-again">Illustrate again</Button>
             <Button variant="secondary" onClick={onClose} data-testid="illustration-close">Close</Button>
           </header>
+          {proposal.coverage !== undefined && <ReferenceCoverage chapter={proposal.coverage} />}
+          {proposal.refreshed === true && <p className="fy-mono fy-ab__card-line" data-testid="illustration-refreshed">References checked · {proposal.refreshedBlocks?.length ?? 0} picture{proposal.refreshedBlocks?.length === 1 ? "" : "s"} changed · review references and price before accepting</p>}
           {ended !== undefined && (
             <p className="fy-mono fy-ab__card-line" data-testid="illustration-ended">
               {ended.state === "stopped" ? "stopped" : "made"} · {ended.made.length} of {ended.total}
@@ -286,7 +294,8 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
                 without={run.without.includes(row.block)}
                 reason={reasons.get(row.block)}
                 slug={slug}
-                disabled={offline}
+                disabled={disabled}
+                refreshed={proposal.refreshedBlocks?.includes(row.block) === true}
                 onSkip={() => onSkip(row.block)}
                 onWithout={() => onWithout(row.block)}
                 onMakeLook={onMakeLook}
@@ -296,10 +305,13 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, onAccept, 
           </div>
           {run.reason !== undefined && <p className="fy-mono fy-ch__who-where--warn" data-testid="illustration-refused">{run.reason}</p>}
           <footer className="fy-ills__foot">
+            <div className="fy-ills__review-actions">
             <Button variant="ghost" className="fy-ills__read" onClick={onLook} data-testid="illustration-look">Review chapter looks</Button>
+            {onRefresh !== undefined && <Button variant="secondary" disabled={disabled} onClick={onRefresh} data-testid="illustration-refresh">{run.refreshing ? "Checking…" : "Refresh references"}</Button>}
+            </div>
             <span className="fy-ills__push" />
-            <Button variant="ghost" onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
-            <Button variant="primary" disabled={offline || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
+            <Button variant="ghost" disabled={run.refreshing} onClick={onDiscard} data-testid="illustration-discard">Discard</Button>
+            <Button variant="primary" disabled={disabled || total.count === 0} onClick={onAccept} data-testid="illustration-accept">
               Accept · {priceLabel(total.microUsd, proposal.model.plan)}
             </Button>
           </footer>
