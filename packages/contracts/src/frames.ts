@@ -55,7 +55,7 @@ import { DomainEventSchema } from "./events.js";
 import { DramaDeliverySchema } from "./audio-drama-edition.js";
 import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
-import { PropIdSchema, PropStateIdSchema } from "./prop.js";
+import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
 import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
@@ -1657,15 +1657,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       propId: PropIdSchema,
       stateId: PropStateIdSchema,
-      selection: z.discriminatedUnion("source", [
-        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
-        z
-          .object({
-            source: z.literal("candidate"),
-            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
-          })
-          .strict(),
-      ]),
+      selection: PropStateSelectionSchema,
       replace: z.boolean().optional(),
     })
     .strict(),

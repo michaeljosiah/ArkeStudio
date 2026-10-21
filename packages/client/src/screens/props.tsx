@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { checkPropName, orderedShots, propSlug, parseMentions, type Prop, type PropState, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
+import { ReferencePickerDialog, worldPickerSources } from "../components/reference-picker.js";
 import { Button, Callout, Input } from "../components/ui.js";
 import { SheetKindNav } from "./world.js";
 import { Plus } from "../components/icons.js";
@@ -15,7 +16,7 @@ import { acceptPropState, addPropState, createProp, importPropStateCandidate } f
  * becomes superseded before it does.
  */
 
-/** The picker belongs to the host, so in the browser there is nothing to open. */
+/** Upload uses the host picker; saved library images are available on every client. */
 function canPickFiles(): boolean {
   return typeof window !== "undefined" && window.arke !== undefined;
 }
@@ -144,6 +145,8 @@ export function PropDetailScreen() {
   const navigate = useNavigate();
   const [stateName, setStateName] = useState("");
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set());
+  const [picker, setPicker] = useState<{ state: PropState; artifacts: WorldBundle["artifacts"] } | null>(null);
+  useEffect(() => { setPicker(null); }, [worldId, propId]);
   const prop = world?.props.find((candidate) => candidate.id === propId) ?? null;
   if (!world || !worldId || !prop) return <p className="fy-mono">No such prop.</p>;
   const cited = citations(world, prop);
@@ -153,7 +156,7 @@ export function PropDetailScreen() {
     (take) => take.kind === "prop-state" && take.prop?.propId === prop.id && !reviewed.has(take.id) && !skipped.has(take.id),
   );
   return (
-    <div data-screen="prop-detail">
+    <div className="fy-prop-detail" data-screen="prop-detail">
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           <button type="button" className="fy-sblink" onClick={() => navigate(`/w/${worldId}/props`)}>
@@ -214,7 +217,7 @@ export function PropDetailScreen() {
             const uses = cited.filter((c) => c.stateId === state.id);
             return (
               <div key={state.id} className="fy-sheetref" data-testid={`prop-state-${state.id}`}>
-                <span className="fy-sbref__thumb" style={{ width: 40, height: 40 }}>
+                <span className="fy-sbref__thumb" style={{ width: 40, height: 40, borderRadius: 6 }}>
                   {path === null ? (
                     <span className="fy-mono">NO REF</span>
                   ) : (
@@ -227,15 +230,14 @@ export function PropDetailScreen() {
                     {uses.length === 0
                       ? "not used yet"
                       : `used by shot ${uses[0]!.shotNumber}, scene ${uses[0]!.sceneNumber}${uses.length > 1 ? ` +${uses.length - 1}` : ""}`}
-                    {state.reference === undefined ? "" : ` · ${state.reference.sourceTakeId ?? state.reference.id}`}
+                    {state.reference === undefined ? "" : ` · accepted ${state.reference.acceptedAt.slice(0, 10)}`}
                   </span>
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canPickFiles()}
-                  title={canPickFiles() ? undefined : "Upload is available in the desktop app"}
-                  onClick={() => importPropStateCandidate(worldId, prop.id, state.id)}
+                  onClick={() => setPicker({ state, artifacts: world.artifacts })}
+                  aria-label={`Choose image for ${state.name}`}
                 >
                   {state.reference === undefined ? "Attach" : "Replace"}
                 </Button>
@@ -243,7 +245,7 @@ export function PropDetailScreen() {
             );
           })}
           <div style={{ display: "flex", gap: 8 }}>
-            <input
+            <Input
               aria-label="New state name"
               placeholder="on-fridge"
               value={stateName}
@@ -263,6 +265,24 @@ export function PropDetailScreen() {
           </div>
         </div>
       </div>
+      {picker && <ReferencePickerDialog open mode="slot" title={`${prop.name} · ${picker.state.name}`}
+        only="image" budget="none" worldSlug={world.meta.slug} model={null} carried={[]}
+        world={worldPickerSources(picker.artifacts, null)} session={[]}
+        confirm={{ label: picker.state.reference ? "Replace reference" : "Use image" }}
+        worldChoices={picker.state.reference ? <div className="fy-sheetref">
+          <span className="fy-sbref__thumb" style={{ width: 40, height: 40, borderRadius: 6 }}><Portrait worldSlug={world.meta.slug} path={referencePath(prop, picker.state)!} label="Current reference" radius={6} /></span>
+          <span className="fy-mono">Currently {picker.state.name} · accepted {picker.state.reference.acceptedAt.slice(0, 10)}</span>
+        </div> : undefined}
+        onChoose={pick => {
+          if (pick.source !== "artifact") return;
+          const artifact = picker.artifacts.find(item => item.id === pick.artifactId);
+          if (!artifact) return;
+          acceptPropState(worldId, prop.id, picker.state.id, { source: "artifact", artifactId: artifact.id,
+            artifactHash: artifact.hash, expectedReferenceId: picker.state.reference?.id ?? null }, picker.state.reference !== undefined);
+          setPicker(null);
+        }}
+        onUpload={canPickFiles() ? () => { importPropStateCandidate(worldId, prop.id, picker.state.id); setPicker(null); } : undefined}
+        onClose={() => setPicker(null)} />}
     </div>
   );
 }

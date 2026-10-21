@@ -13,6 +13,8 @@ import {
   type WorldChangeCandidate,
   type CandidateGroup,
   type WorldChatStoredEvent,
+  type ArkeTargetReadPage,
+  type ArtifactSidecar,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
@@ -161,6 +163,57 @@ describe("retained proposition reads", () => {
     assert.equal((await absent.retrieval.call(absent.mint().token, "get_candidate", args)).receipt.status, "unavailable");
     const switching = await harness({ withIndex: false, drafts: async () => { switching.state.world = "another-world"; return { candidates: [], groups: [] }; } });
     await assert.rejects(switching.retrieval.call(switching.mint().token, "get_candidate", args), LeaseDeniedError);
+  });
+});
+
+describe("bounded inventory reads", () => {
+  it("transfers every large sidecar exactly while keeping cursors and receipts inside bounded replies", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const artifacts: ArtifactSidecar[] = Array.from({ length: 23 }, (_, n) => ({ id: newId("ar"), kind: "image", file: `ledger-${n}.png`,
+      hash: "sha256:0123456789abcdef", origin: { by: "user", importedFrom: ('Harbour\\\"\n\t\u0000 🌊 ' + n).repeat(1100) }, links: [], created: NOW() }));
+    h.bundle.artifacts = artifacts;
+    const chunks = new Map<string, { text: string; next: number }>();
+    let cursor: string | null = null, pages = 0;
+    do {
+      const read = await h.retrieval.call(token, "list_artifacts", { limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = read.result as ArkeTargetReadPage, serialized = JSON.stringify(read, null, 2);
+      assert.ok(serialized.length < 16_000, `Reply was ${serialized.length} characters`);
+      assert.ok(serialized.indexOf('"nextCursor"') < serialized.indexOf('"items"'));
+      assert.equal(read.receipt.complete, page.nextCursor === null);
+      for (const row of page.items as { kind: string; recordKey: string; part: number; parts: number; text: string }[]) {
+        assert.equal(row.kind, "record-chunk");
+        const previous = chunks.get(row.recordKey) ?? { text: "", next: 1 };
+        assert.equal(row.part, previous.next); assert.ok(row.part <= row.parts);
+        chunks.set(row.recordKey, { text: previous.text + row.text, next: row.part + 1 });
+      }
+      cursor = page.nextCursor; pages++;
+    } while (cursor);
+    assert.ok(pages > artifacts.length);
+    assert.deepEqual([...chunks.values()].map(chunk => JSON.parse(chunk.text)), [...artifacts].sort((a, b) => a.id.localeCompare(b.id)));
+  });
+
+  it("reads just the named prop or artifact, rejects foreign cursors and fences changes to that record", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const prop = { id: newId("prop"), name: "Ledger", states: Array.from({ length: 90 }, (_, n) => ({ id: newId("pst"), name: `State ${n}` })) };
+    h.bundle.props = [prop, { id: newId("prop"), name: "Lantern", states: [] }];
+    const args = { propId: prop.id, limit: 1 };
+    const first = await h.retrieval.call(token, "list_references", args), cursor = (first.result as ArkeTargetReadPage).nextCursor!;
+    assert.deepEqual(first.receipt.target, { requirement: "references", id: `prop:${prop.id}` });
+    assert.equal(first.receipt.complete, false);
+    await assert.rejects(h.retrieval.call(token, "list_references", { ...args, propId: h.bundle.props[1]!.id, cursor }), /different target/);
+    await assert.rejects(h.retrieval.call(token, "list_references", { cursor }), /different target/);
+    h.bundle.props[1]!.name = "Unrelated change";
+    assert.equal((await h.retrieval.call(token, "list_references", { ...args, cursor })).receipt.observedRevisionOrDigest, first.receipt.observedRevisionOrDigest);
+    prop.name = "Changed ledger";
+    await assert.rejects(h.retrieval.call(token, "list_references", { ...args, cursor }), /changed while it was being read/);
+    const artifact: ArtifactSidecar = { id: newId("ar"), kind: "image", file: "ledger.png", hash: "sha256:0123456789abcdef", origin: { by: "user" }, links: [], created: NOW() };
+    h.bundle.artifacts = [artifact, { ...artifact, id: newId("ar"), file: "other.png" }];
+    const read = await h.retrieval.call(token, "list_artifacts", { artifactId: artifact.id });
+    assert.deepEqual((read.result as ArkeTargetReadPage).items, [artifact]);
+    assert.deepEqual(read.receipt.target, { requirement: "artifacts", id: `artifact:${artifact.id}` });
+    assert.equal(read.receipt.complete, true);
+    const absent = await h.retrieval.call(token, "list_artifacts", { artifactId: newId("ar") });
+    assert.equal(absent.receipt.status, "empty"); assert.equal(absent.receipt.complete, true);
   });
 });
 

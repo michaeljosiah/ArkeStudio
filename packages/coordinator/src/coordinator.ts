@@ -18914,16 +18914,20 @@ export class Coordinator {
       case "accept-prop-state": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        // A refusal is the location view's silence: nothing changed, and the candidate is still
-        // on the screen to accept once the reason is dealt with. The client confirms a
-        // replacement before sending `replace`, as it confirms a colliding view name.
-        await acceptPropStateReference(store, {
-          propId: msg.propId,
-          stateId: msg.stateId,
-          selection: msg.selection,
-          ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
-        }).catch(() => {});
-        await this.refreshWorldSnapshot(msg.worldId);
+        // Library choices include the image hash and reference shown at selection time. A
+        // stale selection leaves the state untouched and uses the shared refusal notification.
+        try {
+          const result = await acceptPropStateReference(store, {
+            propId: msg.propId,
+            stateId: msg.stateId,
+            selection: msg.selection,
+            ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
+          });
+          if (result.status === "refused") throw new Error(result.reason);
+        } catch (error) {
+          this.emit({ type: "command.failed", at: this.nowIso(), command: msg.kind, requestId: null, reason: describeCoordinatorError(error) });
+        }
+        this.refreshIfStillOpen(store);
         return;
       }
       case "plan-table-read":

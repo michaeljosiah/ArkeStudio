@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, type Prop } from "@arke-studio/contracts";
-import { acceptPropStateReference, createProp } from "../../src/references/props.js";
+import { acceptPropStateReference, addPropState, createProp } from "../../src/references/props.js";
+import { fileArtifact, retireArtifact } from "../../src/artifacts/filing.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { createSheetFromSentence } from "../../src/sheets/authoring.js";
@@ -15,6 +17,59 @@ import { MarkdownFile } from "../../src/world/text-files.js";
 
 /** The prop-state accept path (design turn 105, `referenceOwner: accepted-state-record`; issue 535). */
 describe("prop-state references", () => {
+  it("accepts a pinned library image, explicitly replaces it, and reopens with both immutable takes", async () => {
+    const dir = await makeTempWorld(), store = await WorldStore.open(dir);
+    closeOnCleanup(() => store.close());
+    const prop = (await createProp(store, "Library ledger"))!, state = (await addPropState(store, prop.id, "Closed"))!;
+    const source = join(dir, "ledger.png"), bytes = encodePng(solidImage(4, 4, [12, 34, 56, 255]));
+    await writeFile(source, bytes); await fileArtifact(store, { sourcePath: source });
+    const artifact = store.getBundle().artifacts.find(item => item.file === "ledger.png")!;
+    const selection = { source: "artifact" as const, artifactId: artifact.id, artifactHash: artifact.hash, expectedReferenceId: null };
+    const first = await acceptPropStateReference(store, { propId: prop.id, stateId: state.id, selection });
+    assert.equal(first.status, "accepted", JSON.stringify(first));
+    const reference = store.getBundle().props.find(item => item.id === prop.id)!.states[0]!.reference!;
+    assert.deepEqual(await readFile(join(dir, "references", prop.id, reference.file)), Buffer.from(bytes));
+    assert.deepEqual(store.getBundle().artifacts.find(item => item.id === artifact.id)!.links, [prop.id]);
+    assert.equal((await acceptPropStateReference(store, { propId: prop.id, stateId: state.id, selection })).status, "refused");
+    assert.equal((await acceptPropStateReference(store, { propId: prop.id, stateId: state.id, selection, replace: true })).status, "refused", "a stale empty selection cannot overwrite the new reference");
+    assert.equal(store.getBundle().referenceTakes.length, 1, "refusals did not copy another take");
+    const replacement = await acceptPropStateReference(store, { propId: prop.id, stateId: state.id, replace: true,
+      selection: { ...selection, expectedReferenceId: reference.id } });
+    assert.equal(replacement.status, "accepted");
+    await store.close();
+    const reopened = await WorldStore.open(dir); closeOnCleanup(() => reopened.close());
+    assert.equal(reopened.getBundle().referenceTakes.length, 2);
+    assert.equal(reopened.getBundle().referenceReviews.filter(review => review.decision === "accept").length, 2);
+    assert.notEqual(reopened.getBundle().props.find(item => item.id === prop.id)!.states[0]!.reference!.id, reference.id);
+    assert.deepEqual(await readFile(join(dir, "references", prop.id, reference.file)), Buffer.from(bytes), "old accepted bytes remain available");
+  });
+
+  it("refuses changed, retired, superseded and non-image library sources before creating a take", async () => {
+    const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
+    const prop = (await createProp(store, "Guarded ledger"))!, state = (await addPropState(store, prop.id, "Closed"))!;
+    const source = join(dir, "ledger.png"), bytes = encodePng(solidImage(4, 4, [12, 34, 56, 255]));
+    await writeFile(source, bytes); await fileArtifact(store, { sourcePath: source });
+    const artifact = store.getBundle().artifacts.find(item => item.file === "ledger.png")!;
+    const selection = { source: "artifact" as const, artifactId: artifact.id, artifactHash: artifact.hash, expectedReferenceId: null };
+    const accept = (chosen = selection) => acceptPropStateReference(store, { propId: prop.id, stateId: state.id, selection: chosen });
+    assert.equal((await accept({ ...selection, artifactHash: "sha256:0000000000000000" })).status, "refused");
+    const actualFile = join(dir, "artifacts", artifact.file);
+    await store.gateOp(() => writeFile(actualFile, encodePng(solidImage(4, 4, [90, 80, 70, 255]))));
+    assert.equal((await accept()).status, "refused", "the immutable source hash is checked against bytes");
+    await store.gateOp(() => writeFile(actualFile, bytes));
+    const nextSource = join(dir, "replacement.png"); await writeFile(nextSource, encodePng(solidImage(4, 4, [90, 80, 70, 255])));
+    await fileArtifact(store, { sourcePath: nextSource, supersedes: artifact.id });
+    assert.equal((await accept()).status, "refused", "superseded images are not selectable");
+    const next = store.getBundle().artifacts.find(item => item.file === "replacement.png")!;
+    await retireArtifact(store, next.id);
+    assert.equal((await accept({ ...selection, artifactId: next.id, artifactHash: next.hash })).status, "refused");
+    const textFile = join(dir, "notes.txt"); await writeFile(textFile, "A ledger is not an image."); await fileArtifact(store, { sourcePath: textFile });
+    const text = store.getBundle().artifacts.find(item => item.file === "notes.txt")!;
+    assert.equal((await accept({ ...selection, artifactId: text.id, artifactHash: text.hash })).status, "refused");
+    assert.equal(store.getBundle().referenceTakes.length, 0);
+    assert.equal(store.getBundle().props.find(item => item.id === prop.id)!.states[0]!.reference, undefined);
+  });
+
   it("accepts a candidate through an immutable take, asks before replacing, and keeps the replaced take", async () => {
     const dir = await makeTempWorld();
     const propId = newId("prop");

@@ -7410,7 +7410,7 @@ export function acceptPropState(
   worldId: string,
   propId: string,
   stateId: string,
-  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
+  selection: import("@arke-studio/contracts").PropStateSelection,
   replace = false,
 ): void {
   send({ kind: "accept-prop-state", worldId, propId, stateId, selection, ...(replace ? { replace: true } : {}) });
