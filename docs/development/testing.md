@@ -1319,3 +1319,11 @@ provider command. Client `audiobook-export.test.tsx` exercises those interaction
 `publications/story-illustrations.test.ts` reopens the service after moving the entire source
 world away and compares the ready edition and EPUB bytes. Compare the reader sheet against
 master 224d/224h at phone, tablet and desktop widths.
+
+Audiobook connection interruption (#2067): coordinator `test/productions/audiobook-grouped.test.ts`
+covers thrown and durable offline failures in solo/grouped reads, no later provider requests or
+review flags, exact saved-take/part preservation and explicitly confirmed recovery. Run it with
+`test/queue/classify.test.ts` and `test/productions/audiobook-activity.test.ts`; queue retry policy
+and witnessed terminal errors remain separate. Compare the existing turn-206 Activity interruption
+wording at phone, tablet and desktop widths. Synthetic component screenshots do not establish
+native provider recovery; report any controlled live interruption separately.
