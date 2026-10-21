@@ -34,6 +34,19 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("returns an unfamiliar place as visible unlinked evidence through the public suggestion command (#1948)", () =>
+    withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const answer = suggestion(events);
+      assert.equal(answer.refused, undefined);
+      assert.deepEqual(answer.suggestion!.who, [
+        { key: "north salt", name: "North Salt", kind: "place", reference: null, carried: false },
+      ]);
+      assert.equal(enqueued.length, 0, "preparing evidence does not spend on an image");
+    }, { picture: async () => ({
+      frame: "Wide", inFrame: [], place: "North Salt", prompt: "Wide shot of the shelter's enclosed hall and trestle tables.",
+    }) }));
+
   it("retains checks against their exact prompt when an edited picture is made and reopened (#2011)", () => {
     const prompt = "Detail shot of Maren's hand on the ledger.";
     return withHarness(async ({ events, send, store, schemaVersion, enqueued }) => {
