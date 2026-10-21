@@ -76,6 +76,14 @@ export function speechStretches(pcm: SpeechPcm): Array<{ start: number; end: num
   return out;
 }
 
+/** A local service failure says nothing about the words in a successful voice request. */
+export class TranscriptionUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Local transcription failed.", { cause });
+    this.name = "TranscriptionUnavailableError";
+  }
+}
+
 /** Each stretch transcribed and its words spread across it by their length. */
 export async function timeWords(
   wav: Uint8Array,
@@ -88,11 +96,13 @@ export async function timeWords(
     if (signal?.aborted) throw new Error("stopped");
     // A little of the pause either side, so whisper hears the word's onset and release.
     const piece = sliceSpeech(pcm, stretch.start - 0.05, stretch.end + 0.05);
-    let text = "";
+    let text: string;
     try {
       text = await transcribe(writeSpeechWav(piece), "audio/wav");
-    } catch {
-      // Heard as nothing: the words check says so for the block this stretch belongs to.
+    } catch (error) {
+      // Treating an unavailable transcriber as silence flags good speech and discards the
+      // received request. Keep it for another local check instead of buying it again (#1932).
+      throw new TranscriptionUnavailableError(error);
     }
     const heard = text.trim().split(/\s+/).filter((word) => word !== "");
     const weight = heard.reduce((sum, word) => sum + word.length, 0);

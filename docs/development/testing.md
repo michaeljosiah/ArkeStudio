@@ -1175,7 +1175,10 @@ capturing bridge; no installed app, world or paid provider is involved.
 Chapter narration Activity (turn 206, #1684) has focused contracts identity/cost tests,
 coordinator `test/productions/audiobook-activity.test.ts` for restart, corruption and stop
 ordering, and `audiobook-grouped.test.ts` for provider success followed by local alignment
-and durable block writes. Client `activity-panel.test.tsx` and
+and durable block writes. The grouped suite also covers local transcription failure, preserved
+received WAVs across reopen, retry without synthesis and previously completed groups;
+`test/voice/transcription-rate.test.ts` distinguishes an HTTP 503 from a successful empty
+transcript (#1932). Client `activity-panel.test.tsx` and
 `queue-toaster-lifetime.test.tsx` cover one row and bounded receipts. Run
 `node scripts/smoke-audiobook-activity.mjs` with Chrome (`ARKE_CHROME` overrides its path)
 for synthetic screenshots and overflow/action measurements at 1400, 390 and 320 px.

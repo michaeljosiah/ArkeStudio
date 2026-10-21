@@ -46,7 +46,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
-import type { TimedWord } from "../voice/word-times.js";
+import { TranscriptionUnavailableError, type TimedWord } from "../voice/word-times.js";
 import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
@@ -1193,8 +1193,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         } catch (err) {
           if (signal.aborted) break;
           const message = err instanceof Error ? err.message : String(err);
-          if (err instanceof RecordWriteError) {
-            await finish("failed", { reason: message, record });
+          if (err instanceof RecordWriteError || err instanceof TranscriptionUnavailableError) {
+            // A failed local check leaves this successful request intact and stops the book
+            // before more speech is bought. The next read finds the same durable group job.
+            const reason = err instanceof TranscriptionUnavailableError
+              ? `${message} Received audio is kept. Check Voxa in Settings → Providers, then ${deps.only === undefined ? "read the remaining blocks to retry" : "retry the same read"}.`
+              : message;
+            await finish("failed", { reason, record });
             return;
           }
           try {

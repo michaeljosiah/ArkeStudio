@@ -377,12 +377,21 @@ const GROUPABLE: ManifestModel = (() => {
 const READER: AudiobookReader = { provider: "google", model: GROUPABLE.id, voiceId: "Kore", label: "Kore" };
 const KORE: VoiceCandidate = { provider: "google", model: GROUPABLE.id, voiceId: "Kore", label: "Kore", attributes: [], local: false, canClone: false };
 
-async function world(): Promise<{ store: WorldStore; close: () => Promise<void>; worldDir: string }> {
+async function world(body?: string): Promise<{ store: WorldStore; close: () => Promise<void>; reopen: () => Promise<WorldStore>; worldDir: string }> {
   const { root, worldDir } = await makeTempRoot();
-  const provider = new FsWorldProvider(root, { clock: () => "2026-10-03T09:00:00.000Z" });
+  if (body !== undefined) {
+    const file = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+    const source = await readFile(file, "utf8");
+    await writeFile(file, source.replace(/(---[\s\S]*?\r?\n---)[\s\S]*/, "$1\n\n" + body));
+  }
+  let provider = new FsWorldProvider(root, { clock: () => "2026-10-03T09:00:00.000Z" });
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore!()!;
-  return { store, worldDir, close: () => provider.close() };
+  return { store, worldDir, close: () => provider.close(), reopen: async () => {
+    provider = new FsWorldProvider(root, { clock: () => "2026-10-03T09:00:00.000Z" });
+    await provider.loadWorld(WORLD_ID);
+    return provider.openStore!()!;
+  } };
 }
 
 interface RunHarness {
@@ -394,7 +403,7 @@ interface RunHarness {
   run: (extra?: { confirmationToken?: string; only?: string[] }) => Promise<void>;
 }
 
-async function harness(store: WorldStore, opts: { heardFor?: (text: string) => string; fail?: string; failAfter?: number; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
+async function harness(store: WorldStore, opts: { transcribe?: (text: string, request: number) => Promise<string>; heardFor?: (text: string) => string; fail?: string; failAfter?: number; dailyQuota?: () => DailySpeechQuota | null; actual?: number; tail?: number; model?: ManifestModel } = {}): Promise<RunHarness> {
   const reader = opts.model === undefined ? READER : { provider: opts.model.provider, model: opts.model.id, voiceId: "calen", label: "Calen" };
   const plan = await planAudiobook(store, LEDGER, "neap", { narrator: reader });
   const textOf = new Map(plan.blocks.map((planned) => [planned.block.key, planned.block.text.replace(/\s+/g, " ").trim()]));
@@ -444,7 +453,10 @@ async function harness(store: WorldStore, opts: { heardFor?: (text: string) => s
       wordTimes: (wav) => {
         assert.equal(activity.at(-1)?.phase, "aligning", "provider success stays live while local alignment works");
         let call = 0;
-        return timeWords(wav, async () => heard[call++] ?? "");
+        return timeWords(wav, async () => {
+          const text = heard[call++] ?? "";
+          return opts.transcribe === undefined ? text : opts.transcribe(text, sent.length);
+        });
       },
       emit: (event) => events.push(event),
       now: () => "2026-10-03T09:00:00.000Z",
@@ -680,6 +692,83 @@ describe("a chapter read grouped (design turn 185)", () => {
         emit: e => events.push(e), now: () => "2026-10-03T09:00:00.000Z" });
       assert.deepEqual(events.map(e => e.type), ["started", "finished"]);
       assert.match((events[1] as Extract<AudiobookBookEvent, { type: "finished" }>).reason ?? "", /100 a day · resets/);
+    } finally { await w.close(); }
+  });
+
+  it("keeps a successfully received group through a local outage and reopens it without synthesis", async () => {
+    const w = await world();
+    try {
+      let calls = 0;
+      const h = await harness(w.store, { transcribe: async text => {
+        if (++calls === 2) throw new Error("Voxa /stt HTTP 503");
+        return text;
+      } });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 1);
+      assert.equal(calls, 2, "the first failed stretch stops alignment");
+      assert.equal(finished(h.events)?.outcome, "failed");
+      assert.match(finished(h.events)?.reason ?? "", /Local transcription failed.*Received audio is kept/);
+      assert.equal(h.activity.at(-1)?.phase, "interrupted");
+      assert.equal(h.activity.at(-2)?.phase, "aligning");
+      const before = await planAudiobook(w.store, LEDGER, "neap", { narrator: READER });
+      assert.ok(before.record === null || (before.record !== "unreadable" && Object.keys(before.record.flags).length === 0));
+      assert.ok(before.blocks.every(block => block.state === "not made"));
+      const job = [...h.jobs.values()][0]!;
+      const source = await readFile(join(w.worldDir, job.landedFiles![0]!));
+      await w.close();
+      const reopened = await w.reopen();
+      try {
+        assert.deepEqual(await readFile(join(w.worldDir, job.landedFiles![0]!)), source);
+        const retry = await harness(reopened);
+        retry.jobs.set(job.id, job);
+        retry.seedTranscript(before.blocks.map(block => block.block.text.replace(/\s+/g, " ").trim()));
+        await retry.run();
+        await retry.run({ confirmationToken: priced(retry.events)!.confirmationToken });
+        assert.equal(retry.sent.length, 0, "the retry uses the successful durable job, never the synthesiser");
+        const after = await recordOf(w.worldDir);
+        assert.equal(Object.keys(after.takes).length, before.blocks.length);
+        assert.deepEqual(after.flags, {});
+        assert.ok(Object.values(after.takes).every(take => take.grouped?.request === job.id));
+        assert.ok(retry.activity.some(update => update.job?.id === job.id && update.job.reused));
+        assert.equal(finished(retry.events)?.outcome, "read");
+      } finally { await reopened.close(); }
+    } finally { await w.close(); }
+  });
+
+  it("retains earlier completed groups and retries only received speech while quota blocks later requests", async () => {
+    const body = Array.from({ length: 12 }, (_, i) => `Maren opened ledger number ${i + 1} and read the tide marks beneath the harbour bell. She waited for the water.`).join("\n\n");
+    const w = await world(body);
+    try {
+      const model = { ...GROUPABLE, limits: { ...GROUPABLE.limits, maxPromptChars: 350 } };
+      let unavailable = true, quotaReached = false;
+      const h = await harness(w.store, { model, dailyQuota: () => quotaReached ? { model: model.id, limit: 100, resetsAt: "2026-10-04T07:00:01.000Z", observedAt: "2026-10-03T09:00:00.000Z", reached: true } : null,
+        transcribe: async (text, request) => {
+          if (unavailable && request === 3) throw new Error("Voxa /stt HTTP 503");
+          return text;
+        } });
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 3, "later groups are never submitted after the local outage");
+      const before = await recordOf(w.worldDir);
+      assert.ok(Object.values(before.takes).some(take => take.grouped !== undefined), "a whole earlier group already completed");
+      assert.deepEqual(before.flags, {});
+      const job = [...h.jobs.values()].at(-1)!;
+      const heldKeys = job.params.blocks as string[];
+      assert.ok(heldKeys.length >= 2);
+      const source = await readFile(join(w.worldDir, job.landedFiles![0]!));
+      unavailable = false; quotaReached = true;
+      h.events.length = 0;
+      await h.run();
+      await h.run({ confirmationToken: priced(h.events)!.confirmationToken });
+      assert.equal(h.sent.length, 3, "recovery files received speech without buying any more");
+      const after = await recordOf(w.worldDir);
+      for (const [key, take] of Object.entries(before.takes)) assert.deepEqual(after.takes[key], take);
+      for (const key of heldKeys) assert.equal(after.takes[key]?.grouped?.request, job.id);
+      assert.deepEqual(after.flags, {});
+      assert.equal(Object.keys(after.takes).length, Object.keys(before.takes).length + heldKeys.length);
+      assert.ok(source.length > 44);
+      assert.match(finished(h.events)?.reason ?? "", /100 a day/, "unbought later groups stay pending for quota");
     } finally { await w.close(); }
   });
 
