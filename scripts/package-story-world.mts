@@ -17,9 +17,10 @@ const [sourceArg, outputArg, configArg] = process.argv.slice(2);
 if (!sourceArg || !outputArg || !configArg) throw Error("Usage: node --import tsx scripts/package-story-world.mts SOURCE NEW_OUTPUT CONFIG");
 const source = path.resolve(sourceArg), output = path.resolve(outputArg);
 if (output === source || output.startsWith(source + path.sep)) throw Error("Output must be outside the source world");
+const config = JSON.parse(await fs.readFile(configArg, "utf8"));
+if (typeof config.completion !== "string" || !config.completion.trim()) throw Error("Release config must state completion");
 await fs.mkdir(output); // Refuse an existing release rather than replacing it.
 const target = path.join(output, "the-undersong"); await fs.mkdir(target);
-const config = JSON.parse(await fs.readFile(configArg, "utf8"));
 const selected = new Set<string>(config.productions);
 const excluded = new Set([...WORLD_EXPORT_EXCLUDED, ".conversations", ".proposals", ".sessions", ".staging", ".commit", ".index"]);
 const exists = async (p: string) => fs.access(p).then(() => true, () => false);
@@ -100,7 +101,7 @@ for (const file of (await walk(target)).sort()) {
   const digest = createHash("sha256"); for await (const chunk of createReadStream(file)) digest.update(chunk);
   files.push({ path: path.relative(target, file).replaceAll("\\", "/"), bytes: (await fs.stat(file)).size, sha256: digest.digest("hex") });
 }
-const manifest = { version: config.version, completion: "unfinished-audiobook-and-video", summary: config.status, files };
+const manifest = { version: config.version, completion: config.completion, summary: config.status, files };
 await fs.writeFile(path.join(target, "story-package.json"), JSON.stringify(manifest, null, 2));
 const archive = path.join(output, config.archiveName), zip = new ZipFile();
 const writing = pipeline(zip.outputStream, createWriteStream(archive, { flags: "wx" }));
