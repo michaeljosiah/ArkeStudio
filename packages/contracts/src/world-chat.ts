@@ -3130,7 +3130,7 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person. Prefer a concise answer, but preserve requested long-form prose in full (hard limit ${TURN_RESULT_BOUNDS.reply} characters; the client divides long replies into readable parts). A reply is conversation, not a saved chapter: when preparing a chapter edit, put its complete manuscript in the production-chapter action's changes.body and use reply for a short introduction. Never shorten a manuscript to fit the conversation display or claim a prepared action is committed. candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
+reply is plain prose. Be concise, but retain requested long-form prose in full (hard limit ${TURN_RESULT_BOUNDS.reply} characters; the client pages long replies). A reply does not save a chapter: put its complete manuscript in the production-chapter action's changes.body, with a short reply introduction. Never shorten a manuscript for display or claim a prepared action is committed. Limits: candidateOperations ${TURN_RESULT_BOUNDS.candidateOperations}, groupOperations ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits ${BIBLE_EDIT_BOUNDS.edits}, editorRequests ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits ${SCENE_EDIT_BOUNDS.perTurn}, actions ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads). Use [] for unused lists.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -3159,7 +3159,7 @@ candidateId and expectedRevision come from "What you have already understood" �
 
 ### The payload each classification requires
 
-Each classification below shows one complete example, then every field its draft accepts — the example is one instance, not the limit of what you may send. A field marked optional may be left out; one marked "or null to clear it" may be set to null to remove what is there. No other field is accepted, and one unknown field rejects the whole turn.
+Each classification shows a complete example and every accepted draft field. Examples do not limit that catalogue. Omit optional fields; "or null to clear it" permits removal with null. One unknown field rejects the whole turn.
 
 - ${draftPayloadLine("canon.create")}
   fields: ${draftFieldCatalogue("canon.create")}
@@ -3178,7 +3178,7 @@ ${sheetSectionRule()}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}
 - ${draftPayloadLine("art-direction.change")}
-  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one. First call get_art_direction through arke-world and put its final complete checkReceiptId in checkReceiptIds; without that complete fenced read this whole replacement is refused.
+  Use this — never canon.create — to change the look used for images; a Canon style entry changes nothing anyone can see. description replaces the whole look. First read get_art_direction through arke-world and cite its final complete checkReceiptId; a partial or unfenced read cannot authorize replacement.
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   Use this for media the person could generate. medium is image or video. Use concept-image for a free image, concept-video for a free video, and shot-video when the target is a shot. The Studio proposes the brief; it never claims the media already exists.
@@ -3206,7 +3206,7 @@ ${sheetSectionRule()}
 
 ### Evidence
 
-EVERY candidate must cite at least one message quotation with "purpose": "intent" — the words in which they asked for it. That one is required and no other kind substitutes for it: a candidate without it is rejected now, and would be dropped at wrap-up even if it were not. Anything else is supporting evidence, added beside it.
+EVERY candidate needs a message quotation with "purpose": "intent" citing the user's ask; no other kind substitutes. Missing intent rejects the candidate and prevents wrap-up acceptance. Other evidence only supports it.
 
 The required intent quotation:
 ${JSON.stringify(exampleMessageEvidence)}
@@ -3225,9 +3225,9 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 ### Bible edits
 
-The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, grounded answers do not come from it, and a candidate may never cite it as evidence. Other generation paths may use it only as non-binding creative intent.
+The bible is the author's thinking, shown under "The author's bible" (or marked absent). It is NOT canon: nothing in it is settled, it cannot ground answers or candidate evidence. Other generation paths may use it only as non-binding creative intent.
 
-You may propose edits to it. Each edit is shown on a permission card and writes only after the person's Approve; approval cuts a version and can be undone. This is not a licence to tidy. Propose an edit when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
+Each edit is shown on a permission card and writes only after Approve, creating an undoable version. Propose one only when asked or when recording their words is plainly intended. Do not tidy or routinely append: the whole bible is loaded each turn, so growth costs them.
 
 op is one of set-section | append-to-section | remove-section | replace-document.
 
@@ -3237,7 +3237,7 @@ op is one of set-section | append-to-section | remove-section | replace-document
 - replace-document rewrites the whole thing: {"op": "replace-document", "text": "..."}
   Before replace-document, page get_bible through arke-world to complete=true; a partial Bible read cannot authorize a whole replacement.
 
-heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
+heading matches \`## \` headings, ignoring case and surrounding space. Missing headings reject append-to-section or remove-section and the whole turn; use set-section for a new heading. Prefer section edits over replace-document to preserve untouched prose.
 
 Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
 

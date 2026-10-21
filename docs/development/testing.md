@@ -1,5 +1,16 @@
 # Running and validating changes
 
+Baseline regression checks (#2079) use client `test/art-direction-step.test.tsx` and
+`test/one-register.test.tsx`, contracts `test/world-chat-shape.test.ts`, and coordinator
+`test/productions/audiobook-video.test.ts` / `test/world/store.test.ts`. Keep empty and accepted
+location fixtures distinct; assert visible cast status without forbidding extra attributes.
+Video-cache coverage needs two fully read manuscript chapters and an incomplete one, verifies
+actual encode calls, then renders again without another encode. An outline-only fixture is not
+a narrated chapter. Future-schema refusal must use the current supported version plus one and
+preserve every world file. Keep the shape guide below its existing bound with all schema-owned
+examples, typed fields, receipt rules and approval requirements intact. Run the full affected
+files and package typechecks, and inspect Windows and Linux CI results.
+
 Chapter authoring freshness (#2065) uses coordinator `test/world-chat/retrieval.test.ts`,
 `actions.test.ts` and `chapter-brief.test.ts`. Read the complete `list_chapters` plan scope,
 then advance another chapter's narration and approve a status-only edit. The manuscript must

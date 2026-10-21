@@ -9,7 +9,7 @@ import { tempDir } from "../tmp.js";
 import { WorldLockedError } from "../../src/world/lock.js";
 import { CrashSignal, Committer } from "../../src/world/commit.js";
 import { initialBible } from "../../src/world/bible.js";
-import { WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
+import { SUPPORTED_SCHEMA_VERSION, WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
 import { deleteScanState, WorldStore } from "../../src/world/store.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
@@ -777,13 +777,22 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await cp(FIXTURE_WORLD, worldDir, { recursive: true });
     const metaPath = join(worldDir, "world.json");
     const meta = JSON.parse(await readFile(metaPath, "utf8")) as Record<string, unknown>;
-    meta["schemaVersion"] = 99;
+    meta["schemaVersion"] = SUPPORTED_SCHEMA_VERSION + 1;
     const raw = JSON.stringify(meta, null, 2);
     await writeFile(metaPath, raw, "utf8");
+    const snapshot = async (folder: string): Promise<unknown[]> => {
+      const entries = await fs.readdir(folder, { withFileTypes: true });
+      return Promise.all(entries.sort((a, b) => a.name.localeCompare(b.name)).map(async (entry) => [
+        entry.name, entry.isDirectory() ? await snapshot(join(folder, entry.name)) : sha256(await readFile(join(folder, entry.name))),
+      ]));
+    };
+    const before = await snapshot(worldDir);
 
-    await assert.rejects(() => readWorldMeta(worldDir), WorldOpenError);
-    await assert.rejects(() => WorldStore.open(worldDir, { clock: CLOCK }), WorldOpenError);
+    const newer = (error: unknown) => error instanceof WorldOpenError && error.reason === "schema-newer";
+    await assert.rejects(() => readWorldMeta(worldDir), newer);
+    await assert.rejects(() => WorldStore.open(worldDir, { clock: CLOCK }), newer);
     assert.equal(await readFile(metaPath, "utf8"), raw, "the world was not modified");
+    assert.deepEqual(await snapshot(worldDir), before, "no world file was created, removed or rewritten");
   });
 
   it("contains no absolute path in any world file (R-24)", async () => {
