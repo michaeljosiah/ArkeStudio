@@ -34,7 +34,7 @@ import {
 } from "./commit.js";
 import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
-import { scanWorld, type ScanResult } from "./scan.js";
+import { readWorldMeta, scanWorld, type ScanResult } from "./scan.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 import { WorldWatcher } from "./watcher.js";
 
@@ -131,6 +131,9 @@ export class WorldStore {
       onProgress?: (progress: WorldStoreOpenProgress) => void;
     } = {},
   ): Promise<WorldStore> {
+    // Refuse a newer world before even claiming its lock (R-25). world.json is replaced
+    // atomically, so an interrupted supported commit leaves readable old or new metadata.
+    await readWorldMeta(dir);
     const committer = new Committer(dir, opts.clock, async () => {
       if (!lock) throw new Error("world is read-only");
       await lock.assertOwned();
@@ -139,8 +142,8 @@ export class WorldStore {
     /*
      * Ownership first, then recovery.
      *
-     * An interrupted commit must resolve before anything reads (R-15), but recovery is not a
-     * read: it rolls a `planning` journal back or a `committing` journal forward, renaming live
+     * After metadata admission, an interrupted commit must resolve before scanning (R-15), but
+     * recovery is not a read: it rolls a `planning` journal back or a `committing` journal forward, renaming live
      * files. Running it before the lock meant a second instance resolved a journal that the
      * world's actual owner was in the middle of writing — the one thing the lock exists to
      * prevent, done by the code that runs before the lock is taken.
@@ -159,6 +162,9 @@ export class WorldStore {
     let pending: PendingCommit[] = [];
     let recoveredPerformances: string[] = [];
     try {
+      // Another writer could have advanced the schema while we were acquiring ownership.
+      // Recheck before recovery, which can rename live files and remove pending journals.
+      if (lock) await readWorldMeta(dir);
       if (opts.readOnly) pending = await committer.pendingRecovery();
       else { await committer.recover(); await lock!.assertOwned(); recoveredPerformances = await recoverPerformanceStorage(dir); }
       // Read before the scan rather than after it, which changes nothing — recovery has already
