@@ -109,6 +109,33 @@ function landed(requestId: string, file = ".cache/voice/reply.wav"): DomainEvent
 }
 
 describe("Listen on every chat's replies", () => {
+  it("pages a long reply while Copy and Listen retain the complete durable message", async () => {
+    const state = chatArtifactsFixture();
+    const first = "# Warning slip\n\n" + "Maren read the warning.\n\n".repeat(200);
+    const second = "# Slack water\n\n" + "The warning remained.\n\n".repeat(200);
+    const text = first + second;
+    state.worldChat!.messages[1]!.text = text;
+    let copied = "";
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (value: string) => { copied = value; } } } });
+    const container = await worldChat(state);
+    const studio = turns(container).find(turn => turn.classList.contains("fy-chat__turn--studio"))!;
+    const pages = studio.querySelector('[aria-label="Reply parts"]')!;
+    const next = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Next")!;
+    const previous = [...pages.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Previous")!;
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, first);
+    assert.equal(previous.disabled, true);
+    await click(next);
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, second);
+    assert.equal(next.disabled, true);
+    await click([...studio.querySelectorAll<HTMLButtonElement>(".fy-replyacts__btn")].find(button => button.textContent === "Copy")!);
+    assert.equal(copied, text);
+    await click(listenIn(studio));
+    assert.deepEqual(reads()[0]!.source, { of: "reply", conversationId: CHAT_ID, messageId: state.worldChat!.messages[1]!.id });
+    await click(previous);
+    assert.equal(studio.querySelector(".fy-chat__reply-part")?.textContent, first);
+    assert.equal(sent.some(message => message.kind === "conversation-action-decide"), false);
+  });
+
   it("World Chat on a desktop: Listen under each of Arke's replies, never the author's, read by address", async () => {
     const state = chatArtifactsFixture();
     const container = await worldChat(state);
