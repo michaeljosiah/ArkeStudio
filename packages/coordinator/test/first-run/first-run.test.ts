@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,7 @@ import { ProposalManager } from "../../src/gate/proposals.js";
 import { stageCanonEntry } from "../../src/canon/authoring.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
+import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import type { ClientState } from "@arke-studio/contracts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -84,11 +85,14 @@ describe("newer-schema refusal (R-14, D8, §3.2)", () => {
     const dir = await makeTempWorld();
     const worldJsonPath = join(dir, "world.json");
     const meta = JSON.parse(await readFile(worldJsonPath, "utf8")) as { schemaVersion: number };
-    meta.schemaVersion = 99;
+    meta.schemaVersion = SUPPORTED_SCHEMA_VERSION + 1;
     await writeFile(worldJsonPath, JSON.stringify(meta, null, 2) + "\n", "utf8");
     const before = createHash("sha256").update(await readFile(worldJsonPath)).digest("hex");
 
-    await assert.rejects(() => WorldStore.open(dir, {}), /schema/i, "declined rather than helpfully damaged");
+    await assert.rejects(async () => {
+      const unexpectedlyOpened = await WorldStore.open(dir, {});
+      await unexpectedlyOpened.close();
+    }, /schema/i, "declined rather than helpfully damaged");
 
     const after = createHash("sha256").update(await readFile(worldJsonPath)).digest("hex");
     assert.equal(after, before, "refused UNMODIFIED — hashed before and after (D8)");
@@ -162,20 +166,32 @@ describe("the licence gate (R-9, D5, §3.2)", () => {
       resolve(here, "../../../../apps/desktop/scripts/runtime-support.mjs"),
       join(fakeRepo, "apps", "desktop", "scripts", "runtime-support.mjs"),
     );
-    await writeFile(
-      join(fakeRepo, "THIRD-PARTY-NOTICES.md"),
-      "# notices\nbetter-sqlite3 Electron SQLite Geist\n", // ffmpeg row deliberately absent
-    );
-    assert.throws(
-      () => execFileSync("node", [join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs")], { encoding: "utf8" }),
-      /Command failed|licence gate/i,
-      "a component with no recorded obligation cannot ship (D5)",
-    );
-    assert.throws(
-      () => execFileSync("node", [join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs"), "--require-runtimes"], { encoding: "utf8" }),
-      /required|runtime|licence gate/i,
-      "an installer cannot be built without both architecture runtimes",
-    );
+    // Preserve the rest of the real gate's inputs. A missing compiler file used to throw before
+    // the notice/runtime checks, and the broad "Command failed" assertion counted that as proof.
+    for (const path of [
+      "package.json", "THIRD-PARTY-NOTICES.md", "CLA.md", "CONTRIBUTING.md", "contributors.md",
+      "packages/client/src/screens/shell.tsx", "apps/desktop/assets/Geist-Regular.ttf",
+      "licenses/LICENSE.Geist.txt", "licenses/story-pdf",
+      "packages/coordinator/src/publications/story-pdf.ts", "packages/coordinator/src/publications/fonts",
+    ]) {
+      const target = join(fakeRepo, path);
+      await mkdir(dirname(target), { recursive: true });
+      await cp(resolve(here, "../../../..", path), target, { recursive: true });
+    }
+    const fakeScript = join(fakeRepo, "apps", "desktop", "scripts", "verify-licenses.mjs");
+    execFileSync("node", [fakeScript], { encoding: "utf8" });
+    const noticesPath = join(fakeRepo, "THIRD-PARTY-NOTICES.md");
+    const notices = await readFile(noticesPath, "utf8");
+    await writeFile(noticesPath, notices.replace(/^.*ffmpeg.*(?:\r?\n|$)/gim, ""));
+    const missingNotice = spawnSync("node", [fakeScript], { encoding: "utf8" });
+    assert.equal(missingNotice.status, 1);
+    assert.match(missingNotice.stderr, /build-resources\/ffmpeg is staged but "ffmpeg" has no row/,
+      "a component with no recorded obligation cannot ship (D5)");
+    await writeFile(noticesPath, notices);
+    const missingRuntime = spawnSync("node", [fakeScript, "--require-runtimes"], { encoding: "utf8" });
+    assert.equal(missingRuntime.status, 1);
+    assert.match(missingRuntime.stderr, /opencode2 runtime is required but opencode2.exe is absent/,
+      "an installer cannot be built without its required runtime");
   });
 });
 

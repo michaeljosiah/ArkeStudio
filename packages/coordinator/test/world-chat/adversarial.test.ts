@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   newId,
+  TURN_RESULT_BOUNDS,
   WorldChatTurnResultSchema,
   type ConversationId,
   type MessageId,
@@ -269,8 +270,9 @@ describe("output that tries to talk past the parser", () => {
   });
 
   it("refuses a reply longer than one turn may carry", () => {
-    const raw = JSON.stringify({ reply: "x".repeat(8_001), candidateOperations: [], groupOperations: [] });
-    assert.equal(WorldChatTurnResultSchema.safeParse(JSON.parse(raw)).success, false);
+    const result = { reply: "x".repeat(TURN_RESULT_BOUNDS.reply), candidateOperations: [], groupOperations: [] };
+    assert.equal(WorldChatTurnResultSchema.safeParse(result).success, true, "the inclusive boundary remains usable");
+    assert.equal(WorldChatTurnResultSchema.safeParse({ ...result, reply: result.reply + "x" }).success, false);
   });
 
   it("reads only the object when prose is wrapped around it, and shows none of the prose (issue 1403)", () => {
