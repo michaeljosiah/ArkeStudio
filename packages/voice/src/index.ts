@@ -231,8 +231,8 @@ export class VoxaClient {
   /** Native acoustic word bounds, never the sentence-duration estimate used by older sidecars. */
   async transcribeWords(audio: Uint8Array, options: VoxaRequestOptions = {}): Promise<AcousticWords> {
     const wav = await transcriptionWav(audio);
-    return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res) => {
-      if (res.status >= 400) throw new Error(`voxa: word timing failed (HTTP ${res.status})`);
+    return this.request("stt", "/stt/words", { method: "POST", headers: { "Content-Type": "audio/wav" }, body: Buffer.from(wav) }, options.signal, async (res, signal) => {
+      if (res.status >= 400) throw new Error(await wordTimingFailure(res, signal));
       return AcousticWordsSchema.parse(await res.json());
     }, this.requests.signal, Math.max(this.timeouts.stt, 300_000));
   }
@@ -258,7 +258,7 @@ export class VoxaClient {
     path: string,
     init: RequestInit,
     callerSignal: AbortSignal | undefined,
-    read: (response: Response) => Promise<T>,
+    read: (response: Response, signal: AbortSignal) => Promise<T>,
     lifecycleSignal: AbortSignal = this.requests.signal,
     timeoutMs: number = this.timeouts[operation],
     reportedTimeoutMs: number = timeoutMs,
@@ -288,7 +288,7 @@ export class VoxaClient {
 
     try {
       const work = this.fetchImpl(`${this.resolvedBaseUrl()}${path}`, { ...init, signal: controller.signal })
-        .then(read)
+        .then(response => read(response, controller.signal))
         .catch((error: unknown) => {
           if (controller.signal.aborted) {
             throw cause === "timeout"
@@ -356,6 +356,59 @@ export class VoxaClient {
   private pumpSynthesis(): void {
     if (this.synthesisBusy) return;
     this.synthesisWaiters.shift()?.grant();
+  }
+}
+
+const wordTimingProblem = z.object({ detail: z.string().max(512) });
+const wordTimingReasons = new Map([
+  ["Word timing requires at least 0.2 seconds of audio.", "word timing needs at least 0.2 seconds of audio"],
+  ["The recognizer returned text without usable word timings.", "the recognizer returned no usable word timing"],
+  ["Long audio requires a measurable silent pause within each 28-second alignment window.", "word timing needs a silent pause within each 28-second section"],
+  ["Invalid audio duration.", "word timing could not read the recording’s duration"],
+  ["The recognizer returned multiple words under one timestamp.", "the recognizer grouped multiple words under one timestamp"],
+  ["The recognizer returned out-of-order tokens.", "word timing contains out-of-order words"],
+  ["A word has no usable acoustic interval or an unresolved pause.", "a word has no usable timing or an unresolved pause"],
+]);
+
+/** SPEC-047 R-184: explain only known local refusals, never echo response text or a transcript. */
+async function wordTimingFailure(response: Response, signal: AbortSignal): Promise<string> {
+  const fallback = `voxa: word timing failed (HTTP ${response.status})`;
+  if (response.status !== 422 || response.body === null ||
+    response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/problem+json") return fallback;
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; cancel(); }, 1000);
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    signal.throwIfAborted();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (expired) return fallback;
+      if (done) break;
+      size += value.byteLength;
+      if (size > 2048) return fallback;
+      chunks.push(value);
+    }
+    const parsed = wordTimingProblem.safeParse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    if (!parsed.success) return fallback;
+    const detail = parsed.data.detail;
+    if (/^The recognizer returned ambiguous or overlapping word bounds at word \d+ \([^()\r\n]+ seconds\)\.$/.test(detail))
+      return "word timing contains overlapping or ambiguous words";
+    if (/^The recognizer returned invalid token bounds or confidence \([^()\r\n]+\)\.$/.test(detail))
+      return "word timing contains invalid word bounds or confidence";
+    return wordTimingReasons.get(detail) ?? fallback;
+  } catch {
+    signal.throwIfAborted();
+    return fallback;
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
   }
 }
 
