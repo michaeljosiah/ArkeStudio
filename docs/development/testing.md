@@ -1291,3 +1291,10 @@ review all selected chapters, inspect captured pages, Create, restart, and verif
 Compare PNG/JPEG inventory and manuscript text/order to the captured input; inspect phone,
 tablet and desktop layouts against approved turn 224. This does not establish physical reader
 or Send to Kindle compatibility.
+
+For ready-edition EPUB preview (#2062), verify the Publications route with no world open,
+chapter navigation and captured pictures, Done/close focus return, and no preparation or
+provider command. Client `audiobook-export.test.tsx` exercises those interactions; coordinator
+`publications/story-illustrations.test.ts` reopens the service after moving the entire source
+world away and compares the ready edition and EPUB bytes. Compare the reader sheet against
+master 224d/224h at phone, tablet and desktop widths.

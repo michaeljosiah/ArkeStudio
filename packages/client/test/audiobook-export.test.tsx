@@ -4,13 +4,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
+import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState, StoryEdition } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
 import { packageCounts, WebPackages } from "../src/components/audiobook-export.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { AudiobookExportSheet } from "../src/components/audiobook-export.js";
-import { StoryPublishSheet } from "../src/components/story-publish.js";
+import { StoryPublishSheet, StoryEditionLibrary, StoryEditionFiles } from "../src/components/story-publish.js";
 import { AudiobookPlayerView } from "../src/components/audiobook-player.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -102,6 +102,52 @@ async function chooseShape(value: string) {
 const lastAsk = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind).at(-1);
 
 describe("Export audiobook (turn 186e)", () => {
+  it("opens a ready illustrated edition and navigates captured pages without a source world or write request", async () => {
+    const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000001", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
+      status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }],
+      settings: { title: "Inkbound", author: "", language: "en", label: "Saved illustrated edition", description: "", cover: null, chapterIds: ["slack-water", "neap"], outputs: ["epub"], avoidEmDashes: false, includeIllustrations: true } };
+    const m = await mount(<MemoryRouter><StoryEditionLibrary /></MemoryRouter>);
+    await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "open" }));
+    const list = lastAsk(m, "list-story-publications")!;
+    await act(async () => __applyEventForTest({ at: AT, type: "story.editions", requestId: list.requestId, editions: [edition] }));
+    const button = (label: string) => [...dom.document.querySelectorAll("button")].find(button => text(button) === label)!;
+    await press(button("Preview EPUB"));
+    const first = lastAsk(m, "publish-story")!;
+    assert.deepEqual(first.input, { action: "preview-page", editionId: edition.id, chapter: 0 });
+    await act(async () => __applyEventForTest({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: first.requestId,
+      result: { preview: { chapter: 0, count: 2, html: '<h1>Captured first chapter</h1><img src="illustration-1.png" alt="The ledger">' } } }));
+    const iframe = dom.document.querySelector("iframe")!;
+    assert.match(iframe.getAttribute("srcdoc") ?? iframe.getAttribute("srcDoc") ?? "", /story-preview-media.*illustration-1.png/);
+    assert.equal(iframe.getAttribute("sandbox"), "allow-same-origin", "captured image origin is retained without allowing scripts");
+    await press(button("Next chapter"));
+    assert.deepEqual(lastAsk(m, "publish-story")!.input, { action: "preview-page", editionId: edition.id, chapter: 1 });
+    const interrupted = lastAsk(m, "publish-story")!;
+    await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "closed" }));
+    assert.match(dom.document.body.textContent ?? "", /Reconnect to open this captured book/);
+    assert.doesNotMatch(dom.document.body.textContent ?? "", /Opening captured book/);
+    await act(async () => __setStateForTest({ ...inkbound(), world: null }, { connection: "open" }));
+    const resumed = lastAsk(m, "publish-story")!;
+    assert.notEqual(resumed.requestId, interrupted.requestId);
+    assert.deepEqual(resumed.input, { action: "preview-page", editionId: edition.id, chapter: 1 });
+    await act(async () => __applyEventForTest({ at: AT, type: "story.published", worldId: edition.worldId, productionId: edition.productionId, requestId: resumed.requestId,
+      result: { preview: { chapter: 1, count: 2, html: "<h1>Captured second chapter</h1>" } } }));
+
+    await press(button("Done")); assert.equal(dom.document.querySelector("iframe"), null);
+    await press(button("Preview EPUB"));
+    assert.equal(lastAsk(m, "publish-story")!.input.action, "preview-page");
+    assert.ok(m.sent.every(command => command.kind === "list-story-publications" || command.kind === "publish-story" && command.input.action === "preview-page"), "reading never opens or mutates the source, prepares or generates");
+    assert.ok(dom.document.querySelector('a[download]'), "the saved EPUB download remains available");
+  });
+  it("offers saved-book preview only for ready EPUB files", async () => {
+    const edition: StoryEdition = { id: "00000000-0000-4000-8000-000000000002", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", createdAt: AT,
+      status: "ready", phase: "Files ready", fingerprint: "a".repeat(64), files: [{ format: "m4b", name: "story.m4b", bytes: 123, sha256: "b".repeat(64) }],
+      settings: { title: "Inkbound", author: "", language: "en", label: "Saved audio", description: "", cover: null, chapterIds: ["neap"], outputs: ["m4b"], avoidEmDashes: false } };
+    const m = await mount(<StoryEditionFiles edition={edition} />);
+    assert.doesNotMatch(m.container.textContent ?? "", /Preview EPUB/);
+    await act(async () => m.root.render(<StoryEditionFiles edition={{ ...edition, status: "preview", files: [{ format: "epub", name: "story.epub", bytes: 123, sha256: "b".repeat(64) }] }} />));
+    assert.doesNotMatch(m.container.textContent ?? "", /Preview EPUB/);
+  });
+
   it("opts into EPUB illustrations explicitly and clears them when EPUB is removed", async () => {
     const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
     const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);

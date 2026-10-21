@@ -859,3 +859,9 @@ writer's terminal event and interrupt acknowledgement. The v1 adapter scopes abo
 directory and execution API as prompt_async, waits for pending prompt admission, and translates
 MessageAbortedError to cancellation. Requests are bounded; partial proposal files remain intact.
 Tests: coordinator `test/harness/authoring.test.ts`, adapter-opencode `test/adapter.test.ts`.
+
+Ready EPUB editions (#2062) expose Preview EPUB from `StoryEditionFiles`, in both the
+world-independent Publications library and Publish. The shared `StoryBookPreview` reads only
+`preview-page` and captured media; its read-only `PageSheet` does not open a world or recreate
+an edition. Tests: client `audiobook-export.test.tsx` and coordinator
+`publications/story-illustrations.test.ts` (source world removed after capture).
