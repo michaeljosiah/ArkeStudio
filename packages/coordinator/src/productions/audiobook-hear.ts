@@ -1,5 +1,5 @@
 import { readFile, stat, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { audiobookTextHash, groupedText, type ArtifactAudiobookGeneration, type AudiobookLoudness, type AudiobookTake, type Job } from "@arke-studio/contracts";
 import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { MediaProbe } from "../media/probe.js";
@@ -140,7 +140,7 @@ export async function hearAudiobookLine(
         model: group.model.id,
         params: { voiceId: speaking.reader.voiceId, text, turns: group.turns, audioFormat: "wav", purpose: "audiobook", hear: true, hearCache: cacheFile, productionId, chapterId: chapter.id, block, characterCount: text.length },
         estimatedMicroUsd: group.quote.expectedMicroUsd,
-        landing: { dir: audiobookLanding(productionId, chapter.file), name: `hear-${block.replace(/[^a-z0-9]+/gi, "-")}-group.wav` },
+        landing: { dir: audiobookLanding(productionId, chapter.file), name: `hear-${basename(cacheFile)}` },
       });
       job = await deps.waitForJob(jobId);
     }

@@ -354,7 +354,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === "comfyui") - Number(b.provider === "comfyui"));
   const quotaReads = toRead.flatMap((entry) => entry.prepared.freeReads);
   const quotaRefusal = dailyQuotaRefusal(quotaReads, room.dailyQuota);
-  const readable = quotaRefusal === null ? toRead : toRead.filter(entry => hasRecoverableAudio(entry.prepared, deps.findJobs?.() ?? [], productionId));
+  const readable = quotaRefusal === null ? toRead : toRead.filter(entry => hasRecoverableAudio(entry.prepared, deps.findJobs?.() ?? [], productionId, deps.worldId));
   if (quotaRefusal !== null && readable.length === 0) {
     emit({ type: "finished", outcome: "failed", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0, reason: quotaRefusal });
     return;
