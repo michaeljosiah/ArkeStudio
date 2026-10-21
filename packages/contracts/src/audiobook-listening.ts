@@ -161,16 +161,19 @@ export function placePictures(
       continue;
     }
     const own = blocks.findIndex((block) => block.key === key);
-    const into = own < 0 ? joinedInto.get(key) : undefined;
-    if (into !== undefined && into.order > 0) {
-      offered.push({ key, ...into, picture });
-      continue;
-    }
     let index = own >= 0 && hashes[own] === picture.textHash ? own : -1;
     if (index < 0) {
       const found = hashes.flatMap((hash, at) => (hash === picture.textHash ? [at] : []));
-      index = found.length === 1 ? found[0]! : own;
+      if (found.length === 1) index = found[0]!;
     }
+    // An insertion can reuse this old key inside an unrelated join. Exact surviving words
+    // still own their picture; only a picture without that match follows the join's first image.
+    const into = own < 0 ? joinedInto.get(key) : undefined;
+    if (index < 0 && into !== undefined && into.order > 0) {
+      offered.push({ key, ...into, picture });
+      continue;
+    }
+    if (index < 0) index = own;
     if (index < 0) {
       lost.push(key);
       continue;
