@@ -115,11 +115,20 @@ describe("what the card says (191b)", () => {
 });
 
 describe("the brief a picture is made from (R-99)", () => {
+  it("keeps authored ledger lettering while excluding added text overlays (R-120, issue 2107)", () => {
+    const prompt = 'Detail, the ledger reads "paid" beside the crossed-out tide entry, with the harbour map on the wall.';
+    const brief = pictureBench(prompt, [], undefined);
+    assert.equal(brief.split("\n\n")[0], prompt);
+    assert.match(brief, /No added captions, subtitles or text overlays\./);
+    assert.match(brief, /Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
+    assert.doesNotMatch(brief, /No text in the picture/);
+  });
+
   it("is the prompt, then who is shown in which attached picture, then the book's look", () => {
     const brief = pictureBench("  Maren on   the stair. ", [{ name: "Maren", kind: "character", token: "Image 1" }, { name: "The stairwell", kind: "place", token: "Image 2" }], "Wet ink.");
-    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.\n\nLight and mood: Wet ink.\n\nNo text in the picture.");
-    assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo text in the picture.", "nobody cited: no identity line");
-    assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo text in the picture.", "a place alone: no identity line");
+    assert.equal(brief, "Maren on the stair.\n\nMaren is shown in @Image 1. The setting is The stairwell, shown in @Image 2. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's.\n\nLight and mood: Wet ink.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
+    assert.equal(pictureBench("A hand on a forearm.", [], undefined), "A hand on a forearm.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "nobody cited: no identity line");
+    assert.equal(pictureBench("The quarter.", [{ name: "The quarter", kind: "place", token: "Image 1" }], undefined), "The quarter.\n\nThe setting is The quarter, shown in @Image 1.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.", "a place alone: no identity line");
     assert.equal(referenceBriefLine([]), "");
   });
 
@@ -135,7 +144,7 @@ describe("the brief a picture is made from (R-99)", () => {
     const detailed = pictureDetailSkins([{ of: "ife", part: "hand" }, { of: "ade", part: "mouth" }, { of: "ade", part: "hand" }, { of: "musa", part: "hand" }, { of: "nkechi", part: "hand" }], people, [ade, ife, plain]);
     assert.deepEqual(detailed, [{ name: "Ife", part: "hand", skin: "Dark brown skin kept to a high gloss" }, { name: "Ade", part: "mouth and hand", skin: "Deep brown skin with a warm undertone" }]);
     assert.equal(pictureBench("Detail, her thumb across his lower lip.", [], undefined, detailed),
-      "Detail, her thumb across his lower lip.\n\nIfe's hand: dark brown skin kept to a high gloss. Ade's mouth and hand: deep brown skin with a warm undertone.\n\nNo text in the picture.");
+      "Detail, her thumb across his lower lip.\n\nIfe's hand: dark brown skin kept to a high gloss. Ade's mouth and hand: deep brown skin with a warm undertone.\n\nNo added captions, subtitles or text overlays. Keep writing, markings and maps on objects in the scene when the prompt calls for them.");
     const referenced = pictureBench("Detail, her thumb across his lower lip.", [{ name: "Ife", kind: "character", token: "Image 1" }], undefined, detailed);
     assert.match(referenced, /Ife is shown in @Image 1/);
     assert.doesNotMatch(referenced, /Ife's hand: dark brown skin/);
