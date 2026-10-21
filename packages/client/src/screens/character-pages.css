@@ -7,6 +7,9 @@
 .fy-voicehero__clear-icon { display: none; }
 .fy-gendialog__preview-name { display: none; }
 .fy-character-generation__backdrop { display: none; }
+/* A look is a complete costume/pose reference. Keep the master's cells, but show the whole
+   image when its aspect ratio differs — cover can remove the face before it is chosen. */
+.fy-looks-results__grid .fy-portrait { object-fit: contain; }
 
 @media (max-width: 1099px) {
   .fy-character-head { padding: 26px 48px 0; gap: 12px; flex-wrap: nowrap; }
