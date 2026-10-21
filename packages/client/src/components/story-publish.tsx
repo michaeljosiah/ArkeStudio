@@ -73,7 +73,7 @@ function StoryBookPreview({ edition }: { edition: StoryEdition }) {
   useEffect(() => {
     const off = subscribeStoryPublications(answer => {
       if (answer.type !== "story.published" || answer.requestId !== asked.current) return;
-      if (answer.result.preview) { setHtml(answer.result.preview.html); setError(null); }
+      if (answer.result.preview) { setHtml(answer.result.preview.html.replace(/src="(illustration-\d+\.(?:png|jpg))"/g, (_, name: string) => `src="${storyPreviewMediaUrl(edition.id, name).replace(/&/g, "&amp;")}"`)); setError(null); }
       if (answer.result.error) setError(answer.result.error);
     });
     setHtml("");
@@ -83,8 +83,8 @@ function StoryBookPreview({ edition }: { edition: StoryEdition }) {
   return <section aria-label="Captured EPUB preview">
     <div className="fy-publish-actions"><Button disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}>Previous chapter</Button><span>Chapter {chapter + 1} of {edition.settings.chapterIds.length}</span><Button disabled={chapter + 1 >= edition.settings.chapterIds.length} onClick={() => setChapter(value => value + 1)}>Next chapter</Button></div>
     {error && <p role="alert">{error}</p>}
-    {html ? <iframe title="Captured book page" sandbox="" srcDoc={html} className="fy-publish-book" /> : <p role="status">Opening captured book…</p>}
-    <p className="fy-publish-muted">Text from this EPUB. Your reader controls type size and page layout.</p>
+    {html ? <iframe title="Captured book page" sandbox="allow-same-origin" srcDoc={html} className="fy-publish-book" /> : <p role="status">Opening captured book…</p>}
+    <p className="fy-publish-muted">Content from this EPUB. Your reader controls type size and page layout.</p>
   </section>;
 }
 
@@ -214,7 +214,8 @@ export function StoryPublishSheet({ worldId, production, onClose, onOtherExports
           <label>Cover<select value={settings.cover ?? ""} onChange={event => update({ cover: event.target.value || null })}><option value="">No cover</option>{world && worldImageReferences(world).filter(ref => /\.(png|jpe?g)$/i.test(ref.file)).map(ref => <option key={ref.file} value={ref.file}>{ref.name}</option>)}</select></label>
           <label>Description<textarea value={settings.description} onChange={event => update({ description: event.target.value })} /></label>
         </div>
-        <fieldset><legend>Create files for</legend>{(["epub", "pdf", "m4b"] as const).map(format => <label className="fy-publish-choice" key={format}><input type="checkbox" checked={settings.outputs.includes(format)} onChange={event => update({ outputs: event.target.checked ? [...settings.outputs, format] : settings.outputs.filter(value => value !== format), ...(format === "pdf" && event.target.checked ? { pdf: settings.pdf ?? { ...DEFAULT_STORY_PDF_SETTINGS } } : {}) })} /><span><strong>{format === "pdf" ? "PDF — fixed pages" : format === "epub" ? "Read · EPUB" : "Listen · M4B"}</strong><small>{format === "pdf" ? "A formatted book with selectable text and chapter navigation" : format === "epub" ? "Send to Kindle or use another book reader" : "Arke’s chosen narration and character voices, as produced"}</small></span></label>)}</fieldset>
+        <fieldset><legend>Create files for</legend>{(["epub", "pdf", "m4b"] as const).map(format => <label className="fy-publish-choice" key={format}><input type="checkbox" checked={settings.outputs.includes(format)} onChange={event => update({ outputs: event.target.checked ? [...settings.outputs, format] : settings.outputs.filter(value => value !== format), ...(format === "epub" && !event.target.checked ? { includeIllustrations: false } : {}), ...(format === "pdf" && event.target.checked ? { pdf: settings.pdf ?? { ...DEFAULT_STORY_PDF_SETTINGS } } : {}) })} /><span><strong>{format === "pdf" ? "PDF — fixed pages" : format === "epub" ? "Read · EPUB" : "Listen · M4B"}</strong><small>{format === "pdf" ? "A formatted book with selectable text and chapter navigation" : format === "epub" ? "Send to Kindle or use another book reader" : "Arke’s chosen narration and character voices, as produced"}</small></span></label>)}</fieldset>
+        {settings.outputs.includes("epub") && <label className="fy-publish-choice"><input type="checkbox" checked={settings.includeIllustrations === true} onChange={event => update({ includeIllustrations: event.target.checked })} /><span><strong>Include attached illustrations</strong><small>Current block pictures, in manuscript order. EPUB only.</small></span></label>}
         {settings.outputs.includes("pdf") && <StoryPdfOptions settings={settings.pdf ?? DEFAULT_STORY_PDF_SETTINGS} onChange={pdf => update({ pdf })} />}
         <p className="fy-publish-muted">Creates private files on your host. No upload or new narration is started.</p>
         {onOtherExports && <Button variant="ghost" onClick={onOtherExports}>Other exports</Button>}

@@ -37,8 +37,10 @@ export const StoryPublicationSettingsSchema = z.object({
   chapterIds: z.array(SlugSchema).min(1).max(200).refine(ids => new Set(ids).size === ids.length),
   outputs: z.array(z.enum(["epub", "m4b", "pdf"])).min(1).max(3).refine(values => new Set(values).size === values.length),
   subtitle: Text.optional(), editionLabel: Text.optional(), pdf: StoryPdfSettingsSchema.optional(),
+  includeIllustrations: z.boolean().optional(),
   avoidEmDashes: z.boolean(),
 }).strict().superRefine((value, ctx) => {
+  if (value.includeIllustrations && !value.outputs.includes("epub")) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["includeIllustrations"], message: "Attached illustrations require EPUB output." });
   if (value.outputs.includes("pdf") && !value.pdf) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["pdf"], message: "Choose PDF formatting before preparing the edition." });
 });
 export type StoryPublicationSettings = z.infer<typeof StoryPublicationSettingsSchema>;

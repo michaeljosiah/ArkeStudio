@@ -102,6 +102,30 @@ async function chooseShape(value: string) {
 const lastAsk = <K extends ClientMessage["kind"]>(m: Mounted, kind: K) => m.sent.filter((message): message is Extract<ClientMessage, { kind: K }> => message.kind === kind).at(-1);
 
 describe("Export audiobook (turn 186e)", () => {
+  it("opts into EPUB illustrations explicitly and clears them when EPUB is removed", async () => {
+    const production = inkbound().world!.productions.find(p => p.meta.id === "inkbound")!;
+    const m = await mount(<MemoryRouter><StoryPublishSheet worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>);
+    const choose = async (label: string, checked: boolean) => {
+      const row = [...dom.document.querySelectorAll("label")].find(row => row.textContent?.includes(label))!;
+      const input = row.querySelector("input")!;
+      const key = Object.keys(input).find(key => key.startsWith("__reactProps$"))!;
+      await act(async () => (input as unknown as Record<string, { onChange(event: unknown): void }>)[key]!.onChange({ target: { checked } }));
+    };
+    const picture = () => [...dom.document.querySelectorAll("label")].find(row => row.textContent?.includes("Include attached illustrations"));
+    assert.equal(picture()!.querySelector("input")!.checked, false);
+    await choose("Include attached illustrations", true);
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Review chapters")!);
+    await press([...dom.document.querySelectorAll("button")].find(button => text(button) === "Formatting & style")!);
+    const command = lastAsk(m, "publish-story")!;
+    assert.equal(command.input.action, "review");
+    assert.ok("settings" in command.input && command.input.settings.includeIllustrations);
+    // Start another sheet to exercise the output transition independently of the pending review.
+    await act(async () => m.root.render(<MemoryRouter><StoryPublishSheet key="second" worldId={FIXTURE_WORLD_ID} production={production} onClose={() => {}} /></MemoryRouter>));
+    await choose("Include attached illustrations", true); await choose("Listen · M4B", true); await choose("Read · EPUB", false);
+    assert.equal(picture(), undefined);
+    await choose("Read · EPUB", true); assert.equal(picture()!.querySelector("input")!.checked, false);
+  });
+
   it("leaves outlined chapters out of the default private-edition selection", async () => {
     const base = inkbound().world!.productions.find((p) => p.meta.id === "inkbound")!;
     const production = { ...base, chapters: base.chapters.map(chapter => chapter.id === "neap" ? { ...chapter, status: "outlined" as const } : chapter) };

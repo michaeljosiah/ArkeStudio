@@ -726,6 +726,13 @@ Client components/story-publish.tsx is shared by Story, Audiobook and Publicatio
 arke:save-story-publication resolves an inventoried edition through the coordinator before a
 native Save dialog. See [publications](publications.md) for file ownership and format boundaries.
 
+Illustrated EPUB (#2033) uses `publications/story-illustrations.ts` to resolve existing block
+pictures against manuscript paragraphs and `story-epub.ts` to stream captured PNG/JPEG inputs
+through the shared manuscript EPUB parts. The existing Publish sheet owns the explicit option;
+its authenticated preview reads only inventoried edition media. Regressions live in
+`test/publications/story-illustrations.test.ts`, `story-routes.test.ts`, contracts
+`story-publication.test.ts` and client `audiobook-export.test.tsx`.
+
 Story PDF (SPEC-058): coordinator `publications/story-pdf.ts` owns font preflight, page planning,
 typesetting and independent extraction/geometry/navigation checks; `story-pdf-runner.ts` and
 `story-pdf-worker.ts` isolate bounded work and terminate it on cancellation. Contracts

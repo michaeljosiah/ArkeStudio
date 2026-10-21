@@ -14,11 +14,13 @@ import { openChapter } from "../productions/ops.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
 import { readPublicationFile } from "./files.js";
+import { storyIllustrations } from "./story-illustrations.js";
 import { audioStudioScript, audioStudioSourceProblems } from "../productions/audio-studio.js";
 
 export const storyDigest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export const STORY_COMPILER = { compiler: "arke-private-story", compilerVersion: "2" };
-export const storyCompiler = (settings: StoryPublicationSettings) => settings.outputs.includes("pdf")
+export const storyCompiler = (settings: StoryPublicationSettings) => settings.includeIllustrations
+  ? { compiler: "arke-private-story", compilerVersion: "4" } : settings.outputs.includes("pdf")
   ? { compiler: "arke-private-story", compilerVersion: "3" } : STORY_COMPILER;
 export interface StoryAudioStudio { state: AudioArrangementState; script: AudioScript; revision: number }
 export function mixFiles(mix: ChapterMix): string[] {
@@ -42,7 +44,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
   const rights = settings.outputs.includes("m4b") ? await readAudioRights(store) : [];
   const chapterPaths = new Set(selected.map(chapter => "productions/" + productionId + "/chapters/" + chapter.file + ".md"));
   for (const problem of scan.problems.filter(problem => chapterPaths.has(problem.path))) blockers.push(problem.path + ": " + problem.message);
-  if (settings.outputs.includes("m4b") && await readAudiobookBook(view, productionId) === "unreadable") blockers.push("The book's narration choices could not be read.");
+  if ((settings.outputs.includes("m4b") || settings.includeIllustrations) && await readAudiobookBook(view, productionId) === "unreadable") blockers.push("The book's narration choices could not be read.");
   for (const problem of publicationTextProblems([settings.title, settings.author, settings.description, settings.label, settings.subtitle ?? "", settings.editionLabel ?? ""].join("\n"))) blockers.push(problem);
   const chapters: Array<Awaited<ReturnType<typeof openChapter>> & { id: string; audioProblems: string[]; plan: AudiobookPlan | null; mix: ChapterMix | null; studio: StoryAudioStudio | null }> = [];
   const findings: StoryStyleFinding[] = [];
@@ -51,14 +53,14 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     if (!manuscriptDocument({ title: "", worldName: "", chapters: [chapter] }).chapters.length) blockers.push(`${chapter.title}: this chapter has no prose. Write it or explicitly leave it out.`);
     for (const problem of publicationTextProblems(chapter.body)) blockers.push(`${chapter.title}: ${problem}`);
     if (publicationTextProblems(chapter.title).length) blockers.push(`${chapter.title}: check the chapter heading.`);
-    const plan = settings.outputs.includes("m4b") || settings.avoidEmDashes
+    const plan = settings.outputs.includes("m4b") || settings.avoidEmDashes || settings.includeIllustrations
       ? await planAudiobook(view, productionId, summary.id, { narrator: await anyNarrator(view, productionId) }).catch(() => null) : null;
     const audioProblems: string[] = [];
     let studio: StoryAudioStudio | null = null;
     if (!plan || plan.record === "unreadable" || plan.cast === "unreadable") {
       if (settings.outputs.includes("m4b")) audioProblems.push("Narration records could not be read.");
     }
-    else if (plan.record?.arrangement) {
+    else if (settings.outputs.includes("m4b") && plan.record?.arrangement) {
       const arrangement = plan.record.arrangement;
       try {
         studio = { state: validateAudioArrangement(arrangement.current), script: audioStudioScript(plan), revision: arrangement.revision };
@@ -68,7 +70,7 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
         audioProblems.push(...(await audioStudioSourceProblems(view, productionId, studio.state)).values());
       } catch (error) { audioProblems.push(error instanceof Error ? error.message : "The arrangement could not be read."); }
     }
-    else {
+    else if (settings.outputs.includes("m4b")) {
       for (const block of [...plan.blocks, ...plannedReactions(view, plan, await anyNarrator(view, productionId))]) {
         if (block.state !== "made") audioProblems.push(`Block ${block.block.key}: ${block.state === "stale" ? "needs updating" : block.state}.`);
         const flag = plan.record?.flags[block.block.key], take = plan.record?.takes[block.block.key];
@@ -104,7 +106,8 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
     }
     chapters.push({ ...chapter, id: summary.id, audioProblems, plan, mix, studio });
   }
-  const mediaPaths = [...new Set([...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : [])])];
+  const illustrations = settings.includeIllustrations ? await storyIllustrations(view, chapters, blockers) : [];
+  const mediaPaths = [...new Set([...illustrations.map(image => image.file), ...(settings.cover ? [settings.cover] : []), ...chapters.flatMap(chapter => settings.outputs.includes("m4b") && chapter.studio ? chapter.studio.state.clips.flatMap(clip => clip.source ? [clip.source.file] : []) : chapter.mix ? mixFiles(chapter.mix) : [])])];
   const media: Array<{ key: string; sha256: string; byteLength: number }> = [];
   for (const path of mediaPaths) {
     try {
@@ -122,11 +125,11 @@ export async function readStoryPublication(store: WorldStore, productionId: stri
   const identity = {
     settings, chapters: chapters.map(({ id, title, order, body, plan, mix, studio }) => ({ id, title, order, body,
       ...(settings.outputs.includes("m4b") ? { record: plan?.record, book: plan?.book, cast: plan?.cast, blocks: plan?.blocks, mix, studio } : {}) })),
-    media, rights, compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
+    media, rights, ...(settings.includeIllustrations ? { illustrations } : {}), compiler: storyCompiler(settings), ...(pdfIdentity ? { pdf: pdfIdentity } : {}),
   };
   const fingerprint = storyDigest(identity);
   const review: StoryPublicationReview = { fingerprint, settings, chapters: chapters.map(chapter => ({ id: chapter.id, title: chapter.title, words: countWords(chapter.body), audioProblems: chapter.audioProblems })), findings, blockers, warnings };
-  return { review, chapters, media, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
+  return { review, chapters, media, illustrations, manifest: scan.manifest, identity: storyDigest({ identity, manifest: scan.manifest }), pdfIdentity };
 }
 
 /** Approve one exact proposal through the manuscript's ordinary versioned save. No provider work. */
