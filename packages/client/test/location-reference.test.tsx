@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { parseHTML } from "linkedom";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import {
@@ -109,13 +110,20 @@ describe("the location reference tab (#243)", () => {
     const day = view(3, "Day", "2026-08-03T10:00:00Z");
     const html = render([kit([day, reverse, establishing], "lv_01")]);
 
-    const panels = [...html.matchAll(/PANEL (\d\d)<\/span>.*?<h3>([^<]+)<\/h3>/gs)].map((m) => [m[1], m[2]]);
+    const panels = [...html.matchAll(/PANEL (\d\d)<\/span>.*?<h3[^>]*>([^<]+)<\/h3>/gs)].map((m) => [m[1], m[2]]);
     assert.deepEqual(panels, [
       ["01", "Establishing view"],
       ["02", "Reverse angle"],
       ["03", "Day"],
     ]);
     assert.ok(html.includes("3 of 6"), "the ceiling is stated before it is reached");
+    const document = parseHTML(html).document;
+    const cards = [...document.querySelectorAll(".fy-locref__gallery > article")];
+    assert.equal(cards.length, 3);
+    assert.deepEqual(cards.filter((card) => card.classList.contains("fy-locref__view--establishing")).map((card) => card.querySelector("h3")?.textContent), ["Establishing view"], "the chosen anchor owns the prominent card, even when it was accepted last");
+    assert.match(cards[0]!.textContent, /Replace/);
+    assert.ok(cards.slice(1).every((card) => !card.textContent.includes("Replace")), "secondary views keep their existing actions");
+    assert.deepEqual(cards.map((card) => card.querySelector(".fy-locref__zoom")?.getAttribute("aria-label")), ["View larger: Establishing view", "View larger: Reverse angle", "View larger: Day"], "every card keeps the accessible source-image review action");
   });
 
   it("states the panel map a shot will carry, in the panel order it just showed", () => {
