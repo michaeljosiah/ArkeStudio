@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { describe, it, mock } from "node:test";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ChapterAudiobookSchema,
   audiobookBlockPlan,
   audiobookSeamHash,
+  audiobookTextHash,
   type AudiobookSeamAnchor,
   type ChapterAudiobook,
   type ChapterVoices,
@@ -16,6 +17,7 @@ import {
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { planAudiobook, readAudiobook, writeAudiobook } from "../../src/productions/audiobook.js";
+import { followChapterTakes } from "../../src/productions/audiobook-book.js";
 import { AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, CAST_PARAGRAPHS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readWorldMeta, SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -126,6 +128,96 @@ const gapAt = async (store: WorldStore, press: "join" | "split", block: string, 
 };
 
 describe("Join, Split and Reset (design turn 198)", () => {
+  it("recovers shifted unique passages with their selected take metadata and no synthesis (#2115)", () =>
+    withHarness(async ({ store, spoken, send }) => {
+      await read(send);
+      const before = await plan(store);
+      const record = before.record as ChapterAudiobook;
+      const target = before.blocks.find(row => row.block.key !== "title")!;
+      record.takes[target.block.key]!.loudness = { integratedLufs: -22, gainDb: 2, peakDbfs: -3 };
+      await writeAudiobook(store, LEDGER, "01-neap", record);
+      const calls = spoken.length;
+      await send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body: "A new warning arrives.\n\n" + before.body });
+      await send({ kind: "set-audiobook-narrator", worldId: WORLD_ID, productionId: LEDGER, voice: NARRATOR });
+      const after = await plan(store);
+      for (const original of before.blocks) {
+        const moved = after.blocks.find(row => row.block.text === original.block.text);
+        assert.ok(moved);
+        assert.equal(moved.state, "made");
+        assert.deepEqual((after.record as ChapterAudiobook).takes[moved.block.key], record.takes[original.block.key]);
+      }
+      assert.equal(after.blocks.filter(row => row.state !== "made").length, 1, "only the inserted passage needs narration");
+      assert.equal(spoken.length, calls, "reuse makes no provider call");
+    }));
+
+  for (const refusal of ["repeated passage", "flagged source", "flagged destination", "missing media", "retired media", "different reader", "different direction", "ambiguous selection"] as const) {
+    it(`does not recover a shifted take with ${refusal} (#2115)`, () =>
+      withHarness(async ({ store, spoken, send }) => {
+        await read(send);
+        const before = await plan(store);
+        const record = before.record as ChapterAudiobook;
+        const target = before.blocks.find(row => row.block.key !== "title")!;
+        const take = record.takes[target.block.key]!;
+        if (refusal === "flagged source") {
+          record.flags[target.block.key] = { at: "2026-10-06T09:00:00.000Z", reason: "Rejected reading" };
+          await writeAudiobook(store, LEDGER, "01-neap", record);
+        }
+        if (refusal === "missing media") {
+          const artifact = store.getBundle().artifacts.find(row => row.id === take.artifactId)!;
+          await unlink(join(store.dir, "artifacts", artifact.file));
+        }
+        if (refusal === "retired media") await send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: take.artifactId });
+        if (refusal === "ambiguous selection") {
+          record.flags[target.block.key] = { at: "2026-10-06T09:00:00.000Z", reason: "Read another take" };
+          await writeAudiobook(store, LEDGER, "01-neap", record);
+          await read(send);
+          const newer = (await readAudiobook(store, LEDGER, "01-neap")) as ChapterAudiobook;
+          assert.notEqual(newer.takes[target.block.key]!.artifactId, take.artifactId);
+          delete newer.flags[target.block.key];
+          newer.takes.retained = take;
+          await writeAudiobook(store, LEDGER, "01-neap", newer);
+        }
+        const body = "A new warning arrives.\n\n" + before.body + (refusal === "repeated passage" ? "\n\n" + target.block.text : "");
+        await send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body });
+        const shifted = await plan(store);
+        const moved = shifted.blocks.filter(row => row.block.text === target.block.text);
+        assert.ok(moved.length);
+        if (refusal === "flagged destination") {
+          const current = shifted.record as ChapterAudiobook;
+          current.flags[moved[0]!.block.key] = { at: "2026-10-06T09:00:00.000Z", reason: "Rejected reading" };
+          await writeAudiobook(store, LEDGER, "01-neap", current);
+        }
+        if (refusal === "different direction") {
+          await send({ kind: "set-audiobook-block", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", block: moved[0]!.block.key, direction: { delivery: "urgent", speed: 1, cues: [] } });
+        }
+        const calls = spoken.length;
+        await followChapterTakes(store, LEDGER, before.chapter, { narrator: refusal === "different reader" ? { ...NARRATOR, voiceId: "af_heart" } : NARRATOR });
+        const after = await planAudiobook(store, LEDGER, "neap", { narrator: refusal === "different reader" ? { ...NARRATOR, voiceId: "af_heart" } : NARRATOR });
+        for (const row of after.blocks.filter(row => audiobookTextHash(row.block.text) === take.textHash)) assert.notEqual(row.state, "made");
+        assert.equal(spoken.length, calls);
+        assert.ok(store.getBundle().artifacts.some(row => row.id === take.artifactId), "the historical artifact is retained");
+      }));
+  }
+
+  it("refuses recovery if the manuscript changes at the write boundary (#2115)", () =>
+    withHarness(async ({ store, worldDir, send }) => {
+      await read(send);
+      const before = await plan(store);
+      await send({ kind: "save-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", body: "A new warning arrives.\n\n" + before.body });
+      const record = await readAudiobook(store, LEDGER, "01-neap");
+      const chapterPath = join(worldDir, "productions", LEDGER, "chapters", "01-neap.md");
+      const raw = await readFile(chapterPath, "utf8");
+      const write = store.ownedWrite.bind(store);
+      const boundary = mock.method(store, "ownedWrite", async (operation: () => Promise<unknown>) => {
+        await writeFile(chapterPath, raw + "\n\nA second warning changes the source.\n", "utf8");
+        return write(operation);
+      });
+      try {
+        await assert.rejects(followChapterTakes(store, LEDGER, before.chapter, { narrator: NARRATOR }), /narration changed/);
+        assert.deepEqual(await readAudiobook(store, LEDGER, "01-neap"), record);
+      } finally { boundary.mock.restore(); }
+    }));
+
   it("a join marks one block not read, the neighbours keep their takes, and Reset finds the old takes again at no cost", () =>
     withHarness(async ({ worldDir, store, events, spoken, send }) => {
       await read(send);
