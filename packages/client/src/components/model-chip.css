@@ -33,11 +33,9 @@
 .fy-mchip__gauge { display: none; }
 .fy-mchip__btn .fy-mchip__gauge svg { width: 15px; height: 15px; }
 
-/* The row the chips share, wherever it is a row — under a coarse pointer too, where a composer with
-   the chip puts its tools on their own row (develop-responsive.css), but not where the bar dissolves
-   into the composer's wrapping row (World Chat on a phone), since a bar with display: contents has no
-   box to measure or clip. The bar is measured, not the window: the production dock is 302 to 331
-   wide on any screen, and its phone sheet 330 to 360.
+/* The row the chips share, under a coarse pointer too, where a composer with the chip puts its
+   tools on their own row (develop-responsive.css). The bar is measured, not the window: the
+   production dock is 302 to 331 wide on any screen, and its phone sheet 330 to 360.
    Words beside the tools (a press that failed, Listening, Read replies off) keep to one line and give
    way first: wrapped, a sentence was squeezed to a word a line and climbed over the editor (local.16).
    And whatever the row cannot hold is cut at its own edge, never drawn under send; the margin keeps
