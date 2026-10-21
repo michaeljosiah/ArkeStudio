@@ -46,6 +46,35 @@
 [data-global-chat-hosted] .fy-production-studio { grid-template-columns: minmax(0, 1fr); }
 [data-global-chat-hosted] :is(.fy-production-studio__thread, .fy-production-studio__divider) { display: none; }
 .fy-global-chat-slot:has(> div:empty) > .fy-global-chat-expand { align-self: flex-start; }
+/* Turn 227u/y hosts the same conversation in the chapter's neutral writing-room panel.
+   The old dock's grey surface and tiny footer pills are not the empty chapter's welcome. */
+.fy-global-chat--chapter .fy-arke { padding: 0; background: var(--background); }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-arke__log { padding: 20px 18px; }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-arke__foot { padding: 12px 16px 16px; gap: 8px; border-top: 1px solid var(--border); }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-arke__foot > .fy-arke__subject { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-global-chat-welcome { text-align: center; padding: 25px 5px 30px; }
+.fy-global-chat-welcome__mark { display: grid; place-items: center; width: 40px; height: 40px; margin: 0 auto 16px; border: 1px solid var(--border); border-radius: 12px; font: var(--type-h2); }
+.fy-global-chat-welcome h3 { margin: 0 0 34px; font: var(--type-h3); }
+.fy-global-chat-welcome .fy-arke__prompts { flex-direction: column; align-items: center; gap: 8px; }
+.fy-global-chat-followups { margin-top: 18px; }
+.fy-global-chat--chapter .fy-arke__prompt { min-height: 34px; max-width: 100%; padding: 6px 14px; color: var(--foreground); font: var(--type-ui); overflow-wrap: anywhere; }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-chat__turn--studio { width: 100%; max-width: none; }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-chat__turn--studio .fy-chat__bubble { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.7; }
+.fy-global-chat--chapter .fy-arke[data-conversation-first] .fy-chat__turn--user .fy-chat__bubble { padding: 12px 14px; border-radius: 10px; background: var(--secondary); color: var(--foreground); font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.6; }
+.fy-global-chat--chapter .fy-cx { display: block; border-radius: 10px; }
+.fy-global-chat--chapter :is(.fy-cx__editor, .fy-cx__placeholder) { min-height: 74px; padding: 13px 14px 8px; font: var(--type-ui); font-weight: var(--weight-regular); line-height: 1.6; }
+.fy-global-chat--chapter .fy-cx__bar { padding: 8px; gap: 6px; }
+.fy-global-chat--chapter .fy-cx__left { gap: 5px; }
+.fy-global-chat--chapter .fy-cx__left > .fy-mchip { flex: 1; min-width: 0; }
+.fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool { width: auto; flex: 0 1 auto; }
+.fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool > span { display: inline; }
+.fy-global-chat--chapter .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send) { width: 32px; height: 32px; min-width: 32px; margin-left: 0; border-radius: 6px; }
+@media (pointer: coarse) {
+  .fy-global-chat--chapter :is(.fy-arke__prompt, .fy-mchip__btn) { min-height: 44px; }
+  .fy-global-chat--chapter .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send, .fy-cx__tool) { min-width: 44px; width: 44px; height: 44px; }
+  .fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool { width: 44px; flex: none; }
+  .fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool > span { display: none; }
+}
 @media (min-width: 1100px) {
   body[data-global-chat-open="true"] :is(.fy-prodwrap, .fy-worldapp > .fy-content) { margin-right: var(--global-chat-width, 400px); }
 }
@@ -54,6 +83,8 @@
   body[data-global-chat-enabled="true"] #root .fy-titlebar { display: flex; height: 48px; min-height: 48px; }
   .fy-global-chat { inset: 48px 0 var(--chat-keyboard, 0px); width: 100%; height: calc(100dvh - 48px - var(--chat-keyboard, 0px)); border-left: 0; }
   .fy-global-chat::backdrop { background: transparent; }
+  .fy-global-chat.fy-global-chat--chapter { top: auto; height: min(620px, calc(100dvh - 48px - var(--chat-keyboard, 0px))); border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; overflow: hidden; box-shadow: 0 -20px 60px #0008; }
+  .fy-global-chat--chapter::backdrop { background: #0008; }
   .fy-global-chat-panel header > button { width: 44px; height: 44px; }
   .fy-global-chat .fy-cx :is(.fy-cx__attach,.fy-cx__mic,.fy-cx__send) { width: 44px; min-width: 44px; height: 44px; }
   .fy-global-chat .fy-cx__attach { margin-left: 0; }

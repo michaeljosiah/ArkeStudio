@@ -2863,7 +2863,7 @@ export function ChapterWorkspace({
             // says that one, not whatever is selected now (codex on PR 1232).
             ...(shownSubject.kind === "passage"
               ? { subjectLine: shownSubject.paragraph !== undefined ? `Chapter ${chapter.order} · paragraph ${shownSubject.paragraph}` : `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
-              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : {}),
+              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : { subjectLine: `Chapter ${chapter.order}` }),
           }}
           openingNote="opening…"
           emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}

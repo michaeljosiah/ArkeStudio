@@ -14,6 +14,7 @@ export function chapterLayoutFixture(mode='normal'):ClientState {
  staged.proposal.kind='chapter-draft';staged.proposal.targets=[{path,baseVersion:4,baseHash:null}];staged.proposal.origin={source:'world-chat-action:act_1',surface:'world-chat',gesture:'passage-revision',conversationId:CHAT_ID};
  staged.proposal.summary='A tighter passage';staged.proposal.worldChatOrigins![0]!.targetPaths=[path];
  staged.review!.targets[0]!.path=path;staged.review!.targets[0]!.kind='chapter';staged.review!.targets[0]!.fields=[{field:'Prose',before:CHAPTER_BODY,proposed:CHAPTER_BODY.replace('the scrape of a mistake caught','a mistake caught').replace('had the correct answer in mind before they wrote the wrong one, and wrote it anyway','knew the answer and wrote the wrong one anyway')}]; }
+ if(mode==='empty-thread'){world.conversations=[];state.worldChat=null;}
  return state;
 }
 export function chapterDoor():AudiobookDoor {return {reading:'narrator',voices:[{name:'George',voice:{label:'George',provider:'kokoro',local:true},state:'narrator',blocks:66}],unattributed:0,
