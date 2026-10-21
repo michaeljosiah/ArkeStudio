@@ -538,6 +538,16 @@ filed images, then uses those services after approval. Artifact links and state 
 commit together. `harness/genesis-image-carry.ts` installs approved founding references.
 Checks: coordinator `test/world-chat/actions.test.ts`, `test/world/founding-build.test.ts`.
 
+Prop library binding (#1921) uses the shared `PropStateSelection` contract and
+`references/props.ts` acceptance for both chat and the prop screen's existing
+`ReferencePickerDialog`. Artifact choices pin the selected hash and shown reference;
+acceptance copies an immutable take and commits the reference and artifact link together.
+`world-chat/target-reads.ts` bounds reference/artifact pages, splits large records without
+dropping fields, and serves exact `propId` / `artifactId` reads. Only the matching
+`prop-reference` action may use those scoped receipts. Checks: coordinator
+`test/world-chat/retrieval.test.ts`, `test/references/prop-state.test.ts` and client
+`test/props-screen.test.tsx`; design master turns 69 and 105f.
+
 ### Review founding document imports
 
 Contracts `genesis-imports.ts` defines evidence, candidate review and merge choices.

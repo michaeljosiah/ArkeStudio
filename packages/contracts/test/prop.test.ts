@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { checkPropName, mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
+import { checkPropName, ClientMessageSchema, mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
 
 /** Prop identity and the five provenance fields (design turn 105, Option C; issue 534). */
 describe("props", () => {
+  it("requires a pinned image and explicit current-reference expectation for library acceptance", () => {
+    const command = { kind: "accept-prop-state", worldId: newId("cv").slice(3), propId: newId("prop"), stateId: newId("pst"),
+      selection: { source: "artifact", artifactId: newId("ar"), artifactHash: "sha256:0123456789abcdef", expectedReferenceId: null } };
+    assert.ok(ClientMessageSchema.safeParse(command).success);
+    assert.ok(ClientMessageSchema.safeParse({ ...command, replace: true, selection: { ...command.selection, expectedReferenceId: "psr_prior" } }).success);
+    for (const field of ["artifactHash", "expectedReferenceId"] as const) {
+      const selection: Record<string, unknown> = { ...command.selection }; delete selection[field];
+      assert.equal(ClientMessageSchema.safeParse({ ...command, selection }).success, false);
+    }
+    assert.equal(ClientMessageSchema.safeParse({ ...command, selection: { ...command.selection, artifactHash: "unchecked" } }).success, false);
+    assert.ok(ClientMessageSchema.safeParse({ ...command, selection: { source: "take", takeId: newId("tk") } }).success);
+    assert.ok(ClientMessageSchema.safeParse({ ...command, selection: { source: "candidate", file: "ledger.png" } }).success);
+    assert.equal(ClientMessageSchema.safeParse({ ...command, selection: { source: "candidate", file: "../ledger.png" } }).success, false);
+  });
+
   it("a prop is a name and ordered states; provenance is explicit about absence and optional for legacy takes", () => {
     const prop = PropSchema.parse({
       id: newId("prop"),

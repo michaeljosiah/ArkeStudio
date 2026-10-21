@@ -130,8 +130,8 @@ describe("conversational props", () => {
     });
     assert.equal(w.store.getBundle().props.length, before);
   });
-  async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: ArkeReadRequirement[]) {
-    const receipts = reads.map(read => currentReceipt(w.store, read));
+  async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: (ArkeReadRequirement | WorldChatCheckReceipt)[]) {
+    const receipts = reads.map(read => typeof read === "string" ? currentReceipt(w.store, read) : read);
     const action = ModelWorldChatActionSchema.parse({ ...input, checkReceiptIds: receipts.map(receipt => receipt.id) });
     const one = turn(w.conversationId, w.entryContext, { actions: [action], receipts });
     const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
@@ -175,6 +175,27 @@ describe("conversational props", () => {
     assert.equal(w.store.getBundle().referenceTakes.length, 1);
     assert.equal(w.store.getBundle().props[0]!.states[0]!.reference?.sourceTakeId, w.store.getBundle().referenceTakes[0]!.id);
     assert.deepEqual(w.store.getBundle().artifacts.find(one => one.id === artifact.id)!.links, [prop.id]);
+  });
+  it("uses complete exact prop/image receipts without granting them inventory-wide authority", async () => {
+    const w = await setup(), prop = (await createProp(w.store, "Scoped ledger"))!, state = (await addPropState(w.store, prop.id, "Closed"))!;
+    const other = (await createProp(w.store, "Other lantern"))!;
+    const source = join(w.store.dir, "ledger.png"); await writeFile(source, encodePng(solidImage(4, 4, [12, 34, 56, 255])));
+    await fileArtifact(w.store, { sourcePath: source });
+    const artifact = w.store.getBundle().artifacts.find(item => item.file === "ledger.png")!;
+    const input = { kind: "prop-reference", propId: prop.id, stateId: state.id, artifactId: artifact.id };
+    const refs = currentReceipt(w.store, "references", `prop:${prop.id}`), image = currentReceipt(w.store, "artifacts", `artifact:${artifact.id}`);
+    await assert.rejects(prepare(w, input, [currentReceipt(w.store, "references", `prop:${other.id}`), image]), /scoped inventory read/);
+    await assert.rejects(prepare(w, input, [refs, currentReceipt(w.store, "artifacts", `artifact:${newId("ar")}`)]), /scoped inventory read/);
+    await assert.rejects(prepare(w, input, [{ ...refs, complete: false }, image]), /earlier page|complete current/);
+    await assert.rejects(prepare(w, { kind: "prop-authoring", change: { operation: "create", name: "Unsafe shortcut", states: [] } },
+      [refs, "sheets"]), /scoped inventory read/);
+    const card = await prepare(w, input, [refs, image]);
+    await addPropState(w.store, other.id, "Lit");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed", "unrelated inventory edits do not stale the exact binding");
+    const replacement = await prepare(w, { ...input, replace: true }, [currentReceipt(w.store, "references", `prop:${prop.id}`), currentReceipt(w.store, "artifacts", `artifact:${artifact.id}`)]);
+    await addPropState(w.store, prop.id, "Open");
+    assert.equal((await decide(w.lifecycle, w.log, replacement)).status, "stale", "the reviewed prop remains fenced");
+    assert.equal(w.store.getBundle().referenceTakes.length, 1);
   });
 });
 
@@ -322,9 +343,9 @@ function currentReceipt(
         : requirement === "art-direction"
           ? artDirectionFence(bundle)
           : requirement === "references"
-            ? referencesFence(bundle)
+            ? referencesFence(bundle, target?.startsWith("prop:") ? target.slice(5) : undefined)
             : requirement === "artifacts"
-              ? artifactsFence(bundle)
+              ? artifactsFence(bundle, target?.startsWith("artifact:") ? target.slice(9) : undefined)
               : requirement === "voices"
                 ? voicesFence(bundle)
               : requirement === "takes"

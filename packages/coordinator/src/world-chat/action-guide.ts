@@ -178,10 +178,13 @@ function fullEntry(entry: ActionGuideEntry): string {
   return [
     head,
     `  ${entry.description}`,
+    ...(entry.kind === "prop-reference" ? [`  ${PROP_REFERENCE_READS}`] : []),
     `  fields: ${entry.fields.join("; ")}`,
     `  example: ${JSON.stringify(entry.example)}`,
   ].join("\n");
 }
+
+const PROP_REFERENCE_READS = "Read list_references with this propId and list_artifacts with this artifactId; follow every page and cite only their final complete receipts. These exact-target reads avoid loading unrelated inventory.";
 
 function compactEntry(entry: ActionGuideEntry): string {
   const suffix = entry.unavailable !== null ? " Unavailable; say so instead." : "";
@@ -250,6 +253,7 @@ export function describeAction(kind: string) {
     scope: entry.scope,
     card: entry.cardFamily,
     reads: entry.reads,
+    ...(entry.kind === "prop-reference" ? { readInstructions: PROP_REFERENCE_READS } : {}),
     ...(entry.unavailable !== null
       ? { unavailable: entry.unavailable }
       : { fields: entry.fields, example: entry.example }),

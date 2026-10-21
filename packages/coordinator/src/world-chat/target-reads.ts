@@ -6,6 +6,8 @@ import {
   productionShape,
   FrameRunIdSchema,
   CandidateIdSchema,
+  PropIdSchema,
+  ArtifactIdSchema,
   orderedShots,
   canonicalSceneFlow,
   chapterParagraphs,
@@ -155,7 +157,8 @@ export function sheetsFence(bundle: WorldBundle): string {
   return fence(bundle.sheets);
 }
 
-export function referencesFence(bundle: WorldBundle): string {
+export function referencesFence(bundle: WorldBundle, propId?: string): string {
+  if (propId) return fence(bundle.props.find(prop => prop.id === propId) ?? null);
   return fence({
     props: bundle.props,
     kits: bundle.referenceKits,
@@ -168,8 +171,19 @@ export function referencesFence(bundle: WorldBundle): string {
   });
 }
 
-export function artifactsFence(bundle: WorldBundle): string {
-  return fence(bundle.artifacts);
+export function artifactsFence(bundle: WorldBundle, artifactId?: string): string {
+  return fence(artifactId ? bundle.artifacts.find(artifact => artifact.id === artifactId) ?? null : bundle.artifacts);
+}
+
+/** Large sidecars remain exact, but cannot bury the next cursor beyond a tool output limit. */
+function inventoryRows(rows: readonly Row[]): Row[] {
+  return rows.flatMap(row => {
+    const text = JSON.stringify(row.value);
+    if (JSON.stringify(row.value, null, 2).length <= TEXT_CHUNK_CHARS) return [row];
+    const parts = Math.ceil(text.length / TEXT_CHUNK_CHARS);
+    return Array.from({ length: parts }, (_, part) => ({ key: `${row.key}:part:${padded(part)}`,
+      value: { kind: "record-chunk", recordKey: row.key, part: part + 1, parts, text: text.slice(part * TEXT_CHUNK_CHARS, (part + 1) * TEXT_CHUNK_CHARS) } }));
+  });
 }
 
 export function voicesFence(bundle: WorldBundle): string {
@@ -648,8 +662,15 @@ export class WorldChatTargetReads {
         rows = [{ key: "art-direction", value: bundle.artDirection }];
         revisionOrDigest = artDirectionFence(bundle);
         break;
-      case "list_references":
-        assertArgs(args, []);
+      case "list_references": {
+        assertArgs(args, ["propId"]);
+        if (args["propId"] !== undefined) {
+          const propId = PropIdSchema.parse(args["propId"]), prop = bundle.props.find(prop => prop.id === propId);
+          readTarget = target("references", `prop:${propId}`);
+          rows = prop ? [{ key: `prop:${propId}`, value: { kind: "prop", prop } }] : [];
+          revisionOrDigest = referencesFence(bundle, propId);
+          break;
+        }
         readTarget = target("references", bundle.meta.worldId);
         rows = [
           ...[...bundle.props].sort((a, b) => a.id.localeCompare(b.id)).map(prop => ({ key: `prop:${prop.id}`, value: { kind: "prop", prop } })),
@@ -683,12 +704,15 @@ export class WorldChatTargetReads {
         ];
         revisionOrDigest = referencesFence(bundle);
         break;
-      case "list_artifacts":
-        assertArgs(args, []);
-        readTarget = target("artifacts", bundle.meta.worldId);
-        rows = [...bundle.artifacts].sort((a, b) => a.id.localeCompare(b.id)).map((artifact) => ({ key: artifact.id, value: artifact }));
-        revisionOrDigest = artifactsFence(bundle);
+      }
+      case "list_artifacts": {
+        assertArgs(args, ["artifactId"]);
+        const artifactId = args["artifactId"] === undefined ? undefined : ArtifactIdSchema.parse(args["artifactId"]);
+        readTarget = target("artifacts", artifactId ? `artifact:${artifactId}` : bundle.meta.worldId);
+        rows = bundle.artifacts.filter(artifact => !artifactId || artifact.id === artifactId).sort((a, b) => a.id.localeCompare(b.id)).map((artifact) => ({ key: artifact.id, value: artifact }));
+        revisionOrDigest = artifactsFence(bundle, artifactId);
         break;
+      }
       case "list_voices": {
         assertArgs(args, []);
         readTarget = target("voices", bundle.meta.worldId);
@@ -1089,7 +1113,8 @@ export class WorldChatTargetReads {
       }
     }
 
-    return this.page(lease, args, readTarget, revisionOrDigest, rows, cursorFence);
+    const inventory = tool === "list_references" || tool === "list_artifacts";
+    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : rows, cursorFence, inventory);
   }
 
   private page(
@@ -1099,6 +1124,7 @@ export class WorldChatTargetReads {
     revisionOrDigest: string,
     rows: readonly Row[],
     cursorFence = revisionOrDigest,
+    inventory = false,
   ): TargetReadOutcome {
     const cursor = args["cursor"] as string | undefined;
     let start = 0;
@@ -1120,7 +1146,13 @@ export class WorldChatTargetReads {
     }
 
     const limit = boundedLimit(args["limit"]);
-    const selected = rows.slice(start, start + limit);
+    const selected: Row[] = [];
+    for (const row of rows.slice(start, start + limit)) {
+      // Reserve room for the target, digest, cursor and separate citation block. Large inventory
+      // records were split above, so even a single row cannot exceed the read's output budget.
+      if (inventory && selected.length && JSON.stringify({ items: [...selected, row].map(item => item.value) }, null, 2).length > 12_000) break;
+      selected.push(row);
+    }
     const hasMore = start + selected.length < rows.length;
     const nextCursor = hasMore
       ? this.encodeCursor(lease, {
@@ -1135,10 +1167,10 @@ export class WorldChatTargetReads {
     const result: ArkeTargetReadPage = {
       target: readTarget,
       observedRevisionOrDigest: revisionOrDigest,
-      items: selected.map((row) => row.value),
       total: rows.length,
       nextCursor,
       complete: nextCursor === null,
+      items: selected.map((row) => row.value),
     };
     return { result, status: rows.length === 0 ? "empty" : "complete" };
   }
