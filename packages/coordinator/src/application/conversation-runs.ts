@@ -22,7 +22,7 @@ import { WorldChatService } from "../world-chat/service.js";
 import { describeEntryContext } from "../world-chat/entry-context.js";
 import { budgetFor, currentLookContext } from "../world-chat/context.js";
 import { QueryLeaseRegistry } from "../world-chat/lease.js";
-import { WorldChatRetrieval } from "../world-chat/retrieval.js";
+import { RetrievalError, WorldChatRetrieval } from "../world-chat/retrieval.js";
 import { ConversationImages } from "../world-chat/images.js";
 import { ConversationMediaInspection } from "../world-chat/media-inspection.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
@@ -99,6 +99,11 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(deps.adapter?.knownInputTokenLimit?.() ?? undefined)),
     getBundle: () => deps.activeStore()?.getBundle() ?? null,
     getIndex: () => deps.activeStore()?.getIndex() ?? null,
+    getConversationDrafts: async lease => {
+      const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
+      if (!loaded || loaded.problems.length > 0) throw new RetrievalError("unavailable", "The retained conversation drafts could not be read completely.");
+      return { candidates: loaded.candidates, groups: loaded.groups };
+    },
     getBenchRows: sessionId => benchReadRows(store.dir, sessionId),
     getGenerationRouteRows: deps.generationRoutes,
     getVoiceCatalogue: deps.voiceCatalogue,

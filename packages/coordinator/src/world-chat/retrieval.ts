@@ -195,7 +195,16 @@ export class WorldChatRetrieval {
     const index = this.deps.getIndex();
 
     if (isTargetReadTool(toolName)) {
+      if (toolName === "get_candidate" && !this.deps.getConversationDrafts) throw new RetrievalError("unavailable", "Conversation drafts are unavailable on this host.");
       const read = await this.targetReads.call(lease, bundle, toolName as ArkeTargetReadTool, args);
+      // Loading a retained journal may outlive world selection or cancellation.
+      this.deps.leases.verify(lease.token, toolName);
+      if (toolName === "get_candidate") {
+        const spent = this.textSpentByRun.get(lease.runId) ?? 0;
+        const size = JSON.stringify(read.result).length;
+        if (spent + size > (this.deps.textBudgetChars?.() ?? MAX_TEXT_PER_RUN_CHARS)) throw new RetrievalError("budget-exhausted", "This run has read as much retained draft and attachment text as it may.");
+        this.textSpentByRun.set(lease.runId, spent + size);
+      }
       return {
         result: read.result,
         receipt: receipt(read.status, {

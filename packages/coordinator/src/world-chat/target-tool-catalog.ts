@@ -41,6 +41,7 @@ function tool(
 
 /** Target-specific rather than path-shaped: callers can name an authority, never a file. */
 export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
+  tool("get_candidate", "Read an exact retained proposition and its groups from this conversation, including authored draft, metadata, evidence and status. Join the ordered text chunks as JSON. Read every page before revising; this is draft context, not a world-source check or permission to modify accepted propositions.", { candidateId: { type: "string", description: "Candidate id from the conversation registry" }, expectedRevision: { type: "integer", minimum: 1, description: "Revision from the registry" } }, ["candidateId", "expectedRevision"]),
   tool("get_world_metadata", "Read the open world's complete metadata.", {}),
   tool("list_world_index", "List every targetable world, Canon, sheet, production and Series identity.", {}),
   tool("list_canon", "Read complete Canon entries in stable id order.", {}),

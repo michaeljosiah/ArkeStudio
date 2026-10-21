@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { ArkeReadRequirementSchema, ConversationActionSemanticIdSchema } from "./arke-actions.js";
 
+/** Retained conversation draft receipts are unknown to older journal readers. */
+export const CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION = 100;
+
 /** The complete target reads available only through a run-scoped World Chat lease. */
 export const ArkeTargetReadToolSchema = z.enum([
   "get_world_metadata",
@@ -43,6 +46,7 @@ export const ArkeTargetReadToolSchema = z.enum([
   "list_build_items",
   "list_exports",
   "get_readiness",
+  "get_candidate",
 ]);
 export type ArkeTargetReadTool = z.infer<typeof ArkeTargetReadToolSchema>;
 

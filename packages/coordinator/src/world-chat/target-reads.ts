@@ -5,6 +5,7 @@ import {
   episodeScriptFile,
   productionShape,
   FrameRunIdSchema,
+  CandidateIdSchema,
   orderedShots,
   canonicalSceneFlow,
   chapterParagraphs,
@@ -28,6 +29,8 @@ import {
   type ProductionBundle,
   type WorldBundle,
   type VoiceCandidate,
+  type WorldChangeCandidate,
+  type CandidateGroup,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
@@ -71,6 +74,7 @@ export interface ArkeExportReadRecord {
 }
 
 export interface TargetReadDeps {
+  readonly getConversationDrafts?: (lease: QueryLease) => Promise<Pick<import("@arke-studio/contracts").WorldChatLoaded, "candidates" | "groups">>;
   readonly getAudioStudio?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").AudioStudioSnapshot>;
   readonly getBenchRows?: (sessionId?: string) => readonly ProductionReadRow[];
   readonly getGenerationRouteRows?: () => readonly ProductionReadRow[];
@@ -121,6 +125,13 @@ function fence(value: unknown, version?: string | number): string {
   const digest = conversationActionDigest(value);
   return version === undefined ? digest : `${typeof version === "number" ? `v${version}` : version}:${digest}`;
 }
+
+export function conversationCandidateRecord(candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) {
+  return { candidate, groups: groups.filter(group => group.conversationId === candidate.conversationId && group.members.some(member => member.candidateId === candidate.id)) };
+}
+
+export const conversationCandidateFence = (candidate: WorldChangeCandidate, groups: readonly CandidateGroup[]) =>
+  fence(conversationCandidateRecord(candidate, groups));
 
 /** Shared with whole-target guards, so "current" means exactly what retrieval signed. */
 export function sceneScriptFence(production: ProductionBundle | undefined, sceneId: string): string {
@@ -580,6 +591,21 @@ export class WorldChatTargetReads {
     let rows: Row[];
 
     switch (tool) {
+      case "get_candidate": {
+        assertArgs(args, ["candidateId", "expectedRevision"]);
+        const id = CandidateIdSchema.parse(args["candidateId"]);
+        const revision = args["expectedRevision"];
+        if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 1) throw new TargetReadError("expectedRevision must be the positive revision from the registry");
+        if (!this.deps.getConversationDrafts) throw new TargetReadError("Conversation drafts are unavailable on this host.");
+        const retained = await this.deps.getConversationDrafts(lease);
+        const candidate = retained.candidates.find(entry => entry.id === id && entry.conversationId === lease.conversationId);
+        if (candidate && candidate.revision !== revision) throw new TargetReadError("That proposition changed; use its current registry revision and start again without a cursor.");
+        const record = candidate ? conversationCandidateRecord(candidate, retained.groups) : null;
+        readTarget = target("conversation-candidate", `${lease.conversationId}:${id}`);
+        revisionOrDigest = fence(record);
+        rows = record ? chunks(JSON.stringify(record)) : [];
+        break;
+      }
       case "get_world_metadata":
         assertArgs(args, []);
         readTarget = target("world-metadata", bundle.meta.worldId);

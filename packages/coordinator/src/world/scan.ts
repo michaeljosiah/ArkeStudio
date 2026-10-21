@@ -198,7 +198,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // 97: setup's narrator samples on the draft (SPEC-057 R-6, issue 1882).
 // 98: what of an episode's mix was heard, with its notes — drama-mix `heard` (issue 1882).
 // 99: retained prose-first sheet creation review on conversation action bindings (#2047).
-export const SUPPORTED_SCHEMA_VERSION = 99;
+// 100: exact retained conversation-candidate read receipts (#2048).
+export const SUPPORTED_SCHEMA_VERSION = 100;
 
 export class WorldOpenError extends Error {
   constructor(
