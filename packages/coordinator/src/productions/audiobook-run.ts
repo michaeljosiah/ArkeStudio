@@ -46,7 +46,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { audioHash } from "../audio/qc.js";
 import { applyGain, dropRunawayTail, normaliseSpeech, readSpeechWav, samplePeak, sliceSpeech, trimSpeech, writeSpeechWav } from "../audio/speech-wav.js";
-import type { TimedWord } from "../voice/word-times.js";
+import { TranscriptionUnavailableError, type TimedWord } from "../voice/word-times.js";
 import { LONG_TAIL, splitAudio, splitLexicon, splitRequest } from "./audiobook-split.js";
 import { checkDirection, directionPlan, type RenderedPart } from "../voice/direction.js";
 import { plannedReactions } from "./audiobook-timing.js";
@@ -720,8 +720,9 @@ export function groupIdentity(group: PreparedGroup): string {
 }
 
 /** A grouped request already paid for, or still being made, found in the queue's durable rows (design turn 185, as `priorPartJob`). */
-export function priorGroupJob(jobs: readonly Job[], identity: string): { kind: "landed" | "running"; job: Job } | null {
-  const matching = jobs.filter((job) => job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook" && job.params["hear"] !== true && job.params["group"] === identity);
+export function priorGroupJob(jobs: readonly Job[], identity: string, owner: { worldId: string; productionId: string; chapterId: string }): { kind: "landed" | "running"; job: Job } | null {
+  const matching = jobs.filter((job) => job.worldId === owner.worldId && job.params["productionId"] === owner.productionId && job.params["chapterId"] === owner.chapterId &&
+    job.target.kind === "voice-preview" && job.params["purpose"] === "audiobook" && job.params["hear"] !== true && job.params["group"] === identity);
   for (const job of [...matching].reverse()) {
     if (job.status === "succeeded" && job.landedFiles?.[0] !== undefined) return { kind: "landed", job };
     if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return { kind: "running", job };
@@ -746,10 +747,11 @@ function recoverableBlock(block: Speaking, jobs: readonly Job[], productionId: s
 }
 
 /** A daily refusal must not prevent filing audio already bought before a crash. */
-export function hasRecoverableAudio(prepared: PreparedChapter, jobs: readonly Job[], productionId: string): boolean {
+export function hasRecoverableAudio(prepared: PreparedChapter, jobs: readonly Job[], productionId: string, worldId: string): boolean {
   const grouped = new Set(prepared.groups.flatMap(group => group.kept));
-  return prepared.groups.some(group => priorGroupJob(jobs, groupIdentity(group)) !== null)
-    || prepared.misses.some(block => !grouped.has(block) && recoverableBlock(block, jobs, productionId, prepared.plan.chapter.id));
+  const owned = jobs.filter(job => job.worldId === worldId);
+  return prepared.groups.some(group => priorGroupJob(owned, groupIdentity(group), { worldId, productionId, chapterId: prepared.plan.chapter.id }) !== null)
+    || prepared.misses.some(block => !grouped.has(block) && recoverableBlock(block, owned, productionId, prepared.plan.chapter.id));
 }
 
 /**
@@ -812,7 +814,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
   }
   const { plan, toMake, speaking, misses, clones, priceOf, estimate, asks, freePlan, groups, requests, perParagraph, toCast } = preparation.prepared;
   const quotaRefusal = dailyQuotaRefusal(preparation.prepared.freeReads, deps.dailyQuota);
-  if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId)) {
+  if (quotaRefusal !== null && !hasRecoverableAudio(preparation.prepared, deps.findJobs(), productionId, deps.worldId)) {
     await finish("failed", { reason: quotaRefusal, record: preparation.prepared.record });
     return;
   }
@@ -1055,7 +1057,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
     emit({ type: "request", index: requestAt, of: requests, keys: group.kept.map((block) => block.block.key) });
     const identity = groupIdentity(group);
     const first = group.kept[0]!;
-    let prior = priorGroupJob(deps.findJobs(), identity);
+    let prior = priorGroupJob(deps.findJobs(), identity, { worldId: deps.worldId, productionId, chapterId: plan.chapter.id });
     if (prior?.kind === "landed") {
       const stillThere = await readFile(toExtendedLength(join(store.dir, fromPortable(prior.job.landedFiles![0]!)))).then(() => true).catch(() => false);
       if (!stillThere) prior = null;
@@ -1093,7 +1095,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
             sheetVersion: plan.chapter.version,
           },
           estimatedMicroUsd: group.quote.expectedMicroUsd,
-          landing: { dir: landingDir, name: `group-${first.block.key.replace(/[^a-z0-9]+/gi, "-")}-${keys.length}.wav` },
+          landing: { dir: landingDir, name: `group-${identity}.wav` },
         }]);
         jobId = queued.jobIds[0];
         if (jobId === undefined) throw new Error(queued.reason ?? "the voice job could not be queued");
@@ -1177,7 +1179,7 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
       if (misses.includes(block)) {
         const refusal = dailyQuotaRefusal([{ model: block.model, requests: 1 }], deps.dailyQuota);
         const recoverable = refusal !== null && (group !== undefined
-          ? priorGroupJob(deps.findJobs(), groupIdentity(group)) !== null
+          ? priorGroupJob(deps.findJobs(), groupIdentity(group), { worldId: deps.worldId, productionId, chapterId: plan.chapter.id }) !== null
           : recoverableBlock(block, deps.findJobs(), productionId, plan.chapter.id));
         if (refusal !== null && !recoverable) { heldByQuota ??= refusal; continue; }
       }
@@ -1193,8 +1195,13 @@ export async function runAudiobookChapter(deps: AudiobookRunDeps): Promise<void>
         } catch (err) {
           if (signal.aborted) break;
           const message = err instanceof Error ? err.message : String(err);
-          if (err instanceof RecordWriteError) {
-            await finish("failed", { reason: message, record });
+          if (err instanceof RecordWriteError || err instanceof TranscriptionUnavailableError) {
+            // A failed local check leaves this successful request intact and stops the book
+            // before more speech is bought. The next read finds the same durable group job.
+            const reason = err instanceof TranscriptionUnavailableError
+              ? `${message} Received audio is kept. Check Voxa in Settings → Providers, then ${deps.only === undefined ? "read the remaining blocks to retry" : "retry the same read"}.`
+              : message;
+            await finish("failed", { reason, record });
             return;
           }
           try {

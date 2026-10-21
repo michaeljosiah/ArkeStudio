@@ -76,6 +76,12 @@ Client `components/audiobook-activity.tsx` draws one Activity row per read and b
 its single-block return carries a `block` query to `useChapterAudiobook`, which selects and
 scrolls to that passage once per navigation without restarting work. Group request details use
 the operation journal's durable saved count rather than inferring saved takes from job success.
+`voice/word-times.ts` distinguishes a failed local transcription from a successful empty
+transcript. On failure the chapter read interrupts before cutting or flagging the group, keeps
+its received WAV and completed takes, and the existing read path finds the exact durable job
+again after transcription recovers (#1932). `productions/audiobook-hear.ts` likewise records the
+exact preview cache identity on its job and reuses received preview audio within the same world,
+production and chapter; preview jobs remain excluded from chapter take recovery.
 `chapter-audiobook.tsx` shows its alignment phase at the foot. Focused coverage is in contracts and
 coordinator `test/.../audiobook-activity.test.ts`, coordinator `audiobook-grouped.test.ts`, and client
 `activity-panel.test.tsx` / `queue-toaster-lifetime.test.tsx`. SPEC-014 turn 206; SPEC-047 R-178.
