@@ -370,6 +370,13 @@ const wordTimingReasons = new Map([
   ["A word has no usable acoustic interval or an unresolved pause.", "a word has no usable timing or an unresolved pause"],
 ]);
 
+/** Other local readers may preserve these safe refusals without trusting arbitrary exception text. */
+export function wordTimingRefusalReason(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const reasons = [...wordTimingReasons.values(), "word timing contains overlapping or ambiguous words", "word timing contains invalid word bounds or confidence"];
+  return reasons.find(reason => reason === error.message);
+}
+
 /** SPEC-047 R-184: explain only known local refusals, never echo response text or a transcript. */
 async function wordTimingFailure(response: Response, signal: AbortSignal): Promise<string> {
   const fallback = `voxa: word timing failed (HTTP ${response.status})`;

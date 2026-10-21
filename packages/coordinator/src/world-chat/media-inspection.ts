@@ -11,6 +11,7 @@ import { LeaseDeniedError, type QueryLease, type QueryLeaseRegistry } from "./le
 import { conversationDir, WorldChatStore } from "./store.js";
 import { recognizeAgentSpeech, type AgentSpeechReader } from "../media/agent-speech.js";
 import { listenToAgentAudio, type AgentAudioListener } from "../media/agent-listening.js";
+import { VoxaCancelledError, VoxaTimeoutError, wordTimingRefusalReason } from "@arke-studio/voice";
 
 export const MEDIA_INSPECTION_NAMES = ["inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content", "listen_audio"] as const;
 export type MediaInspectionName = typeof MEDIA_INSPECTION_NAMES[number];
@@ -50,6 +51,28 @@ export async function agentMediaSource(store: WorldStore, source: AgentMediaSour
 }
 const identity = (value: InspectionSource) => JSON.stringify(value);
 
+const audioInspectionReasons = new Map([
+  ["Speech derivative exceeds its profile", "The speech excerpt exceeds the local recognition profile."],
+  ["Invalid canonical mono speech derivative", "The speech excerpt could not be prepared for local recognition."],
+  ["Speech response exceeds its profile", "The recognizer returned more text or words than this review can accept."],
+  ["Recognizer duration does not match the derivative", "The recognizer returned timing for a different recording duration."],
+  ["Speech recognition was stopped or exceeded its deadline", "Local speech recognition was stopped or exceeded its time limit."],
+  ["Listening clip exceeds its profile", "The listening excerpt exceeds the local audio profile."],
+  ["Invalid canonical listening WAV", "The excerpt could not be prepared for local audio listening."],
+  ["Audio listening stopped or exceeded its deadline", "Local audio listening was stopped or exceeded its time limit."],
+]);
+
+/** A valid decode can still fail recognition or listening. Only fixed local reasons leave this boundary. */
+function audioInspectionFailure(error: unknown, kind: "speech recognition" | "audio listening", signal: AbortSignal): Error {
+  if (error instanceof RetrievalError || error instanceof LeaseDeniedError) return error;
+  if (signal.aborted || error instanceof VoxaCancelledError) return new RetrievalError("unavailable", `Local ${kind} was stopped.`);
+  if (error instanceof VoxaTimeoutError) return new RetrievalError("unavailable", `Local ${kind} exceeded its time limit.`);
+  const wordTiming = kind === "speech recognition" ? wordTimingRefusalReason(error) : undefined;
+  const reason = wordTiming !== undefined ? `Local speech recognition unavailable: ${wordTiming}.`
+    : error instanceof Error ? audioInspectionReasons.get(error.message) : undefined;
+  return new RetrievalError("unavailable", reason ?? `Local ${kind} could not be completed or its response was invalid.`);
+}
+
 export class ConversationMediaInspection {
   private readonly signals = new Map<string, AbortSignal>();
   private readonly counts = new Map<string, number>();
@@ -69,7 +92,7 @@ export class ConversationMediaInspection {
   read(lease: QueryLease, name: MediaInspectionName, input: Record<string, unknown>): Promise<RetrievalOutcome> {
     const result = this.tail.then(() => this.readOnce(lease, name, input)).catch(error => {
       if (error instanceof RetrievalError || error instanceof LeaseDeniedError) throw error;
-      throw new RetrievalError("unavailable", "The verified media source could not be decoded within this host's bounded profile, or inspection was stopped.");
+      throw new RetrievalError("unavailable", "Media inspection could not be completed, or inspection was stopped.");
     });
     this.tail = result.then(() => {}, () => {}); return result;
   }
@@ -115,7 +138,8 @@ export class ConversationMediaInspection {
       if (listeningRead) {
         const derivative = await tools.speechAudio!(snapshot.path, selected, startSec, endSec, signal);
         this.access(lease, name);
-        const listening = await listenToAgentAudio({ ...derivative, streamIndex: selected.index, focuses: args.focuses!, listener: this.deps.listener!, signal });
+        const listening = await listenToAgentAudio({ ...derivative, streamIndex: selected.index, focuses: args.focuses!, listener: this.deps.listener!, signal })
+          .catch(error => { throw audioInspectionFailure(error, "audio listening", signal); });
         return { observation: AgentMediaObservationSchema.parse({ ...base, range: args.range, listening, coverage: "model-audio-listening",
           limitations: ["Local audio-model interpretation of this mono 16 kHz excerpt only; subjective impressions can be wrong and do not establish a person's actual emotional state.",
             "No measured word/event times, speaker identity, diagnosis, stereo/spatial detail, high-frequency fidelity, original-channel QC or audiovisual sync assessment.",
@@ -125,7 +149,8 @@ export class ConversationMediaInspection {
         const derivative = await tools.speechAudio!(snapshot.path, selected, startSec, endSec, signal);
         this.access(lease, name);
         const transcript = await recognizeAgentSpeech({ ...derivative, streamIndex: selected.index, sourceStartSec: startSec,
-          viewStartSec: args.range.startSec, expectedText: args.expectedText, read: this.deps.speech!, signal });
+          viewStartSec: args.range.startSec, expectedText: args.expectedText, read: this.deps.speech!, signal })
+          .catch(error => { throw audioInspectionFailure(error, "speech recognition", signal); });
         return { observation: AgentMediaObservationSchema.parse({ ...base, range: args.range, transcript, coverage: "recognized-speech",
           limitations: ["Local automatic speech recognition on a separate mono 16 kHz derivative; words and acoustic bounds may be wrong. Word probabilities are uncalibrated.",
             "Speech content only. Music, sound events, speaker identity, emotion, delivery, pronunciation quality and audiovisual sync were not assessed.",

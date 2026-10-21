@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { VoxaClient, VoxaCancelledError, encodePcm16Wav } from "../src/index.js";
+import { VoxaClient, VoxaCancelledError, encodePcm16Wav, wordTimingRefusalReason } from "../src/index.js";
+
+it("shares only exact static word-timing refusals with other local readers", () => {
+  const known = "the recognizer grouped multiple words under one timestamp";
+  assert.equal(wordTimingRefusalReason(new Error(known)), known);
+  for (const error of [new Error(known + " private transcript"), new Error("voxa: word timing failed (HTTP 422)"),
+    new Error("x".repeat(10000)), { message: known }, known, null]) assert.equal(wordTimingRefusalReason(error), undefined);
+});
 
 it("requests acoustic words from saved WAV audio and rejects sentence-only answers", async () => {
   const heard = {
