@@ -761,6 +761,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
+  const notesFeedback = rippleNotice ? "What changed elsewhere"
+    : wrapUpRefusal && !wrappingUp ? "Review needed"
+    : mediaRefusal ? "Media could not open" : null;
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure;
   const starting = opening !== null;
@@ -988,8 +991,9 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           </div>
 
           <HeldBar className="fy-chat__composer">
-            {(phone || inPanel) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
-              <span><b>What I’ve understood <span>· {carried} of {points.length} ready</span></b><span>{[...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
+            {(phone || inPanel) && (points.length > 0 || notesFeedback) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
+              <span><b>{points.length > 0 ? <>What I’ve understood <span>· {carried} of {points.length} ready</span></> : notesFeedback}</b><span>{(notesFeedback && (points.length > 0 ? notesFeedback : "View details"))
+                ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
             <Composer
               value={draft}
