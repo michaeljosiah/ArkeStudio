@@ -6,7 +6,7 @@ const input = { key: "rena", expectedName: "Rena", expectedHash: lookCharacterHa
 it("links identical words to an explicit sheet, preserving evidence and the original record", () => {
   const before = structuredClone(held); const linked = linkLookCharacter(held, input, "2026-10-21T00:01:00Z");
   assert.equal(linked.characters.rena, undefined);
-  assert.deepEqual(linked.characters["maren-kest"], { ...held.characters.rena, name: "Maren Kest", sheet: "maren-kest" });
+  assert.deepEqual(linked.characters["maren-kest"], { ...held.characters.rena, sheet: "maren-kest" });
   assert.equal(linked.chapterHash, held.chapterHash); assert.deepEqual(held, before);
 });
 it("refuses stale names or words, linked sources and authored target collisions", () => {

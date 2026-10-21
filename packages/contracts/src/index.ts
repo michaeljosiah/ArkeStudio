@@ -180,6 +180,7 @@ export * from "./audiobook-motion.js";
 export * from "./audiobook-motion-quote.js";
 export * from "./audiobook-word-timing.js";
 export * from "./audiobook-look.js";
+export * from "./audiobook-reference-coverage.js";
 export * from "./audiobook-illustrate.js";
 export * from "./audiobook-listening.js";
 export * from "./world-package.js";

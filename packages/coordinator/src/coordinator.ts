@@ -359,6 +359,7 @@ import { chooseAudiobookMotion, quoteAudiobookMotion, saveAudiobookMotionCandida
 import type { AudiobookWordTimingState } from "@arke-studio/contracts";
 import { prepareAudiobookWordTiming } from "./productions/audiobook-word-timing.js";
 import { audiobookVideoState, exportAudiobookVideo, forgetVideoJob, listVideoExports, pendingVideoJobs } from "./productions/audiobook-video.js";
+import { bookReferenceCoverage } from "./productions/audiobook-reference-coverage.js";
 import { bookLookChoices, lookUsage } from "./productions/audiobook-look-book.js";
 import { chooseChapterLook, deriveChapterLook, makeAdapterLookDeriver, setChapterLook, linkChapterCharacter, writeDerivedLook, type LookDeriver } from "./productions/audiobook-look.js";
 import { makeAdapterIllustrateDeriver, proposeIllustrations, type IllustrateDeriver } from "./productions/audiobook-illustrate.js";
@@ -16332,7 +16333,9 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         const usage = lookUsage(await bookLookChoices(store, msg.productionId));
-        this.emit({ at: new Date().toISOString(), type: "audiobook.looks", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, usage });
+        const pictures = new Map([...this.heldIllustrations.entries()].filter(([key]) => key.startsWith(`${msg.worldId}/${msg.productionId}/`)).map(([key, held]) => [key.slice(`${msg.worldId}/${msg.productionId}/`.length), held.proposal?.rows ?? []]));
+        const coverage = msg.coverage === true ? await bookReferenceCoverage(store, msg.productionId, pictures) : undefined;
+        this.emit({ at: new Date().toISOString(), type: "audiobook.looks", requestId: msg.requestId, worldId: msg.worldId, productionId: msg.productionId, usage, ...(coverage === undefined ? {} : { coverage }) });
         return;
       }
       case "choose-audiobook-look": {

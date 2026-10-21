@@ -151,7 +151,7 @@ export type AudiobookAsk =
   | { state: "made"; sessionId?: string }
   | { state: "failed"; reason: string; sessionId?: string }
   /** Which chapters (by number) of the book chose each kit look (design turn 193, R-114). */
-  | { state: "looks"; usage: Record<string, number[]> }
+  | { state: "looks"; usage: Record<string, number[]>; coverage?: import("@arke-studio/contracts").ChapterReferenceCoverage[] }
   /** Update prompt answered (design turn 193d, R-146): the prompt with the changed people's clothing words rewritten. */
   | { state: "prompt"; prompt: string };
 
@@ -2396,7 +2396,7 @@ function handleFrame(json: string): void {
         };
       }
     } else if (event.type === "audiobook.looks") {
-      if (audiobookAsks[event.requestId] !== undefined) audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "looks", usage: event.usage } };
+      if (audiobookAsks[event.requestId] !== undefined) audiobookAsks = { ...audiobookAsks, [event.requestId]: { state: "looks", usage: event.usage, ...(event.coverage === undefined ? {} : { coverage: event.coverage }) } };
     } else if (event.type === "audiobook.picture-suggestion") {
       if (audiobookAsks[event.requestId] !== undefined) {
         audiobookAsks = { ...audiobookAsks, [event.requestId]: event.suggestion !== undefined ? { state: "suggested", suggestion: event.suggestion } : { state: "refused", refused: event.refused ?? "no picture suggested" } };
@@ -4497,9 +4497,9 @@ export function acceptChapterLook(
 }
 
 /** Which chapters of the book chose each kit look (R-114), answered under the id returned and held in `audiobookAsks`. */
-export function readAudiobookLooks(worldId: string, productionId: string): string | null {
+export function readAudiobookLooks(worldId: string, productionId: string, coverage = false): string | null {
   const requestId = ulid();
-  if (!send({ kind: "read-audiobook-looks", worldId, productionId, requestId })) return null;
+  if (!send({ kind: "read-audiobook-looks", worldId, productionId, requestId, ...(coverage ? { coverage: true } : {}) })) return null;
   emitChange({ ...current, audiobookAsks: { ...current.audiobookAsks, [requestId]: { state: "working" } } });
   return requestId;
 }
