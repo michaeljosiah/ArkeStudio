@@ -74,6 +74,15 @@ async function active() {
 }
 
 describe("durable additional conversation inputs (SPEC-045)", () => {
+  it("fences explicit manuscript intent before recording it and preserves it on reopen", async () => {
+    const state = await setup();
+    const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
+    await state.journal.record(request("Draft the rest", { subject }), { ...CAPTURE, constraints: { replyOnly: false, subject } });
+    assert.equal(state.boundary, 102);
+    const reopened = await state.other().read();
+    assert.deepEqual(reopened.inputs[0]!.input.constraints.subject, subject);
+    assert.deepEqual(reopened.inputs[0]!.input.request.subject, subject);
+  });
   it("records one input for concurrent duplicate submissions without inventing a transcript turn", async t => {
     const state = await setup();
     const { journal, other, id } = state;

@@ -1321,7 +1321,7 @@ export function ProductionConversationBody({
       // A prompt says its subject; an explicit press keeps its own action (turns 128–129).
       return <button key={prompt} type="button" className="fy-arke__prompt"
         disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-        onClick={() => press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly)}>{prompt}</button>;
+        onClick={() => press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly, subject)}>{prompt}</button>;
     })}
   </div>;
   const transcript = (

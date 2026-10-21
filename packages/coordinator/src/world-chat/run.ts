@@ -10,6 +10,7 @@ import {
   REFUSED_TOOLS_MAX,
   PRODUCTION_READINESS_SCHEMA_VERSION,
   CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION,
+  CHAPTER_DRAFT_INTENT_SCHEMA_VERSION,
   type ProductionPlanRequest,
   type BibleEdit,
   type CandidateChecks,
@@ -41,6 +42,7 @@ import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
 import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
 import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
+import { chapterDraftResult } from "./chapter-draft.js";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -123,7 +125,7 @@ export interface RunDeps {
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
   /** Assemble the selected chapter through the run's leased reads before asking the model. */
-  chapterBrief?: (input: { leaseToken: string; productionId: string; chapterId: string; budgetChars: number }) => Promise<string>;
+  chapterBrief?: (input: { leaseToken: string; productionId: string; chapterId: string; budgetChars: number; draft?: boolean }) => Promise<string>;
   receiptsFor: (runId: RunId) => readonly WorldChatCheckReceipt[];
   /** Run the coordinator's own check plan for one draft and return what it found. */
   runCheckPlan: (input: {
@@ -754,10 +756,10 @@ export class WorldChatRunner {
     // A promotion carries its constraints in the same record as the turn, so it writes none here.
     const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter" || subject?.kind === "effect-arrangement");
     if (constrained) {
-      if (subject?.kind === "effect-arrangement" && !this.deps.raiseSchemaBoundary) {
-        return { status: "unavailable", reason: "This host cannot preserve effects request scope." };
+      if ((subject?.kind === "effect-arrangement" || subject?.kind === "chapter" && subject.intent === "draft") && !this.deps.raiseSchemaBoundary) {
+        return { status: "unavailable", reason: "This host cannot preserve the requested authoring scope." };
       }
-      await this.deps.raiseSchemaBoundary?.(subject?.kind === "effect-arrangement" ? 75 : subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
+      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION : subject?.kind === "effect-arrangement" ? 75 : subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
         { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
         { at },
@@ -811,7 +813,8 @@ export class WorldChatRunner {
       });
       prepared = true;
       let brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
-        ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget })
+        ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget,
+          ...(chapterSubject.kind === "chapter" && chapterSubject.intent === "draft" ? { draft: true } : {}) })
         : "";
       if (view.entryContext?.kind === "production-setup") {
         if (!view.productionSetup || !this.deps.setupBrief) throw new Error("Production setup is unavailable. Reopen the draft.");
@@ -1110,6 +1113,11 @@ export class WorldChatRunner {
     });
 
     if (!outcome.ok) return { ok: false, problems: outcome.problems };
+    if (subject?.kind === "chapter" && subject.intent === "draft") {
+      const draft = chapterDraftResult(outcome.turn,
+        folded.entryContext?.kind === "production" ? folded.entryContext.productionId : undefined, subject.chapterId);
+      if ("problem" in draft) return { ok: false, problems: [{ code: "chapter-draft", safeMessage: draft.problem }] };
+    }
     const effectScopeProblem = effectOnlyTurnProblem(subject, outcome.turn);
     if (effectScopeProblem) return { ok: false, problems: [{ code: "effects-scope", safeMessage: effectScopeProblem }] };
     let productionSetup: ProductionSetupState | undefined;
@@ -1531,7 +1539,7 @@ function subjectNarration(subject: WorldChatSubject | undefined, productionId?: 
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject, productionId) : ""}`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject, productionId) : ""}${subject.kind === "chapter" && subject.intent === "draft" ? " This is an explicit manuscript-writing operation. Read this chapter in full and the required production sources, then return exactly one production-chapter edit action for this chapter with its complete proposed manuscript in changes.body, optional title and status draft only. Preserve the existing prose when asked to continue. Do not substitute critique or another question, and do not include plan, world-fact or other changes. The author will decide the staged draft separately." : ""}`;
 }
 
 /**

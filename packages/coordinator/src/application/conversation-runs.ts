@@ -277,13 +277,13 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       receipts.delete(runId);
       await removeRunScratch(deps.scratchRoot, conversationId, runId);
     },
-    chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars }) => chapterDraftingBrief(
+    chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars, draft }) => chapterDraftingBrief(
       store.getBundle(), productionId, chapterId, async (tool, args) => {
         const outcome = await retrieval.call(leaseToken, tool, args);
         const seen = receipts.get(outcome.receipt.runId) ?? [];
         receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
         return outcome;
-      }, budgetChars,
+      }, budgetChars, draft ? { impliedFacts: false, manuscript: true } : {},
     ),
     checkSetupUpdate: async (update, { draft, receipts }) => {
       assertAdaptableSource(store, update);

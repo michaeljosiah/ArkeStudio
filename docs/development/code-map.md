@@ -652,9 +652,15 @@ hash through `save-chapter`, edits the frontmatter through `edit-chapter-plan`, 
 available snapshot through `restore-chapter`. Coordinator `productions/ops.ts` owns those writes;
 `world/commit.ts` owns the chapter history and commits `progress.json` with a successful save.
 
-The dock uses the production conversation, naming the chapter as its subject. `world-chat/run.ts`
+The chapter uses the production conversation, naming the chapter as its subject. `world-chat/run.ts`
 asks `chapter-brief.ts` for leased reads of its plan, previous ending, draws and style, retaining
-the normal receipts. `production-authoring.ts` stages a `production-chapter` action as a chapter
+the normal receipts. Its drafting presses additionally carry `intent: "draft"` on that chapter
+subject (schema 102, #1928), preserved by the input journal and retry. They read the complete current
+manuscript and chapter inventory within the same budget. `world-chat/chapter-draft.ts` shares the
+bounded manuscript contract with `application/local-writing.ts`: exactly one chapter-body edit,
+with optional title and draft status, before any result side effects. Advice alone receives the
+existing single corrective attempt and otherwise fails; ordinary chapter chat remains conversational.
+`production-authoring.ts` stages a `production-chapter` action as a chapter
 proposal; acceptance cuts a version. Its `outline` operation stages several planned chapters on
 one card. Implies stays on the chapter until Propose sends its separate canon/sheet ask or Dismiss
 removes an open item. See SPEC-012 R-53–R-61 and the chapter workspace, chapter brief, chapter
