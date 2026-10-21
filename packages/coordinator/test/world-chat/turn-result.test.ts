@@ -432,6 +432,42 @@ describe("accepting a turn", () => {
 });
 
 describe("rejecting a turn", () => {
+  it("identifies each bad quotation without returning source text, and preserves the independent work (#1912)", async () => {
+    const input = await baseInput();
+    const good = canonCreateDraft(input.message);
+    const bad = canonCreateDraft(input.message);
+    bad.evidence = [{ kind: "message", messageId: input.message.id, quote: "private invented quotation", start: 0, end: 26, purpose: "intent" }];
+    const operations = [good, bad, bad].map((candidate, i) => ({ op: "create" as const, temporaryId: `t${i}`, candidate }));
+    const refused = validateTurnResult({ ...input, raw: turn({ candidateOperations: operations }) });
+    assert.equal(refused.ok, false);
+    if (refused.ok) return;
+    assert.deepEqual(refused.problems.map(p => p.path), ["candidateOperations.1.candidate.evidence.0", "candidateOperations.2.candidate.evidence.0"]);
+    const correction = correctiveMessage(refused.problems);
+    for (const path of refused.problems.map(p => p.path!)) assert.ok(correction.includes(path));
+    assert.match(correction, /Keep valid independent records/);
+    assert.match(correction, /Never split an atomic group/);
+    assert.match(correction, /copy an exact quotation/);
+    assert.doesNotMatch(correction, /private invented quotation|Her aunt/);
+    assert.doesNotMatch(personLine(refused.problems), /candidateOperations/);
+    const repaired = validateTurnResult({ ...input, raw: turn({ candidateOperations: operations.map(op => ({ ...op, candidate: good })) }) });
+    assert.ok(repaired.ok);
+    assert.equal(repaired.turn.candidates.length, 3);
+  });
+
+  it("gives the link shape instead of a union error, and still refuses malformed links (#1912)", async () => {
+    const input = await baseInput();
+    const draft = canonCreateDraft(input.message);
+    const raw = (links: unknown[]) => JSON.stringify({ reply: "Noted.", candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...draft, draft: { ...draft.draft, links } } }], groupOperations: [] });
+    const refused = parseTurnResult(raw(["private location name"]));
+    assert.equal(refused.ok, false);
+    if (refused.ok) return;
+    const correction = correctiveMessage(refused.problems);
+    assert.match(correction, /candidateOperations.0.candidate.draft.links.0 must be a typed link/);
+    assert.match(correction, /kind:"sheet",sheetId/);
+    assert.doesNotMatch(correction, /private location name/);
+    assert.ok(parseTurnResult(raw([{ kind: "sheet", sheetId: "maren-kest" }])).ok);
+  });
+
   it("rejects everything when one piece of evidence does not verify", async () => {
     const input = await baseInput();
     const good = canonCreateDraft(input.message);
@@ -569,7 +605,17 @@ describe("rejecting a turn", () => {
       }),
     });
     assert.equal(outcome.ok, false);
-    if (!outcome.ok) assert.ok(outcome.problems.some((p) => p.code === "immutable-candidate"));
+    if (!outcome.ok) {
+      assert.ok(outcome.problems.some((p) => p.code === "immutable-candidate" && p.path === "candidateOperations.0"));
+      assert.match(correctiveMessage(outcome.problems), /fresh create operation/);
+      assert.match(correctiveMessage(outcome.problems), /use sheet.edit if the sheet already exists/);
+    }
+    const fresh = validateTurnResult({ ...input, existing: [accepted], raw: turn({ candidateOperations: [
+      { op: "create", temporaryId: "fresh", candidate: canonCreateDraft(input.message) },
+    ] }) });
+    assert.ok(fresh.ok);
+    assert.notEqual(fresh.turn.candidates[0]!.id, accepted.id);
+    assert.equal(accepted.revision, 1);
   });
 
   it("names every fault at once, because there is only one corrective turn", async () => {

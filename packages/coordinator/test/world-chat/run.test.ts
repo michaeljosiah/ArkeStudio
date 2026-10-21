@@ -332,6 +332,40 @@ describe("taking a turn", () => {
     assert.equal(asked, 2, "the first attempt and one correction — never a third");
   });
 
+  it("recovers an independent batch in one correction and persists only the corrected result (#1912)", async () => {
+    const said = "Create Bell House and East Lock.", prompts: string[] = [];
+    const answer = async (invalid: boolean) => {
+      const user = (await h.view()).messages[0]!;
+      const result = JSON.parse(goodAnswer(said, said, user.id));
+      result.candidateOperations = ["Bell House", "East Lock"].map((name, index) => ({
+        op: "create", temporaryId: `location-${index}`, candidate: {
+          ...result.candidateOperations[0].candidate, classification: "sheet.create", title: name,
+          draft: { type: "location", name, sections: [{ heading: "Look", body: `${name} stands beside the harbour.` }], links: [], canonRules: [] },
+        },
+      }));
+      if (invalid) result.candidateOperations[1].candidate.evidence = [{ kind: "message", messageId: user.id, quote: "unread invented source", start: 0, end: 22, purpose: "intent" }];
+      result.reply = "Both locations are ready for review.";
+      return JSON.stringify(result);
+    };
+    const h = await setup(fakeAdapter([() => answer(true), async () => {
+      const before = await h.view();
+      assert.equal(before.candidates.length, 0);
+      assert.equal(before.messages.filter(m => m.role === "studio").length, 0);
+      assert.match(prompts[1]!, /candidateOperations.1.candidate.evidence.0/);
+      assert.match(prompts[1]!, /Keep valid independent records/);
+      return answer(false);
+    }], { prompts }));
+    assert.equal((await h.runner.send(h.store, h.conversationId, said)).status, "completed");
+    assert.equal(prompts.length, 2);
+    const reopened = new WorldChatStore(h.store.dir), meta = await reopened.readMeta();
+    const events = (await reopened.read()).events;
+    const view = foldConversation(meta!.id, meta!.createdAt, events).view;
+    assert.deepEqual(view.candidates.map(c => c.title), ["Bell House", "East Lock"]);
+    assert.equal(events.filter(e => e.event.type === "turn.completed").length, 1);
+    assert.equal(events.filter(e => e.event.type === "run.retry-started").length, 1);
+    assert.equal(view.messages.at(-1)!.text, "Both locations are ready for review.");
+  });
+
   it("records the failure on the run rather than losing it", async () => {
     const { runner, store, conversationId } = await setup(fakeAdapter(["bad", "bad"]));
     await runner.send(store, conversationId, "anything");
