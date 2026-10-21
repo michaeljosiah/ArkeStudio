@@ -156,7 +156,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     }
   }, [rendering, held]);
   const counts = plan === null ? null : packageCounts(plan);
-  const arke = useArkePlayerExport({ worldId, worldSlug: world?.meta.slug, production, plan: scope.kind === "book" ? plan : null, worldName: world?.meta.name ?? "", committed: bookChapters(production), remote, phone, onClose });
+  const arke = useArkePlayerExport({ worldId, worldSlug: world?.meta.slug, keyArt: world?.keyArt ?? null, production, plan: scope.kind === "book" ? plan : null, worldName: world?.meta.name ?? "", committed: bookChapters(production), remote, phone, onClose });
   const start = () => {
     setBusy(true);
     setResult(null);
@@ -405,7 +405,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="audiobook-export">
             {kind !== "arke" && scopeRow}
             {kind !== "arke" && scopeReadiness}
-            <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
+            {/* Made (233c), the sheet is the package alone. */}
+            {!(kind === "arke" && arke.made) && <div className="fy-abv-kinds" role="radiogroup" aria-label="Export">
               <button type="button" role="radio" aria-checked={kind === "player"} className={kind === "player" ? "fy-abv-kind on" : "fy-abv-kind"} onClick={() => setKind("player")}>
                 <span className="r" />
                 <div>
@@ -434,7 +435,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
                   <span>phone · pictures · the book</span>
                 </div>
               </button>
-            </div>
+            </div>}
             {kind === "arke" ? (
               <>
                 {arke.rows !== null && <div className="fy-abv-opts">{arke.rows}</div>}

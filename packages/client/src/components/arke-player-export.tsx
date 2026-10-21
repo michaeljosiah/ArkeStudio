@@ -36,7 +36,8 @@ export interface ArkePlayerCounts {
 
 export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean }): ArkePlayerCounts {
   const whole = wholeChapters(plan);
-  const pictures = new Set<string>([...(plan.cover !== null ? [plan.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])]);
+  // The cover ships with the narration only: a package of the book alone shows no pictures.
+  const pictures = new Set<string>(whole.length === 0 ? [] : [...(plan.cover !== null ? [plan.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])]);
   const loops = new Set(whole.flatMap((chapter) => chapter.pictures.flatMap((picture) => (picture.motion !== undefined ? [picture.motion.file] : []))));
   const orders = whole.map((chapter) => chapter.order);
   const runsOn = orders.every((order, index) => index === 0 || order === orders[index - 1]! + 1);
@@ -57,6 +58,12 @@ export function arkePlayerCounts(plan: AudiobookListening, options: { book: bool
 /** The chapters the book holds (R-2): every chapter still in the manuscript. */
 export const bookChapters = (production: ProductionBundle) => production.chapters.filter((chapter) => chapter.retired !== true && (chapter.words === undefined || chapter.words > 0)).length;
 
+/** `2026-10-21 09:12` in this device's time: when the package was made (233c). */
+const madeStamp = (at: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+};
+
 /** `21 Oct 2026`, today, as the edition the package will carry. */
 const edition = () => new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 
@@ -68,9 +75,11 @@ const holds = (result: Extract<ArkePlayerExported["result"], { ok: true }>) =>
  * package made with its size and SHA-256 (233c). The package is made on the desktop that holds the
  * world, whichever window asked (233f).
  */
-export function useArkePlayerExport({ worldId, worldSlug, production, plan, worldName, committed, remote, phone, onClose }: {
+export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, plan, worldName, committed, remote, phone, onClose }: {
   worldId: string;
   worldSlug: string | undefined;
+  /** The world's key art, world-relative: the package's picture in the made row (233c). */
+  keyArt: string | null;
   production: ProductionBundle;
   plan: AudiobookListening | null;
   worldName: string;
@@ -79,11 +88,12 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
   remote: boolean;
   phone: boolean;
   onClose: () => void;
-}): { rows: ReactNode; lines: ReactNode; foot: ReactNode; sub: string | null } {
+}): { rows: ReactNode; lines: ReactNode; foot: ReactNode; made: boolean; sub: string | null } {
   const connection = useStore().connection;
   const [options, setOptions] = useState({ book: committed > 0, motion: true });
   const [result, setResult] = useState<ArkePlayerExported["result"] | null>(null);
   const [making, setMaking] = useState<string | null>(null);
+  const [madeAt, setMadeAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
   const listing = useRef<string | null>(null);
   useEffect(() => {
@@ -91,6 +101,7 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
       if (answer.exportId !== making) return;
       setMaking(null);
       setResult(answer.result);
+      setMadeAt(new Date());
     });
     // A reconnect can lose the one answer (as the player's export, codex on PR 1498): the
     // packages are listed again, and this export's package is the answer.
@@ -100,6 +111,7 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
       if (found?.file === undefined || found.sha256 === undefined) return;
       setMaking(null);
       setResult({ ok: true, file: found.file, bytes: found.bytes ?? 0, sha256: found.sha256, edition: found.exportedAt.slice(0, 10), chapters: 0, pictures: 0, book: false });
+      setMadeAt(new Date(found.exportedAt));
     });
     return () => {
       offExported();
@@ -172,7 +184,7 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
       {made === null && (
         <div className="fy-abv-est" data-testid="arke-player-estimate">
           <b>{counts === null ? "…" : `~${megabytes(counts.bytes)} · ~${counts.minutes} min ${remote ? "on the desktop" : "on this machine"}`}</b>
-          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures} pictures`, options.book ? "the book" : null].filter(Boolean).join(" · ")}</span>}
+          {!phone && counts !== null && <span className="m">{[`${counts.chapters} chapter${counts.chapters === 1 ? "" : "s"}`, `${counts.pictures} picture${counts.pictures === 1 ? "" : "s"}`, options.book ? "the book" : null].filter(Boolean).join(" · ")}</span>}
         </div>
       )}
       {making !== null && <div className="fy-abv-note" data-testid="arke-player-making">Making package · follow it in Activity</div>}
@@ -192,8 +204,12 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
             {!phone && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={start}>Make again</button>}
           </div>
           <div className="fy-abv-file">
-            <div>{name}</div>
-            <div className="m">{[holds(made), megabytes(made.bytes)].filter(Boolean).join(" · ")}</div>
+            {keyArt !== null && worldSlug !== undefined ? <img src={mediaUrl(worldSlug, keyArt)} alt="" /> : <span className="ph" />}
+            <div>
+              <div>{name}</div>
+              <div className="m">{[holds(made), megabytes(made.bytes)].filter(Boolean).join(" · ")}</div>
+            </div>
+            <span />
           </div>
           <div className="fy-abv-sha">
             <b>SHA-256</b>
@@ -228,5 +244,5 @@ export function useArkePlayerExport({ worldId, worldSlug, production, plan, worl
       )}
     </div>
   );
-  return { rows, lines, foot, sub: made === null ? null : `arke player · made ${made.edition}` };
+  return { rows, lines, foot, made: made !== null, sub: made === null ? null : `arke player · made ${madeAt === null ? made.edition : madeStamp(madeAt)}` };
 }
