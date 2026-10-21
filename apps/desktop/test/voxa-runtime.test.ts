@@ -6,11 +6,28 @@ import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
 import { KokoroClient } from "@arke-studio/providers";
 import { VoxaClient } from "@arke-studio/voice";
-import { environmentVoxaArgs, safeVoxaExtraArgs, selectVoxa, validateVoxaExecutable } from "../src/voxa-runtime.js";
+import { createVoxaTranscriptionIdentity, environmentVoxaArgs, safeVoxaExtraArgs, selectVoxa, validateVoxaExecutable } from "../src/voxa-runtime.js";
 
 const settings = (executablePath: string | null = null) => ({
   executablePath,
   extraArgs: [],
+});
+
+it("binds recognition identity to healthy runtime and actual model bytes, refreshing changed models", async () => {
+  const root = await mkdtemp(join(tmpdir(), "arke-words-model-")), path = join(root, "model.bin");
+  await writeFile(path, "first model");
+  let ready = false, version = "1", hashes = 0;
+  const identity = createVoxaTranscriptionIdentity({ path: () => path,
+    health: async () => ({ version, protocolVersion: 1, architecture: "x64", engineStatus: { whisper: { ready } } }),
+    hash: async () => { hashes++; return `sha256:${String(hashes).repeat(64)}`; } });
+  assert.equal(await identity(new AbortController().signal), null); assert.equal(hashes, 0);
+  ready = true;
+  const first = await identity(new AbortController().signal);
+  assert.ok(first); assert.deepEqual(await identity(new AbortController().signal), first); assert.equal(hashes, 1);
+  version = "2"; assert.notDeepEqual(await identity(new AbortController().signal), first); assert.equal(hashes, 1);
+  await writeFile(path, "a changed and longer model");
+  assert.notDeepEqual(await identity(new AbortController().signal), first); assert.equal(hashes, 2);
+  const stopped = new AbortController(); stopped.abort(); await assert.rejects(identity(stopped.signal));
 });
 
 async function peExecutable(arch: "x64" | "arm64", name = "voxa.exe"): Promise<string> {

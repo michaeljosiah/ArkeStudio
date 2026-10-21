@@ -1,4 +1,5 @@
 import { chapterNarrator } from "../lib/audiobook-narrator.js";
+import { AudiobookWordsControl } from "../components/audiobook-words.js";
 export { chapterNarrator } from "../lib/audiobook-narrator.js";
 import { bookNarratorUnavailable, readerUnavailableWords, soloTurns, compileAudiobookPerformance, castStanding, chapterParagraphs, characterLabels, DEFAULT_GROUP_PACKING, estimateSpeechMicroUsd, expectedSpeechSeconds, packTurns, freeCreditLeft, freePlanAskCopy, freePlanNote, groupReads, localTranscriberAvailable, quoteGroupedSpeech, readBreaksFor, readsGrouped, speechPlanLabel, speechPriceCopy, speechPricePrefix, voiceDisplayLabel, type AudiobookSplitFlag, type SpeechTurn, type BlockTurns } from "@arke-studio/contracts";
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
@@ -2929,6 +2930,8 @@ export function AudiobookSide({ rows, selected, record, artifacts, slug, product
         )}
       </section>
       )}
+      {hear !== undefined && <AudiobookWordsControl worldId={hear.worldId} productionId={productionId} chapterId={chapterId}
+        block={row.block.key} freshness={`${record?.updatedAt ?? ""}/${row.block.text}`} />}
       {/* Sent as, folded (rule 12): what the reader is sent, each part named, opened on a press. */}
       {row.proposed === null && row.sentAs !== null && (
         <details className="fy-abp__disc" data-testid="audiobook-sent">

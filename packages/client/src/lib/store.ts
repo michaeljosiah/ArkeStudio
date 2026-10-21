@@ -823,6 +823,18 @@ export function subscribeAudiobookMotion(listener: (answer: AudiobookMotionAnswe
   return () => audiobookMotionListeners.delete(listener);
 }
 export type AudiobookWordTimingAnswer = Extract<DomainEvent, { type: "audiobook.word-timing" }>;
+export type AudiobookWordsAnswer = Extract<DomainEvent, { type: "audiobook.words" }>;
+const audiobookWordsListeners = new Set<(answer: AudiobookWordsAnswer) => void>();
+export function subscribeAudiobookWords(listener: (answer: AudiobookWordsAnswer) => void): () => void {
+  audiobookWordsListeners.add(listener);
+  return () => audiobookWordsListeners.delete(listener);
+}
+export function requestAudiobookWords(worldId: string, productionId: string, action: "read" | "check" | "stop",
+  scope: { chapters?: string[]; blocks?: { chapterId: string; key: string }[] } = {}): string {
+  const requestId = ulid();
+  send({ kind: "audiobook-words", worldId, productionId, action, ...scope, requestId });
+  return requestId;
+}
 const audiobookWordTimingListeners = new Set<(answer: AudiobookWordTimingAnswer) => void>();
 export function subscribeAudiobookWordTiming(listener: (answer: AudiobookWordTimingAnswer) => void): () => void {
   audiobookWordTimingListeners.add(listener);
@@ -1939,6 +1951,7 @@ function handleFrame(json: string): void {
     }
     if (event.type === "audiobook.motion") for (const listener of audiobookMotionListeners) listener(event);
     if (event.type === "audiobook.word-timing") for (const listener of audiobookWordTimingListeners) listener(event);
+    if (event.type === "audiobook.words") for (const listener of audiobookWordsListeners) listener(event);
     if (event.type === "audiobook.video-state") {
       for (const listener of audiobookVideoStateListeners) listener(event);
     }

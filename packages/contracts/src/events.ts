@@ -17,6 +17,7 @@ import { AudiobookDirectionInputSchema, AudiobookDoorSchema, AudiobookPriceLineS
 import { AudiobookListeningSchema, AudiobookScopeSchema } from "./audiobook-listening.js";
 import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
 import { AudiobookWordTimingStateSchema } from "./audiobook-word-timing.js";
+import { AudiobookWordsStateSchema } from "./audiobook-words.js";
 import { AudiobookVideoProgressSchema, AudiobookVideoResultSchema, AudiobookVideoStateSchema } from "./audiobook-video.js";
 import { ChapterReferenceCoverageSchema } from "./audiobook-reference-coverage-schema.js";
 import { IllustrationProgressSchema, IllustrationProposalSchema, PICTURE_PROMPT_MAX, PictureSuggestionSchema } from "./audiobook-illustrate.js";
@@ -1618,6 +1619,7 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
     .strict(),
   z.object({ ...base, type: z.literal("audiobook.motion"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, block: z.string(), state: z.enum(["quoted", "making", "review", "chosen", "failed"]), quote: AudiobookMotionQuoteSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("audiobook.word-timing"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordTimingStateSchema }).strict(),
+  z.object({ ...base, type: z.literal("audiobook.words"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, state: AudiobookWordsStateSchema }).strict(),
   /** An accepted proposal made one picture at a time (design turn 191d, R-102): how many, what has landed, what was held and why. */
   z
     .object({

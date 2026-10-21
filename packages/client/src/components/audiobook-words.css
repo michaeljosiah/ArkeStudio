@@ -1,0 +1,11 @@
+/* The recorded-take data rows, with wrapping for a whole book's chapter names and reasons. */
+.fy-abwords { padding: 14px 16px 16px; min-height: 0; overflow: auto; }
+.fy-abwords p { margin: 0; }
+.fy-abwords .fy-rectake__check { height: auto; min-height: 38px; padding: 8px 12px; align-items: flex-start; }
+.fy-abwords .fy-rectake__check-label, .fy-abwords .fy-rectake__check-value { min-width: 0; overflow-wrap: anywhere; }
+.fy-abwords .fy-rectake__check-value { flex: 1; text-align: right; }
+.fy-abwords .fy-rectake__foot, .fy-abwords .fy-rectake__sect { flex-wrap: wrap; }
+.fy-abwords .fy-ab__splitpanel { padding: 8px 12px; }
+.fy-abwords .fy-abp__disc > p { padding: 0 12px 8px; }
+.fy-abwords .fy-rectake__tech { flex: 1; min-width: 80px; }
+.fy-abwords .fy-rectake__push { display: none; }

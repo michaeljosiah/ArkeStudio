@@ -79,6 +79,7 @@ import "./components/account-menu.css";
 import "./components/model-chip.css";
 import "./screens/audiobook-show.css";
 import "./components/audiobook-motion.css";
+import "./components/audiobook-words.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import "./components/audiobook-look.css";

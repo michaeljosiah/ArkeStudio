@@ -891,3 +891,12 @@ inputs before dispatch. Client `reference-coverage.tsx` reuses folded Looks disc
 `audiobook-illustrate.tsx` shows missing places, explicit Refresh, and revised acceptance. Tests:
 contracts/coordinator `audiobook-reference-coverage.test.ts`, client `reference-coverage.test.tsx`
 and `chapter-audiobook.test.tsx`. Existing pictures and world identity records are not rewritten.
+
+Saved narration words checks (#2113): coordinator `productions/audiobook-words.ts` projects current
+block/chapter/book coverage and compares serially through VoiceService's local plain transcription.
+`audio/transcript-comparison.ts` owns the existing full source/text/engine cache, with inference
+outside its short derived write. Desktop `voxa-runtime.ts` binds recognition to the healthy runtime
+and managed model bytes. Client `components/audiobook-words.tsx` reuses Voice/Takes and EditorDialog;
+contracts `audiobook-words.ts` carries progress and honest comparison counts. No generation flag,
+take selection or acoustic word-timing record is changed. Tests: coordinator
+`productions/audiobook-words.test.ts`, desktop `voxa-runtime.test.ts`, client `audiobook-words.test.tsx`.

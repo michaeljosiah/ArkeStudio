@@ -58,7 +58,9 @@ export interface SidecarLike {
   health(options?: { signal?: AbortSignal }): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } }; wordTiming?: { ready: boolean; reason?: string } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; language?: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
-  transcribe(audio: Uint8Array, contentType: string): Promise<string>;
+  transcribe(audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal }): Promise<string>;
+  /** Evidence from the host's healthy runtime and managed model, never a guessed model label. */
+  transcriptionIdentity?(signal: AbortSignal): Promise<{ id: string; version: string } | null>;
   transcribeWords?(audio: Uint8Array, options?: { signal?: AbortSignal }): Promise<AcousticWords>;
 }
 
@@ -926,9 +928,15 @@ export class VoiceService {
   }
 
   /** The words in some audio, for a caller that wants them back rather than an event (issue 683). */
-  async transcribe(audio: Uint8Array, contentType: string): Promise<string> {
+  async transcribe(audio: Uint8Array, contentType: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     if (!this.deps.sidecar) throw new Error("Voxa is not running — speech-to-text is off");
-    return this.deps.sidecar.transcribe(audio, contentType);
+    return this.deps.sidecar.transcribe(audio, contentType, signal ? { signal } : undefined);
+  }
+
+  async transcriptionIdentity(signal: AbortSignal): Promise<{ id: string; version: string } | null> {
+    signal.throwIfAborted();
+    return this.deps.sidecar?.transcriptionIdentity?.(signal) ?? null;
   }
 
   async wordTimingAvailability(signal?: AbortSignal): Promise<{ ready: boolean; reason?: string }> {
