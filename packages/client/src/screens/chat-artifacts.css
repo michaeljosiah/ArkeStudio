@@ -115,16 +115,11 @@
   .fy-artifact-candidate { flex-wrap: wrap; }
   .fy-artifact-candidate__actions { flex-wrap: wrap; flex-basis: 100%; }
   .fy-artifact-candidate__actions .ui-btn { white-space: normal; }
-  .fy-chat__composer .fy-cx { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 3px; border-radius: 16px; }
-  .fy-chat__composer .fy-cx__editorwrap { flex: 1; min-width: 60px; }
-  .fy-chat__composer .fy-cx__editor { padding: 12px 10px; min-height: 44px; max-height: 100px; font-size: var(--text-sm); }
-  .fy-chat__composer .fy-cx__placeholder { position: absolute; padding: 0; left: 10px; top: 12px; right: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
-  .fy-chat__composer .fy-cx__bar, .fy-chat__composer .fy-cx__left { display: contents; }
-  .fy-chat__composer .fy-cx__agent { display: none; }
-  .fy-chat__composer :is(.fy-cx__strip, .fy-cx__busy, .fy-cx__reason, .fy-cx__drop) { flex-basis: 100%; }
-  .fy-chat__composer .fy-cx { min-height: 54px; box-shadow: none; }
-  .fy-chat__composer .fy-cx__send { border-radius: 50%; }
-  .fy-chat__composer :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic) { min-width: 44px; min-height: 44px; }
+  /* Keep the shared editor and toolbar rows (225), including its model-width queries. */
+  .fy-chat__composer .fy-cx :is(.fy-cx__attach, .fy-cx__send, .fy-cx__mic, .fy-cx__tool) { min-width: 44px; min-height: 44px; }
+  /* World Chat names one fixed model. Let its name yield before wrapping the read toggle. */
+  .fy-chat__composer .fy-cx__left:has(.fy-mchip__btn--fixed) { flex-wrap: nowrap; }
+  .fy-chat__composer .fy-cx__left > .fy-mchip:has(.fy-mchip__btn--fixed) { min-width: 0; }
 }
 @media (max-width: 599px) {
   .fy-chat__listpage { padding: 14px 20px 24px; }

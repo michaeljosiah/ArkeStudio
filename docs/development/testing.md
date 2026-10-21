@@ -87,7 +87,12 @@ acceptance remain host checks.
 
 Shared composer/model layout
 uses `test/composer-row-layout.test.tsx`, `test/composer.test.tsx`, `test/model-picker.test.tsx`
-and `test/harness-model-controls.test.tsx` from the client directory. The whole-page design
+and `test/harness-model-controls.test.tsx` from the client directory. Full-App checks for
+World Chat (#2051) include 320/390/820/1440 light/dark, empty/multiline drafts,
+long fixed model labels, notes present/absent, attachment/read controls and keyboard clearance.
+Its browser regression uses 296/366/747px composer boxes inside an 820px viewport to exercise
+the shared rows and the <=1099px World Chat cascade; this is separate from full-App captures.
+The whole-page design
 verification commands are in `design-system/global-chat-224.notes.md`: build the native and
 master readers, then run `global-chat-224.parity-check.mjs` with mouse and `--touch`.
 They compare matching native/master specimens and measure empty/multiline drafts, clipping,
