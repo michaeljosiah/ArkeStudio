@@ -56,12 +56,16 @@ it("captures attached pictures in manuscript order with exact prose, alt text an
   assert.equal(frozen.media.length, 1, "the same input is captured only once");
   assert.equal(frozen.compiler.compilerVersion, "4");
   await rename(join(h.dir, "world-art.png"), join(h.dir, "removed-image.png"));
+  await h.store.close();
+  await rename(h.dir, join(h.root, "removed-source-world"));
+  const savedEdition = await readFile(join(h.root, ready.id, "edition.json"));
   const independent = new StoryPublicationService(h.root);
   assert.deepEqual(await readFile((await independent.previewMedia(ready.id, "illustration-1.png"))!.path), Buffer.from(h.image));
   assert.equal(await independent.previewMedia(ready.id, "illustration-4.png"), null);
   assert.equal(await independent.previewMedia(ready.id, "../inputs.json"), null);
   assert.match((await independent.previewPage(ready.id, 0)).html, /illustration-1.png/);
   assert.deepEqual(await readFile((await independent.serve(ready.id, "story.epub"))!.path), bytes);
+  assert.deepEqual(await readFile(join(h.root, ready.id, "edition.json")), savedEdition, "reading after source removal does not change the ready edition");
 });
 
 it("refuses missing and changed bindings only when illustrations are explicitly selected", async () => {

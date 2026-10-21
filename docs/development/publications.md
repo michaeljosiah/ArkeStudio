@@ -446,3 +446,9 @@ previous session after unmount. The host allows at most two sessions for this ha
 removes its owned copy. A renderer reload/crash cancels pending opens and releases playback copies
 without cancelling host-owned export jobs. Abrupt exit can leave scratch files; no orphan
 sweep or power-loss durability guarantee is added by the UI.
+
+Ready EPUB files offer **Preview EPUB** from their saved edition, including on the
+world-independent Publications page. The existing captured-book preview opens in a read-only
+sheet with chapter navigation and restores focus to its opener when closed. It reads frozen
+text and inventoried images without opening or checking the mutable source world. The saved
+edition and deliverable bytes do not change; this is not a new preparation or publication.
