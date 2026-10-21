@@ -42,7 +42,8 @@
 .fy-abv-modal--phone .fy-abv-opt > b { width: auto; flex-basis: 100%; }
 .fy-abv-modal--phone .fy-abv-btn, .fy-abv-modal--phone .fy-abv-seg button, .fy-abv-modal--phone .fy-abv-chk { min-height: 44px; height: auto; white-space: normal; }
 
-.fy-abv-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+/* Four kinds since turn 233 (Arke Player beside the player, chapter files and video), two a row. */
+.fy-abv-kinds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .fy-abv-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
 .fy-abv-kind:disabled { cursor: default; opacity: .5; }
 .fy-abv-kind.on { border-color: var(--foreground); }
@@ -72,6 +73,17 @@
 .fy-abv-est { display: flex; align-items: center; gap: 12px; font-size: var(--text-sm); }
 .fy-abv-est > b { font-weight: 600; }
 .fy-abv-est .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+
+/* Turn 233: the Arke Player package's edition, the package made, its SHA-256, and a phone's
+   Download and Share. */
+.fy-abv-field { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; display: inline-flex; align-items: center; font: var(--type-label); min-width: 150px; }
+.fy-abv-made { display: flex; flex-direction: column; gap: 12px; }
+.fy-abv-made .fy-abv-file > div { min-width: 0; overflow-wrap: anywhere; }
+.fy-abv-sha { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); }
+.fy-abv-sha b { font-weight: 500; color: var(--muted-foreground); font-size: var(--text-sm); flex: none; }
+.fy-abv-sha code { flex: 1; min-width: 0; font: var(--type-mono); font-size: var(--text-2xs); overflow-wrap: anywhere; color: var(--foreground); }
+.fy-abv-acts { display: flex; gap: 6px; }
+.fy-abv-modal--phone .fy-abv-acts .fy-abv-btn { flex: 1; min-height: 44px; justify-content: center; }
 .fy-abv-btn { height: 32px; padding: 0 13px; border: 1px solid var(--border); border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; font: var(--type-label); background: var(--background); color: var(--foreground); white-space: nowrap; cursor: pointer; }
 .fy-abv-btn.pri { background: var(--foreground); color: var(--background); border-color: transparent; font-weight: 600; }
 .fy-abv-btn:disabled { cursor: default; opacity: .5; }
