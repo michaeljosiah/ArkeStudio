@@ -70,7 +70,7 @@
 .fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool > span { display: inline; }
 .fy-global-chat--chapter .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send) { width: 32px; height: 32px; min-width: 32px; margin-left: 0; border-radius: 6px; }
 @media (pointer: coarse) {
-  .fy-global-chat--chapter .fy-arke__prompt { min-height: 44px; }
+  .fy-global-chat--chapter :is(.fy-arke__prompt, .fy-mchip__btn) { min-height: 44px; }
   .fy-global-chat--chapter .fy-cx :is(.fy-cx__attach, .fy-cx__mic, .fy-cx__send, .fy-cx__tool) { min-width: 44px; width: 44px; height: 44px; }
   .fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool { width: 44px; flex: none; }
   .fy-global-chat--chapter .fy-cx .fy-cx__left > .fy-cx__tool > span { display: none; }
