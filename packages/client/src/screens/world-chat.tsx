@@ -489,6 +489,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
   const phone = useMediaQuery("(max-width: 599px)");
   const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
   const [understoodOpen, setUnderstoodOpen] = useState(false);
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [notesVisible, setNotesVisible] = useState<boolean | null>(null);
   const notesId = useId();
   useEffect(() => { setNotesVisible(null); }, [conversationId]);
@@ -997,6 +998,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
             </button>}
             <Composer
               value={draft}
+              focusRequest={composerFocusRequest}
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
@@ -1090,7 +1092,11 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
           {understoodBody}
           <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
         </div>}
-        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
+        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => {
+          setUnderstoodOpen(false);
+          // Dismissing the last result removes the opener. Return to the existing draft instead.
+          if (points.length === 0 && !notesFeedback) setComposerFocusRequest(value => value + 1);
+        }} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
           <div className="fy-panel__count">{carried} of {points.length} ready</div>
           {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           {understoodBody}{decisionNotices}

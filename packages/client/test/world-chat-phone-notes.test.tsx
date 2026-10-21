@@ -5,15 +5,17 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
-import { __applyEventForTest, __clearWorldChatHoldsForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __clearWorldChatHoldsForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { chatArtifactsFixture, CHAT_ID } from "./chat-artifacts-fixture.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const focused: HTMLElement[] = [];
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({ matches: query === "(max-width: 599px)", media: query, addEventListener() {}, removeEventListener() {} }),
   getComputedStyle: () => ({ direction: "ltr" }),
 });
 Object.assign(dom.HTMLElement.prototype, {
+  focus(this: HTMLElement) { focused.push(this); },
   scrollIntoView() {},
   showModal(this: HTMLElement) { this.setAttribute("open", ""); },
   close(this: HTMLElement) { this.removeAttribute("open"); },
@@ -31,6 +33,7 @@ it("keeps empty phone notes out of the review while retaining final-point feedba
   const commands: string[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: raw => { commands.push(raw); } });
   __setStateForTest(state);
+  __connectionStatusForTest("open");
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container);
   const peek = () => document.querySelector<HTMLButtonElement>(".fy-thread-peek");
@@ -55,6 +58,7 @@ it("keeps empty phone notes out of the review while retaining final-point feedba
     await click([...sheet.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Dismiss")!);
     assert.equal(peek(), null, "dismissed news does not leave an empty overlay");
     await click(document.querySelector<HTMLButtonElement>('.fy-understood-sheet button[aria-label="Close"]')!);
+    assert.ok(focused.at(-1)?.classList.contains("fy-cx__editor"), "closing after the opener disappears returns to the draft");
     await act(async () => __applyEventForTest({ type: "world-chat.wrap-up-refused", at: "2026-10-21T02:00:01Z",
       conversationId: CHAT_ID, requestId: "final-point-refused", reason: "stale", detail: "The world changed; review the remaining notes." }));
     assert.match(peek()!.textContent!, /Review needed/);
