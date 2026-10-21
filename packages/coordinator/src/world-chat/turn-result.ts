@@ -27,7 +27,7 @@ import {
 import {
   normaliseEvidence,
   safeEvidenceMessage,
-  verifyAllEvidence,
+  verifyEvidence,
   type EvidenceSources,
 } from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
@@ -52,6 +52,8 @@ export interface TurnProblem {
   code: string;
   /** Safe to send to the model in the one corrective turn. Never carries world content. */
   safeMessage: string;
+  /** Coordinator-built location, shown only in the correction, never in the person's reply. */
+  path?: string;
 }
 
 export interface ValidateInput {
@@ -137,8 +139,8 @@ export function personLine(problems: readonly TurnProblem[]): string {
   return [...new Set(lines)].join(" · ");
 }
 
-function problem(code: string, safeMessage: string): TurnProblem {
-  return { code, safeMessage };
+function problem(code: string, safeMessage: string, path?: string): TurnProblem {
+  return { code, safeMessage, ...(path ? { path } : {}) };
 }
 
 const NO_EVIDENCE: readonly CandidateEvidence[] = [];
@@ -206,6 +208,9 @@ function schemaIssueLine(issue: z.ZodIssue): string {
     case z.ZodIssueCode.invalid_enum_value:
       return `${path} must be one of ${issue.options.map((o) => JSON.stringify(o)).join(" | ")}`;
     case z.ZodIssueCode.invalid_union:
+      if (/^candidateOperations\.\d+\.(?:candidate|replacements\.\d+)\.draft\.links\.\d+$/.test(path)) {
+        return `${path} must be a typed link: {kind:"sheet",sheetId}, {kind:"canon",entryId}, or {kind:"pending-entity",ref:{temporaryId}} for a create in this result. Copy existing ids from current reads; do not use a string, title or URL.`;
+      }
       return `${path} matches none of the allowed shapes for that field`;
     case z.ZodIssueCode.too_small: {
       const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
@@ -432,7 +437,8 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
 
   // Step 3 and 4: identity, revisions and payloads.
   const temporaryIds = new Set<string>();
-  for (const op of result.candidateOperations) {
+  for (const [index, op] of result.candidateOperations.entries()) {
+    const path = `candidateOperations.${index}`;
     if (op.op === "create") {
       if (temporaryIds.has(op.temporaryId)) {
         problems.push(problem("duplicate-temporary-id", "Two operations used the same temporary id."));
@@ -454,7 +460,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       // Accepted propositions are immutable history; a later change is a new proposition
       // against accepted world state (§6.3).
       problems.push(
-        problem("immutable-candidate", "A proposition that has already been carried into a proposal cannot be changed."),
+        problem("immutable-candidate", "A proposition that has already been carried into a proposal cannot be changed.", path),
       );
     }
   }
@@ -477,18 +483,21 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
    * a required intent citation could not be written, and both the turn and its one retry would
    * fail on a proposition the user was actively trying to fix.
    */
-  const drafts = result.candidateOperations.flatMap((op) => {
-    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE }];
-    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)) }];
+  const drafts = result.candidateOperations.flatMap((op, index) => {
+    const path = `candidateOperations.${index}`;
+    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE, path: `${path}.candidate` }];
+    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)), path: `${path}.candidate` }];
     if (op.op === "split") {
       const inherited = intentEvidenceOf(byId.get(op.candidateId));
-      return op.replacements.map((draft) => ({ draft, inherited }));
+      return op.replacements.map((draft, replacement) => ({ draft, inherited, path: `${path}.replacements.${replacement}` }));
     }
     return [];
   });
-  for (const { draft, inherited } of drafts) {
-    for (const evidenceProblem of verifyAllEvidence(draft.evidence, input.evidenceSources)) {
-      problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem)));
+  for (const { draft, inherited, path } of drafts) {
+    for (const [index, evidence] of draft.evidence.entries()) {
+      for (const evidenceProblem of verifyEvidence(evidence, input.evidenceSources)) {
+        problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem), `${path}.evidence.${index}`));
+      }
     }
     if (draft.evidence.length === 0) {
       problems.push(problem("no-evidence", "Every proposition needs evidence of what it is based on."));
@@ -929,7 +938,7 @@ function buildGroups(
 function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
   const seen = new Set<string>();
   return problems.filter((p) => {
-    const key = `${p.code}|${p.safeMessage}`;
+    const key = `${p.code}|${p.path ?? ""}|${p.safeMessage}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -944,16 +953,25 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, p.code === "action-preparation" ? MAX_PREPARATION_CHARS : MAX_PROBLEM_CHARS)}`);
+  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(`${p.path ? `${p.path}: ` : ""}${p.safeMessage}`, p.code === "action-preparation" ? MAX_PREPARATION_CHARS : MAX_PROBLEM_CHARS)}`);
   const message = [
     "The previous result was not accepted:",
-    ...lines,
-    "",
     "Return the complete result again, as a single JSON object matching the required shape.",
     'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
+    // The failed location batch (#1912) became an offer to try next turn. Preserve the ask in
+    // the one correction; validation still accepts one complete result, never a salvaged subset.
+    "If the ask requests changes, repair and retain that work; do not replace it with advice or an offer to do it later. Keep valid independent records. If a record cannot be repaired, omit it together with its dependents and atomic group, explain what is missing and why in reply, and return the remaining requested work. Never split an atomic group or claim omitted work is ready.",
+    ...(problems.some(p => p.code === "immutable-candidate") ? [
+      'For an already-carried proposition, leave its history unchanged. Read current world state and use a fresh create operation with a new temporaryId for a still-needed change; use sheet.edit if the sheet already exists. Do not create a duplicate sheet.',
+    ] : []),
+    ...(problems.some(p => /^(message-|world-|attachment-)/.test(p.code)) ? [
+      "Repair evidence at the named path: read the cited source again and copy an exact quotation and its citation metadata. Do not paraphrase a quote or cite Bible prose as a sheet or canon entry. Preserve the user's intent quotation and required current-read receipts; never invent evidence.",
+    ] : []),
     // Said every time (issue 1295): listing an invalid action's faults reads as "fix it", and a
     // question that needed no change is answered best by dropping it.
     "If the ask needs no change to the world, leave every action and candidate list empty: the reply alone is a complete answer.",
+    "",
+    ...lines,
   ].join("\n");
   return truncate(message, MAX_CORRECTIVE_CHARS);
 }
