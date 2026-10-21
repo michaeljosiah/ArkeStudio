@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { newId, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
 import {
   attachmentDependencies,
@@ -26,6 +28,23 @@ import { tempDir } from "../tmp.js";
  * Two things here are worth more than the rest: that a supplied file name cannot steer where
  * bytes land, and that the app never claims to have read something it cannot read.
  */
+
+it("loads filing first without eagerly reading the shared attachment extensions", () => {
+  // This fresh process catches cycles which importing Coordinator first conceals.
+  const source = `
+    import assert from "node:assert/strict";
+    const filing = await import("./src/artifacts/filing.ts");
+    const attachments = await import("./src/world-chat/attachments.ts");
+    assert.strictEqual(attachments.CHAT_ATTACHMENT_EXTENSIONS, filing.ATTACHABLE_EXTENSIONS);
+    assert.ok(attachments.CHAT_ATTACHMENT_EXTENSIONS.includes("html"));
+  `;
+  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+    cwd: fileURLToPath(new URL("../../", import.meta.url)),
+    encoding: "utf8",
+    timeout: 30_000,
+    windowsHide: true,
+  });
+});
 
 const NOW = () => "2026-08-06T10:00:00Z";
 
