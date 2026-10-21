@@ -153,11 +153,12 @@ export const EditorRequestFileSchema = z.union([EditorRequestFileV1Schema, z.obj
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
 /** What the person has selected while they talk to Arke (R-26): the subject of "this". */
+export const CHAPTER_DRAFT_INTENT_SCHEMA_VERSION = 102;
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
   /** Explicit human request scope, separate from prose and model payloads (SPEC-053 R-28). */
   z.object({ kind: z.literal("effect-arrangement"), scope: EffectArrangementScopeSchema,
     reviewed: EffectVersionRefSchema.optional(), selectedEffectId: TimelineClipIdSchema.optional() }).strict(),
-  z.object({ kind: z.literal("chapter"), chapterId: SlugSchema }).strict(),
+  z.object({ kind: z.literal("chapter"), chapterId: SlugSchema, intent: z.literal("draft").optional() }).strict(),
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),
   z.object({ kind: z.literal("scene"), sceneId: SceneIdSchema }).strict(),

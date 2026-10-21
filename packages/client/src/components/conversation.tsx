@@ -716,7 +716,7 @@ export type ProductionConversationProps = {
      * the style`) says so, and the send carries it, so the coordinator refuses any action the
      * turn comes back with.
      */
-    prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
+    prompts?: readonly (string | { label: string; replyOnly?: boolean; subject?: WorldChatSubject; press?: () => void })[];
     /**
      * An ask handed in from outside the dock, said once as a quick ask is. `draft` only puts the
      * line in the composer for the author to finish. The page clears it in `onAskTaken`.
@@ -1478,7 +1478,7 @@ export function ProductionConversationBody({
                     type="button"
                     className="fy-arke__prompt"
                     disabled={press === undefined && (opening !== null || running || echo !== null || languageUnavailableReason !== undefined)}
-                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
+                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly, typeof entry === "string" ? subject : entry.subject ?? subject))}
                   >
                     {prompt}
                   </button>

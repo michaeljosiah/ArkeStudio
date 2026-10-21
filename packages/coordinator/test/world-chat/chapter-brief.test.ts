@@ -56,10 +56,17 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   assert.ok(ending.complete);
   assert.ok(receipts.some((r) => r.consulted.some((c) => c.ref.kind === "sheet")));
   assert.ok(receipts.some((r) => r.consulted.some((c) => c.ref.kind === "canon")));
+  const manuscriptBrief = await chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, 60_000, { impliedFacts: false, manuscript: true });
+  assert.match(manuscriptBrief, /Opening not needed/);
+  assert.match(manuscriptBrief, /Complete current manuscript/);
+  assert.match(manuscriptBrief, /do not include changes.implies/);
+  assert.doesNotMatch(manuscriptBrief, /ask that specific question/);
+  assert.ok(receipts.some(r => r.target?.id === `${production.meta.id}:${chapter.id}` && r.complete && r.nextCursor === null));
   production.chapters[0]!.hash = "changed";
   const reread = await read("get_chapter", { productionId: production.meta.id, chapterId: production.chapters[0]!.id, section: "ending" });
   assert.notEqual(reread.receipt.observedRevisionOrDigest, ending.observedRevisionOrDigest);
   await assert.rejects(chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, 100), /too large/);
+  await assert.rejects(chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, brief.length + 100, { manuscript: true }), /too large/, "full manuscript reads share the context budget");
 });
 
 // The beats a chapter was grouped by (design turn 201), as an adaptation reads them (SPEC-052 R-15):

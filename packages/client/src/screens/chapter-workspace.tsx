@@ -1697,6 +1697,7 @@ export function ChapterWorkspace({
   const dockSubject: WorldChatSubject = passage === null
     ? { kind: "chapter", chapterId: chapter.id }
     : { kind: "passage", chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage };
+  const draftPrompt = (label: string) => ({ label, subject: { kind: "chapter" as const, chapterId: chapter.id, intent: "draft" as const } });
   const [nameAsk, setNameAsk] = useState<string | null>(null);
   // A name is Chat's subject until Chat is put away or the page moves on (codex on PR 1800).
   useEffect(() => setNameAsk(null), [chapter.id, view]);
@@ -2840,8 +2841,8 @@ export function ChapterWorkspace({
                   ? [question(`What does ${named(placedFirst)} learn here?`), question(`Where is ${named(placedSecond ?? placedFirst)} now?`)]
                   : live.trim() === ""
                     // A chapter with no words starts from its plan, its opening, or the plan itself (SPEC-056 R-34).
-                    ? [...(chapter.synopsis?.trim() ? ["Draft from the synopsis"] : []), "Draft the opening", "Plan the beats"]
-                    : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
+                    ? [...(chapter.synopsis?.trim() ? [draftPrompt("Draft from the synopsis")] : []), draftPrompt("Draft the opening"), "Plan the beats"]
+                    : [draftPrompt(firstPrompt(live, chapter.synopsis)), style !== null ? { label: "Hold this against the style", replyOnly: true } : question("What does this chapter draw on?")],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: dockPrefix,

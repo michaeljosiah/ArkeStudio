@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   ConversationIdSchema, WorldChatInputAttemptSchema, WorldChatInputConstraintsSchema, WorldChatInputRequestSchema,
   WorldChatInputRoutingSchema, WorldChatRunSchema, WorldChatStoredEventSchema,
-  WORLD_CHAT_INPUT_SCHEMA_VERSION, newId, worldChatInputRouting,
+  WORLD_CHAT_INPUT_SCHEMA_VERSION, CHAPTER_DRAFT_INTENT_SCHEMA_VERSION, newId, worldChatInputRouting,
   type ConversationId, type WorldChatEventEnvelope, type WorldChatInputAttempt,
   type WorldChatInputPauseReason, type WorldChatInputQueue, type WorldChatInputRecord,
   type WorldChatInputRequest, type WorldChatInputRouting, type WorldChatRun,
@@ -205,8 +205,9 @@ export class WorldChatInputJournal {
     const first = await this.world.ownedWrite(() => this.preflight(requestId, commandDigest, build));
     // The boundary commits through the world's queue, and so does ownedWrite: raising it inside
     // ownedWrite would wait on itself. Ownership is checked again by the ownedWrite below.
-    const effectScope = first.event.type === "input.recorded" && first.event.input.constraints.subject?.kind === "effect-arrangement";
-    await this.world.raiseSchemaBoundary(effectScope ? 75 : WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
+    const subject = first.event.type === "input.recorded" ? first.event.input.constraints.subject : undefined;
+    await this.world.raiseSchemaBoundary(subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION
+      : subject?.kind === "effect-arrangement" ? 75 : WORLD_CHAT_INPUT_SCHEMA_VERSION, "world-chat-input");
     return this.world.ownedWrite(async () => {
       for (;;) {
         // Repeated after the boundary: lifecycle, queue and context can all move while it commits.

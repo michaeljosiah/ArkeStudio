@@ -618,6 +618,23 @@ describe("the craft loop (turn 128)", () => {
     });
   };
 
+  it("Draft the rest sends explicit manuscript intent without changing the ordinary chapter subject", async () => {
+    const plain = inkbound();
+    const workspace = {
+      conversationId: THREAD.id as never, status: "open" as const, initiative: "collaborate" as const, hasMore: false,
+      runStatus: null, runStartedAt: null, retrievalUnavailable: false, attachments: [], seq: 4, actions: [], messages: [], points: [],
+    };
+    const m = await mount({ ...plain, world: { ...plain.world!, conversations: [THREAD] }, worldChat: workspace } as ClientState);
+    await answerOpen(m);
+    const draft = [...m.container.querySelectorAll("button.fy-arke__prompt")].find(button => button.textContent === "Draft the rest") as HTMLElement;
+    assert.ok(draft);
+    await act(async () => draft.click());
+    const sent = m.sent.findLast(message => message.kind === "world-chat-send") as Extract<ClientMessage, { kind: "world-chat-send" }>;
+    assert.deepEqual(sent.subject, { kind: "chapter", chapterId: "neap", intent: "draft" });
+    assert.notEqual(sent.replyOnly, true);
+    assert.match(sent.text, /Draft the rest$/);
+  });
+
   it("a suggested question is asked for its answer alone (issue 1295)", async () => {
     const plain = inkbound();
     const workspace = {
